@@ -109,3 +109,6 @@ the first frame, then keeps only the pages near the viewport in the DOM. A page
 is drawn once per zoom level and theme; the theme is baked into the bitmap with
 canvas blend modes rather than a CSS filter, so scrolling afterwards costs
 nothing.
+
+## Name
+HyloPDF is named after the [rusty-barred owl](https://en.wikipedia.org/wiki/Rusty-barred_owl), *Strix hylophila*. Night owls might appreciate dark themes. Also, Rust.

@@ -1,0 +1,7 @@
+# Gruvbox, for the oldies. Retro groove, warm and low-glare.
+name = "Gruvbox"
+text = "#ebdbb2"
+background = "#282828"
+accent = "#fe8019"
+# Gruvbox aqua for links, against the orange accent.
+link = "#83a598"

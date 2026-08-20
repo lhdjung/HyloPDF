@@ -1,0 +1,12 @@
+# Hylo Light — the default theme.
+# `recolor = false` means the document is shown exactly as its author made it;
+# only the app's own chrome uses the colors below.
+name = "Hylo Light"
+text = "#2f3237"
+background = "#f2f1ed"
+accent = "#3f7d94"
+# Links are tinted under every theme, this one included: a link that reads
+# exactly like the sentence around it cannot be seen. The rest of the page is
+# left alone.
+link = "#2f6f8f"
+recolor = false

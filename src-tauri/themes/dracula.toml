@@ -1,0 +1,11 @@
+# Dracula, translated for reading.
+# The real Dracula palette uses #f8f8f2 for body text and keeps pink (#ff79c6),
+# purple (#bd93f9) and cyan (#8be9fd) for accents. Pink body text over a full
+# page is exhausting, so the pink lives in the accent here, the way it does in
+# every editor theme that ships Dracula.
+name = "Dracula"
+text = "#f8f8f2"
+background = "#282a36"
+accent = "#ff79c6"
+# Cyan for links, as in the palette proper.
+link = "#8be9fd"

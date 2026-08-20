@@ -1,0 +1,8 @@
+# Hylo Dark — the default dark theme.
+# Not pure black on white: that contrast is tiring to read for long stretches.
+name = "Hylo Dark"
+text = "#e9eaee"
+background = "#24272f"
+accent = "#8fb0d4"
+# A calm blue for links: clearly not body text, and nowhere near a warning.
+link = "#8ec5e8"

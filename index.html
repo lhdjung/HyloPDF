@@ -1,0 +1,80 @@
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HyloPDF</title>
+<link rel="stylesheet" href="/src/styles.css" />
+
+<div id="shell" data-empty="true">
+  <header id="toolbar" data-tauri-drag-region="deep">
+    <div class="bar-group bar-left">
+      <button id="open" class="btn" data-icon="folder" data-shortcut="⌘O">Open</button>
+      <button id="contents" class="btn" data-icon="contents" aria-pressed="false">Contents</button>
+      <div id="doc-title" class="doc-title"></div>
+      <button id="close-doc" class="btn" data-icon="close" title="Close this document">Close</button>
+    </div>
+
+    <div class="bar-group bar-center">
+      <button id="prev-page" class="btn icon-only" data-icon="up" title="Previous page"></button>
+      <label class="page-jump">
+        <input id="page-number" type="text" inputmode="numeric" value="" aria-label="Page number" autocomplete="off" spellcheck="false" />
+        <span id="page-count" class="page-count"></span>
+      </label>
+      <button id="next-page" class="btn icon-only" data-icon="down" title="Next page"></button>
+    </div>
+
+    <div class="bar-group bar-right">
+      <button id="find" class="btn" data-icon="search" data-shortcut="⌘F" aria-pressed="false">Search</button>
+      <div class="zoom-group">
+        <button id="zoom-out" class="btn icon-only" data-icon="minus" title="Zoom out"></button>
+        <button id="zoom-level" class="btn zoom-level">100%</button>
+        <button id="zoom-in" class="btn icon-only" data-icon="plus" title="Zoom in"></button>
+      </div>
+      <button id="theme" class="btn" data-icon="theme">Theme</button>
+      <button id="settings" class="btn" data-icon="settings">Settings</button>
+    </div>
+  </header>
+
+  <div id="body">
+    <aside id="sidebar" hidden>
+      <div class="sidebar-tabs" role="tablist">
+        <button class="tab" data-tab="outline" role="tab" data-icon="contents">Contents</button>
+        <button class="tab" data-tab="pages" role="tab" data-icon="pages">Pages</button>
+      </div>
+      <div id="outline-panel" class="sidebar-panel" role="tabpanel"></div>
+      <div id="pages-panel" class="sidebar-panel" role="tabpanel" hidden></div>
+      <div id="sidebar-grip" class="sidebar-grip" title="Drag to resize"></div>
+    </aside>
+
+    <main id="viewer" tabindex="0">
+      <div id="pages"></div>
+    </main>
+
+    <section id="welcome">
+      <div class="welcome-inner">
+        <h1>HyloPDF</h1>
+        <p class="welcome-sub">A quiet place to read.</p>
+        <button id="welcome-open" class="btn btn-primary" data-icon="folder">Open a document</button>
+        <div id="recents" class="recents"></div>
+        <p class="welcome-hint">Or drop a PDF anywhere in this window</p>
+      </div>
+    </section>
+  </div>
+
+  <div id="find-bar" class="find-bar" hidden>
+    <span class="find-icon" data-icon="search"></span>
+    <input id="find-input" type="text" placeholder="Search this document" aria-label="Search this document" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+    <span id="find-status" class="find-status"></span>
+    <button id="find-prev" class="btn icon-only" data-icon="up" title="Previous match"></button>
+    <button id="find-next" class="btn icon-only" data-icon="down" title="Next match"></button>
+    <button id="find-close" class="btn icon-only" data-icon="close" title="Close search"></button>
+  </div>
+
+  <div id="title-drag" class="title-drag" data-tauri-drag-region="deep"></div>
+  <button id="toolbar-peek" class="toolbar-peek" data-icon="down">Show toolbar</button>
+  <div id="page-pill" class="page-pill"></div>
+  <div id="popovers"></div>
+  <div id="windows"></div>
+  <div id="notice" class="notice" hidden></div>
+  <div id="drop-hint" class="drop-hint" hidden><span>Drop to open</span></div>
+</div>
+
+<script type="module" src="/src/main.ts"></script>

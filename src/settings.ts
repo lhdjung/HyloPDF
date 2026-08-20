@@ -1,0 +1,592 @@
+/* The settings window.
+ *
+ * The little menu under the Settings button holds the handful of things a
+ * reader reaches for mid-document. Everything else lives here: the same
+ * settings written the same way — one key at a time, applied the moment they
+ * change — with room to say what each one does, and to show the themes as
+ * themes rather than as a list of names.
+ *
+ * This file knows nothing about the app class; it is handed the small set of
+ * things it needs through `SettingsHost`, so nothing here can drift out of
+ * step with the rest of the interface. */
+
+import { type Settings, type Theme, deleteTheme, isMac, saveTheme } from "./api";
+import { hydrateIcons } from "./icons";
+import * as ui from "./ui";
+import { isDarkTheme } from "./themes";
+import type { FitMode } from "./viewer";
+
+export interface SettingsHost {
+  settings: Settings;
+  themes: Theme[];
+  theme: Theme;
+  paths: { config: string; themes: string };
+
+  set<K extends keyof Settings>(key: K, value: Settings[K]): void;
+  themeById(id: string): Theme;
+  replacementFor(gone: Theme): Theme;
+  useTheme(theme: Theme, remember?: boolean): void;
+  refreshThemes(): Promise<void>;
+  toggleDark(on: boolean): void;
+  toggleToolbar(show: boolean): void;
+  toggleSidebar(show: boolean): void;
+  toggleFullscreen(on: boolean): Promise<void>;
+  setFit(mode: FitMode, zoom?: number): void;
+  setScrollMode(mode: Settings["scroll_mode"]): void;
+  setPageGap(value: number): void;
+  setSidebarWidth(value: number): void;
+  setRecolorImages(on: boolean): void;
+}
+
+type PageId = "reading" | "appearance" | "window" | "keyboard" | "about";
+
+const PAGES: { id: PageId; label: string; icon: string }[] = [
+  { id: "reading", label: "Reading", icon: "book" },
+  { id: "appearance", label: "Appearance", icon: "theme" },
+  { id: "window", label: "Window", icon: "sidebar" },
+  { id: "keyboard", label: "Keyboard", icon: "keyboard" },
+  { id: "about", label: "About", icon: "info" },
+];
+
+/** The colours a theme editor is working on, before it is saved. A draft is
+    never built in: editing one of the packaged themes starts a copy. */
+type Draft = Theme;
+
+// Which pane was last open. Coming back to the same one is what a window
+// with a sidebar is expected to do.
+let currentPage: PageId = "reading";
+
+export function showSettingsWindow(
+  host: SettingsHost,
+  opening?: { page?: PageId; edit?: { from: Theme | null } },
+): void {
+  if (opening?.page) currentPage = opening.page;
+
+  // What is being edited in Appearance, if anything. Cleared when the window
+  // closes, so it never reopens half-way through something.
+  let editing: { draft: Draft; before: Theme } | null = null;
+  if (opening?.edit) {
+    editing = { draft: draftFrom(opening.edit.from, host.theme), before: host.theme };
+    host.useTheme(editing.draft, false);
+  }
+
+  // Backing out of a half-finished theme — by cancelling, by walking to
+  // another pane, or by closing the window — puts back the one in use.
+  const cancelEdit = () => {
+    if (!editing) return;
+    host.useTheme(editing.before, false);
+    editing = null;
+  };
+
+  ui.showWindow("Settings", () => {
+    const body = document.createElement("div");
+    body.className = "window-body";
+
+    const nav = document.createElement("nav");
+    nav.className = "window-nav";
+    const pane = document.createElement("div");
+    pane.className = "window-pane";
+    body.append(nav, pane);
+
+    const render = () => {
+      nav.replaceChildren();
+      for (const page of PAGES) {
+        const item = document.createElement("button");
+        item.className = "btn";
+        item.dataset.icon = page.icon;
+        item.append(page.label);
+        item.setAttribute("aria-pressed", String(page.id === currentPage));
+        item.addEventListener("click", () => {
+          if (page.id === currentPage) return;
+          cancelEdit();
+          currentPage = page.id;
+          render();
+        });
+        nav.append(item);
+      }
+
+      pane.replaceChildren();
+      pane.scrollTop = 0;
+      switch (currentPage) {
+        case "reading":
+          readingPage(host, pane);
+          break;
+        case "appearance":
+          appearancePage(host, pane, {
+            editing,
+            begin: (from) => {
+              editing = { draft: draftFrom(from, host.theme), before: host.theme };
+              host.useTheme(editing.draft, false);
+              render();
+            },
+            preview: () => host.useTheme(editing!.draft, false),
+            cancel: () => {
+              cancelEdit();
+              render();
+            },
+            done: () => {
+              editing = null;
+              render();
+            },
+          });
+          break;
+        case "window":
+          windowPage(host, pane);
+          break;
+        case "keyboard":
+          keyboardPage(pane);
+          break;
+        case "about":
+          aboutPage(host, pane);
+          break;
+      }
+      hydrateIcons(nav);
+      hydrateIcons(pane);
+    };
+
+    render();
+    return body;
+  }, cancelEdit);
+}
+
+/* --------------------------------------------------------------- reading */
+
+function readingPage(host: SettingsHost, pane: HTMLElement): void {
+  const s = host.settings;
+  pane.append(
+    ui.text("title", "Reading"),
+    ui.text("lede", "How a document moves and how much of it you see."),
+  );
+
+  pane.append(
+    ui.field(
+      "Page progression",
+      ui.segmented(
+        [
+          { value: "continuous" as const, label: "Continuous" },
+          { value: "paged" as const, label: "One page at a time" },
+        ],
+        s.scroll_mode,
+        (mode) => host.setScrollMode(mode),
+      ),
+      "Continuous scrolling is the default, and no shortcut can change it by accident.",
+    ),
+    ui.field(
+      "Space between pages",
+      ui.stepper(s.page_gap, { min: 0, max: 64, step: 4 }, (value) => host.setPageGap(value), (value) => `${value} px`),
+      "How much room to leave between one page and the next.",
+    ),
+    ui.field(
+      "Zoom",
+      ui.segmented(
+        [
+          { value: "width" as const, label: "Fit width" },
+          { value: "page" as const, label: "Fit page" },
+          { value: "actual" as const, label: "Fixed" },
+        ],
+        s.fit_mode,
+        (mode) => {
+          host.setFit(mode);
+          zoomField.hidden = mode !== "actual";
+        },
+      ),
+      "Fit width follows the window; a fixed zoom stays where you put it.",
+    ),
+  );
+
+  const zoomField = ui.field(
+    "Fixed zoom",
+    ui.stepper(
+      Math.round(s.zoom * 100),
+      { min: 25, max: 600, step: 25 },
+      (value) => host.setFit("actual", value / 100),
+      (value) => `${value}%`,
+    ),
+  );
+  zoomField.hidden = s.fit_mode !== "actual";
+  pane.append(zoomField);
+
+  pane.append(
+    ui.field(
+      "Come back to where I stopped",
+      ui.toggle(s.remember_position, (on) => host.set("remember_position", on)),
+      "Each document reopens on the page you left it on.",
+    ),
+  );
+}
+
+/* ------------------------------------------------------------ appearance */
+
+function draftFrom(from: Theme | null, current: Theme): Draft {
+  if (!from) {
+    return {
+      id: "",
+      name: "My theme",
+      text: current.text,
+      background: current.background,
+      accent: current.accent,
+      link: current.link,
+      recolor: true,
+      built_in: false,
+    };
+  }
+  // A built-in theme is never overwritten; editing one starts a copy.
+  return {
+    id: from.built_in ? "" : from.id,
+    name: from.built_in ? `${from.name} copy` : from.name,
+    text: from.text,
+    background: from.background,
+    accent: from.accent,
+    link: from.link,
+    recolor: from.recolor,
+    built_in: false,
+  };
+}
+
+function appearancePage(
+  host: SettingsHost,
+  pane: HTMLElement,
+  edit: {
+    editing: { draft: Draft; before: Theme } | null;
+    begin: (from: Theme | null) => void;
+    preview: () => void;
+    cancel: () => void;
+    done: () => void;
+  },
+): void {
+  pane.append(
+    ui.text("title", "Appearance"),
+    ui.text("lede", "A theme is two colours: the ink and the paper. Everything else follows from them."),
+  );
+
+  pane.append(
+    ui.field(
+      "Dark mode",
+      ui.toggle(isDarkTheme(host.theme), (on) => {
+        host.toggleDark(on);
+        edit.done();
+      }),
+      "Switches between the light theme and the dark theme you last chose.",
+    ),
+    ui.field(
+      "Recolour pictures too",
+      ui.toggle(host.settings.recolor_images, (on) => host.setRecolorImages(on)),
+      "Off keeps photographs and diagrams as they were printed.",
+    ),
+  );
+
+  if (edit.editing) {
+    pane.append(themeEditor(host, edit.editing.draft, edit));
+    return;
+  }
+
+  pane.append(ui.text("group", "Themes"));
+
+  const grid = document.createElement("div");
+  grid.className = "theme-grid";
+  for (const theme of host.themes) {
+    grid.append(themeCard(theme, theme.id === host.theme.id, () => {
+      host.useTheme(theme);
+      edit.done();
+    }));
+  }
+  pane.append(grid);
+
+  const buttons = document.createElement("div");
+  buttons.className = "pane-actions";
+  buttons.append(
+    ui.button("New theme…", () => edit.begin(null)),
+    ui.button(
+      host.theme.built_in ? `Make a copy of ${host.theme.name}…` : `Edit ${host.theme.name}…`,
+      () => edit.begin(host.theme),
+    ),
+  );
+  if (!host.theme.built_in) {
+    buttons.append(
+      ui.button(`Delete ${host.theme.name}`, () => {
+        const removed = host.theme;
+        void (async () => {
+          try {
+            await deleteTheme(removed.id);
+            await host.refreshThemes();
+            host.useTheme(host.replacementFor(removed));
+            ui.notice(`Deleted ${removed.name}.`);
+          } catch (error) {
+            ui.notice(messageOf(error));
+          }
+          edit.done();
+        })();
+      }),
+    );
+  }
+  pane.append(buttons);
+
+  pane.append(ui.text("note", `Theme files live in ${host.paths.themes}. They are plain text — a theme can be written by hand, or copied to another computer.`));
+}
+
+function themeCard(theme: Theme, current: boolean, onSelect: () => void): HTMLElement {
+  const card = document.createElement("button");
+  card.className = current ? "theme-card current" : "theme-card";
+
+  const preview = document.createElement("span");
+  preview.className = "preview";
+  preview.style.background = theme.recolor ? theme.background : "#ffffff";
+  preview.style.color = theme.recolor ? theme.text : "#2f3237";
+  const letters = document.createElement("span");
+  letters.textContent = "Aa";
+  const link = document.createElement("span");
+  link.className = "preview-link";
+  link.textContent = "Link";
+  // A theme that leaves the document alone leaves its links alone too.
+  link.style.color = theme.recolor ? theme.link ?? theme.accent ?? theme.text : "#1a5fb4";
+  preview.append(letters, link);
+
+  const name = document.createElement("span");
+  name.className = "theme-name";
+  if (current) name.dataset.icon = "check";
+  name.append(theme.name);
+
+  card.append(preview, name);
+  card.addEventListener("click", onSelect);
+  return card;
+}
+
+function themeEditor(
+  host: SettingsHost,
+  draft: Draft,
+  edit: { preview: () => void; cancel: () => void; done: () => void },
+): HTMLElement {
+  const box = document.createElement("div");
+  box.append(ui.text("group", draft.id ? "Edit theme" : "New theme"));
+
+  box.append(
+    ui.field(
+      "Name",
+      ui.textField(draft.name, (value) => {
+        draft.name = value;
+      }),
+    ),
+    ui.field(
+      "Text",
+      ui.colorField(draft.text, (value) => {
+        draft.text = value;
+        edit.preview();
+      }),
+      "The colour the words are printed in.",
+    ),
+    ui.field(
+      "Background",
+      ui.colorField(draft.background, (value) => {
+        draft.background = value;
+        edit.preview();
+      }),
+      "The colour of the paper behind them.",
+    ),
+    ui.field(
+      "Accent",
+      ui.colorField(draft.accent ?? draft.text, (value) => {
+        draft.accent = value;
+        edit.preview();
+      }),
+      "Selected text, the current page, and anything else that needs to stand out.",
+    ),
+    ui.field(
+      "Links",
+      ui.colorField(draft.link ?? draft.accent ?? draft.text, (value) => {
+        draft.link = value;
+        edit.preview();
+      }),
+      "Links in the document take this colour, wherever the page is recoloured.",
+    ),
+    ui.field(
+      "Recolour the document",
+      ui.toggle(draft.recolor, (on) => {
+        draft.recolor = on;
+        edit.preview();
+      }),
+      "Off leaves every page exactly as it was printed.",
+    ),
+  );
+
+  const buttons = document.createElement("div");
+  buttons.className = "pane-actions";
+  buttons.append(
+    ui.button("Cancel", () => edit.cancel()),
+    ui.button(
+      "Save theme",
+      () => {
+        void (async () => {
+          try {
+            const stored = await saveTheme(draft);
+            await host.refreshThemes();
+            host.useTheme(host.themes.find((theme) => theme.id === stored.id) ?? stored);
+            ui.notice(`Saved ${stored.name}.`);
+            edit.done();
+          } catch (error) {
+            ui.notice(messageOf(error));
+          }
+        })();
+      },
+      "primary",
+    ),
+  );
+  box.append(buttons);
+  box.append(ui.text("note", "Colours apply as you pick them, so the app around you is the preview."));
+  return box;
+}
+
+/* ---------------------------------------------------------------- window */
+
+function windowPage(host: SettingsHost, pane: HTMLElement): void {
+  const s = host.settings;
+  pane.append(
+    ui.text("title", "Window"),
+    ui.text(
+      "lede",
+      "How much of the app stays on screen around the document. Each of these is its own switch: full screen fills the screen and changes nothing else.",
+    ),
+  );
+
+  pane.append(
+    ui.field(
+      "Show toolbar",
+      ui.toggle(s.show_toolbar, (on) => host.toggleToolbar(on)),
+      `The bar along the top. Hidden, the page number appears briefly as you scroll, and the top edge of the window brings the bar back. ${shortcut("⌘⇧T", "Ctrl+Shift+T")}`,
+    ),
+    ui.field(
+      "Show contents sidebar",
+      ui.toggle(s.show_sidebar, (on) => host.toggleSidebar(on)),
+      `Chapters and page thumbnails, down the left. ${shortcut("⌘B", "Ctrl+B")}`,
+    ),
+    ui.field(
+      "Sidebar width",
+      ui.stepper(
+        s.sidebar_width,
+        { min: 160, max: 460, step: 8 },
+        (value) => host.setSidebarWidth(value),
+        (value) => `${value} px`,
+      ),
+      "It can also be dragged by its edge.",
+    ),
+    ui.field(
+      "Full screen",
+      ui.toggle(s.fullscreen, (on) => void host.toggleFullscreen(on)),
+      `The window fills the screen. ${shortcut("⌘⇧F", "F11")} — and Escape leaves again. For the document and nothing else, turn the toolbar off as well.`,
+    ),
+  );
+
+  pane.append(
+    ui.text(
+      "note",
+      "The size and position of the window are remembered on their own; there is nothing to set here.",
+    ),
+  );
+}
+
+/* -------------------------------------------------------------- keyboard */
+
+function keyboardPage(pane: HTMLElement): void {
+  pane.append(
+    ui.text("title", "Keyboard"),
+    ui.text("lede", "Everything the app listens for, in one place."),
+  );
+
+  const groups: [string, [string, string][]][] = [
+    [
+      "Documents",
+      [
+        ["Open a document", shortcut("⌘O", "Ctrl+O")],
+        ["Search this document", shortcut("⌘F", "Ctrl+F")],
+        ["Next match, previous match", shortcut("⌘G, ⌘⇧G", "Ctrl+G, Ctrl+Shift+G")],
+        ["Settings", shortcut("⌘,", "Ctrl+,")],
+      ],
+    ],
+    [
+      "Moving around",
+      [
+        ["Next page, previous page", "→, ←"],
+        ["A little down, a little up", "↓, ↑ — or j, k"],
+        ["Down a screen, up a screen", "Space, ⇧Space"],
+        ["Down a screen, up a screen", "Page Down, Page Up"],
+        ["First page, last page", "Home, End"],
+        ["Jump to a page", "g"],
+      ],
+    ],
+    [
+      "Looking at it",
+      [
+        ["Zoom in, zoom out", shortcut("⌘+, ⌘−", "Ctrl++, Ctrl+−")],
+        ["Fit the width of the window", shortcut("⌘0", "Ctrl+0")],
+        ["Dark mode", shortcut("⌘D", "Ctrl+D")],
+        ["Contents sidebar", shortcut("⌘B", "Ctrl+B")],
+        ["Toolbar", shortcut("⌘⇧T", "Ctrl+Shift+T")],
+        ["Full screen", shortcut("⌘⇧F, ⌃⌘F", "F11, Ctrl+Shift+F")],
+        ["Close search, or leave full screen", "Escape"],
+      ],
+    ],
+  ];
+
+  for (const [title, rows] of groups) {
+    pane.append(ui.text("group", title));
+    const table = document.createElement("div");
+    table.className = "keys";
+    for (const [what, keys] of rows) {
+      const label = document.createElement("span");
+      label.textContent = what;
+      const key = document.createElement("span");
+      key.className = "key";
+      key.textContent = keys;
+      table.append(label, key);
+    }
+    pane.append(table);
+  }
+}
+
+/* ----------------------------------------------------------------- about */
+
+function aboutPage(host: SettingsHost, pane: HTMLElement): void {
+  pane.append(
+    ui.text("title", `HyloPDF ${__APP_VERSION__}`),
+    ui.text("lede", "A calm place to read."),
+  );
+
+  pane.append(
+    ui.field("Settings file", pathValue(join(host.paths.config, "settings.toml"))),
+    ui.field("Themes folder", pathValue(host.paths.themes)),
+  );
+
+  pane.append(
+    ui.text(
+      "note",
+      "Both are plain text. Nothing is stored anywhere else, and nothing leaves this computer.",
+    ),
+  );
+}
+
+function join(dir: string, name: string): string {
+  const separator = dir.includes("\\") ? "\\" : "/";
+  return `${dir}${dir.endsWith(separator) ? "" : separator}${name}`;
+}
+
+function pathValue(value: string): HTMLElement {
+  const element = document.createElement("span");
+  element.className = "field-note";
+  element.style.userSelect = "text";
+  element.style.wordBreak = "break-all";
+  element.style.textAlign = "right";
+  element.style.maxWidth = "440px";
+  element.textContent = value;
+  return element;
+}
+
+/* ----------------------------------------------------------------- odds */
+
+function shortcut(mac: string, other: string): string {
+  return isMac ? mac : other;
+}
+
+function messageOf(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  return "Something went wrong.";
+}

@@ -1,0 +1,215 @@
+//! Themes are plain TOML files, one per theme, so that a theme can be written
+//! by hand (or by an LLM) without touching the app.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+/// The themes that ship with HyloPDF. They are written into the user's theme
+/// directory on first run so that they are visible, readable and copyable, but
+/// the embedded copies stay authoritative if a file is missing or unreadable.
+pub const BUILT_IN: &[(&str, &str)] = &[
+    ("hylo-light", include_str!("../themes/hylo-light.toml")),
+    ("hylo-dark", include_str!("../themes/hylo-dark.toml")),
+    ("pzazz", include_str!("../themes/pzazz.toml")),
+    ("dracula", include_str!("../themes/dracula.toml")),
+    ("gruvbox", include_str!("../themes/gruvbox.toml")),
+];
+
+pub const DEFAULT_LIGHT: &str = "hylo-light";
+pub const DEFAULT_DARK: &str = "hylo-dark";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Theme {
+    /// Slug, taken from the file name. Not stored in the file itself.
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    pub text: String,
+    pub background: String,
+    #[serde(default)]
+    pub accent: Option<String>,
+    /// The colour links are tinted with while the document is being recoloured.
+    /// Absent means "use the accent".
+    #[serde(default)]
+    pub link: Option<String>,
+    /// When false the document keeps its own colors and only the app chrome is
+    /// themed. Used by Hylo Light.
+    #[serde(default = "yes")]
+    pub recolor: bool,
+    /// Set by the loader, not by the file.
+    #[serde(default)]
+    pub built_in: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// What actually gets written to disk when a user saves a theme.
+#[derive(Debug, Serialize)]
+struct ThemeFile<'a> {
+    name: &'a str,
+    text: &'a str,
+    background: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accent: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    link: &'a Option<String>,
+    recolor: bool,
+}
+
+pub fn slugify(name: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            dash = false;
+        } else if !out.is_empty() && !dash {
+            out.push('-');
+            dash = true;
+        }
+    }
+    let slug = out.trim_matches('-').to_string();
+    if slug.is_empty() {
+        "theme".into()
+    } else {
+        slug
+    }
+}
+
+fn parse(id: &str, source: &str, built_in: bool) -> Option<Theme> {
+    let mut theme: Theme = toml::from_str(source).ok()?;
+    theme.id = id.to_string();
+    theme.built_in = built_in;
+    Some(theme)
+}
+
+fn is_built_in(id: &str) -> bool {
+    BUILT_IN.iter().any(|(name, _)| *name == id)
+}
+
+/// Write the shipped themes out on every run, so that a built-in whose colours
+/// change in the app changes on disk too, rather than the first install of it
+/// sitting there forever. Editing a built-in through the app already saves a
+/// copy under an id of its own, so nothing a reader made is at stake; a
+/// built-in file hand-edited in place is overwritten, deliberately — the
+/// shipped set is the app's to define.
+pub fn install_built_ins(dir: &Path) {
+    if fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    for (id, source) in BUILT_IN {
+        let path = dir.join(format!("{id}.toml"));
+        // Only when it differs: no reason to touch a file that already says
+        // exactly this.
+        let on_disk = fs::read_to_string(&path).unwrap_or_default();
+        if on_disk != *source {
+            let _ = fs::write(path, source);
+        }
+    }
+}
+
+/// All themes, built-ins first and in the order they are declared above, then
+/// the user's own in alphabetical order.
+pub fn load_all(dir: &Path) -> Vec<Theme> {
+    let mut themes: Vec<Theme> = Vec::new();
+
+    for (id, embedded) in BUILT_IN {
+        let from_disk = fs::read_to_string(dir.join(format!("{id}.toml")))
+            .ok()
+            .and_then(|source| parse(id, &source, true));
+        if let Some(theme) = from_disk.or_else(|| parse(id, embedded, true)) {
+            themes.push(theme);
+        }
+    }
+
+    let mut custom: Vec<Theme> = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if is_built_in(id) {
+                continue;
+            }
+            if let Some(theme) = fs::read_to_string(&path)
+                .ok()
+                .and_then(|source| parse(id, &source, false))
+            {
+                custom.push(theme);
+            }
+        }
+    }
+    custom.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    themes.append(&mut custom);
+    themes
+}
+
+pub fn save(dir: &Path, theme: &Theme) -> Result<Theme, String> {
+    if theme.name.trim().is_empty() {
+        return Err("A theme needs a name.".into());
+    }
+    let mut id = if theme.id.trim().is_empty() {
+        // A new theme never lands on top of one that is already there.
+        unique_id(dir, &slugify(&theme.name))
+    } else {
+        slugify(&theme.id)
+    };
+    if is_built_in(&id) {
+        // Editing a built-in makes a copy rather than shadowing the original.
+        id = unique_id(dir, &format!("{id}-custom"));
+    }
+
+    let stored = ThemeFile {
+        name: theme.name.trim(),
+        text: &theme.text,
+        background: &theme.background,
+        accent: &theme.accent,
+        link: &theme.link,
+        recolor: theme.recolor,
+    };
+    let body = toml::to_string_pretty(&stored).map_err(|e| e.to_string())?;
+
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    fs::write(path_for(dir, &id), body).map_err(|e| e.to_string())?;
+
+    let mut saved = theme.clone();
+    saved.id = id;
+    saved.built_in = false;
+    Ok(saved)
+}
+
+pub fn delete(dir: &Path, id: &str) -> Result<(), String> {
+    if is_built_in(id) {
+        return Err("Built-in themes cannot be deleted.".into());
+    }
+    let path = path_for(dir, &slugify(id));
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn path_for(dir: &Path, id: &str) -> PathBuf {
+    dir.join(format!("{id}.toml"))
+}
+
+fn unique_id(dir: &Path, base: &str) -> String {
+    if !path_for(dir, base).exists() && !is_built_in(base) {
+        return base.to_string();
+    }
+    for n in 2.. {
+        let candidate = format!("{base}-{n}");
+        if !path_for(dir, &candidate).exists() && !is_built_in(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}

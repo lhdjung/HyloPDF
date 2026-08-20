@@ -1,0 +1,428 @@
+/* Small pieces of interface: menus that hang off a button, switches, the
+   settings window, and the one-line notice at the bottom of the screen.
+ *
+ * Nothing here appears on its own. A menu is dismissed by Escape, by clicking
+ * elsewhere, or by choosing something; the window, which is the one thing that
+ * does sit in front of the document, only ever opens because someone asked
+ * for it, and closes the same three ways. */
+
+import { hydrateIcons, iconMarkup } from "./icons";
+
+let openMenu: (() => void) | null = null;
+let openAnchor: HTMLElement | null = null;
+
+export function closeMenus(): void {
+  openMenu?.();
+}
+
+export function isMenuOpen(): boolean {
+  return openMenu !== null;
+}
+
+export function showPopover(
+  anchor: HTMLElement,
+  build: (close: () => void) => HTMLElement,
+  align: "left" | "right" = "left",
+): void {
+  // The button that opened a menu closes it again: pressing Theme twice should
+  // leave nothing behind, not blink the same menu back into place.
+  const reopening = openAnchor === anchor;
+  closeMenus();
+  if (reopening) return;
+
+  const popover = document.createElement("div");
+  popover.className = "popover";
+  const close = () => {
+    popover.remove();
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("resize", close);
+    if (openMenu === close) {
+      openMenu = null;
+      openAnchor = null;
+    }
+    anchor.setAttribute("aria-expanded", "false");
+  };
+
+  const onPointerDown = (event: PointerEvent) => {
+    const target = event.target as Node;
+    if (!popover.contains(target) && !anchor.contains(target)) close();
+  };
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      event.preventDefault();
+      close();
+    }
+  };
+
+  popover.append(build(close));
+  document.getElementById("popovers")!.append(popover);
+  hydrateIcons(popover);
+
+  const rect = anchor.getBoundingClientRect();
+  const width = popover.offsetWidth;
+  const left =
+    align === "right"
+      ? Math.min(rect.right - width, window.innerWidth - width - 8)
+      : Math.min(rect.left, window.innerWidth - width - 8);
+  popover.style.left = `${Math.max(8, left)}px`;
+  popover.style.top = `${rect.bottom + 6}px`;
+  const overflow = rect.bottom + 6 + popover.offsetHeight - window.innerHeight + 8;
+  if (overflow > 0) popover.style.maxHeight = `${popover.offsetHeight - overflow}px`;
+
+  anchor.setAttribute("aria-expanded", "true");
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("resize", close);
+  openMenu = close;
+  openAnchor = anchor;
+}
+
+export function section(title: string): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "popover-section";
+  element.textContent = title;
+  return element;
+}
+
+export function divider(): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "popover-divider";
+  return element;
+}
+
+export type MenuItemOptions = {
+  label: string;
+  note?: string;
+  icon?: string;
+  checked?: boolean;
+  lead?: HTMLElement;
+  trail?: HTMLElement;
+  onSelect?: () => void;
+};
+
+export function menuItem(options: MenuItemOptions): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "popover-item";
+  if (options.checked) button.classList.add("current");
+
+  const check = document.createElement("span");
+  check.className = "check";
+  check.innerHTML = options.checked ? iconMarkup("check") : "";
+  button.append(check);
+  if (options.lead) button.append(options.lead);
+
+  if (options.icon) {
+    const icon = document.createElement("span");
+    icon.dataset.icon = options.icon;
+    icon.style.display = "flex";
+    button.append(icon);
+  }
+
+  const label = document.createElement("span");
+  label.className = "popover-label";
+  label.textContent = options.label;
+  button.append(label);
+
+  if (options.note) {
+    const note = document.createElement("span");
+    note.className = "popover-note";
+    note.textContent = options.note;
+    button.append(note);
+  }
+  if (options.trail) button.append(options.trail);
+  if (options.onSelect) button.addEventListener("click", options.onSelect);
+  return button;
+}
+
+export function swatch(text: string, background: string, letter = "A"): HTMLElement {
+  const element = document.createElement("span");
+  element.className = "swatch";
+  element.style.background = background;
+  element.style.color = text;
+  element.textContent = letter;
+  return element;
+}
+
+export function row(label: string, control: HTMLElement, note?: string): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "popover-row";
+  const text = document.createElement("label");
+  text.append(label);
+  if (note) {
+    const hint = document.createElement("span");
+    hint.className = "popover-note";
+    hint.textContent = note;
+    text.append(hint);
+  }
+  element.append(text, control);
+  return element;
+}
+
+export function toggle(on: boolean, onChange: (value: boolean) => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "switch";
+  button.setAttribute("aria-pressed", String(on));
+  button.addEventListener("click", () => {
+    const next = button.getAttribute("aria-pressed") !== "true";
+    button.setAttribute("aria-pressed", String(next));
+    onChange(next);
+  });
+  return button;
+}
+
+export function stepper(
+  value: number,
+  range: { min: number; max: number; step: number },
+  onChange: (value: number) => void,
+  format: (value: number) => string = String,
+): HTMLElement {
+  const group = document.createElement("div");
+  group.className = "zoom-group";
+  const readout = document.createElement("span");
+  readout.className = "btn zoom-level";
+  readout.textContent = format(value);
+
+  const make = (icon: string, delta: number) => {
+    const button = document.createElement("button");
+    button.className = "btn icon-only";
+    button.dataset.icon = icon;
+    button.addEventListener("click", () => {
+      value = Math.max(range.min, Math.min(range.max, value + delta));
+      readout.textContent = format(value);
+      onChange(value);
+    });
+    return button;
+  };
+
+  group.append(make("minus", -range.step), readout, make("plus", range.step));
+  return group;
+}
+
+export function textField(value: string, onInput: (value: string) => void): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = value;
+  input.addEventListener("input", () => onInput(input.value));
+  return input;
+}
+
+export function colorField(value: string, onInput: (value: string) => void): HTMLElement {
+  const wrap = document.createElement("span");
+  wrap.style.display = "flex";
+  wrap.style.gap = "6px";
+  wrap.style.alignItems = "center";
+
+  const picker = document.createElement("input");
+  picker.type = "color";
+  picker.value = value;
+  const text = document.createElement("input");
+  text.type = "text";
+  text.value = value;
+  text.style.width = "84px";
+
+  picker.addEventListener("input", () => {
+    text.value = picker.value;
+    onInput(picker.value);
+  });
+  text.addEventListener("input", () => {
+    if (/^#[0-9a-f]{6}$/i.test(text.value)) {
+      picker.value = text.value;
+      onInput(text.value);
+    }
+  });
+
+  wrap.append(picker, text);
+  return wrap;
+}
+
+export function actions(...buttons: HTMLElement[]): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "popover-actions";
+  element.append(...buttons);
+  return element;
+}
+
+export function button(
+  label: string,
+  onClick: () => void,
+  variant: "plain" | "primary" = "plain",
+): HTMLButtonElement {
+  const element = document.createElement("button");
+  element.className = variant === "primary" ? "btn btn-primary" : "btn";
+  element.textContent = label;
+  element.addEventListener("click", onClick);
+  return element;
+}
+
+/* ------------------------------------------------------------------ window */
+
+let closeWindowFn: (() => void) | null = null;
+
+export function isWindowOpen(): boolean {
+  return closeWindowFn !== null;
+}
+
+export function closeWindow(): void {
+  closeWindowFn?.();
+}
+
+/** A panel in the middle of the screen with a title bar of its own: the one
+    piece of interface allowed to sit in front of the document, because it is
+    only ever there on request. */
+export function showWindow(
+  title: string,
+  build: (close: () => void) => HTMLElement,
+  onClose?: () => void,
+): void {
+  closeMenus();
+  closeWindow();
+
+  const returnFocusTo = document.activeElement as HTMLElement | null;
+  const scrim = document.createElement("div");
+  scrim.className = "window-scrim";
+
+  const frame = document.createElement("div");
+  frame.className = "window";
+  frame.tabIndex = -1;
+  frame.setAttribute("role", "dialog");
+  frame.setAttribute("aria-modal", "true");
+  frame.setAttribute("aria-label", title);
+
+  const close = () => {
+    scrim.remove();
+    document.removeEventListener("keydown", onKeyDown, true);
+    if (closeWindowFn === close) closeWindowFn = null;
+    onClose?.();
+    returnFocusTo?.focus();
+  };
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    event.preventDefault();
+    close();
+  };
+
+  const bar = document.createElement("header");
+  bar.className = "window-bar";
+  const heading = document.createElement("span");
+  heading.className = "window-title";
+  heading.textContent = title;
+  const dismiss = document.createElement("button");
+  dismiss.className = "btn icon-only";
+  dismiss.dataset.icon = "close";
+  dismiss.title = "Close";
+  dismiss.setAttribute("aria-label", "Close");
+  dismiss.addEventListener("click", close);
+  bar.append(heading, dismiss);
+
+  frame.append(bar, build(close));
+  scrim.append(frame);
+  scrim.addEventListener("pointerdown", (event) => {
+    if (event.target === scrim) close();
+  });
+
+  document.getElementById("windows")!.append(scrim);
+  hydrateIcons(scrim);
+  document.addEventListener("keydown", onKeyDown, true);
+  frame.focus();
+  closeWindowFn = close;
+}
+
+/** A labelled line in a window: what the setting is on the left, the control
+    that changes it on the right. */
+export function field(
+  label: string,
+  control: HTMLElement,
+  note?: string,
+): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "field";
+
+  const text = document.createElement("div");
+  text.className = "field-text";
+  const name = document.createElement("span");
+  name.className = "field-label";
+  name.textContent = label;
+  text.append(name);
+  if (note) {
+    const hint = document.createElement("span");
+    hint.className = "field-note";
+    hint.textContent = note;
+    text.append(hint);
+  }
+
+  const holder = document.createElement("div");
+  holder.className = "field-control";
+  holder.append(control);
+
+  element.append(text, holder);
+  return element;
+}
+
+/** A row of buttons where exactly one is on: for a setting with two or three
+    answers, all of which are worth reading at a glance. */
+export function segmented<T extends string>(
+  choices: { value: T; label: string; icon?: string }[],
+  current: T,
+  onChange: (value: T) => void,
+): HTMLElement {
+  const group = document.createElement("div");
+  group.className = "segmented";
+
+  for (const choice of choices) {
+    const option = document.createElement("button");
+    option.className = "btn";
+    if (choice.icon) option.dataset.icon = choice.icon;
+    option.append(choice.label);
+    option.setAttribute("aria-pressed", String(choice.value === current));
+    option.addEventListener("click", () => {
+      for (const sibling of group.children) {
+        sibling.setAttribute("aria-pressed", String(sibling === option));
+      }
+      onChange(choice.value);
+    });
+    group.append(option);
+  }
+  return group;
+}
+
+/** A heading, a paragraph of explanation, or the quiet line of small print at
+    the bottom of a pane. */
+export function text(
+  kind: "title" | "lede" | "group" | "note",
+  content: string,
+): HTMLElement {
+  const element = document.createElement(kind === "title" ? "h2" : "p");
+  element.className = `pane-${kind}`;
+  element.textContent = content;
+  return element;
+}
+
+let noticeTimer = 0;
+
+/** The one line at the bottom of the screen.
+ *
+ * `done` marks something that worked, and gets a green tick in front of it.
+ * The line itself keeps the same quiet surface either way: a whole panel
+ * turning green over a copied file name would be a lot of colour for very
+ * little news. */
+export function notice(message: string, kind: "plain" | "done" = "plain"): void {
+  const element = document.getElementById("notice");
+  if (!element) return;
+  element.replaceChildren();
+  if (kind === "done") {
+    const tick = document.createElement("span");
+    tick.className = "notice-tick";
+    tick.innerHTML = iconMarkup("check");
+    element.append(tick);
+  }
+  element.append(message);
+  element.hidden = false;
+  window.clearTimeout(noticeTimer);
+  noticeTimer = window.setTimeout(() => {
+    element.hidden = true;
+  }, 4200);
+}

@@ -1,0 +1,1252 @@
+@import "./textlayer.css";
+
+/* Colours come from the active theme. themes.ts derives every shade below
+   from the theme's two colours, so a theme file only ever has to name text and
+   background. */
+:root {
+  --bg: #e7e6e2;
+  --surface: #f7f6f3;
+  --surface-hover: #ececE7;
+  --surface-sunk: #efeeea;
+  --line: #dedcd6;
+  --text: #2f3237;
+  --text-soft: #6a6d73;
+  --text-note: #7c7f84;
+  --text-faint: #9a9da2;
+  --accent: #3f7d94;
+  --accent-soft: #dfeaee;
+  --accent-contrast: #ffffff;
+  --positive: #3d8f5b;
+  --page-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --radius: 9px;
+
+  --font: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --toolbar-height: 46px;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* `hidden` has to beat every display rule below, or a hidden panel keeps its
+   flex box and stays on screen. */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+#shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---------------------------------------------------------------- toolbar */
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--toolbar-height);
+  flex: 0 0 auto;
+  padding: 0 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#shell[data-platform="macos"] #toolbar {
+  padding-left: 78px;
+}
+
+#shell[data-toolbar="hidden"] #toolbar {
+  display: none;
+}
+
+.bar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bar-left {
+  flex: 1 1 0;
+}
+
+.bar-center {
+  flex: 0 0 auto;
+}
+
+.bar-right {
+  flex: 1 1 0;
+  justify-content: flex-end;
+}
+
+.doc-title {
+  margin-left: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-weight: 500;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn:active {
+  background: var(--surface-sunk);
+}
+
+/* Held down, whatever it is holding: a panel that is open (Contents, Search)
+   and a menu that is hanging off the button (Theme, Settings, the zoom level)
+   are the same thing to whoever is looking at the bar, so they look the same.
+   `aria-pressed` is the panels, `aria-expanded` the menus. */
+.btn[aria-pressed="true"],
+.btn[aria-expanded="true"],
+.btn.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.btn.icon-only {
+  padding: 0;
+  width: 30px;
+  justify-content: center;
+}
+
+.btn svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  height: 36px;
+  padding: 0 16px;
+}
+
+.btn-primary:hover {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  filter: brightness(1.08);
+}
+
+.zoom-group {
+  display: flex;
+  align-items: center;
+  background: var(--surface-sunk);
+  border-radius: var(--radius);
+  padding: 2px;
+  gap: 2px;
+}
+
+.zoom-level {
+  min-width: 62px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.page-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.page-jump input {
+  width: 44px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-sunk);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.page-jump input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.page-count {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* With no document open there is nothing to page through, zoom, search or
+   list, so those controls step aside rather than sit there greyed out —
+   and no page counter has to invent a "1 of 0". */
+#shell[data-empty="true"] .bar-center,
+#shell[data-empty="true"] #contents,
+#shell[data-empty="true"] #close-doc,
+#shell[data-empty="true"] #find,
+#shell[data-empty="true"] .bar-right .zoom-group {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- layout */
+
+#body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#viewer {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: auto;
+  outline: none;
+  scrollbar-width: thin;
+}
+
+#pages {
+  position: relative;
+  margin: 0 auto;
+}
+
+/* --------------------------------------------------------------- sidebar */
+
+#sidebar {
+  position: relative;
+  /* Over the drag strip: with the toolbar hidden the contents tabs sit in the
+     top band, and they are still buttons before they are anywhere to grab. */
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  width: 232px;
+  font-size: 14.5px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sidebar-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 8px 6px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 0;
+  justify-content: center;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-weight: 500;
+  cursor: default;
+}
+
+.tab svg {
+  width: 15px;
+  height: 15px;
+}
+
+.tab:hover {
+  background: var(--surface-hover);
+}
+
+.tab[aria-selected="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.sidebar-panel {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 4px 8px 12px;
+  scrollbar-width: thin;
+}
+
+.sidebar-grip {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.outline-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  padding: 5px 8px;
+  color: var(--text-soft);
+  font: inherit;
+  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outline-item:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.outline-item.current {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.thumb {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 6px 0 2px;
+  cursor: default;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12px;
+}
+
+.thumb canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.thumb.current canvas {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.thumb.current {
+  color: var(--accent);
+}
+
+.sidebar-empty {
+  padding: 16px 10px;
+  color: var(--text-faint);
+}
+
+/* ----------------------------------------------------------------- pages */
+
+.page {
+  position: absolute;
+  left: 0;
+  background: var(--page-paper, #fff);
+  box-shadow: var(--page-shadow);
+  overflow: hidden;
+  /* Each page paints as a group of its own, so nothing on one page can reach
+     across to the next. */
+  isolation: isolate;
+}
+
+.page canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.page-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.textLayer {
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+}
+
+.textLayer ::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* The document's own links. Sized in percentages of the page, so a zoom moves
+   them without anything being redrawn, and above the text layer, which is
+   where a click has to land first. The colour of a link is painted into the
+   page itself; this layer only catches the click. */
+/* Above the selection layer, whatever order the two were built in. A repaint
+   — a zoom, a change of theme — lays a fresh text layer down after this one,
+   and without a level of its own the links would end up underneath it and
+   stop answering the pointer. */
+.link-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.link-layer a {
+  position: absolute;
+  display: block;
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.link-layer a:hover {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--link) 45%, transparent);
+}
+
+/* The way back to the toolbar.
+ *
+ * With the bar hidden there is nothing on screen to press, and a shortcut only
+ * helps someone who already knows it. The top edge of the window is where a
+ * hand goes looking for a toolbar that has gone, so reaching for it brings a
+ * small handle down to meet the pointer. It moves only because someone moved
+ * towards it, and it is gone again the moment they move away. */
+.toolbar-peek {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  z-index: 30;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 13px 7px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 11px 11px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: default;
+  transform: translate(-50%, -101%);
+  transition: transform 150ms ease;
+}
+
+#shell[data-toolbar="hidden"] .toolbar-peek {
+  display: flex;
+}
+
+.toolbar-peek.visible {
+  transform: translate(-50%, 0);
+}
+
+/* In full screen, reaching for the top edge of the screen is also the gesture
+   that brings the menu bar and the window's own title bar sliding down over
+   the top of the page — right where this handle would be. So in full screen it
+   drops below them instead of under them. */
+#shell[data-fullscreen="true"] .toolbar-peek.visible {
+  transform: translate(-50%, 38px);
+  border-top: 1px solid var(--line);
+  border-radius: 11px;
+}
+
+.toolbar-peek:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Somewhere to take hold of the window.
+ *
+ * On a Mac the document runs up under the title bar, so the toolbar is what
+ * the window is dragged by. With the toolbar away there is nothing left to
+ * grab — and the traffic lights are still sitting up there, so the strip they
+ * sit in is already half a title bar in every reader's head. This finishes the
+ * thought: the same band, invisible, drags the window and zooms it on a
+ * double click. It is not there in full screen, where a window cannot be
+ * moved anyway and the top of the screen is the top of the page. */
+.title-drag {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  z-index: 20;
+  display: none;
+  /* Inert until someone reaches the top edge, so a link or a line of text in
+     the top of the page stays a link and a line of text. */
+  pointer-events: none;
+}
+
+.title-drag.armed {
+  pointer-events: auto;
+}
+
+#shell[data-platform="macos"][data-toolbar="hidden"][data-fullscreen="false"] .title-drag {
+  display: block;
+}
+
+.find-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.find-highlight {
+  position: absolute;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  pointer-events: none;
+}
+
+.find-highlight.current {
+  background: color-mix(in srgb, var(--accent) 62%, transparent);
+}
+
+/* --------------------------------------------------------------- welcome */
+
+/* With no document open there is no page to set off against a backdrop, so the
+   start screen carries on from the toolbar above it: one clean surface, light
+   enough to read quiet text against, rather than the grey the pages float on. */
+#welcome {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  font-size: 14.5px;
+}
+
+#shell[data-empty="true"] #welcome {
+  display: flex;
+}
+
+.welcome-inner {
+  width: min(460px, 82vw);
+  text-align: center;
+}
+
+.welcome-inner h1 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.welcome-sub {
+  margin: 6px 0 22px;
+  color: var(--text-note);
+  font-size: 15.5px;
+}
+
+.welcome-hint {
+  margin-top: 22px;
+  color: var(--text-note);
+}
+
+.recents {
+  margin-top: 26px;
+  text-align: left;
+}
+
+.recents-title {
+  padding: 0 8px 6px;
+  color: var(--text-note);
+}
+
+.recent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  color: var(--text-soft);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.recent:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.recent svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+.recent-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Where you stopped, in a narrow column of its own at the right: a size
+   smaller and quieter than the name, so it reads as a page reference in the
+   margin rather than as part of the title. Right-aligned and tabular, so a
+   three-digit page still lines up with a one-digit one. */
+.recent-page {
+  flex: 0 0 auto;
+  min-width: 3.4em;
+  text-align: right;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.recent:hover .recent-page {
+  color: var(--text-note);
+}
+
+.recent-forget {
+  visibility: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  border-radius: 6px;
+  padding: 2px;
+  cursor: default;
+  display: flex;
+}
+
+.recent:hover .recent-forget {
+  visibility: visible;
+}
+
+.recent-forget:hover {
+  color: var(--text);
+}
+
+/* -------------------------------------------------------------- popovers */
+
+.popover {
+  position: fixed;
+  font-size: 14.5px;
+  z-index: 40;
+  min-width: 232px;
+  max-width: 340px;
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.16);
+  scrollbar-width: thin;
+}
+
+.popover-section {
+  padding: 8px 10px 4px;
+  color: var(--text-faint);
+}
+
+.popover-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--text-soft);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.popover-item:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.popover-item.current {
+  color: var(--accent);
+}
+
+.popover-item .check {
+  width: 14px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.popover-item .check svg {
+  width: 14px;
+  height: 14px;
+}
+
+.popover-item svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.popover-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popover-note {
+  color: var(--text-note);
+  font-size: 13.5px;
+}
+
+.popover-divider {
+  height: 1px;
+  margin: 6px 8px;
+  background: var(--line);
+}
+
+.swatch {
+  width: 22px;
+  height: 16px;
+  border-radius: 4px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.35);
+}
+
+.popover-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  color: var(--text-soft);
+}
+
+.popover-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.popover-row input[type="text"],
+.popover-row input[type="number"] {
+  width: 96px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-sunk);
+  color: var(--text);
+  font: inherit;
+}
+
+.popover-row input[type="color"] {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-sunk);
+}
+
+.popover-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 8px 8px 4px;
+}
+
+.switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--surface-sunk);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: default;
+  flex: 0 0 auto;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.switch[aria-pressed="true"] {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.switch[aria-pressed="true"]::after {
+  left: 17px;
+  background: var(--accent-contrast);
+}
+
+/* ------------------------------------------------------- search and pill */
+
+.find-bar {
+  position: absolute;
+  top: calc(var(--toolbar-height) + 12px);
+  right: 18px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.14);
+}
+
+#shell[data-toolbar="hidden"] .find-bar {
+  top: 12px;
+}
+
+.find-bar input {
+  width: 230px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.find-bar input:focus {
+  outline: none;
+}
+
+.find-icon {
+  display: flex;
+  color: var(--text-faint);
+}
+
+.find-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.find-status {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+  text-align: right;
+}
+
+.page-pill {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.page-pill.visible {
+  opacity: 1;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  max-width: 70%;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  color: var(--text);
+}
+
+/* Something worked. The tick carries the good news; the line around it stays
+   the same quiet surface as every other notice. */
+.notice-tick {
+  display: flex;
+  color: var(--positive);
+}
+
+.drop-hint {
+  position: absolute;
+  inset: 10px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------- settings window */
+
+/* A window inside the window: opened on purpose, never on its own. Big
+   enough to hold everything the small menu leaves out, and closed with
+   Escape, the corner, or a click on the dimmed page behind it. */
+
+.window-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.window {
+  display: flex;
+  flex-direction: column;
+  font-size: 14.5px;
+  width: min(860px, 100%);
+  height: min(600px, 100%);
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+  outline: none;
+}
+
+.window-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  height: 48px;
+  padding: 0 10px 0 18px;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.window-title {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.window-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.window-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+  width: 186px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-sunk);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.window-nav .btn {
+  justify-content: flex-start;
+  height: 32px;
+  width: 100%;
+}
+
+.window-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  padding: 18px 26px 28px;
+  scrollbar-width: thin;
+}
+
+.pane-title {
+  margin: 0 0 2px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.pane-lede {
+  margin: 0 0 6px;
+  color: var(--text-faint);
+}
+
+.pane-group {
+  margin-top: 22px;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.pane-note {
+  margin-top: 14px;
+  color: var(--text-faint);
+  word-break: break-word;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.field:last-child {
+  border-bottom: 0;
+}
+
+.field-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.field-label {
+  color: var(--text);
+}
+
+.field-note {
+  color: var(--text-note);
+  font-size: 13.5px;
+}
+
+.field-control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field input[type="text"] {
+  width: 150px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-sunk);
+  color: var(--text);
+  font: inherit;
+}
+
+.field input[type="color"] {
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-sunk);
+}
+
+.segmented {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+}
+
+.segmented .btn {
+  height: 28px;
+}
+
+.segmented .btn[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-sunk);
+  color: var(--text-soft);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.theme-card:hover {
+  border-color: var(--text-faint);
+}
+
+.theme-card.current {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+
+.theme-card .preview {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  height: 54px;
+  padding-top: 17px;
+  border-radius: 7px;
+  font-size: 17px;
+  box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.25);
+}
+
+.theme-card .preview-link {
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.theme-card .theme-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-card .theme-name svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.pane-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0 24px;
+  margin-top: 8px;
+}
+
+.keys > span {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-soft);
+}
+
+.keys > span:last-child,
+.keys > span:nth-last-child(2) {
+  border-bottom: 0;
+}
+
+.keys .key {
+  text-align: right;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

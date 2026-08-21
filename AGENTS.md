@@ -335,7 +335,7 @@ full screen cannot be captured at all.
 So: say plainly when you are about to drive the real app, and say when you have
 stopped.
 
-## The renderer is the replaceable part
+## The renderer is the replaceable part, and it was tried
 
 pdf.js is the largest thing in the app by some distance: 1.2MB of worker, plus
 cmaps, standard fonts and wasm decoders, against a Rust binary that is a
@@ -343,25 +343,100 @@ rounding error. It is also where the remaining costs are — a canvas per page i
 JavaScript, recolouring done with composite operations because that is what a
 canvas offers, and no encryption support beyond a password prompt.
 
-The alternative worth costing, if the memory or the speed ever stops being good
-enough, is **`pdfium-render`**: rasterise pages in Rust and have the frontend
-ask for a bitmap at a scale, rather than driving pdf.js. That would take the
-page cache, the operator lists, the range transport and the loading-task
-lifecycle out of the frontend entirely; recolouring could run over the pixel
-buffer in Rust, with SIMD and without the pristine copy or the blend-mode
-gymnastics that WebKitGTK puts at risk; and encrypted documents, forms and
-printing come with it. The costs are real: a prebuilt pdfium per platform
-(4–8MB each, so the payload is roughly a wash), a per-target build matrix, and
-a native crash surface where today a bad PDF merely rejects a promise.
-`mupdf-rs` is faster and smaller but AGPL, which is a licensing decision rather
-than a technical one.
+The alternative was **`pdfium-render`**: rasterise pages in Rust and hand the
+frontend a bitmap. That is no longer a thought experiment. It was built, run in
+the real app, measured against the renderer it would replace, and parked on the
+**`pdfium-prototype`** branch — a Rust side in `src-tauri/src/render.rs` and two
+viewers over the same layout, `proto/pdfium.ts` through pdfium and
+`proto/pdfjs.ts` through the app's own `Viewer`, so the only difference between
+a run of one and a run of the other is which renderer answered. The branch
+carries its own instructions. Nothing of it is on `main`, because the answer
+came back "not yet".
 
-**This is a change to the renderer, not to the framework.** Tauri is the right
-shell for a UI like this one, and nothing above suggests otherwise. What makes
+**pdfium draws faster than pdf.js, by between a third and eight times.** Per
+page, at the 10.5 megapixels the app actually renders (fit width, retina, the
+12M ceiling just above):
+
+| document                | pdf.js | pdfium |
+| ----------------------- | -----: | -----: |
+| 400 pages of plain text | 27ms   | 3.6ms  |
+| a typeset paper         | 33ms   | 21ms   |
+| a paper full of figures | 82ms   | 36ms   |
+| a scanned manual        | 80ms   | 10ms   |
+| slides                  | 66ms   | 52ms   |
+
+Text extraction is three times quicker, opening a document is two orders
+quicker (pdf.js is mostly starting its worker), and recolouring in Rust is
+13-17ms a page scalar, 2.8-3.5ms across the cores — against 1.5-5.6ms for the
+canvas blend chain, which is the one thing pdf.js's side does better by
+default.
+
+**And none of that survives the trip into the webview.** A page at that size is
+43MB of bitmap, and it has to cross a process boundary that pdf.js never
+crosses, because pdf.js draws into a canvas that already lives in the web
+content process. Measured end to end, in the app, on the same document and the
+same scroll:
+
+| what                          | pdf.js    | pdfium via `invoke` | pdfium via `page://` image |
+| ----------------------------- | --------: | ------------------: | -------------------------: |
+| per page, end to end          | —         | 47ms                | 82ms                       |
+| app process                   | 89MB      | 172MB               | 124MB                      |
+| web content process           | 92MB      | 158MB               | 573MB                      |
+| **total, after 60 viewports** | **182MB** | **330MB**           | **697MB**                  |
+
+The 3.6ms render becomes 47ms by the time the pixels are in a canvas, and the
+memory roughly doubles: the bitmap exists in the Rust buffer, again as an
+`ArrayBuffer` on the JavaScript heap, and again inside the canvas. Serving the
+same bitmap as an image over a custom URI scheme — which sounds better, and
+lets pdfium draw straight into the response with no copy at all — is worse
+still, because WebKit's image cache holds every page it is given and the decode
+costs more than the copy did. Both numbers are after fixing the obvious faults
+(rendering off the main thread, `no-store`, releasing bitmaps on unmount); what
+is left is the transport itself.
+
+**So: not yet, and here is what would change it.** The costs that would have
+justified the swap are not where they were assumed to be. What pdfium is
+plainly better at is *drawing*, and drawing is not the bottleneck — the frontier
+is the bridge. The versions of this that could win:
+
+- Draw at the window's scale rather than the device's on a first pass and
+  refine, so the bytes crossing are a quarter of what they are now.
+- Keep the bitmap on the native side entirely — a layer under or over the
+  webview, which is how Chrome's own PDF viewer does it. That is a much larger
+  change than swapping a renderer, and it takes the text layer, selection and
+  find-in-page with it.
+- Wait for something that shares memory across the boundary. Nothing in Tauri
+  exposes an `IOSurface` today.
+
+**What it would cost on disk, measured.** `libpdfium.dylib` for macOS arm64 is
+7.7MB (3.5MB compressed), the bindings add 0.4MB to the Rust binary, and what
+pdf.js would stop shipping is 5.5MB — the 1.2MB worker, 1.6MB of cmaps, 1.5MB
+of wasm decoders, 0.8MB of standard fonts and about 0.35MB of the bundle. Call
+it +2.6MB on one architecture, and rather more on a universal build, where
+pdfium is 15MB. "Roughly a wash" was the guess and it is close to right,
+slightly the wrong side of it.
+
+**Three things that will bite whoever picks this up again.** pdfium renders
+into a buffer of your choosing (`PdfBitmap::from_bytes`), which is how the
+`page://` path gets away without a copy — but Skia CHECKs that the buffer is
+four-byte aligned, and a failed CHECK is a trap instruction: the process
+vanishes with no panic, no message and no stack. The BMP wrapper has to be a
+plain `BITMAPINFOHEADER`, because ImageIO, which is what decodes an image
+inside a WKWebView, rejects a `BITMAPV4HEADER` outright and reports it as
+`EncodingError: Loading error`. And `register_asynchronous_uri_scheme_protocol`
+hands you the request on the thread that draws the window: answer it there and
+the scroll stops for as long as the page takes.
+
+`mupdf-rs` is faster and smaller but AGPL, which is a licensing decision rather
+than a technical one. Nothing measured here bears on it.
+
+**This was a change to the renderer, not to the framework.** Tauri is the right
+shell for a UI like this one, and nothing above suggests otherwise. What made
 the renderer swappable is that `viewer.ts` is the only file that imports pdf.js
 for rendering (`search.ts` and `sidebar.ts` use it only through a
 `PDFDocumentProxy` they are handed) and `api.ts` is the only door into Rust.
-Keep both of those true and this stays a decision that can be made later.
+Keep both of those true and this stays a decision that can be made later — the
+prototype needed no change to either.
 
 ## Running it
 

@@ -21,9 +21,14 @@ import type { Match, Viewer } from "./viewer";
 type PageText = {
   /** Every text run on the page, in the order the text layer draws them. */
   items: string[];
-  /** The runs joined, which is what a query is matched against. */
+  /** The runs joined and folded, which is what a query is matched against. */
   text: string;
-  /** Where each run starts inside `text`. */
+  /** For each character of `text`, its offset in the unfolded page text.
+      Folding changes lengths — "ﬁ" becomes two characters, a soft hyphen
+      becomes none — so a hit has to be translated back before it can be
+      pointed at a run. */
+  origin: number[];
+  /** Where each run starts inside the unfolded page text. */
   starts: number[];
 };
 
@@ -65,6 +70,19 @@ export class Search {
     this.clear();
   }
 
+  /** Put the index down.
+   *
+   * Every page ever scanned is kept — the joined text and the individual runs
+   * — which is what makes stepping through matches instant, and what makes a
+   * long book cost tens of megabytes for as long as it is open. That is a fair
+   * trade while the find bar is up and no trade at all once it is closed, so
+   * the index goes when the bar does. Reopening it rescans, which streams and
+   * is over in well under a second. */
+  forget(): void {
+    this.pages.clear();
+    this.clear();
+  }
+
   clear(): void {
     this.run++;
     this.query = "";
@@ -94,7 +112,14 @@ export class Search {
       return;
     }
 
-    const needle = query.toLowerCase();
+    const needle = fold(query).text;
+    if (needle.length === 0) {
+      // A query of nothing but soft hyphens or combining marks folds away to
+      // nothing, and an empty needle matches at every position.
+      this.viewer.setMatches([], -1);
+      this.onUpdate({ query, total: 0, index: -1, scanning: false, capped: false });
+      return;
+    }
     // Start at the page being read, then outwards, so the first result is
     // usually the one just below the reader's eyes.
     const order = pagesFromHere(this.viewer.pageNumber, doc.numPages);
@@ -192,21 +217,76 @@ export class Search {
   private async textFor(page: number, doc: PDFDocumentProxy): Promise<PageText> {
     const cached = this.pages.get(page);
     if (cached) return cached;
-    const runs = await readTextRuns(await doc.getPage(page));
+    const proxy = await doc.getPage(page);
+    const runs = await readTextRuns(proxy);
     const items: string[] = [];
     const starts: number[] = [];
-    let text = "";
+    let raw = "";
     for (const run of runs) {
-      starts.push(text.length);
+      starts.push(raw.length);
       items.push(run.str);
-      text += run.str;
-      if (run.hasEOL) text += "\n";
+      raw += run.str;
+      if (run.hasEOL) raw += "\n";
     }
-    const built: PageText = { items, text: text.toLowerCase(), starts };
+    const folded = fold(raw);
+    const built: PageText = { items, text: folded.text, origin: folded.origin, starts };
     this.pages.set(page, built);
+    // The proxy was fetched for its text and has no other work to do here;
+    // holding its parsed contents would be a second copy of the document.
+    proxy.cleanup();
     return built;
   }
 }
+
+/**
+ * Fold text into the form a search is actually done against, and record where
+ * every character of the result came from.
+ *
+ * Three things stand between a typed word and the same word in a PDF, and all
+ * three are invisible to the person typing:
+ *
+ * * **Ligatures.** A professionally typeset document does not contain "fi" —
+ *   it contains "ﬁ", one character. Searching for "find" in a book set in
+ *   anything but Courier found nothing at all, which reads as the search being
+ *   broken rather than as a fact about typography.
+ * * **Accents.** Someone typing "resume" means to find "résumé". Decomposing
+ *   and dropping the combining marks makes both sides the same word.
+ * * **Soft hyphens.** A word broken across a line keeps a U+00AD in the
+ *   extracted text, so "typography" split at the margin is two words to an
+ *   exact match and one word to a reader.
+ *
+ * `origin` is what keeps the answer usable: folding changes lengths, so a hit
+ * at index *i* in the folded text has to be translated back to the offset in
+ * the page's real text before it can be turned into a run and a DOM range.
+ */
+function fold(input: string): { text: string; origin: number[] } {
+  let text = "";
+  const origin: number[] = [];
+
+  for (let i = 0; i < input.length; i++) {
+    const source = i;
+    // NFKD splits the ligatures into their letters and the accented letters
+    // into a letter plus its marks; the marks are then dropped. Done a
+    // character at a time so that every piece of the result knows which
+    // character of the original it came from.
+    const pieces = input[i].normalize("NFKD").toLowerCase();
+    for (const piece of pieces) {
+      if (COMBINING.test(piece) || IGNORED.test(piece)) continue;
+      text += piece;
+      origin.push(source);
+    }
+  }
+  // One past the end, so a match that runs to the last character has somewhere
+  // to point its end at.
+  origin.push(input.length);
+  return { text, origin };
+}
+
+/** Combining marks, which are what is left of an accent after NFKD. */
+const COMBINING = /[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20f0\ufe20-\ufe2f]/;
+/** Characters that are in the text but not in the word: the soft hyphen, and
+    the zero-width joiners that some producers scatter through it. */
+const IGNORED = /[\u00ad\u200b-\u200d\ufeff]/;
 
 /**
  * Read a page's text runs.
@@ -249,8 +329,14 @@ function locate(page: PageText, needle: string, number: number): Match[] {
   const found: Match[] = [];
   let at = page.text.indexOf(needle);
   while (at !== -1) {
-    const start = position(page, at);
-    const end = position(page, at + needle.length);
+    // Back from the folded text to the page's own, which is what the runs and
+    // the text layer are indexed by. The end has to clear the last character
+    // it matched: one source character can fold to several — "ﬁ" is two — so
+    // a match ending inside a ligature would otherwise start and end on the
+    // same character and highlight nothing.
+    const last = at + needle.length - 1;
+    const start = position(page, page.origin[at]);
+    const end = position(page, Math.max(page.origin[at + needle.length], page.origin[last] + 1));
     found.push({
       page: number,
       itemStart: start.item,

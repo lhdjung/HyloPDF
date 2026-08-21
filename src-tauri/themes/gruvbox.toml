@@ -5,3 +5,5 @@ background = "#282828"
 accent = "#fe8019"
 # Gruvbox aqua for links, against the orange accent.
 link = "#83a598"
+# Gruvbox bg3: the warm grey the palette selects with.
+selection = "#504945"

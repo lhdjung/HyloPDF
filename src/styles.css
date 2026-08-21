@@ -54,7 +54,7 @@ body {
 }
 
 ::selection {
-  background: var(--accent-soft);
+  background: var(--selection);
 }
 
 #shell {
@@ -422,8 +422,11 @@ body {
   --scale-round-y: 1px;
 }
 
+/* Selected text on the page. The layer above the canvas is transparent ink, so
+   the colour here is the whole of what selection looks like — and it is the
+   theme's own, whether the theme named it or it was derived from the accent. */
 .textLayer ::selection {
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--selection);
 }
 
 /* The document's own links. Sized in percentages of the page, so a zoom moves
@@ -987,12 +990,16 @@ body {
   backdrop-filter: blur(2px);
 }
 
+/* A window fits what is in it. Settings asks for the big fixed frame because
+   it has a nav column down the side and panes that vary in length; a window
+   that is one question and one field should be the size of one question and
+   one field. */
 .window {
   display: flex;
   flex-direction: column;
   font-size: 14.5px;
-  width: min(860px, 100%);
-  height: min(600px, 100%);
+  width: min(460px, 100%);
+  max-height: min(600px, 100%);
   min-height: 0;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -1021,10 +1028,47 @@ body {
   color: var(--text);
 }
 
+.window[data-size="full"] {
+  width: min(860px, 100%);
+  height: min(600px, 100%);
+}
+
 .window-body {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* The body of a window that is asking something rather than showing a pane. */
+.window-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 18px;
+}
+
+.window-ask .pane-lede {
+  margin: 0;
+}
+
+.window-ask input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  color: var(--text);
+  font: inherit;
+}
+
+.window-ask input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.window-ask .popover-actions {
+  margin: 0;
 }
 
 .window-nav {

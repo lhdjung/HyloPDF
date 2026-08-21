@@ -1,0 +1,96 @@
+# HyloPDF ships to three platforms with three different web engines, and the
+# ones it is not developed on are the ones that break: WebKitGTK on Linux and
+# WebView2 on Windows disagree with WKWebView about exactly the things this app
+# leans on — canvas blend modes, pinch gestures, text layout. Building on all
+# three on every push is the cheapest way to hear about it from a machine
+# rather than from a reader.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: Interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Types
+        run: npm run check
+      - name: Browsers for the interface tests
+        run: npx playwright install --with-deps webkit
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libxdo-dev
+      - name: Formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+  bundle:
+    name: Bundle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: System libraries
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libxdo-dev
+      - run: npm ci
+      - name: Build the app
+        # Signing is the one thing this cannot do without secrets. On macOS an
+        # unsigned build is quarantined on any machine but the one that made
+        # it, and on Windows it draws a SmartScreen warning — so a release
+        # workflow has to supply these. They are read straight from the
+        # environment by the Tauri bundler; nothing here has to pass them on.
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run tauri build -- --ci

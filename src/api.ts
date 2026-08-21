@@ -34,6 +34,8 @@ export type Theme = {
   background: string;
   accent: string | null;
   link: string | null;
+  /** The colour behind selected text. Null means "derive it from the accent". */
+  selection: string | null;
   recolor: boolean;
   built_in: boolean;
 };
@@ -77,7 +79,7 @@ const fallbackDefaults: Settings = {
   fit_mode: "width",
   zoom: 1,
   page_gap: 16,
-  recolor_images: true,
+  recolor_images: false,
   remember_position: true,
   show_toolbar: true,
   show_sidebar: false,
@@ -91,11 +93,11 @@ const fallbackDefaults: Settings = {
 };
 
 const fallbackThemes: Theme[] = [
-  { id: "hylo-light", name: "Hylo Light", text: "#2f3237", background: "#f2f1ed", accent: "#3f7d94", link: "#2f6f8f", recolor: false, built_in: true },
-  { id: "hylo-dark", name: "Hylo Dark", text: "#e9eaee", background: "#24272f", accent: "#8fb0d4", link: "#8ec5e8", recolor: true, built_in: true },
-  { id: "pzazz", name: "Pzazz", text: "#f4ecff", background: "#1c1526", accent: "#ff5fa2", link: "#5fe3c8", recolor: true, built_in: true },
-  { id: "dracula", name: "Dracula", text: "#f8f8f2", background: "#282a36", accent: "#ff79c6", link: "#8be9fd", recolor: true, built_in: true },
-  { id: "gruvbox", name: "Gruvbox", text: "#ebdbb2", background: "#282828", accent: "#fe8019", link: "#83a598", recolor: true, built_in: true },
+  { id: "hylo-light", name: "Hylo Light", text: "#2f3237", background: "#f2f1ed", accent: "#3f7d94", link: "#2f6f8f", selection: null, recolor: false, built_in: true },
+  { id: "hylo-dark", name: "Hylo Dark", text: "#e9eaee", background: "#24272f", accent: "#8fb0d4", link: "#8ec5e8", selection: null, recolor: true, built_in: true },
+  { id: "pzazz", name: "Pzazz", text: "#f4b8e4", background: "#1b1029", accent: "#c77dff", link: "#9d7bff", selection: "#4a2f6b", recolor: true, built_in: true },
+  { id: "dracula", name: "Dracula", text: "#f8f8f2", background: "#282a36", accent: "#ff79c6", link: "#8be9fd", selection: "#44475a", recolor: true, built_in: true },
+  { id: "gruvbox", name: "Gruvbox", text: "#ebdbb2", background: "#282828", accent: "#fe8019", link: "#83a598", selection: "#504945", recolor: true, built_in: true },
 ];
 
 function fallbackSettings(): Settings {
@@ -121,18 +123,24 @@ export async function bootstrap(): Promise<Bootstrap> {
   return invoke<Bootstrap>("bootstrap");
 }
 
-/** Write exactly one setting. Nothing else in the file is touched. */
-export async function setSetting<K extends keyof Settings>(
-  key: K,
-  value: Settings[K],
+/** Write settings. Nothing else in the file is touched.
+ *
+ * Plural because the interface almost always changes settings in groups — a
+ * theme and the light or dark slot it fills, a zoom and the fit mode that goes
+ * with it — and each call is a whole-file rewrite on the other side. Sending
+ * the group as one call makes it one write, and means the group can never be
+ * seen half-applied. */
+export async function setSettings(
+  entries: [keyof Settings, Settings[keyof Settings]][],
 ): Promise<void> {
+  if (entries.length === 0) return;
   if (!hasBackend) {
     const stored = fallbackSettings();
-    stored[key] = value;
+    for (const [key, value] of entries) (stored as Record<string, unknown>)[key] = value;
     localStorage.setItem(FALLBACK_KEY, JSON.stringify(stored));
     return;
   }
-  await invoke("set_setting", { key, value });
+  await invoke("set_settings", { entries });
 }
 
 export async function listThemes(): Promise<Theme[]> {
@@ -162,11 +170,38 @@ export async function openDocument(path: string): Promise<OpenedDocument> {
   return invoke<OpenedDocument>("open_document", { path });
 }
 
-export async function readDocument(path: string): Promise<Uint8Array> {
+/* --------------------------------------------------- reading a document
+
+   A document is read in pieces rather than all at once. pdf.js asks for the
+   cross-reference table at the end of the file and then only the pages being
+   looked at, so nothing here ever holds a whole PDF — which used to mean three
+   copies of it, one on each side of the bridge and one in the pdf.js worker. */
+
+/** Open a document for reading and learn how long it is. Reads nothing. */
+export async function openForReading(path: string): Promise<number> {
   const local = browserFiles.get(path);
-  if (local) return new Uint8Array(await local.arrayBuffer());
-  const bytes = await invoke<ArrayBuffer>("read_document", { path });
+  if (local) return local.size;
+  return invoke<number>("open_for_reading", { path });
+}
+
+/** Bytes `[start, start + length)` of the document opened for reading. */
+export async function readRange(
+  path: string,
+  start: number,
+  length: number,
+): Promise<Uint8Array> {
+  const local = browserFiles.get(path);
+  if (local) {
+    return new Uint8Array(await local.slice(start, start + length).arrayBuffer());
+  }
+  const bytes = await invoke<ArrayBuffer>("read_range", { path, start, length });
   return new Uint8Array(bytes);
+}
+
+/** Let go of the document, so its handle does not outlive the reading. */
+export async function closeReading(): Promise<void> {
+  if (!hasBackend) return;
+  await invoke("close_document").catch(() => {});
 }
 
 export async function rememberPosition(

@@ -2,8 +2,10 @@ mod library;
 mod settings;
 mod theme;
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -11,6 +13,42 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
+
+/// Replace a file's contents without ever leaving a half-written one behind:
+/// write beside the target, then rename over it, which is atomic on every
+/// system we ship to.
+///
+/// The temp file is named for this process and this write. Sharing one temp
+/// path — which is what `with_extension("toml.tmp")` gave us — meant two
+/// writers could overwrite each other's staging file and then rename the wrong
+/// bytes into place, or find it already gone and fail. The locks in `settings`
+/// and `library` make that unreachable within one process; the unique name
+/// makes it unreachable full stop.
+pub(crate) fn atomic_write(target: &Path, body: &[u8]) -> Result<(), String> {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let dir = target
+        .parent()
+        .ok_or("That path has no folder to write into.")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+
+    let stem = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    let ticket = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp = dir.join(format!(".{stem}.{}.{ticket}.tmp", std::process::id()));
+
+    if let Err(e) = std::fs::write(&temp, body) {
+        return Err(e.to_string());
+    }
+    std::fs::rename(&temp, target).map_err(|e| {
+        // A failed rename leaves the staging file behind; it is ours and
+        // nobody else's, so cleaning it up cannot take anything with it.
+        let _ = std::fs::remove_file(&temp);
+        e.to_string()
+    })
+}
 
 /// Resolved once at startup: the config directory and the themes directory
 /// inside it.
@@ -26,6 +64,63 @@ struct Paths {
 struct Pending {
     file: Mutex<Option<String>>,
     listening: AtomicBool,
+}
+
+/// The document currently open, held open.
+///
+/// pdf.js reads a document in pieces — it asks for the cross-reference table,
+/// then the pages it actually needs — so the file is opened once and kept,
+/// rather than opened and closed for every range. Only the path recorded here
+/// can be read, which keeps `read_range` a way of reading the open document
+/// rather than a way of reading any file on the disk.
+#[derive(Default)]
+struct OpenFile(Mutex<Option<(String, File)>>);
+
+impl OpenFile {
+    /// Open a document for reading and report its size.
+    fn begin(&self, path: &str) -> Result<u64, String> {
+        let file =
+            File::open(path).map_err(|e| format!("Could not read {}: {e}", file_name(path)))?;
+        let length = file
+            .metadata()
+            .map_err(|e| format!("Could not measure {}: {e}", file_name(path)))?
+            .len();
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some((path.to_string(), file));
+        Ok(length)
+    }
+
+    /// Bytes `[start, start + length)` of the open document.
+    fn range(&self, path: &str, start: u64, length: u64) -> Result<Vec<u8>, String> {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((open, file)) = slot.as_mut() else {
+            return Err("No document is open.".into());
+        };
+        if open != path {
+            return Err("That is not the document that is open.".into());
+        }
+        // A document is never larger than the disk it sits on, and a request
+        // for more than that is a bug rather than a big file.
+        let length = length.min(64 * 1024 * 1024) as usize;
+        file.seek(SeekFrom::Start(start))
+            .map_err(|e| format!("Could not seek: {e}"))?;
+        let mut buffer = vec![0u8; length];
+        let mut filled = 0;
+        while filled < length {
+            match file.read(&mut buffer[filled..]) {
+                Ok(0) => break, // end of file: a short read is the honest answer
+                Ok(n) => filled += n,
+                Err(e) => return Err(format!("Could not read: {e}")),
+            }
+        }
+        buffer.truncate(filled);
+        Ok(buffer)
+    }
+
+    fn close(&self) {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = None;
+    }
 }
 
 #[derive(Serialize)]
@@ -59,32 +154,51 @@ fn file_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
+/// Every command that touches the disk is `async`, and that is the whole
+/// reason for the keyword here — none of them await anything.
+///
+/// A synchronous Tauri command runs on the thread that received the IPC
+/// message, which is the main thread: the one drawing the window. Reading a
+/// document, or rewriting `settings.toml`, would stop the app dead for as long
+/// as the disk took. `remember_position` alone fires on every pause in a
+/// scroll, so that stall would land squarely in the middle of the one gesture
+/// this app exists to make smooth. Marked `async`, the body is handed to the
+/// runtime's thread pool instead and the window keeps painting.
+///
+/// The price is that two of them can now genuinely run at once, which is why
+/// `settings` and `library` hold a lock across read-modify-write.
 #[tauri::command]
-fn bootstrap(paths: State<'_, Paths>) -> Bootstrap {
+async fn bootstrap(paths: State<'_, Paths>) -> Result<Bootstrap, String> {
     let stored = library::load(&paths.config);
-    Bootstrap {
+    Ok(Bootstrap {
         settings: settings::load(&paths.config),
         themes: theme::load_all(&paths.themes),
         library: library::prune(&stored).files,
         config_dir: paths.config.to_string_lossy().to_string(),
         themes_dir: paths.themes.to_string_lossy().to_string(),
-    }
+    })
 }
 
+/// Settings, written as a group.
+///
+/// Every write is still one key changing one entry; what arrives together is
+/// simply written together. The interface changes settings in pairs more often
+/// than not — a theme and the light or dark slot it fills, a zoom and its fit
+/// mode — and sending those as two commands meant two whole-file rewrites that
+/// each had to re-read what the other had just done.
 #[tauri::command]
-fn set_setting(
+async fn set_settings(
     paths: State<'_, Paths>,
-    key: String,
-    value: Value,
+    entries: Vec<(String, Value)>,
 ) -> Result<settings::Settings, String> {
-    settings::set(&paths.config, &key, value)
+    settings::set_many(&paths.config, entries)
 }
 
 /// The window's geometry is one observation of one window, so it is written in
-/// one go. Everything else goes through `set_setting`, one key at a time.
-// Async, and deliberately so: window getters below hand their work to the
-// main thread and wait for it, which would deadlock a command already running
-// there. The same goes for `ready`.
+/// one go, like everything else.
+// Async for a second reason as well as the one above: the window getters below
+// hand their work to the main thread and wait for it, which would deadlock a
+// command already running there. The same goes for `ready`.
 #[tauri::command]
 async fn save_window_state(
     window: WebviewWindow,
@@ -115,17 +229,17 @@ async fn save_window_state(
 }
 
 #[tauri::command]
-fn list_themes(paths: State<'_, Paths>) -> Vec<theme::Theme> {
-    theme::load_all(&paths.themes)
+async fn list_themes(paths: State<'_, Paths>) -> Result<Vec<theme::Theme>, String> {
+    Ok(theme::load_all(&paths.themes))
 }
 
 #[tauri::command]
-fn save_theme(paths: State<'_, Paths>, theme: theme::Theme) -> Result<theme::Theme, String> {
+async fn save_theme(paths: State<'_, Paths>, theme: theme::Theme) -> Result<theme::Theme, String> {
     theme::save(&paths.themes, &theme)
 }
 
 #[tauri::command]
-fn delete_theme(paths: State<'_, Paths>, id: String) -> Result<Vec<theme::Theme>, String> {
+async fn delete_theme(paths: State<'_, Paths>, id: String) -> Result<Vec<theme::Theme>, String> {
     theme::delete(&paths.themes, &id)?;
     Ok(theme::load_all(&paths.themes))
 }
@@ -143,7 +257,7 @@ async fn pick_pdf(app: AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
-fn open_document(paths: State<'_, Paths>, path: String) -> Result<Opened, String> {
+async fn open_document(paths: State<'_, Paths>, path: String) -> Result<Opened, String> {
     if !PathBuf::from(&path).is_file() {
         return Err(format!("{} is no longer there.", file_name(&path)));
     }
@@ -158,17 +272,43 @@ fn open_document(paths: State<'_, Paths>, path: String) -> Result<Opened, String
     })
 }
 
-/// The bytes of the document. Returned raw rather than as JSON, so a large PDF
-/// does not get base64'd through the IPC bridge.
+/// Open a document for reading and report how long it is.
+///
+/// Nothing is read here. pdf.js is given the length and asks for the pieces it
+/// needs — the cross-reference table at the end, then the pages actually being
+/// looked at — through `read_range`. Handing it the whole file instead meant
+/// three copies of every document in memory at once: the buffer read here, the
+/// array it became on the way through the bridge, and the copy the pdf.js
+/// worker keeps. A five hundred megabyte scan cost well over a gigabyte before
+/// a single page was drawn, and every one of those bytes was read before the
+/// first one was shown.
 #[tauri::command]
-fn read_document(path: String) -> Result<tauri::ipc::Response, String> {
-    std::fs::read(&path)
+async fn open_for_reading(open: State<'_, OpenFile>, path: String) -> Result<u64, String> {
+    open.begin(&path)
+}
+
+/// A slice of the open document. Returned raw rather than as JSON, so the
+/// bytes do not get base64'd through the IPC bridge.
+#[tauri::command]
+async fn read_range(
+    open: State<'_, OpenFile>,
+    path: String,
+    start: u64,
+    length: u64,
+) -> Result<tauri::ipc::Response, String> {
+    open.range(&path, start, length)
         .map(tauri::ipc::Response::new)
-        .map_err(|e| format!("Could not read {}: {e}", file_name(&path)))
+}
+
+/// Let go of the open document, so the handle does not outlive the reading.
+#[tauri::command]
+async fn close_document(open: State<'_, OpenFile>) -> Result<(), String> {
+    open.close();
+    Ok(())
 }
 
 #[tauri::command]
-fn remember_position(
+async fn remember_position(
     paths: State<'_, Paths>,
     path: String,
     page: u32,
@@ -178,7 +318,10 @@ fn remember_position(
 }
 
 #[tauri::command]
-fn forget_document(paths: State<'_, Paths>, path: String) -> Result<Vec<library::Entry>, String> {
+async fn forget_document(
+    paths: State<'_, Paths>,
+    path: String,
+) -> Result<Vec<library::Entry>, String> {
     library::forget(&paths.config, &path).map(|library| library.files)
 }
 
@@ -197,7 +340,7 @@ async fn open_link(url: String) -> Result<(), String> {
         return Err("That link does not point at a web page.".into());
     }
 
-    let mut command = if cfg!(target_os = "macos") {
+    let command = if cfg!(target_os = "macos") {
         let mut c = std::process::Command::new("open");
         c.arg(&url);
         c
@@ -212,13 +355,29 @@ async fn open_link(url: String) -> Result<(), String> {
         c
     };
 
-    // Async, so waiting for the launcher to hand off — and reaping it — never
-    // touches the main thread.
-    match command.status() {
-        Ok(status) if status.success() => Ok(()),
-        Ok(_) => Err("Nothing here knows how to open that link.".into()),
+    match wait_for(command).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Nothing here knows how to open that link.".into()),
         Err(e) => Err(format!("Could not open the link: {e}")),
     }
+}
+
+/// Start a program and wait for it to hand off, on a thread that is allowed to
+/// sit still.
+///
+/// `status()` blocks until the child exits. Called straight from an async
+/// command that would tie up one of the runtime's few worker threads for as
+/// long as the launcher took, and the launchers here are the slowest programs
+/// on the system to start cold. `spawn_blocking` is where waiting belongs.
+async fn wait_for(mut command: std::process::Command) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        command
+            .status()
+            .map(|status| status.success())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Show a document where it lives, selected, in whatever this system uses to
@@ -234,14 +393,14 @@ async fn reveal_document(path: String) -> Result<(), String> {
     }
 
     #[cfg(target_os = "macos")]
-    let mut command = {
+    let command = {
         let mut c = std::process::Command::new("open");
         c.arg("-R").arg(&file);
         c
     };
 
     #[cfg(target_os = "windows")]
-    let mut command = {
+    let command = {
         // `/select,` takes the path as one argument; nothing goes through a
         // shell.
         let mut c = std::process::Command::new("explorer.exe");
@@ -250,24 +409,21 @@ async fn reveal_document(path: String) -> Result<(), String> {
     };
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let mut command = {
+    let command = {
         // The freedesktop file managers answer this; the fallback below opens
         // the folder for the ones that do not.
         let uri = format!("file://{}", file.display());
-        let shown = std::process::Command::new("dbus-send")
-            .args([
-                "--session",
-                "--dest=org.freedesktop.FileManager1",
-                "--type=method_call",
-                "/org/freedesktop/FileManager1",
-                "org.freedesktop.FileManager1.ShowItems",
-                &format!("array:string:{uri}"),
-                "string:",
-            ])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-        if shown {
+        let mut ask = std::process::Command::new("dbus-send");
+        ask.args([
+            "--session",
+            "--dest=org.freedesktop.FileManager1",
+            "--type=method_call",
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1.ShowItems",
+            &format!("array:string:{uri}"),
+            "string:",
+        ]);
+        if wait_for(ask).await.unwrap_or(false) {
             return Ok(());
         }
         let mut c = std::process::Command::new("xdg-open");
@@ -275,9 +431,9 @@ async fn reveal_document(path: String) -> Result<(), String> {
         c
     };
 
-    match command.status() {
-        Ok(status) if status.success() => Ok(()),
-        Ok(_) => Err("Nothing here knows how to show that file.".into()),
+    match wait_for(command).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Nothing here knows how to show that file.".into()),
         Err(e) => Err(format!("Could not show the file: {e}")),
     }
 }
@@ -386,10 +542,26 @@ fn is_on_screen(window: &WebviewWindow) -> Result<bool, tauri::Error> {
     Ok(false)
 }
 
-fn first_pdf_argument() -> Option<String> {
+/// The document named on the command line, if there was one.
+///
+/// Any argument that is not a flag and names a file that exists. Deliberately
+/// not "ends in .pdf": on Linux a file is what its contents say it is and an
+/// extension is optional, so filtering on the name meant `hylopdf ./report`
+/// opened nothing and said nothing about why. Let the parser be the judge —
+/// it already reports a document it cannot read, and it does it properly.
+fn first_document_argument() -> Option<String> {
     std::env::args()
         .skip(1)
-        .find(|arg| !arg.starts_with('-') && arg.to_lowercase().ends_with(".pdf"))
+        .find(|arg| !arg.starts_with('-') && Path::new(arg).is_file())
+}
+
+/// The same question asked of a second instance's arguments, which arrive as a
+/// list rather than from the environment.
+fn document_among(args: &[String]) -> Option<String> {
+    args.iter()
+        .skip(1)
+        .find(|arg| !arg.starts_with('-') && Path::new(arg).is_file())
+        .cloned()
 }
 
 /// A document handed to us by the OS: sent straight through if the interface
@@ -413,18 +585,47 @@ fn hand_over(app: &AppHandle, path: String) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // One HyloPDF at a time.
+    //
+    // `RunEvent::Opened` below is an Apple Events mechanism and fires on macOS
+    // alone. Everywhere else the system answers "open this PDF" by launching
+    // the whole app again with the path in its arguments — so double-clicking
+    // three documents gave three windows, three pdf.js runtimes, and three
+    // processes writing over each other's `settings.toml`, which no lock
+    // inside one of them can help with. A second instance now hands its
+    // document to the first and stands down.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(
+            |app: &AppHandle, args: Vec<String>, _cwd: String| {
+                if let Some(path) = document_among(&args) {
+                    hand_over(app, path);
+                } else if let Some(window) = app.get_webview_window("main") {
+                    // Started again with nothing to open: the reader is looking
+                    // for the window they already have.
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            },
+        ));
+    }
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             bootstrap,
-            set_setting,
+            set_settings,
             save_window_state,
             list_themes,
             save_theme,
             delete_theme,
             pick_pdf,
             open_document,
-            read_document,
+            open_for_reading,
+            read_range,
+            close_document,
             remember_position,
             forget_document,
             open_link,
@@ -441,8 +642,9 @@ pub fn run() {
 
             let stored = settings::load(&config);
             app.manage(Paths { config, themes });
+            app.manage(OpenFile::default());
             app.manage(Pending {
-                file: Mutex::new(first_pdf_argument()),
+                file: Mutex::new(first_document_argument()),
                 listening: AtomicBool::new(false),
             });
 

@@ -9,11 +9,17 @@ This is the working implementation of the description in [AGENTS.md](AGENTS.md).
 ```sh
 npm install
 npm run tauri dev      # development, with hot reload for the interface
+npm test               # the interface, headlessly — takes nobody's screen
 npm run tauri build    # a release build and an installer in src-tauri/target/release
 ```
 
 `hylopdf path/to/file.pdf` opens a document straight away, and the app
-registers itself for `.pdf` files, so "Open with" works too.
+registers itself for `.pdf` files, so "Open with" works too. Opening a second
+document hands it to the window that is already open rather than starting
+another copy.
+
+Documents are read a piece at a time rather than loaded whole, so a very large
+PDF opens as quickly as a small one and costs about as much to keep open.
 
 ## Keyboard
 
@@ -55,7 +61,8 @@ your theme folder on every run, so they can be read and copied, and so a change
 to a shipped theme reaches a machine that already has the old one. The embedded
 copies are the authoritative ones: a built-in edited in place is overwritten,
 while editing one through the app saves a copy under a name of its own, which
-is never touched.
+is never touched. Each shipped file says as much at the top of it, so nobody
+finds that out by losing an afternoon's work.
 
 ```
 ~/Library/Application Support/app.hylopdf/themes/   (macOS)
@@ -70,7 +77,9 @@ name = "Hylo Dark"
 text = "#e9eaee"
 background = "#24272f"
 accent = "#8fb0d4"
-# recolor = false   # leave the document exactly as printed, theme only the app
+# link = "#8ec5e8"      # links in the document; the accent if left out
+# selection = "#44475a" # behind selected text; derived from the accent if left out
+# recolor = false       # leave the document exactly as printed, theme only the app
 ```
 
 Two colours are enough because everything else — the toolbar, the borders, the

@@ -2,13 +2,22 @@
 //!
 //! This is reading history rather than configuration, so it lives in its own
 //! file and never mixes with settings.
+//!
+//! Like settings, every change here is a read-modify-write of the whole file,
+//! and `remember` fires on every pause in a scroll — so it is the one most
+//! likely to meet another. `LOCK` serialises them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::atomic_write;
+
 const LIMIT: usize = 24;
+
+static LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Entry {
@@ -48,15 +57,13 @@ pub fn load(dir: &Path) -> Library {
 
 fn save(dir: &Path, library: &Library) -> Result<(), String> {
     let body = toml::to_string_pretty(library).map_err(|e| e.to_string())?;
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let temp = path(dir).with_extension("toml.tmp");
-    fs::write(&temp, body).map_err(|e| e.to_string())?;
-    fs::rename(&temp, path(dir)).map_err(|e| e.to_string())
+    atomic_write(&path(dir), body.as_bytes())
 }
 
 /// Move a document to the front of the list, keeping the position already
 /// recorded for it.
 pub fn touch(dir: &Path, file: &str, title: &str, now: i64) -> Result<Library, String> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut library = load(dir);
     let mut entry = take(&mut library, file).unwrap_or_else(|| Entry {
         path: file.to_string(),
@@ -74,6 +81,7 @@ pub fn touch(dir: &Path, file: &str, title: &str, now: i64) -> Result<Library, S
 }
 
 pub fn remember(dir: &Path, file: &str, page: u32, offset: f64) -> Result<(), String> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut library = load(dir);
     let Some(entry) = library.files.iter_mut().find(|e| e.path == file) else {
         return Ok(());
@@ -87,6 +95,7 @@ pub fn remember(dir: &Path, file: &str, page: u32, offset: f64) -> Result<(), St
 }
 
 pub fn forget(dir: &Path, file: &str) -> Result<Library, String> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut library = load(dir);
     take(&mut library, file);
     save(dir, &library)?;

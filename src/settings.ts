@@ -13,7 +13,7 @@
 import { type Settings, type Theme, deleteTheme, isMac, saveTheme } from "./api";
 import { hydrateIcons } from "./icons";
 import * as ui from "./ui";
-import { isDarkTheme } from "./themes";
+import { isDarkTheme, parseColor, toHex } from "./themes";
 import type { FitMode } from "./viewer";
 
 export interface SettingsHost {
@@ -146,7 +146,7 @@ export function showSettingsWindow(
 
     render();
     return body;
-  }, cancelEdit);
+  }, cancelEdit, "full");
 }
 
 /* --------------------------------------------------------------- reading */
@@ -226,6 +226,7 @@ function draftFrom(from: Theme | null, current: Theme): Draft {
       background: current.background,
       accent: current.accent,
       link: current.link,
+      selection: current.selection,
       recolor: true,
       built_in: false,
     };
@@ -238,6 +239,7 @@ function draftFrom(from: Theme | null, current: Theme): Draft {
     background: from.background,
     accent: from.accent,
     link: from.link,
+    selection: from.selection,
     recolor: from.recolor,
     built_in: false,
   };
@@ -399,6 +401,14 @@ function themeEditor(
       "Links in the document take this colour, wherever the page is recoloured.",
     ),
     ui.field(
+      "Selected text",
+      ui.colorField(draft.selection ?? selectionDefault(draft), (value) => {
+        draft.selection = value;
+        edit.preview();
+      }),
+      "The colour behind text you have selected. Left alone it follows the accent.",
+    ),
+    ui.field(
       "Recolour the document",
       ui.toggle(draft.recolor, (on) => {
         draft.recolor = on;
@@ -433,6 +443,21 @@ function themeEditor(
   box.append(buttons);
   box.append(ui.text("note", "Colours apply as you pick them, so the app around you is the preview."));
   return box;
+}
+
+/** What selection looks like when a theme has not said. The same derivation
+    `applyTheme` uses, so the editor opens on the colour already in force
+    rather than on something the reader has never seen. */
+function selectionDefault(theme: Theme): string {
+  const accent = parseColor(theme.accent ?? theme.text);
+  const background = parseColor(theme.background);
+  const dark = isDarkTheme(theme);
+  const t = dark ? 0.62 : 0.72;
+  return toHex([
+    accent[0] + (background[0] - accent[0]) * t,
+    accent[1] + (background[1] - accent[1]) * t,
+    accent[2] + (background[2] - accent[2]) * t,
+  ]);
 }
 
 /* ---------------------------------------------------------------- window */

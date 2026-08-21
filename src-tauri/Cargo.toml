@@ -25,6 +25,11 @@ toml = "0.8"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 
+# Desktop only. `cfg(desktop)` is Tauri's own cfg, set by tauri-build; Cargo
+# only understands the target triple, so the platforms are named directly.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2.4.3"
+
 [profile.release]
 codegen-units = 1
 lto = true

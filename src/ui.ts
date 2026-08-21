@@ -48,12 +48,51 @@ export function showPopover(
     const target = event.target as Node;
     if (!popover.contains(target) && !anchor.contains(target)) close();
   };
+  /** Everything in the menu that can be pressed, in the order it is read. */
+  const items = (): HTMLElement[] =>
+    [...popover.querySelectorAll<HTMLElement>("button, [href], input, select")].filter(
+      (item) => !item.hasAttribute("disabled"),
+    );
+
+  const step = (by: number) => {
+    const all = items();
+    if (all.length === 0) return;
+    const at = all.indexOf(document.activeElement as HTMLElement);
+    // Off the list entirely — arriving from the button that opened the menu —
+    // means starting at whichever end the key is pointing away from.
+    const next = at < 0 ? (by > 0 ? 0 : all.length - 1) : (at + by + all.length) % all.length;
+    all[next].focus();
+  };
+
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      event.preventDefault();
-      close();
+    switch (event.key) {
+      case "Escape":
+        event.stopPropagation();
+        event.preventDefault();
+        close();
+        return;
+      case "ArrowDown":
+        step(1);
+        break;
+      case "ArrowUp":
+        step(-1);
+        break;
+      case "Home":
+        items()[0]?.focus();
+        break;
+      case "End":
+        items().at(-1)?.focus();
+        break;
+      case "Tab":
+        // A menu is a place you are in, not a stop on the way through the
+        // page: Tab moves within it and Escape is how you leave.
+        step(event.shiftKey ? -1 : 1);
+        break;
+      default:
+        return;
     }
+    event.stopPropagation();
+    event.preventDefault();
   };
 
   popover.append(build(close));
@@ -77,6 +116,11 @@ export function showPopover(
   window.addEventListener("resize", close);
   openMenu = close;
   openAnchor = anchor;
+
+  // Opened from the keyboard, the menu takes the keyboard with it. Opened by a
+  // click it does not, because moving the focus would put a ring around the
+  // first item of a menu somebody is already pointing at.
+  if (anchor.matches(":focus-visible")) items()[0]?.focus();
 }
 
 export function section(title: string): HTMLElement {
@@ -275,6 +319,7 @@ export function showWindow(
   title: string,
   build: (close: () => void) => HTMLElement,
   onClose?: () => void,
+  size: "fit" | "full" = "fit",
 ): void {
   closeMenus();
   closeWindow();
@@ -285,6 +330,7 @@ export function showWindow(
 
   const frame = document.createElement("div");
   frame.className = "window";
+  frame.dataset.size = size;
   frame.tabIndex = -1;
   frame.setAttribute("role", "dialog");
   frame.setAttribute("aria-modal", "true");
@@ -298,11 +344,38 @@ export function showWindow(
     returnFocusTo?.focus();
   };
 
+  const focusable = (): HTMLElement[] =>
+    [...frame.querySelectorAll<HTMLElement>(
+      "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+    )].filter((item) => !item.hasAttribute("disabled") && item.offsetParent !== null);
+
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== "Escape") return;
-    event.stopPropagation();
-    event.preventDefault();
-    close();
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      event.preventDefault();
+      close();
+      return;
+    }
+    // Keep Tab inside the window. It says `aria-modal`, and a window that
+    // claims to be modal and then lets the keyboard walk out behind the scrim
+    // — into a document nobody can see the focus ring on — is worse than one
+    // that never claimed it.
+    if (event.key !== "Tab") return;
+    const all = focusable();
+    if (all.length === 0) return;
+    const first = all[0];
+    const last = all[all.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (!frame.contains(active)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
   };
 
   const bar = document.createElement("header");
@@ -329,6 +402,63 @@ export function showWindow(
   document.addEventListener("keydown", onKeyDown, true);
   frame.focus();
   closeWindowFn = close;
+}
+
+/** Ask for a document's password.
+ *
+ * An encrypted PDF is not a broken one, and it used to be reported as though
+ * it were: the load rejected, the app went back to the start screen, and the
+ * notice said something had gone wrong. Nothing had. Resolves to null if the
+ * reader would rather not, which is a perfectly good answer and closes the
+ * document quietly.
+ */
+export function askForPassword(wrong: boolean): Promise<string | null> {
+  return new Promise((resolve) => {
+    let answered: string | null = null;
+
+    showWindow(
+      "This document is locked",
+      (close) => {
+        const body = document.createElement("div");
+        body.className = "window-ask";
+
+        const field = document.createElement("input");
+        field.type = "password";
+        field.autocomplete = "off";
+        field.setAttribute("aria-label", "Password");
+
+        const submit = () => {
+          answered = field.value;
+          close();
+        };
+
+        field.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          submit();
+        });
+
+        body.append(
+          text(
+            "lede",
+            wrong
+              ? "That password was not right. Try again."
+              : "It needs a password before it can be opened.",
+          ),
+          field,
+          actions(
+            button("Not now", close),
+            button("Open", submit, "primary"),
+          ),
+        );
+
+        // The field is the only thing anyone came here to use.
+        queueMicrotask(() => field.focus());
+        return body;
+      },
+      () => resolve(answered),
+    );
+  });
 }
 
 /** A labelled line in a window: what the setting is on the left, the control

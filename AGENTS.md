@@ -55,6 +55,14 @@ src-tauri/          Rust: settings, themes, reading history, the window
   src/library.rs    library.toml — where you were in each document
   themes/*.toml     the five packaged themes, embedded with include_str!
 
+tests/              node --test; `npm test` starts a dev server for them
+  search.test.mjs   text folding and where a match lands
+  recolor.test.mjs  the two recolouring paths, in WebKit
+  reader.test.mjs   the whole interface, through the harness
+  password.test.mjs an encrypted document: asking, refusing, and giving up
+  helpers.mjs       compiling a .ts module to reach what it does not export
+  fixtures/         PDFs are generated, not committed
+
 src/                TypeScript: the interface
   main.ts           the App object: state, menus, keyboard, wiring
   viewer.ts         layout, rendering, scrolling, links   ← the heart of it
@@ -70,51 +78,99 @@ src/                TypeScript: the interface
 
 ## What lives where
 
-**Rust never renders anything.** It hands over bytes (`read_document` returns a
-raw response rather than base64 through the JSON bridge), remembers things, and
+**Rust never renders anything.** It hands over bytes, remembers things, and
 asks the system to open a link or show a file. It also decides when the window
 appears: the frontend calls `ready` once it can paint, so a dark theme never
 flashes white on the way in.
+
+**A document is read in pieces, never whole.** `open_for_reading` opens the
+file and reports its length without reading any of it; `read_range` serves
+slices of whichever document is currently open, raw rather than base64'd
+through the JSON bridge. `FileRange` in `viewer.ts` is a pdf.js
+`PDFDataRangeTransport` over those two, with `disableAutoFetch` and
+`disableStream` so nothing is fetched speculatively. Handing pdf.js the whole
+file instead meant three copies of every document in memory — the Rust buffer,
+the JS array, and the worker's own — and reading all of a scanned volume before
+showing any of it.
+
+**Every command that touches the disk is `async`, and that is the only reason
+for the keyword.** None of them await anything. A synchronous Tauri command
+runs on the thread that received the IPC message, which is the thread drawing
+the window: `remember_position` fires on every pause in a scroll, so a
+whole-file rewrite of `library.toml` was landing in the middle of the one
+gesture this app exists to make smooth. The price of moving them off is that
+two can now run at once, which is what the locks in `settings.rs` and
+`library.rs` are for, and why `atomic_write` gives every write its own temp
+file.
 
 **`api.ts` is the only door.** Nothing else imports `@tauri-apps/api`. It also
 carries a browser fallback — settings in `localStorage`, a file input instead of
 the native picker — so `npm run dev` can be opened in an ordinary browser while
 working on the interface.
 
-**Settings are written one key at a time.** `set_setting` reads the file,
-changes one entry, writes it back, and leaves unknown keys alone. The defaults
-table in `settings.rs` doubles as a whitelist. `App.set` keeps the in-memory
-copy in step; `App.setSoon` debounces the ones that move continuously, like
-zoom during a pinch.
+**Settings are written a group at a time.** Each write still changes only the
+entries it names and leaves unknown keys alone; the defaults table in
+`settings.rs` doubles as a whitelist. What changed is the batching: `App.set`
+records the change in memory and queues it, and `flushSettings` sends whatever
+has collected on the next turn of the event loop. Settings almost never move
+alone — a theme comes with the light or dark slot it fills, a zoom with its fit
+mode — and one call per key meant two whole-file rewrites per change, each
+re-reading what the other had just done. `App.setSoon` queues the same way but
+waits 400ms, for values that move continuously like zoom during a pinch.
+Anything still queued is flushed on the way out, before the window goes.
 
 **Themes are files.** Five built-ins are written into the user's themes
 directory on every run so they can be read and copied, and so a change to a
 shipped theme reaches a machine that already has the old one; the embedded
 copies are authoritative, and a built-in file edited in place is overwritten.
 Editing a built-in through the app saves a copy under an id of its own, which
-is never touched. A theme names colours and a `recolor` flag, and nothing
-else. `applyTheme` derives every shade the chrome uses — surface, line, three
-grades of muted text, the positive green — from those colours, which is why a
-five-line file is enough.
+is never touched, and every shipped file carries a banner saying so — silently
+reverting someone's edit is a trap however defensible the policy is. A theme
+names colours and a `recolor` flag, and nothing else; `selection` is optional
+and derived from the accent when it is absent. `applyTheme` derives every shade
+the chrome uses — surface, line, three grades of muted text, the positive green
+— from those colours, which is why a five-line file is enough.
 
 ## The viewer
 
-`viewer.ts` earns its size. Four things are worth knowing before changing it.
+`viewer.ts` earns its size. Six things are worth knowing before changing it.
 
-*Layout is computed once, for every page, in advance.* Page dimensions are read
-up front (cheap — a page proxy is not a render), so the scroll container gets
-its true height on the first frame and the scrollbar never lies. `boxes[]` holds
-the position and scale of every page.
+*The first page is measured; the rest are estimated and then corrected.* Page
+one's size stands in for every page, the layout is built from it, and the app
+paints. `measureRest` then walks the document in batches and lays out again
+whenever a real size differs. Most documents are one size throughout, so the
+correction is usually a no-op — and measuring all of them first meant a blank
+window until the last of two thousand page proxies came back. `boxes[]` holds
+the position and scale of every page, in order, which is what lets
+`firstBoxEndingAfter` and `lastBoxStartingAbove` binary-search it instead of
+scanning the whole book on every scroll frame.
 
 *Only the pages near the viewport exist in the DOM.* `mount()` keeps a window of
 slots around the viewport (`OVERSCAN`), discards the rest, and queues the rest
 for rendering nearest-to-the-middle first. A nine hundred page book costs about
 what a two page letter costs.
 
-*A rendered page is identified by `keyFor()` — its scale and its theme.* If the
-key still matches, the canvas is reused; change scale, text colour, background,
-link colour, or the picture setting, and the page repaints. This is the whole
-invalidation story.
+*Page proxies are an LRU, and dropping one means `cleanup()`.* pdf.js holds a
+page's parsed operator list — every decoded image on it — from the first render
+until `cleanup()` is called. `pageCache` keeps `PAGE_CACHE` of them, never one
+that is mounted, and cleans up what it evicts. Without that, a long illustrated
+book grew for as long as it was read and gave none of it back. `discard()` does
+the same for the canvas, by resizing it to nothing: dropping the reference
+makes it collectable, not collected.
+
+*A rendered page is identified by `keyFor()` — its scale, the screen's density,
+and its theme.* If the key still matches, the canvas is reused; change any of
+them and the page repaints. The density is in there because it is half of how
+many pixels the canvas gets, and `watchDensity` re-arms a `matchMedia` query so
+a window dragged between screens of different densities actually hears about
+it. This is the whole invalidation story.
+
+*The text layer is built once per mounted page and thereafter only rescaled.*
+pdf.js positions its spans in percentages and sizes them from
+`--total-scale-factor`, which `place()` sets on every layout, so `renderText`
+calls `TextLayer.update()` rather than rebuilding. Rebuilding meant re-streaming
+the page's text out of the worker on every zoom step — and throwing away
+whatever the reader had selected.
 
 *Recolouring is baked into the bitmap, not applied by CSS.* `recolor()` in
 `themes.ts` flattens the canvas to luminance with composite operations and
@@ -123,7 +179,10 @@ nothing. Two things are painted back on top of that result: pictures, if
 "Recolour pictures too" is off (pdf.js reports where images landed via
 `recordImages`), and links, which are redrawn from the untouched copy and
 recoloured towards the link colour. Both need a pristine copy of the canvas,
-taken before recolouring.
+taken before recolouring, and both put it back under a *single* clip covering
+every rectangle at once — one clip and one `drawImage` per page, not one per
+picture, which on a page of typeset mathematics is the difference between a
+frame and a stall.
 
 ## Things that will bite
 
@@ -137,6 +196,47 @@ lives in image masks. `asset()` in `viewer.ts` exists for this.
 **Do not tint the document with `mix-blend-mode`.** WebKit drops the blend
 against a composited canvas, and a dropped blend renders as a solid band across
 the line. Anything that has to change the colour of ink goes onto the canvas.
+
+**Canvas blend modes are checked before they are trusted.** `recolor()` is
+built on `saturation`, which is non-separable and not implemented on a canvas
+by every engine — WebKitGTK on Linux is the one we have least visibility into,
+and a dropped blend mode does not throw, it silently does nothing and the page
+comes out as printed under a theme meant to recolour it. `canBlend()` probes
+once (an unsupported value is refused and the property keeps what it had) and
+`recolorByPixel` is the fallback. The two agree to within one level out of 255;
+`recolor.test.mjs` is what says so.
+
+**`putImageData` ignores the clipping path.** It is the one drawing operation
+that does. That is why `recolor()` takes an optional list of rectangles as well
+as being called inside a clip: the fast path is bounded by the clip, the pixel
+fallback has to be told, and `tintLinks` passes both. Get this wrong and
+colouring the links repaints the entire page.
+
+**A window fits its content unless it asks not to.** `showWindow` sizes to
+what is in it; Settings passes `"full"` for the fixed 860×600 frame it needs
+for its nav column. The default used to be the fixed frame, which gave a
+one-field password prompt a half-empty window five hundred pixels tall.
+
+**One instance, on every platform.** `RunEvent::Opened` is Apple Events and
+fires on macOS alone; everywhere else the system answers "open this PDF" by
+launching the app again with the path in `argv`. `tauri-plugin-single-instance`
+routes that into `hand_over` — without it, three double-clicked documents meant
+three processes writing over each other's `settings.toml`, which no lock inside
+one of them can help with.
+
+**Declining a password is not an empty password.** pdf.js reads any string
+handed to `onPassword` as another attempt, so answering `""` when the reader
+presses "Not now" got the question asked straight back, with no way out of it
+at all. Giving up means passing an `Error`, which rejects the load. The
+rejection travels through the worker and comes out as something else entirely,
+so `load` remembers the decline itself and throws `Cancelled` — which `open`
+recognises and says nothing about, because there is nothing to report.
+
+**Document links are not anchors.** They carry `role="link"` and no `href`. An
+anchor that carries the address navigates on a middle click, which never
+reaches the `click` handler — so the webview left the app, taking the open
+document with it. Both `click` and `auxclick` go through `onExternalLink`,
+which is the only thing allowed to decide what opening a link means.
 
 **The top of the window is the app's, not the system's.** `titleBarStyle:
 Overlay` runs the document up under the title bar, so on macOS there is no
@@ -173,6 +273,13 @@ its anchor for exactly that.
 
 ## Testing the interface without taking the screen
 
+**`npm test` is the first thing to run and the first thing to add to.** It
+starts a dev server if one is not already up, generates the four-hundred-page
+fixture if it is not there, and runs everything in `tests/`. Two of the three
+files compile a module in memory to reach what it does not export — see
+`tests/helpers.mjs` — which is how the text folding and both recolouring paths
+get tested without widening a module's public surface to suit its tests.
+
 **Drive the frontend headlessly. Do not synthesise input into the real app
 unless the change is genuinely native.** `scripts/ui-harness.mjs` opens the
 interface in Playwright's WebKit and gives you keys, wheel gestures, clicks and
@@ -192,10 +299,18 @@ the things this app leans on — blend modes on a composited canvas, pinch zoom,
 text layout. `{ engine: "chromium" }` is there for comparing the two.
 
 Settings are seeded through the `localStorage` fallback in `api.ts`, so the
-whole browser path is exercised: no Rust, no window, no traffic lights.
+whole browser path is exercised: no Rust, no window, no traffic lights. Reading
+a document goes through the same range-based path as the real app — the
+fallback slices a `File` where Rust seeks a handle — so the transport is
+exercised here too.
+
 Anything that is really about the *window* — dragging it, full screen, the
 title-bar buttons, the peek handle clearing the system bars — has to be checked
-in the real app, and there is no way to do that quietly.
+in the real app, and there is no way to do that quietly. **Nothing here has
+ever run on WebKitGTK**; CI builds on Linux, which catches a build break but
+not a rendering one. The recolouring is the part most likely to differ, which
+is why it has a fallback and a test rather than a note saying it should be
+fine.
 
 **The real app can only be driven from the foreground.** Synthetic keys and
 clicks go to whichever process is frontmost, so testing takes the machine away
@@ -211,6 +326,34 @@ full screen cannot be captured at all.
 So: say plainly when you are about to drive the real app, and say when you have
 stopped.
 
+## The renderer is the replaceable part
+
+pdf.js is the largest thing in the app by some distance: 1.2MB of worker, plus
+cmaps, standard fonts and wasm decoders, against a Rust binary that is a
+rounding error. It is also where the remaining costs are — a canvas per page in
+JavaScript, recolouring done with composite operations because that is what a
+canvas offers, and no encryption support beyond a password prompt.
+
+The alternative worth costing, if the memory or the speed ever stops being good
+enough, is **`pdfium-render`**: rasterise pages in Rust and have the frontend
+ask for a bitmap at a scale, rather than driving pdf.js. That would take the
+page cache, the operator lists, the range transport and the loading-task
+lifecycle out of the frontend entirely; recolouring could run over the pixel
+buffer in Rust, with SIMD and without the pristine copy or the blend-mode
+gymnastics that WebKitGTK puts at risk; and encrypted documents, forms and
+printing come with it. The costs are real: a prebuilt pdfium per platform
+(4–8MB each, so the payload is roughly a wash), a per-target build matrix, and
+a native crash surface where today a bad PDF merely rejects a promise.
+`mupdf-rs` is faster and smaller but AGPL, which is a licensing decision rather
+than a technical one.
+
+**This is a change to the renderer, not to the framework.** Tauri is the right
+shell for a UI like this one, and nothing above suggests otherwise. What makes
+the renderer swappable is that `viewer.ts` is the only file that imports pdf.js
+for rendering (`search.ts` and `sidebar.ts` use it only through a
+`PDFDocumentProxy` they are handed) and `api.ts` is the only door into Rust.
+Keep both of those true and this stays a decision that can be made later.
+
 ## Running it
 
 ```
@@ -218,8 +361,16 @@ npm run tauri dev              # the app, with vite behind it
 npm run tauri dev -- -- FILE   # …opened on a document
 npm run dev                    # the interface alone, in a browser
 npm run check                  # tsc --noEmit
+npm test                       # node --test, with a dev server started for it
 npm run tauri build            # .app and .dmg
 ```
+
+`.github/workflows/ci.yml` runs the types, the tests and a build on every push,
+and bundles the app on all three platforms — which is the only way the engines
+this is not developed on get exercised at all. Signing is the one thing it
+cannot do without secrets; the workflow names the variables the Tauri bundler
+reads, and an unsigned macOS build is quarantined anywhere but the machine that
+made it.
 
 `scripts/sync-pdfjs.mjs` copies pdf.js's cmaps, standard fonts, ICC profiles and
 wasm decoders into `public/pdfjs` before every dev run and build. Nothing is

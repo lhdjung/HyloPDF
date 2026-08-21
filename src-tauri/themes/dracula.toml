@@ -9,3 +9,5 @@ background = "#282a36"
 accent = "#ff79c6"
 # Cyan for links, as in the palette proper.
 link = "#8be9fd"
+# Dracula's own "current line" grey, which is what it selects with.
+selection = "#44475a"

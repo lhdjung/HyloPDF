@@ -7,3 +7,6 @@ accent = "#c77dff"
 # Links lean violet where the body text leans pink: a different hue and a
 # darker one, so they are still links to someone who reads colour differently.
 link = "#9d7bff"
+# The accent is loud enough to read as a highlight on its own, so selection
+# gets a quieter violet of its own rather than a wash of it.
+selection = "#4a2f6b"

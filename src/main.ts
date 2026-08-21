@@ -11,6 +11,7 @@ import {
   type Settings,
   type Theme,
   bootstrap,
+  closeReading,
   copyText,
   deleteTheme,
   fileManagerName,
@@ -27,14 +28,13 @@ import {
   openDocument,
   openExternal,
   pickPdf,
-  readDocument,
   registerBrowserFile,
   rememberPosition,
   revealDocument,
   saveWindowState,
   focusWindow,
   setFullscreen,
-  setSetting,
+  setSettings,
   setTitlebarButtons,
   setWindowTitle,
   signalReady,
@@ -47,7 +47,7 @@ import { showSettingsWindow } from "./settings";
 import { Sidebar } from "./sidebar";
 import { applyTheme, isDarkTheme } from "./themes";
 import * as ui from "./ui";
-import { type FitMode, Viewer } from "./viewer";
+import { Cancelled, type FitMode, Viewer } from "./viewer";
 
 if (import.meta.env.DEV && hasBackend) {
   // The webview has no terminal of its own; send what it says to the one
@@ -131,7 +131,10 @@ class App {
 
   private path: string | null = null;
   private saveTimer = 0;
-  private saveTimers = new Map<string, number>();
+  /** Settings changed but not yet written, and the timer that will write them.
+      Keyed so the last value for a key wins. */
+  private pendingWrites = new Map<keyof Settings, Settings[keyof Settings]>();
+  private writeTimer = 0;
   private pillTimer = 0;
   private geometryTimer = 0;
   private fullscreenTimer = 0;
@@ -144,6 +147,7 @@ class App {
       onScroll: () => this.onScroll(),
       onError: (message) => ui.notice(message),
       onExternalLink: (url) => void this.openLink(url),
+      onPassword: (wrong) => ui.askForPassword(wrong),
     });
     this.sidebar = new Sidebar(
       el.outlinePanel,
@@ -213,24 +217,39 @@ class App {
     return this.themes.find((theme) => theme.id === id) ?? this.themes[0];
   }
 
-  /** Persist exactly one setting, and keep the in-memory copy in step. */
+  /** Change a setting: the interface follows at once, the file catches up.
+   *
+   * Writes are collected and sent together on the next turn of the event loop.
+   * Settings almost never move alone — a theme comes with the light or dark
+   * slot it fills, a zoom with its fit mode — and each write is a whole-file
+   * rewrite on the other side, so sending them one at a time meant two of
+   * those for every change, each having to re-read what the other had just
+   * done. Grouped, the pair is one write and can never be seen half-applied. */
   set<K extends keyof Settings>(key: K, value: Settings[K]): void {
     this.settings[key] = value;
-    void setSetting(key, value).catch((error) => ui.notice(String(error)));
+    this.pendingWrites.set(key, value);
+    if (this.writeTimer) return;
+    this.writeTimer = window.setTimeout(() => void this.flushSettings(), 0);
   }
 
   /** Like `set`, but for a value that moves many times a second: the interface
       follows every change, the file only the one it settles on. */
   setSoon<K extends keyof Settings>(key: K, value: Settings[K]): void {
     this.settings[key] = value;
-    window.clearTimeout(this.saveTimers.get(key));
-    this.saveTimers.set(
-      key,
-      window.setTimeout(() => {
-        this.saveTimers.delete(key);
-        void setSetting(key, this.settings[key]).catch((error) => ui.notice(String(error)));
-      }, 400),
-    );
+    this.pendingWrites.set(key, value);
+    window.clearTimeout(this.writeTimer);
+    this.writeTimer = window.setTimeout(() => void this.flushSettings(), 400);
+  }
+
+  /** Send whatever is waiting. Awaited on the way out, so nothing typed or
+      chosen in the last moments of a session is lost with it. */
+  async flushSettings(): Promise<void> {
+    window.clearTimeout(this.writeTimer);
+    this.writeTimer = 0;
+    if (this.pendingWrites.size === 0) return;
+    const entries = [...this.pendingWrites.entries()];
+    this.pendingWrites.clear();
+    await setSettings(entries).catch((error) => ui.notice(messageOf(error)));
   }
 
   /* ------------------------------------------------------------ document */
@@ -241,12 +260,13 @@ class App {
     // reaches it, so the place in the old one is written down first — and the
     // pending write from scrolling is dropped, or it would land after the
     // handover and record the new document's position against the old path.
-    this.savePosition();
+    void this.savePosition();
     window.clearTimeout(this.saveTimer);
     try {
       const opened = await openDocument(path);
-      const bytes = await readDocument(path);
-      const doc = await this.viewer.load(bytes);
+      // The viewer reads the document itself, a piece at a time — nothing here
+      // ever holds the whole file.
+      const doc = await this.viewer.load(path);
 
       this.path = path;
       el.shell.dataset.empty = "false";
@@ -265,6 +285,12 @@ class App {
       this.renderRecents();
       el.viewer.focus();
     } catch (error) {
+      // Choosing not to give a password is not a failure and has nothing to
+      // say for itself. The start screen is still the right place to end up.
+      if (error instanceof Cancelled) {
+        this.clearDocument();
+        return;
+      }
       console.error("could not open", path, error);
       // The document that was open is already gone — the viewer let go of it
       // before this one turned out to be unreadable — so the start screen is
@@ -282,7 +308,7 @@ class App {
   closeDocument(): void {
     if (!this.path) return;
     ui.closeMenus();
-    this.savePosition();
+    void this.savePosition();
     this.clearDocument();
   }
 
@@ -292,8 +318,12 @@ class App {
     this.path = null;
 
     this.viewer.close();
+    // The handle on the file goes here rather than in `viewer.close()`: this
+    // is the one path that means "no document open", where opening another one
+    // does not.
+    void closeReading();
     this.closeFind();
-    this.search.reset();
+    this.search.forget();
     void this.sidebar.setDocument(null, this.theme);
 
     el.shell.dataset.empty = "true";
@@ -326,15 +356,17 @@ class App {
     this.saveTimer = window.setTimeout(() => this.savePosition(), 700);
   }
 
-  private savePosition(): void {
-    if (!this.path || !this.settings.remember_position) return;
+  /** Write down where the reader is. Returns the write, so the one place that
+      has to wait for it — quitting — can. */
+  private savePosition(): Promise<void> {
+    if (!this.path || !this.settings.remember_position) return Promise.resolve();
     const at = this.viewer.position();
-    void rememberPosition(this.path, at.page, at.offset).catch(() => {});
     const entry = this.library.find((item) => item.path === this.path);
     if (entry) {
       entry.page = at.page;
       entry.offset = at.offset;
     }
+    return rememberPosition(this.path, at.page, at.offset).catch(() => {});
   }
 
   private flashPill(): void {
@@ -572,8 +604,14 @@ class App {
 
   /** Zoom by a proportion of where we are, which is what a pinch asks for.
       The ladder below is for buttons and keys, where a definite step is what
-      is wanted. */
-  zoomBy(factor: number): void {
+      is wanted.
+
+      `focus` is where the gesture is happening, and the page stays still under
+      it. Without it the zoom holds the top edge of the window instead, so
+      pinching on a figure halfway down pushed the figure away from the fingers
+      — which is the opposite of what every other document viewer does, and of
+      what the hand expects. */
+  zoomBy(factor: number, focus?: { x: number; y: number }): void {
     const min = ZOOM_LADDER[0] / 100;
     const max = ZOOM_LADDER[ZOOM_LADDER.length - 1] / 100;
     const current = this.viewer.isEmpty ? this.settings.zoom : this.viewer.zoomPercent() / 100;
@@ -581,10 +619,10 @@ class App {
     if (Math.abs(next - current) < 0.0005) return;
 
     // A pinch produces a new zoom every frame; the file hears about the one it
-    // comes to rest at.
+    // comes to rest at, and hears about both halves of it at once.
     this.setSoon("fit_mode", "actual");
     this.setSoon("zoom", next);
-    this.viewer.setFit("actual", next);
+    this.viewer.setFit("actual", next, focus);
     this.updateZoomLabel();
   }
 
@@ -628,7 +666,10 @@ class App {
     window.clearTimeout(this.searchTimer);
     el.findBar.hidden = true;
     el.find.setAttribute("aria-pressed", "false");
-    this.search.clear();
+    // The index goes with the bar. It is what makes stepping through matches
+    // instant and it costs a long book tens of megabytes for as long as it is
+    // open, which is a fair trade only while the bar is actually up.
+    this.search.forget();
     el.viewer.focus();
   }
 
@@ -1270,17 +1311,23 @@ class App {
     // and the proportions collected within a frame are applied together.
     let pendingZoom = 1;
     let zoomFrame = 0;
+    // Where the gesture is. The last one seen within a frame wins, which is
+    // the one the fingers are on now.
+    let zoomAt: { x: number; y: number } | undefined;
     // Set by the pinch handlers below; read by the wheel handler above them.
     let pinching = false;
     let lastScale = 1;
-    const queueZoom = (factor: number) => {
+    const queueZoom = (factor: number, at?: { x: number; y: number }) => {
       pendingZoom *= factor;
+      if (at) zoomAt = at;
       if (zoomFrame) return;
       zoomFrame = requestAnimationFrame(() => {
         zoomFrame = 0;
         const collected = pendingZoom;
+        const where = zoomAt;
         pendingZoom = 1;
-        this.zoomBy(collected);
+        zoomAt = undefined;
+        this.zoomBy(collected, where);
       });
     };
 
@@ -1293,7 +1340,7 @@ class App {
         if (pinching) return;
         const perLine = event.deltaMode === 1 ? 16 : 1;
         const delta = Math.max(-60, Math.min(60, event.deltaY * perLine));
-        queueZoom(Math.exp(-delta / 320));
+        queueZoom(Math.exp(-delta / 320), { x: event.clientX, y: event.clientY });
       },
       { passive: false },
     );
@@ -1313,6 +1360,14 @@ class App {
      * counted twice. Nothing outside WebKit fires these at all, so the wheel
      * remains the path for a mouse, and for Chromium. */
     const scaleOf = (event: Event) => (event as Event & { scale?: number }).scale ?? 1;
+    /** Where a pinch is on the screen. WebKit puts the middle of the two
+        fingers on the gesture event, in client coordinates. */
+    const centreOf = (event: Event) => {
+      const { clientX, clientY } = event as Event & { clientX?: number; clientY?: number };
+      return clientX === undefined || clientY === undefined
+        ? undefined
+        : { x: clientX, y: clientY };
+    };
 
     el.viewer.addEventListener(
       "gesturestart",
@@ -1329,7 +1384,7 @@ class App {
         event.preventDefault();
         const scale = scaleOf(event);
         if (!pinching || scale <= 0 || lastScale <= 0) return;
-        queueZoom(scale / lastScale);
+        queueZoom(scale / lastScale, centreOf(event));
         lastScale = scale;
       },
       { passive: false },
@@ -1378,8 +1433,13 @@ class App {
       this.fullscreenTimer = window.setTimeout(() => void this.syncFullscreen(), 150);
     });
 
+    // The last thing that happens before the window goes. Everything here is
+    // awaited: a write still in flight when the window is destroyed is a write
+    // that never happened, and "come back to where I stopped" is the one
+    // promise this app makes about what survives a quit.
     void onCloseRequested(async () => {
-      this.savePosition();
+      await this.savePosition();
+      await this.flushSettings();
       await saveWindowState().catch(() => {});
     });
 

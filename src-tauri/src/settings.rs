@@ -8,12 +8,27 @@
 //! So the file is a map of scalars, and a write is a read-modify-write of a
 //! single key. Keys the running version does not know about are carried
 //! through untouched instead of being dropped.
+//!
+//! A read-modify-write is only atomic if nothing else is doing one at the same
+//! time. These commands run off the main thread, and the interface writes
+//! settings in pairs — a theme and the light or dark theme it stands for, a
+//! zoom and the fit mode that goes with it — so two writes landing together is
+//! the normal case rather than the unlucky one. `LOCK` serialises them, and
+//! the temp file each write goes through is named for the writer, so two of
+//! them can never be the same file.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde_json::{json, Value};
+
+use crate::atomic_write;
+
+/// Held across read-modify-write, so one write never reads a file another is
+/// half way through replacing.
+static LOCK: Mutex<()> = Mutex::new(());
 
 pub type Settings = BTreeMap<String, Value>;
 
@@ -33,7 +48,11 @@ pub fn defaults() -> Settings {
     s.insert("fit_mode".into(), json!("width"));
     s.insert("zoom".into(), json!(1.0));
     s.insert("page_gap".into(), json!(16));
-    s.insert("recolor_images".into(), json!(true));
+    // Off by default: text recolours, pictures stay as they were printed.
+    // Flattening a photograph — or a chart whose series differ only in hue —
+    // to a two-tone ramp is the one thing recolouring can do that makes a page
+    // harder to read rather than easier.
+    s.insert("recolor_images".into(), json!(false));
     s.insert("remember_position".into(), json!(true));
     // Chrome
     s.insert("show_toolbar".into(), json!(true));
@@ -106,12 +125,7 @@ fn write(dir: &Path, settings: &Settings) -> Result<(), String> {
         toml::to_string_pretty(&table).map_err(|e| e.to_string())?
     );
 
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    // Write beside the target and rename, so a crash mid-write cannot leave a
-    // truncated settings file behind.
-    let temp = path(dir).with_extension("toml.tmp");
-    fs::write(&temp, body).map_err(|e| e.to_string())?;
-    fs::rename(&temp, path(dir)).map_err(|e| e.to_string())
+    atomic_write(&path(dir), body.as_bytes())
 }
 
 /// Whether a value is the kind of thing a setting holds, judged against that
@@ -132,36 +146,144 @@ fn same_shape(default: &Value, value: &Value) -> bool {
     }
 }
 
-/// Change exactly one setting. Everything else in the file is read back and
-/// written out as it was, including keys this version does not know.
-pub fn set(dir: &Path, key: &str, value: Value) -> Result<Settings, String> {
-    let known = defaults();
-    let Some(default) = known.get(key) else {
-        return Err(format!("Unknown setting: {key}"));
-    };
-    if !same_shape(default, &value) {
-        return Err(format!("Setting {key} does not take that kind of value."));
-    }
-
-    let mut settings = load(dir);
-    settings.insert(key.to_string(), value);
-    write(dir, &settings)?;
-    Ok(settings)
-}
-
-/// Several settings at once, for the one case where that is honest: the window
-/// geometry saved on quit, which is a single observation of a single window.
+/// Several settings at once. Two cases want this: the window geometry saved on
+/// quit, which is one observation of one window, and any group the interface
+/// changes together — a theme and the light or dark slot it fills, a zoom and
+/// the fit mode that goes with it. Writing those as one file write is both
+/// cheaper and the only way they can never be seen half-applied.
+///
+/// Unknown keys and wrong-shaped values are reported rather than silently
+/// dropped, so a typo in a command still surfaces; the rest are still written.
 pub fn set_many(dir: &Path, entries: Vec<(String, Value)>) -> Result<Settings, String> {
     let known = defaults();
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut settings = load(dir);
+    let mut refused: Vec<String> = Vec::new();
     for (key, value) in entries {
-        let Some(default) = known.get(&key) else {
-            continue;
-        };
-        if same_shape(default, &value) {
-            settings.insert(key, value);
+        match known.get(&key) {
+            Some(default) if same_shape(default, &value) => {
+                settings.insert(key, value);
+            }
+            Some(_) => refused.push(format!("{key} does not take that kind of value")),
+            None => refused.push(format!("unknown setting {key}")),
         }
     }
     write(dir, &settings)?;
-    Ok(settings)
+    if refused.is_empty() {
+        Ok(settings)
+    } else {
+        Err(refused.join("; "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wire shape `set_settings` receives.
+    ///
+    /// The frontend sends `entries` as an array of two-element arrays, and
+    /// this is the one thing about that command a type checker on either side
+    /// cannot see: TypeScript says it sent tuples, serde says it wants tuples,
+    /// and nothing checks that those two agree until a reader changes a
+    /// setting and it silently does not stick.
+    #[test]
+    fn entries_deserialize_from_pairs() {
+        let wire = r#"[["theme", "dracula"], ["zoom", 1.5], ["show_toolbar", false]]"#;
+        let entries: Vec<(String, Value)> = serde_json::from_str(wire).expect("entries");
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0], ("theme".to_string(), json!("dracula")));
+        assert_eq!(entries[1], ("zoom".to_string(), json!(1.5)));
+        assert_eq!(entries[2], ("show_toolbar".to_string(), json!(false)));
+    }
+
+    #[test]
+    fn a_group_is_written_together_and_read_back() {
+        let dir = std::env::temp_dir().join(format!("hylopdf-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let after = set_many(
+            &dir,
+            vec![
+                ("theme".into(), json!("dracula")),
+                ("dark_theme".into(), json!("dracula")),
+            ],
+        )
+        .expect("write");
+        assert_eq!(after.get("theme"), Some(&json!("dracula")));
+
+        // Both halves survive a reload, which is the point of writing them as
+        // one file write rather than two.
+        let reloaded = load(&dir);
+        assert_eq!(reloaded.get("theme"), Some(&json!("dracula")));
+        assert_eq!(reloaded.get("dark_theme"), Some(&json!("dracula")));
+        // Untouched settings keep their defaults.
+        assert_eq!(reloaded.get("scroll_mode"), Some(&json!("continuous")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bad_key_is_reported_and_the_rest_still_land() {
+        let dir = std::env::temp_dir().join(format!("hylopdf-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let refused = set_many(
+            &dir,
+            vec![
+                ("page_gap".into(), json!(20)),
+                ("nonsense".into(), json!(1)),
+                ("show_toolbar".into(), json!("not a boolean")),
+            ],
+        );
+        let message = refused.expect_err("should report what it refused");
+        assert!(message.contains("nonsense"), "{message}");
+        assert!(message.contains("show_toolbar"), "{message}");
+
+        let reloaded = load(&dir);
+        assert_eq!(reloaded.get("page_gap"), Some(&json!(20)));
+        assert_eq!(reloaded.get("show_toolbar"), Some(&json!(true)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Concurrent writers must not lose each other's work. This is the failure
+    /// the lock exists for, and it only became reachable when the commands
+    /// stopped running on the main thread.
+    #[test]
+    fn concurrent_writes_do_not_lose_settings() {
+        let dir = std::env::temp_dir().join(format!("hylopdf-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let keys = ["page_gap", "sidebar_width", "window_width", "window_height"];
+        std::thread::scope(|scope| {
+            for (n, key) in keys.iter().enumerate() {
+                let dir = dir.clone();
+                scope.spawn(move || {
+                    for _ in 0..20 {
+                        set_many(&dir, vec![((*key).into(), json!(100 + n as i64))]).unwrap();
+                    }
+                });
+            }
+        });
+
+        let reloaded = load(&dir);
+        for (n, key) in keys.iter().enumerate() {
+            assert_eq!(
+                reloaded.get(*key),
+                Some(&json!(100 + n as i64)),
+                "{key} was lost by another writer"
+            );
+        }
+        // And nothing was left staged.
+        let staged: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(staged.is_empty(), "temp files left behind: {staged:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

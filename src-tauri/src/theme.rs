@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::atomic_write;
+
 /// The themes that ship with HyloPDF. They are written into the user's theme
 /// directory on first run so that they are visible, readable and copyable, but
 /// the embedded copies stay authoritative if a file is missing or unreadable.
@@ -34,6 +36,11 @@ pub struct Theme {
     /// Absent means "use the accent".
     #[serde(default)]
     pub link: Option<String>,
+    /// The colour behind selected text. Absent means "derive it from the
+    /// accent", which is what every theme did before this was settable and is
+    /// still the right answer for most of them.
+    #[serde(default)]
+    pub selection: Option<String>,
     /// When false the document keeps its own colors and only the app chrome is
     /// themed. Used by Hylo Light.
     #[serde(default = "yes")]
@@ -57,6 +64,8 @@ struct ThemeFile<'a> {
     accent: &'a Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     link: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selection: &'a Option<String>,
     recolor: bool,
 }
 
@@ -91,23 +100,48 @@ fn is_built_in(id: &str) -> bool {
     BUILT_IN.iter().any(|(name, _)| *name == id)
 }
 
+/// The banner every shipped theme file carries.
+///
+/// These files are rewritten on every run, so an edit made in place disappears
+/// at the next launch. That is deliberate — the shipped set is the app's to
+/// define, and a built-in that could drift would make "Hylo Dark" mean
+/// something different on every machine. But a file that silently undoes your
+/// work and says nothing about it is a trap, and the whole point of keeping
+/// themes as plain text is that someone can open one and get somewhere. So the
+/// file says what it is and where to put a copy.
+const BANNER: &str = "\
+# This file ships with HyloPDF and is rewritten every time the app starts.
+# Edit it and your changes will be gone at the next launch.
+#
+# To make it yours: copy it to a new name in this folder — any name but the
+# five reserved ones — change the `name` inside, and it will appear in the
+# theme list alongside these. The app does the same thing when you press
+# \"Make a copy of this theme\".
+
+";
+
+fn shipped(source: &str) -> String {
+    format!("{BANNER}{source}")
+}
+
 /// Write the shipped themes out on every run, so that a built-in whose colours
 /// change in the app changes on disk too, rather than the first install of it
 /// sitting there forever. Editing a built-in through the app already saves a
 /// copy under an id of its own, so nothing a reader made is at stake; a
-/// built-in file hand-edited in place is overwritten, deliberately — the
-/// shipped set is the app's to define.
+/// built-in file hand-edited in place is overwritten, deliberately — and the
+/// banner on top of it says so, so nobody finds that out the hard way.
 pub fn install_built_ins(dir: &Path) {
     if fs::create_dir_all(dir).is_err() {
         return;
     }
     for (id, source) in BUILT_IN {
         let path = dir.join(format!("{id}.toml"));
+        let wanted = shipped(source);
         // Only when it differs: no reason to touch a file that already says
         // exactly this.
         let on_disk = fs::read_to_string(&path).unwrap_or_default();
-        if on_disk != *source {
-            let _ = fs::write(path, source);
+        if on_disk != wanted {
+            let _ = fs::write(path, wanted);
         }
     }
 }
@@ -147,7 +181,7 @@ pub fn load_all(dir: &Path) -> Vec<Theme> {
             }
         }
     }
-    custom.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    custom.sort_by_key(|theme| theme.name.to_lowercase());
     themes.append(&mut custom);
     themes
 }
@@ -173,12 +207,12 @@ pub fn save(dir: &Path, theme: &Theme) -> Result<Theme, String> {
         background: &theme.background,
         accent: &theme.accent,
         link: &theme.link,
+        selection: &theme.selection,
         recolor: theme.recolor,
     };
     let body = toml::to_string_pretty(&stored).map_err(|e| e.to_string())?;
 
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    fs::write(path_for(dir, &id), body).map_err(|e| e.to_string())?;
+    atomic_write(&path_for(dir, &id), body.as_bytes())?;
 
     let mut saved = theme.clone();
     saved.id = id;

@@ -8,19 +8,26 @@
 import {
   getDocument,
   GlobalWorkerOptions,
+  PasswordResponses,
+  PDFDataRangeTransport,
   PixelsPerInch,
   RenderingCancelledException,
   TextLayer,
 } from "pdfjs-dist";
 import type {
+  PDFDocumentLoadingTask,
   PDFDocumentProxy,
   PDFPageProxy,
   RenderTask,
 } from "pdfjs-dist/types/src/display/api";
-import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+// The minified worker, deliberately. Vite copies a `?url` import through
+// untouched — it is an asset rather than part of the module graph, so it never
+// meets the minifier — and importing the development build shipped a megabyte
+// of whitespace and comments that the worker then had to parse at every open.
+import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-import type { Theme } from "./api";
-import { recolor, restoreImages } from "./themes";
+import { openForReading, readRange, type Theme } from "./api";
+import { recolor, type Rect, restoreImages } from "./themes";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -32,6 +39,16 @@ GlobalWorkerOptions.workerSrc = workerUrl;
  * missing pieces: scanned documents lose their text, which lives in image
  * masks, and CJK documents lose their glyphs. */
 const asset = (path: string): string => new URL(path, window.location.href).href;
+
+/** Thrown when the reader is asked for a document's password and would rather
+    not give one. Not a failure — there is nothing to report and nothing to put
+    right — so the only thing anyone does with this is recognise it and say
+    nothing. */
+export class Cancelled extends Error {
+  constructor() {
+    super("The document was not opened.");
+  }
+}
 
 export type FitMode = "width" | "page" | "actual";
 export type ScrollMode = "continuous" | "paged";
@@ -46,6 +63,14 @@ export type Match = {
 
 const PAD_X = 20;
 const PAD_Y = 20;
+/** How much of the document to ask for at a time. pdf.js's own default; big
+    enough that a page rarely needs two, small enough that the end of a file is
+    cheap to reach. */
+const RANGE_CHUNK = 64 * 1024;
+/** How many page proxies to keep. A proxy holds its parsed operator list —
+    every decoded image on the page — until it is cleaned up, so this is the
+    ceiling on what a long book costs after being read end to end. */
+const PAGE_CACHE = 48;
 /** How far beyond the viewport pages are kept alive, in viewport heights. */
 const OVERSCAN = 0.6;
 /** How far a wheel has to push past the end of a page before it turns it.
@@ -69,6 +94,16 @@ type Slot = {
 
 type Box = { top: number; left: number; width: number; height: number; scale: number };
 
+/** A place in the document and where on the screen it was, so a zoom can put
+    it back under the same finger. */
+type Point = {
+  index: number;
+  fx: number;
+  fy: number;
+  viewX: number;
+  viewY: number;
+};
+
 /** One link on a page, in fractions of the page, and where it leads. */
 type Link = {
   x: number;
@@ -85,10 +120,56 @@ export type ViewerCallbacks = {
   onError(message: string): void;
   /** A link in the document that points somewhere outside it. */
   onExternalLink(url: string): void;
+  /** The document is encrypted. Ask for the password, or return null to give
+      up; `wrong` is true when the last answer was refused. */
+  onPassword(wrong: boolean): Promise<string | null>;
 };
+
+/**
+ * Reading a document in pieces.
+ *
+ * pdf.js is given the length of the file and a way to ask for parts of it, so
+ * it fetches the cross-reference table at the end and then only the pages
+ * being looked at. The alternative — handing it the whole file — meant three
+ * copies of every document in memory at once, and reading all of a five
+ * hundred megabyte scan before showing any of it.
+ */
+class FileRange extends PDFDataRangeTransport {
+  private cancelled = false;
+
+  constructor(
+    private path: string,
+    length: number,
+  ) {
+    super(length, null, false);
+  }
+
+  requestDataRange(begin: number, end: number): void {
+    if (this.cancelled) return;
+    void readRange(this.path, begin, end - begin)
+      .then((chunk) => {
+        if (!this.cancelled) this.onDataRange(begin, chunk);
+      })
+      .catch(() => {
+        // A range that cannot be read is a document that cannot be read.
+        // pdf.js reports that itself, through the load or the render.
+      });
+  }
+
+  abort(): void {
+    this.cancelled = true;
+  }
+}
 
 export class Viewer {
   private doc: PDFDocumentProxy | null = null;
+  /** The load in flight or the one that finished. Kept so it can be destroyed:
+      `doc` is only assigned once the load resolves, so a document abandoned
+      while it was still loading was left with nothing referring to it — and a
+      pdf.js loading task owns a worker, which then ran on to finish parsing a
+      document nobody would read, and held the result. Two impatient clicks in
+      the recents list was enough. */
+  private loading: PDFDocumentLoadingTask | null = null;
   private sizes: { width: number; height: number }[] = [];
   private boxes: Box[] = [];
   private slots = new Map<number, Slot>();
@@ -100,6 +181,8 @@ export class Viewer {
   /** One wheel gesture, for turning pages: when it was last heard from, how
       far it has pushed past the edge, and whether it has already turned. */
   private wheel = { at: 0, accumulated: 0, turned: false };
+  /** Whether the page-turning wheel listener is attached. See `setScrollMode`. */
+  private wheelBound = false;
   private queue: number[] = [];
   private rendering = false;
   private frame = 0;
@@ -115,6 +198,9 @@ export class Viewer {
   private current = 1;
   private matches: Match[] = [];
   private currentMatch = -1;
+  /** Bumped whenever the background measuring should stop, so a document put
+      down mid-measure does not go on laying out the one after it. */
+  private measuring = 0;
 
   constructor(
     private container: HTMLElement,
@@ -122,51 +208,130 @@ export class Viewer {
     private callbacks: ViewerCallbacks,
   ) {
     this.container.addEventListener("scroll", this.onScroll, { passive: true });
-    this.container.addEventListener("wheel", this.onWheel, { passive: false });
+    this.watchDensity();
   }
 
   /* ------------------------------------------------------------ lifecycle */
 
-  async load(data: Uint8Array): Promise<PDFDocumentProxy> {
+  async load(path: string): Promise<PDFDocumentProxy> {
     this.close();
+    const length = await openForReading(path);
     const task = getDocument({
-      data,
+      range: new FileRange(path, length),
+      rangeChunkSize: RANGE_CHUNK,
+      // Ask for what is needed and nothing else. Without these two, pdf.js
+      // reads the file from one end to the other in the background as well,
+      // which is exactly the cost the range transport exists to avoid.
+      disableAutoFetch: true,
+      disableStream: true,
       cMapUrl: asset("pdfjs/cmaps/"),
       cMapPacked: true,
       standardFontDataUrl: asset("pdfjs/standard_fonts/"),
       iccUrl: asset("pdfjs/iccs/"),
       wasmUrl: asset("pdfjs/wasm/"),
     });
-    const doc = await task.promise;
+    this.loading = task;
+    // The rejection that a decline produces travels back through the worker
+    // and comes out the other side as something else entirely, so whether the
+    // reader declined is remembered here rather than read off the error.
+    let declined = false;
+
+    // An encrypted document asks rather than fails. Left to itself this comes
+    // back as a rejected promise indistinguishable from a corrupt file, and
+    // "Something went wrong" is the wrong thing to tell someone whose PDF is
+    // merely locked.
+    task.onPassword = (respond: (password: string | Error) => void, reason: number) => {
+      void this.callbacks
+        .onPassword(reason === PasswordResponses.INCORRECT_PASSWORD)
+        .then((password) => {
+          if (password === null) {
+            // Declined. This has to be an Error rather than an empty string:
+            // pdf.js treats any string as another attempt, so answering "" got
+            // the question asked again, and neither Escape nor "Not now" could
+            // ever get out of it. An Error rejects the load, which is what
+            // giving up means.
+            declined = true;
+            respond(new Error("cancelled"));
+            return;
+          }
+          respond(password);
+        });
+    };
+
+    let doc: PDFDocumentProxy;
+    try {
+      doc = await task.promise;
+    } catch (error) {
+      throw declined ? new Cancelled() : error;
+    }
     this.doc = doc;
 
-    // Page dimensions up front: the scrollbar should be honest immediately,
-    // and a page proxy is cheap next to rendering one.
-    const sizes = new Array<{ width: number; height: number }>(doc.numPages);
-    const batch = 24;
-    for (let start = 0; start < doc.numPages; start += batch) {
-      const pending = [];
-      for (let n = start; n < Math.min(start + batch, doc.numPages); n++) {
-        pending.push(
-          this.page(n).then((page) => {
-            const view = page.getViewport({ scale: 1 });
-            sizes[n] = { width: view.width, height: view.height };
-          }),
-        );
-      }
-      await Promise.all(pending);
-      if (this.doc !== doc) return doc; // a different document arrived meanwhile
-    }
-    this.sizes = sizes;
+    // Measure the first page and paint. The rest are measured behind the
+    // reader's back.
+    //
+    // Every page used to be fetched and measured before anything appeared, on
+    // the grounds that a page proxy is cheap next to a render — which is true
+    // of one page and not of two thousand. Nothing was on screen until the
+    // last of them came back. Most documents are one size throughout, so the
+    // first page is a good guess for all of them, and where it is wrong the
+    // correction arrives within a second and moves pages the reader has not
+    // reached yet.
+    const first = await this.page(0);
+    if (this.doc !== doc) return doc;
+    const view = first.getViewport({ scale: 1 });
+    const estimate = { width: view.width, height: view.height };
+    this.sizes = new Array(doc.numPages).fill(estimate);
     this.relayout();
+
+    void this.measureRest(doc, estimate);
     return doc;
   }
 
+  /** Measure the pages the first one was standing in for, in batches, letting
+      the app breathe between them. A page whose real size differs moves the
+      pages below it, so the layout is redone — but only when something
+      actually changed, and never more than once a batch. */
+  private async measureRest(
+    doc: PDFDocumentProxy,
+    estimate: { width: number; height: number },
+  ): Promise<void> {
+    const run = ++this.measuring;
+    const batch = 24;
+    let changed = false;
+
+    for (let start = 1; start < doc.numPages; start += batch) {
+      const pending: Promise<void>[] = [];
+      for (let n = start; n < Math.min(start + batch, doc.numPages); n++) {
+        pending.push(
+          this.page(n)
+            .then((page) => {
+              const view = page.getViewport({ scale: 1 });
+              if (view.width !== estimate.width || view.height !== estimate.height) {
+                changed = true;
+              }
+              this.sizes[n] = { width: view.width, height: view.height };
+            })
+            .catch(() => {
+              // A page that cannot be measured keeps the estimate; the render
+              // is where an unreadable page is reported.
+            }),
+        );
+      }
+      await Promise.all(pending);
+      if (this.doc !== doc || this.measuring !== run) return;
+      if (changed) {
+        this.relayout();
+        changed = false;
+      }
+    }
+  }
+
   close(): void {
+    this.measuring++;
     for (const slot of this.slots.values()) this.discard(slot);
     this.slots.clear();
     this.queue = [];
-    this.pageCache.clear();
+    this.releasePages();
     this.linkCache.clear();
     this.pendingReveal = -1;
     this.matches = [];
@@ -175,18 +340,61 @@ export class Viewer {
     this.boxes = [];
     this.pagesEl.replaceChildren();
     this.pagesEl.style.height = "0px";
-    void this.doc?.destroy();
+    // Destroy the load, not just the document: the two are the same thing once
+    // it has resolved, and only the load exists before that.
+    const task = this.loading;
+    this.loading = null;
     this.doc = null;
+    void task?.destroy().catch(() => {});
+    // Deliberately not closing the file here. `load` calls `close` first, and
+    // a fire-and-forget close could land after the open that followed it and
+    // shut the document it had just opened — `open_for_reading` replaces
+    // whatever was there anyway, so there is nothing to close first. Putting
+    // the document down for good goes through `clearDocument`, which is the
+    // only place that means it.
     this.current = 1;
   }
 
+  /** A page proxy, kept only while it is worth keeping.
+   *
+   * pdf.js holds a page's parsed operator list — every decoded image on it —
+   * from the first render until `cleanup()` is called, and nothing called it.
+   * Keeping every proxy therefore meant keeping the render state of every page
+   * ever looked at: a long illustrated book grew for as long as it was being
+   * read and never gave any of it back. */
   private page(index: number): Promise<PDFPageProxy> {
-    let pending = this.pageCache.get(index);
-    if (!pending) {
-      pending = this.doc!.getPage(index + 1);
-      this.pageCache.set(index, pending);
+    const known = this.pageCache.get(index);
+    if (known) {
+      // Re-inserting moves it to the end, which is what makes this an LRU.
+      this.pageCache.delete(index);
+      this.pageCache.set(index, known);
+      return known;
     }
+    const pending = this.doc!.getPage(index + 1);
+    this.pageCache.set(index, pending);
+    this.trimPages();
     return pending;
+  }
+
+  /** Drop the least recently wanted proxies, never one that is on screen. */
+  private trimPages(): void {
+    if (this.pageCache.size <= PAGE_CACHE) return;
+    for (const index of [...this.pageCache.keys()]) {
+      if (this.pageCache.size <= PAGE_CACHE) break;
+      if (this.slots.has(index)) continue;
+      const pending = this.pageCache.get(index)!;
+      this.pageCache.delete(index);
+      // `cleanup` defers while a render is running, so this cannot pull a page
+      // out from under one.
+      void pending.then((page) => page.cleanup()).catch(() => {});
+    }
+  }
+
+  private releasePages(): void {
+    for (const pending of this.pageCache.values()) {
+      void pending.then((page) => page.cleanup()).catch(() => {});
+    }
+    this.pageCache.clear();
   }
 
   /* -------------------------------------------------------------- getters */
@@ -238,10 +446,17 @@ export class Viewer {
     if (changed) this.repaint();
   }
 
-  setFit(fit: FitMode, zoom = this.zoomFactor): void {
+  /** Change the zoom, optionally keeping a point on the screen still.
+   *
+   * `focus` is where the gesture is — the middle of a pinch, or the pointer
+   * under a ctrl+wheel — in client coordinates. Without it a zoom keeps the
+   * top edge of the window, which is what `position()` describes, so pinching
+   * on a figure halfway down the page pushed the figure away from the fingers
+   * doing the pinching. */
+  setFit(fit: FitMode, zoom = this.zoomFactor, focus?: { x: number; y: number }): void {
     this.fit = fit;
     this.zoomFactor = zoom;
-    this.relayout();
+    this.relayout(focus);
   }
 
   setGap(gap: number): void {
@@ -249,15 +464,59 @@ export class Viewer {
     this.relayout();
   }
 
+  /** Continuous or one page at a time.
+   *
+   * The wheel listener comes and goes with the mode, and that is the point of
+   * doing this here. It has to be non-passive — turning a page means stopping
+   * the window rubber-banding against an edge it is about to leave — and a
+   * non-passive wheel listener on a scroll container makes the browser wait
+   * for the main thread before it will scroll at all. Left permanently
+   * attached, continuous scrolling paid for a page-turning gesture it does not
+   * have. */
   setScrollMode(mode: ScrollMode): void {
+    if (mode === this.mode && this.wheelBound === (mode === "paged")) {
+      this.relayout();
+      return;
+    }
     this.mode = mode;
+    this.bindWheel(mode === "paged");
     this.relayout();
+  }
+
+  private bindWheel(on: boolean): void {
+    if (on === this.wheelBound) return;
+    this.wheelBound = on;
+    if (on) this.container.addEventListener("wheel", this.onWheel, { passive: false });
+    else this.container.removeEventListener("wheel", this.onWheel);
+  }
+
+  /** Repaint when the window moves to a screen of a different density.
+   *
+   * How sharply a page is drawn comes from `devicePixelRatio`, and the density
+   * is part of what identifies a rendered page — so a canvas drawn for a
+   * Retina screen is wrong on the 1× monitor next to it, and vice versa.
+   * Nothing announces this: `matchMedia` on the current resolution fires once
+   * when it stops being the current one, and then has to be asked again about
+   * the new one. */
+  private watchDensity(): void {
+    const arm = () => {
+      const ratio = window.devicePixelRatio || 1;
+      const query = window.matchMedia(`(resolution: ${ratio}dppx)`);
+      const once = () => {
+        query.removeEventListener("change", once);
+        arm();
+        this.repaint();
+      };
+      query.addEventListener("change", once);
+    };
+    arm();
   }
 
   /* --------------------------------------------------------------- layout */
 
-  relayout(): void {
+  relayout(focus?: { x: number; y: number }): void {
     if (!this.doc || this.sizes.length === 0) return;
+    const held = focus ? this.pointAt(focus) : null;
     const anchor = this.position();
     const availableWidth = Math.max(this.container.clientWidth - PAD_X * 2, 120);
     const availableHeight = Math.max(this.container.clientHeight - PAD_Y * 2, 120);
@@ -305,8 +564,39 @@ export class Viewer {
 
     // Every mounted page moved; re-place and re-render them where they landed.
     for (const slot of this.slots.values()) this.place(slot);
-    this.scrollTo(anchor.page, anchor.offset);
+    if (held) this.restorePoint(held);
+    else this.scrollTo(anchor.page, anchor.offset);
     this.update();
+  }
+
+  /** The spot in the document under a point on the screen, described so that
+      it survives a change of scale: which page, and how far across and down
+      it — plus where on the screen it was, so it can be put back there. */
+  private pointAt(focus: { x: number; y: number }): Point | null {
+    const view = this.container.getBoundingClientRect();
+    const docY = this.container.scrollTop + (focus.y - view.top);
+    const docX = this.container.scrollLeft + (focus.x - view.left);
+    const index =
+      this.mode === "paged" ? this.current - 1 : this.lastBoxStartingAbove(docY);
+    const box = this.boxes[index];
+    if (!box) return null;
+    return {
+      index,
+      fx: (docX - box.left) / Math.max(box.width, 1),
+      fy: (docY - box.top) / Math.max(box.height, 1),
+      viewX: focus.x - view.left,
+      viewY: focus.y - view.top,
+    };
+  }
+
+  private restorePoint(point: Point): void {
+    const box = this.boxes[point.index];
+    if (!box) return;
+    const top = box.top + point.fy * box.height - point.viewY;
+    const left = box.left + point.fx * box.width - point.viewX;
+    this.container.scrollTop = Math.max(0, top);
+    this.container.scrollLeft = Math.max(0, left);
+    this.trackCurrentPage();
   }
 
   private place(slot: Slot): void {
@@ -386,11 +676,22 @@ export class Viewer {
     const from = top - height * OVERSCAN;
     const to = top + height * (1 + OVERSCAN);
 
+    // Boxes are in order down the page, so the visible run can be found rather
+    // than looked for. Scanning all of them cost a pass over the whole
+    // document on every frame of every scroll — nine hundred pages of work to
+    // discover that three of them are on screen, growing with the length of
+    // the book, which is the one thing this layout was built not to do.
     const wanted: number[] = [];
-    for (let index = 0; index < this.boxes.length; index++) {
-      const box = this.boxes[index];
-      if (!box) continue;
-      if (box.top + box.height >= from && box.top <= to) wanted.push(index);
+    if (this.mode === "paged") {
+      // One page is laid out and the rest of `boxes` is empty, so there is
+      // nothing to search for.
+      if (this.boxes[this.current - 1]) wanted.push(this.current - 1);
+    } else {
+      for (let index = this.firstBoxEndingAfter(from); index < this.boxes.length; index++) {
+        const box = this.boxes[index];
+        if (!box || box.top > to) break;
+        wanted.push(index);
+      }
     }
 
     for (const [index, slot] of this.slots) {
@@ -429,19 +730,56 @@ export class Viewer {
   }
 
   private trackCurrentPage(): void {
-    if (this.boxes.length === 0) return;
+    if (this.boxes.length === 0 || this.mode === "paged") return;
     const probe = this.container.scrollTop + this.container.clientHeight * 0.35;
-    let page = this.current;
-    for (let index = 0; index < this.boxes.length; index++) {
-      const box = this.boxes[index];
-      if (!box) continue;
-      if (box.top <= probe) page = index + 1;
-      else break;
-    }
+    const page = this.lastBoxStartingAbove(probe) + 1;
     if (page !== this.current) {
       this.current = page;
       this.callbacks.onPageChange(page, this.pageCount);
     }
+  }
+
+  /* Both searches below assume `boxes` runs in order down the page and has no
+     holes, which is true in continuous mode and is why neither is used in
+     paged mode — there, one page is laid out and the rest of the array is
+     empty. */
+
+  /** The first page whose bottom edge is at or below `y`. */
+  private firstBoxEndingAfter(y: number): number {
+    let low = 0;
+    let high = this.boxes.length - 1;
+    let found = this.boxes.length;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      const box = this.boxes[middle];
+      if (!box) break;
+      if (box.top + box.height >= y) {
+        found = middle;
+        high = middle - 1;
+      } else {
+        low = middle + 1;
+      }
+    }
+    return found;
+  }
+
+  /** The last page whose top edge is at or above `y`; page one if none is. */
+  private lastBoxStartingAbove(y: number): number {
+    let low = 0;
+    let high = this.boxes.length - 1;
+    let found = 0;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      const box = this.boxes[middle];
+      if (!box) break;
+      if (box.top <= y) {
+        found = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return found;
   }
 
   scrollTo(page: number, offset = 0, smooth = false): void {
@@ -499,7 +837,14 @@ export class Viewer {
   /* ------------------------------------------------------------ rendering */
 
   /** Identity of a rendered page: change any part of it and the page is
-      repainted, leave it alone and the canvas is reused. */
+      repainted, leave it alone and the canvas is reused.
+   *
+   * The screen's density belongs in here as much as the zoom does — it is half
+   * of how many pixels the canvas gets. Without it, a window dragged from a
+   * Retina display to the 1× monitor beside it kept every bitmap it already
+   * had, and no amount of scrolling or resizing would produce a different key
+   * to replace them with: the pages stayed soft, or over-sharp the other way,
+   * for as long as the document was open. */
   private keyFor(index: number): string {
     const box = this.boxes[index];
     const theme = this.theme;
@@ -508,7 +853,8 @@ export class Viewer {
           this.preserveImages ? "img" : ""
         }`
       : `plain|${theme ? linkColor(theme) : ""}`;
-    return `${box ? box.scale.toFixed(3) : "0"}|${themeKey}`;
+    const density = window.devicePixelRatio || 1;
+    return `${box ? box.scale.toFixed(3) : "0"}@${density}|${themeKey}`;
   }
 
   private createSlot(index: number): Slot {
@@ -535,6 +881,14 @@ export class Viewer {
     slot.task?.cancel();
     slot.task = null;
     slot.textLayer?.cancel();
+    slot.textLayer = null;
+    // Hand the bitmap back now rather than when the collector gets round to
+    // it. A page canvas is tens of megabytes of GPU-backed surface, and three
+    // of them are live at any moment; waiting for a collection that has no
+    // particular reason to run is how a scroll through a long book climbs and
+    // stays climbed.
+    release(slot.canvas);
+    slot.canvas = null;
     slot.el.remove();
   }
 
@@ -657,11 +1011,15 @@ export class Viewer {
       if (pristine && coordinates && hasImages) {
         restoreImages(ctx, pristine, canvas.width, canvas.height, coordinates);
       }
+      // As big as the page it copied, and finished with.
+      release(pristine);
     }
 
-    slot.canvas?.remove();
+    const replaced = slot.canvas;
     slot.canvas = canvas;
     slot.el.prepend(canvas);
+    replaced?.remove();
+    release(replaced);
     slot.renderedKey = key;
 
     await this.renderText(slot, page, box.scale);
@@ -671,10 +1029,27 @@ export class Viewer {
     void this.renderLinks(slot, page);
   }
 
+  /** The selectable text over a page.
+   *
+   * Built once per mounted page and then only rescaled. pdf.js lays its spans
+   * out in percentages and sizes them from `--total-scale-factor`, which
+   * `place()` sets on every layout — so a zoom has already moved the text
+   * layer by the time anything else happens, and `update` only has to agree
+   * about the number. Rebuilding it instead meant streaming the page's text
+   * out of the worker again and laying out several hundred absolutely
+   * positioned spans, per visible page, per step of a zoom — and it threw away
+   * whatever the reader had selected while doing it. */
   private async renderText(slot: Slot, page: PDFPageProxy, scale: number): Promise<void> {
-    slot.textLayer?.cancel();
-    slot.textEl?.remove();
+    const viewport = page.getViewport({ scale });
 
+    if (slot.textLayer && slot.textEl) {
+      slot.textLayer.update({ viewport });
+      this.paintHighlights(slot);
+      this.finishReveal(slot.index + 1);
+      return;
+    }
+
+    slot.textEl?.remove();
     const container = document.createElement("div");
     container.className = "textLayer";
     slot.el.append(container);
@@ -683,12 +1058,14 @@ export class Viewer {
     const layer = new TextLayer({
       textContentSource: page.streamTextContent(),
       container,
-      viewport: page.getViewport({ scale }),
+      viewport,
     });
     slot.textLayer = layer;
     try {
       await layer.render();
     } catch {
+      // A text layer that could not be built is not one to reuse.
+      if (slot.textLayer === layer) slot.textLayer = null;
       return;
     }
     if (slot.textEl !== container) return;
@@ -781,20 +1158,29 @@ export class Viewer {
       link.style.width = `${width * 100}%`;
       link.style.height = `${height * 100}%`;
 
-      if (url) {
-        link.href = url;
-        link.title = url;
-        link.addEventListener("click", (event) => {
-          event.preventDefault();
-          this.callbacks.onExternalLink(url);
-        });
-      } else {
-        link.href = "#";
-        link.addEventListener("click", (event) => {
-          event.preventDefault();
-          void this.goToDestination(dest);
-        });
-      }
+      // Deliberately not an `href`.
+      //
+      // An anchor that carries the address navigates on a middle click, and on
+      // a modifier click on some platforms, neither of which goes anywhere
+      // near the click handler — so the webview left the app, taking the open
+      // document with it, and landed on whatever the PDF pointed at. The
+      // address is not needed here: every destination goes out through
+      // `onExternalLink`, which is the only thing allowed to decide what
+      // opening a link means.
+      link.setAttribute("role", "link");
+      link.tabIndex = 0;
+      const follow = (event: Event) => {
+        event.preventDefault();
+        if (url) this.callbacks.onExternalLink(url);
+        else void this.goToDestination(dest);
+      };
+      if (url) link.title = url;
+      link.addEventListener("click", follow);
+      // Middle click and the rest of the buttons, which never fire `click`.
+      link.addEventListener("auxclick", follow);
+      link.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") follow(event);
+      });
       layer.append(link);
     }
 
@@ -974,11 +1360,16 @@ function tintLinks(
   links: Link[],
   theme: Theme,
 ): void {
+  const rects: Rect[] = links.map((link) => ({
+    x: link.x * width,
+    y: link.y * height,
+    w: link.width * width,
+    h: link.height * height,
+  }));
+
   ctx.save();
   ctx.beginPath();
-  for (const link of links) {
-    ctx.rect(link.x * width, link.y * height, link.width * width, link.height * height);
-  }
+  for (const rect of rects) ctx.rect(rect.x, rect.y, rect.w, rect.h);
   ctx.clip();
   // On a page that was never recoloured the canvas is already the untouched
   // one, and there is nothing to put back.
@@ -987,13 +1378,32 @@ function tintLinks(
   // as the rest of the page, or the rectangle shows as a patch. On a page left
   // as it was printed, the paper is the white pdf.js drew it on, and mapping
   // it back to white is what keeps the seam invisible there.
-  recolor(ctx, width, height, {
-    ...theme,
-    text: linkColor(theme),
-    background: theme.recolor ? theme.background : "#ffffff",
-    recolor: true,
-  });
+  // The rectangles are handed over as well as clipped: where the engine
+  // cannot blend, `recolor` works on pixels, and pixels do not honour a clip.
+  recolor(
+    ctx,
+    width,
+    height,
+    {
+      ...theme,
+      text: linkColor(theme),
+      background: theme.recolor ? theme.background : "#ffffff",
+      recolor: true,
+    },
+    rects,
+  );
   ctx.restore();
+}
+
+/** Let go of a canvas's backing store at once.
+ *
+ * Dropping the reference is enough to make it collectable and not enough to
+ * make it collected; resizing it to nothing is what actually frees the surface
+ * the compositor is holding. */
+function release(canvas: HTMLCanvasElement | null): void {
+  if (!canvas) return;
+  canvas.width = 0;
+  canvas.height = 0;
 }
 
 function copyCanvas(source: HTMLCanvasElement): HTMLCanvasElement {

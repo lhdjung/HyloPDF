@@ -37,6 +37,9 @@ const URL_BASE = process.env.HYLOPDF_URL ?? "http://localhost:1420/";
  *        zoom, blend modes and text layout all behave differently in Chromium.
  * @param {number}  [options.width]
  * @param {number}  [options.height]
+ * @param {"document"|"password"} [options.expect]  what opening the file should
+ *        produce: the document itself, or the password window for an encrypted
+ *        one, which never reaches a page count.
  */
 export async function openApp(options = {}) {
   const engine = options.engine === "chromium" ? chromium : webkit;
@@ -70,12 +73,16 @@ export async function openApp(options = {}) {
     const chooser = page.waitForEvent("filechooser");
     await page.click("#welcome-open");
     await (await chooser).setFiles(file);
-    // The page count lands only once pdf.js has the document.
-    await page.waitForFunction(
-      () => (document.getElementById("page-count")?.textContent ?? "").length > 0,
-      null,
-      { timeout: 20_000 },
-    );
+    if (options.expect === "password") {
+      await page.waitForSelector("#windows .window", { timeout: 20_000 });
+    } else {
+      // The page count lands only once pdf.js has the document.
+      await page.waitForFunction(
+        () => (document.getElementById("page-count")?.textContent ?? "").length > 0,
+        null,
+        { timeout: 20_000 },
+      );
+    }
   }
 
   return {
@@ -106,15 +113,21 @@ export async function openApp(options = {}) {
 
     /** What the interface currently says about itself. */
     async state() {
-      return page.evaluate(() => ({
-        page: document.getElementById("page-number")?.value,
-        pages: document.getElementById("page-count")?.textContent,
-        zoom: document.getElementById("zoom-level")?.textContent,
-        scrollTop: document.getElementById("viewer")?.scrollTop,
-        findOpen: !document.getElementById("find-bar")?.hidden,
-        findStatus: document.getElementById("find-status")?.textContent,
-        menuOpen: document.querySelectorAll("#popovers .popover").length > 0,
-      }));
+      return page.evaluate(() => {
+        const window = document.querySelector("#windows .window");
+        return {
+          page: document.getElementById("page-number")?.value,
+          pages: document.getElementById("page-count")?.textContent,
+          zoom: document.getElementById("zoom-level")?.textContent,
+          scrollTop: document.getElementById("viewer")?.scrollTop,
+          findOpen: !document.getElementById("find-bar")?.hidden,
+          findStatus: document.getElementById("find-status")?.textContent,
+          menuOpen: document.querySelectorAll("#popovers .popover").length > 0,
+          windowTitle: window?.querySelector(".window-title")?.textContent ?? null,
+          windowText: window?.querySelector(".pane-lede")?.textContent ?? null,
+          onStartScreen: document.getElementById("shell")?.dataset.empty === "true",
+        };
+      });
     },
 
     async shot(file) {

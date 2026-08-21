@@ -12,6 +12,29 @@ const WHITE: Rgb = [255, 255, 255];
 const GREEN_DARK: Rgb = [0x3d, 0x8f, 0x5b];
 const GREEN_LIGHT: Rgb = [0x6c, 0xc0, 0x8b];
 
+/**
+ * Where paper begins, on the 0–255 grey the recolouring reads the page as.
+ *
+ * A straight ramp is fair to ink and unfair to the absence of it. A hairline
+ * that was printed at 90% white is nearly invisible on paper, because two
+ * bright greys are hard to tell apart; carried across to a dark theme by the
+ * same fraction, it arrives as a light rule on a dark ground, which is the
+ * easiest thing in the world to see. The hyperref boxes around cross-references
+ * are the usual sighting — grey enough to ignore on the printed page, a cage
+ * around every citation once the page turns dark.
+ *
+ * So the top of the ramp is compressed: anything this light is paper, and the
+ * greys just below it are pulled most of the way there. It costs the faintest
+ * eighth of the range, which is the part a reader was never meant to notice,
+ * and it also flattens the off-white of a scan into the theme's own background
+ * instead of leaving every scanned page a shade paler than the app around it.
+ *
+ * Kept as a level rather than a fraction because the blend path can only reach
+ * it as a fill colour, and both paths have to walk the same curve to the same
+ * rounding — `recolor.test.mjs` holds them to a level of each other.
+ */
+const WHITE_POINT = 235;
+
 export function parseColor(value: string, fallback: Rgb = BLACK): Rgb {
   const hex = value.trim().replace(/^#/, "");
   if (hex.length === 3) {
@@ -30,6 +53,11 @@ export function toHex([r, g, b]: Rgb): string {
   const part = (v: number) =>
     Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
   return `#${part(r)}${part(g)}${part(b)}`;
+}
+
+/** A colour with nothing in it but a level, for the fills that carry one. */
+function grey(level: number): Rgb {
+  return [level, level, level];
 }
 
 function mix(a: Rgb, b: Rgb, t: number): Rgb {
@@ -125,7 +153,8 @@ export function applyTheme(theme: Theme): void {
  * stretch that single channel between the theme's text and background colour:
  * black ink lands on the text colour, white paper on the background, and
  * everything in between keeps its relative weight, so a grey rule stays a grey
- * rule instead of vanishing.
+ * rule instead of vanishing. `WHITE_POINT` is the one departure from that —
+ * the palest greys are paper, not ink.
  *
  * Doing this with canvas blend modes keeps the whole thing on the GPU and,
  * more importantly, bakes the result into the bitmap — scrolling afterwards
@@ -151,6 +180,14 @@ export function recolor(
   ctx.save();
   ctx.globalCompositeOperation = "saturation";
   ctx.fillStyle = "#808080";
+  ctx.fillRect(0, 0, width, height);
+
+  // The white point, and the only bend in an otherwise straight ramp.
+  // `color-dodge` against a constant is a division: the grey is scaled up by
+  // 255 / WHITE_POINT and everything that reaches white stays there. Black is
+  // dodge's fixed point, so full-strength ink is untouched by it.
+  ctx.globalCompositeOperation = "color-dodge";
+  ctx.fillStyle = toHex(grey(255 - WHITE_POINT));
   ctx.fillRect(0, 0, width, height);
 
   if (inverted) {
@@ -193,7 +230,9 @@ function canBlend(): boolean {
     const saturation = probe.globalCompositeOperation === "saturation";
     probe.globalCompositeOperation = "multiply";
     const multiply = probe.globalCompositeOperation === "multiply";
-    return (blendable = saturation && multiply);
+    probe.globalCompositeOperation = "color-dodge";
+    const dodge = probe.globalCompositeOperation === "color-dodge";
+    return (blendable = saturation && multiply && dodge);
   } catch {
     return (blendable = false);
   }
@@ -233,7 +272,10 @@ function recolorByPixel(
   // stretch it from the text colour at black to the background at white.
   const ramp = new Uint8ClampedArray(256 * 3);
   for (let level = 0; level < 256; level++) {
-    const t = level / 255;
+    // The white point, arrived at the way the dodge arrives at it: an 8-bit
+    // canvas rounds after every composite, so rounding here too is what keeps
+    // the two paths on the same level rather than a level apart.
+    const t = Math.min(255, Math.round((level * 255) / WHITE_POINT)) / 255;
     ramp[level * 3] = text[0] + (bg[0] - text[0]) * t;
     ramp[level * 3 + 1] = text[1] + (bg[1] - text[1]) * t;
     ramp[level * 3 + 2] = text[2] + (bg[2] - text[2]) * t;
@@ -246,8 +288,12 @@ function recolorByPixel(
       if (regions?.length && !within(regions, originX + column, y)) continue;
       const i = (row * spanX + column) * 4;
       // Rec. 601 luma, which is what the `saturation` + greyscale path amounts
-      // to and is cheap in integers.
-      const level = (pixels[i] * 77 + pixels[i + 1] * 151 + pixels[i + 2] * 28) >> 8;
+      // to and is cheap in integers. The half added before the shift is what
+      // rounds it rather than flooring it: the white point multiplies whatever
+      // the two paths disagree about by 255 / WHITE_POINT, and half a level of
+      // truncation here came out the other end as two.
+      const level =
+        (pixels[i] * 77 + pixels[i + 1] * 151 + pixels[i + 2] * 28 + 128) >> 8;
       const at = level * 3;
       pixels[i] = ramp[at];
       pixels[i + 1] = ramp[at + 1];

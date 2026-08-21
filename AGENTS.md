@@ -175,7 +175,16 @@ whatever the reader had selected.
 *Recolouring is baked into the bitmap, not applied by CSS.* `recolor()` in
 `themes.ts` flattens the canvas to luminance with composite operations and
 stretches it between the theme's two colours, so scrolling afterwards costs
-nothing. Two things are painted back on top of that result: pictures, if
+nothing. The ramp is straight but for its top: `WHITE_POINT` calls everything
+above level 235 paper, because a hairline printed at 90% white is invisible on
+paper and, carried across by the same fraction, arrives as a bright cage around
+every hyperref box. The blend path reaches it as a `color-dodge` fill and the
+pixel path as a clamp in the lookup table, which is why the fallback's luma is
+rounded rather than truncated — the dodge multiplies any disagreement between
+the two by 255/235. What it costs is the other thing that lives up there: a
+code block shaded 4% grey now merges into the background rather than showing as
+a slightly paler block. That is the trade the constant makes, and the constant
+is the only place to change it. Two things are painted back on top of that result: pictures, if
 "Recolour pictures too" is off (pdf.js reports where images landed via
 `recordImages`), and links, which are redrawn from the untouched copy and
 recoloured towards the link colour. Both need a pristine copy of the canvas,

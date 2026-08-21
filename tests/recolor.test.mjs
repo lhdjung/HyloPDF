@@ -82,6 +82,56 @@ test("the pixel fallback matches the blend modes", async () => {
   assert.ok(mean < 0.5, `average difference ${mean}`);
 });
 
+test("near-white ink lands on the background, and ink does not", async () => {
+  const seen = await page.evaluate((theme) => {
+    // Every level, both ways round, measured against the two ends of the ramp.
+    const levels = [...Array(256).keys()];
+    const run = (blend) => {
+      globalThis.T.setBlend(blend);
+      const canvas = document.createElement("canvas");
+      canvas.width = levels.length;
+      canvas.height = 1;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      for (const v of levels) {
+        ctx.fillStyle = `rgb(${v},${v},${v})`;
+        ctx.fillRect(v, 0, 1, 1);
+      }
+      globalThis.T.recolor(ctx, levels.length, 1, theme);
+      const data = ctx.getImageData(0, 0, levels.length, 1).data;
+      return levels.map((v) => [data[v * 4], data[v * 4 + 1], data[v * 4 + 2]]);
+    };
+    return { blend: run(true), pixel: run(false) };
+  }, THEME);
+
+  const bg = [0x24, 0x27, 0x2f];
+  const text = [0xe9, 0xea, 0xee];
+  const away = (rgb, from) => Math.max(...rgb.map((v, i) => Math.abs(v - from[i])));
+
+  for (const [path, ramp] of Object.entries(seen)) {
+    // Paper is the background, and so is anything close enough to paper to
+    // have been invisible on it — the hyperref boxes this white point exists
+    // for sit around level 230.
+    assert.equal(away(ramp[255], bg), 0, `${path}: paper is not the background`);
+    assert.equal(away(ramp[240], bg), 0, `${path}: near-white ink is not the background`);
+    assert.ok(away(ramp[230], bg) <= 5, `${path}: a 90% grey is ${away(ramp[230], bg)} off`);
+
+    // What was actually printed still is. Black is the dodge's fixed point, so
+    // full-strength ink keeps the whole of the text colour, and a mid grey
+    // stays unmistakably a mid grey.
+    assert.equal(away(ramp[0], text), 0, `${path}: black ink is not the text colour`);
+    assert.ok(away(ramp[128], bg) > 70, `${path}: mid grey collapsed to ${away(ramp[128], bg)}`);
+
+    // Monotone throughout: no level is darker than a darker one, which is what
+    // would show as a band across a gradient.
+    for (let level = 1; level < 256; level++) {
+      assert.ok(
+        away(ramp[level], text) >= away(ramp[level - 1], text),
+        `${path}: the ramp turns back at ${level}`,
+      );
+    }
+  }
+});
+
 test("the fallback colours only the region it was given", async () => {
   const seen = await page.evaluate((theme) => {
     globalThis.T.setBlend(false);

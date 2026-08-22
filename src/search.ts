@@ -21,6 +21,12 @@ import type { Match, Viewer } from "./viewer";
 type PageText = {
   /** Every text run on the page, in the order the text layer draws them. */
   items: string[];
+  /** The runs joined, exactly as the document has them. Kept because getting
+      it back out of the worker is the expensive half of this, and folding it
+      again is not: changing "Match case" refolds rather than re-extracts. */
+  raw: string;
+  /** Whether `text` below was folded with the case left alone. */
+  cased: boolean;
   /** The runs joined and folded, which is what a query is matched against. */
   text: string;
   /** For each character of `text`, its offset in the unfolded page text.
@@ -30,6 +36,14 @@ type PageText = {
   origin: number[];
   /** Where each run starts inside the unfolded page text. */
   starts: number[];
+};
+
+/** How a query is matched. "Highlight all" is not here: it changes nothing
+    about what is found, only how much of it is painted, and that belongs to
+    the viewer. */
+export type SearchOptions = {
+  matchCase: boolean;
+  wholeWords: boolean;
 };
 
 /** Past this many, another match is not news. Stopping keeps the highlight
@@ -59,6 +73,7 @@ export class Search {
   private query = "";
   private run = 0;
   private capped = false;
+  private options: SearchOptions = { matchCase: false, wholeWords: false };
 
   constructor(
     private viewer: Viewer,
@@ -68,6 +83,12 @@ export class Search {
   reset(): void {
     this.pages.clear();
     this.clear();
+  }
+
+  /** Change how a query is matched. The extracted text stays: only the fold
+      and the boundary test depend on these, and both are cheap. */
+  setOptions(options: SearchOptions): void {
+    this.options = options;
   }
 
   /** Put the index down.
@@ -112,7 +133,7 @@ export class Search {
       return;
     }
 
-    const needle = fold(query).text;
+    const needle = fold(query, this.options.matchCase).text;
     if (needle.length === 0) {
       // A query of nothing but soft hyphens or combining marks folds away to
       // nothing, and an empty needle matches at every position.
@@ -143,7 +164,7 @@ export class Search {
       const text = await this.textFor(page, doc);
       if (token !== this.run) return;
 
-      const hits = locate(text, needle, page);
+      const hits = locate(text, needle, page, this.options.wholeWords);
       if (hits.length > 0) {
         if (total + hits.length >= MATCH_LIMIT) {
           hits.length = MATCH_LIMIT - total;
@@ -216,7 +237,7 @@ export class Search {
 
   private async textFor(page: number, doc: PDFDocumentProxy): Promise<PageText> {
     const cached = this.pages.get(page);
-    if (cached) return cached;
+    if (cached) return this.refold(cached);
     const proxy = await doc.getPage(page);
     const runs = await readTextRuns(proxy);
     const items: string[] = [];
@@ -228,13 +249,30 @@ export class Search {
       raw += run.str;
       if (run.hasEOL) raw += "\n";
     }
-    const folded = fold(raw);
-    const built: PageText = { items, text: folded.text, origin: folded.origin, starts };
+    const folded = fold(raw, this.options.matchCase);
+    const built: PageText = {
+      items,
+      raw,
+      cased: this.options.matchCase,
+      text: folded.text,
+      origin: folded.origin,
+      starts,
+    };
     this.pages.set(page, built);
     // The proxy was fetched for its text and has no other work to do here;
     // holding its parsed contents would be a second copy of the document.
     proxy.cleanup();
     return built;
+  }
+
+  /** Bring a page indexed under the other case setting up to date. */
+  private refold(page: PageText): PageText {
+    if (page.cased === this.options.matchCase) return page;
+    const folded = fold(page.raw, this.options.matchCase);
+    page.cased = this.options.matchCase;
+    page.text = folded.text;
+    page.origin = folded.origin;
+    return page;
   }
 }
 
@@ -258,8 +296,11 @@ export class Search {
  * `origin` is what keeps the answer usable: folding changes lengths, so a hit
  * at index *i* in the folded text has to be translated back to the offset in
  * the page's real text before it can be turned into a run and a DOM range.
+ *
+ * Case is the one part of this the reader can turn off. The other three are
+ * not offered as choices because nobody types a soft hyphen on purpose.
  */
-function fold(input: string): { text: string; origin: number[] } {
+function fold(input: string, caseSensitive = false): { text: string; origin: number[] } {
   let text = "";
   const origin: number[] = [];
 
@@ -269,7 +310,8 @@ function fold(input: string): { text: string; origin: number[] } {
     // into a letter plus its marks; the marks are then dropped. Done a
     // character at a time so that every piece of the result knows which
     // character of the original it came from.
-    const pieces = input[i].normalize("NFKD").toLowerCase();
+    const decomposed = input[i].normalize("NFKD");
+    const pieces = caseSensitive ? decomposed : decomposed.toLowerCase();
     for (const piece of pieces) {
       if (COMBINING.test(piece) || IGNORED.test(piece)) continue;
       text += piece;
@@ -325,10 +367,22 @@ function pagesFromHere(current: number, count: number): number[] {
   return order;
 }
 
-function locate(page: PageText, needle: string, number: number): Match[] {
+function locate(
+  page: PageText,
+  needle: string,
+  number: number,
+  wholeWords = false,
+): Match[] {
   const found: Match[] = [];
   let at = page.text.indexOf(needle);
   while (at !== -1) {
+    if (wholeWords && !standsAlone(page.text, at, at + needle.length)) {
+      // A rejected hit only moves the search on by one: "and" inside "understand"
+      // is not a word, but the "and" that ends it is, and it starts one
+      // character later.
+      at = page.text.indexOf(needle, at + 1);
+      continue;
+    }
     // Back from the folded text to the page's own, which is what the runs and
     // the text layer are indexed by. The end has to clear the last character
     // it matched: one source character can fold to several — "ﬁ" is two — so
@@ -347,6 +401,22 @@ function locate(page: PageText, needle: string, number: number): Match[] {
     at = page.text.indexOf(needle, at + Math.max(needle.length, 1));
   }
   return found;
+}
+
+/** Letters, digits and the underscore: what "whole words" counts as being part
+    of a word, in every alphabet rather than only the Latin one. */
+const WORD = /[\p{L}\p{N}_]/u;
+
+/** Whether a match has something other than a word character on each side.
+ *
+ * The test is done against the folded text, which is the point of doing it
+ * here rather than against the page: a word hyphenated across a line break
+ * has already had the soft hyphen taken out of it, so "typo-graphy" at the
+ * margin is one whole word by the time this sees it, as it is to a reader. */
+function standsAlone(text: string, start: number, end: number): boolean {
+  if (start > 0 && WORD.test(text[start - 1])) return false;
+  if (end < text.length && WORD.test(text[end])) return false;
+  return true;
 }
 
 /** Turn an offset into the joined page text back into a run and an offset

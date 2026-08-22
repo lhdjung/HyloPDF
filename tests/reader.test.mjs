@@ -104,7 +104,77 @@ test("search", async (t) => {
     assert.ok(marks > 0, "matches were counted but not shown");
   });
 
+  await t.test("only the current match is marked when highlight all is off", async () => {
+    const all = await app.page.evaluate(
+      () => document.querySelectorAll(".find-highlight").length,
+    );
+    assert.ok(all > 1, "the fixture should have more than one match on screen");
+
+    await app.page.click("#find-highlight");
+    await app.page.waitForTimeout(200);
+    const one = await app.page.evaluate(
+      () => document.querySelectorAll(".find-highlight").length,
+    );
+    // One match, but a match spanning two lines is two rectangles, so the
+    // test is that it collapsed rather than that it collapsed to exactly one.
+    assert.ok(one < all, `${one} marks left of ${all}`);
+    assert.ok(
+      await app.page.evaluate(
+        () => document.querySelectorAll(".find-highlight.current").length > 0,
+      ),
+      "the match being read stopped being marked",
+    );
+
+    await app.page.click("#find-highlight");
+    await app.page.waitForTimeout(200);
+  });
+
+  await t.test("whole words drops the matches inside longer words", async () => {
+    // Every "he" in the fixture is inside "the", and every "row" inside
+    // "brown", so whole words leaves the query with nothing.
+    await app.page.fill("#find-input", "row");
+    await app.page.waitForTimeout(2500);
+    assert.match((await app.state()).findStatus ?? "", /\d+ of \d+/);
+
+    await app.page.click("#find-words");
+    await app.page.waitForTimeout(2500);
+    assert.equal((await app.state()).findStatus, "None");
+
+    await app.page.click("#find-words");
+    await app.page.waitForTimeout(2500);
+    assert.match((await app.state()).findStatus ?? "", /\d+ of \d+/);
+  });
+
+  await t.test("match case takes the query at its word", async () => {
+    // The fixture writes "Page" and never "page", so the same six letters
+    // find everything or nothing depending on this switch alone.
+    await app.page.fill("#find-input", "page");
+    await app.page.waitForTimeout(2500);
+    assert.match((await app.state()).findStatus ?? "", /\d+ of \d+/);
+
+    await app.page.click("#find-case");
+    await app.page.waitForTimeout(2500);
+    assert.equal((await app.state()).findStatus, "None");
+
+    await app.page.fill("#find-input", "Page");
+    await app.page.waitForTimeout(2500);
+    assert.match((await app.state()).findStatus ?? "", /\d+ of \d+/);
+
+    await app.page.click("#find-case");
+    await app.page.waitForTimeout(2500);
+  });
+
+  await t.test("clicking the document puts it away", async () => {
+    assert.equal((await app.state()).findOpen, true);
+    await app.page.mouse.click(640, 600);
+    await app.page.waitForTimeout(150);
+    assert.equal((await app.state()).findOpen, false);
+  });
+
   await t.test("Escape puts it away", async () => {
+    await app.page.keyboard.press("Meta+f");
+    await app.page.waitForTimeout(150);
+    assert.equal((await app.state()).findOpen, true);
     await app.page.keyboard.press("Escape");
     assert.equal((await app.state()).findOpen, false);
   });

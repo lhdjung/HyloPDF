@@ -54,6 +54,12 @@ pub fn defaults() -> Settings {
     // harder to read rather than easier.
     s.insert("recolor_images".into(), json!(false));
     s.insert("remember_position".into(), json!(true));
+    // Search. Where a match is looked for is a way of reading, not a property
+    // of a document, so these outlive the find bar they are set from and the
+    // session they were set in.
+    s.insert("search_highlight_all".into(), json!(true));
+    s.insert("search_match_case".into(), json!(false));
+    s.insert("search_whole_words".into(), json!(false));
     // Chrome
     s.insert("show_toolbar".into(), json!(true));
     s.insert("show_sidebar".into(), json!(false));

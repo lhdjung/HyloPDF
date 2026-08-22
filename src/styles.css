@@ -858,13 +858,65 @@ body {
   right: 18px;
   z-index: 30;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px 6px 12px;
+  flex-direction: column;
+  padding: 6px 8px 8px 12px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.14);
+}
+
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Indented to the field above them rather than to the bar, so the three read
+   as belonging to the query and not as three more buttons. */
+.find-options {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 20px;
+  padding-top: 4px;
+}
+
+.find-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.find-option svg {
+  width: 13px;
+  height: 13px;
+  /* Present whether it is ticked or not, so turning one on does not shuffle
+     the other two sideways under the pointer. */
+  opacity: 0.28;
+}
+
+.find-option:hover {
+  background: var(--surface-hover);
+  color: var(--text-soft);
+}
+
+.find-option[aria-pressed="true"] {
+  color: var(--text-soft);
+}
+
+.find-option[aria-pressed="true"] svg {
+  opacity: 1;
+  color: var(--accent);
 }
 
 #shell[data-toolbar="hidden"] .find-bar {

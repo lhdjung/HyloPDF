@@ -198,6 +198,7 @@ export class Viewer {
   private current = 1;
   private matches: Match[] = [];
   private currentMatch = -1;
+  private highlightAll = true;
   /** Bumped whenever the background measuring should stop, so a document put
       down mid-measure does not go on laying out the one after it. */
   private measuring = 0;
@@ -1241,6 +1242,15 @@ export class Viewer {
     for (const slot of this.slots.values()) this.paintHighlights(slot);
   }
 
+  /** Whether every match is marked, or only the one being looked at. Off, a
+      search for a common word stops turning the page into a striped thing and
+      leaves one mark to follow. */
+  setHighlightAll(on: boolean): void {
+    if (this.highlightAll === on) return;
+    this.highlightAll = on;
+    for (const slot of this.slots.values()) this.paintHighlights(slot);
+  }
+
   /** Go to a match and put it under the reader's eyes.
    *
    * Landing on the right page is the easy half. The hard half is that a match
@@ -1306,6 +1316,7 @@ export class Viewer {
     for (let i = 0; i < this.matches.length; i++) {
       const match = this.matches[i];
       if (match.page !== slot.index + 1) continue;
+      if (!this.highlightAll && i !== this.currentMatch) continue;
       const range = rangeFor(divs, match);
       if (!range) continue;
       for (const rect of range.getClientRects()) {

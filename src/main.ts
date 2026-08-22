@@ -106,6 +106,9 @@ const el = {
   findPrev: byId<HTMLButtonElement>("find-prev"),
   findNext: byId<HTMLButtonElement>("find-next"),
   findClose: byId<HTMLButtonElement>("find-close"),
+  findHighlight: byId<HTMLButtonElement>("find-highlight"),
+  findCase: byId<HTMLButtonElement>("find-case"),
+  findWords: byId<HTMLButtonElement>("find-words"),
   pagePill: byId<HTMLDivElement>("page-pill"),
   toolbarPeek: byId<HTMLButtonElement>("toolbar-peek"),
   titleDrag: byId<HTMLDivElement>("title-drag"),
@@ -177,6 +180,7 @@ class App {
     this.viewer.setGap(this.settings.page_gap);
     this.viewer.setScrollMode(this.settings.scroll_mode);
     this.viewer.setFit(this.settings.fit_mode, this.settings.zoom);
+    this.applySearchOptions();
     this.renderRecents();
     this.wire();
 
@@ -644,6 +648,7 @@ class App {
     const reopening = el.findBar.hidden;
     el.findBar.hidden = false;
     el.find.setAttribute("aria-pressed", "true");
+    document.addEventListener("pointerdown", this.onFindOutside, true);
     el.findInput.focus();
     el.findInput.select();
     // Closing the bar drops the matches but keeps the words, so a bar that
@@ -666,11 +671,44 @@ class App {
     window.clearTimeout(this.searchTimer);
     el.findBar.hidden = true;
     el.find.setAttribute("aria-pressed", "false");
+    document.removeEventListener("pointerdown", this.onFindOutside, true);
     // The index goes with the bar. It is what makes stepping through matches
     // instant and it costs a long book tens of megabytes for as long as it is
     // open, which is a fair trade only while the bar is actually up.
     this.search.forget();
     el.viewer.focus();
+  }
+
+  /** Everything the find bar is allowed to lose the pointer to and stay open.
+      The bar itself, obviously; the top strip, because the buttons up there
+      that close it do so themselves and the ones that do not are the reader
+      changing the view around a search they are still in the middle of; and
+      the two layers that only ever open from up there anyway. */
+  private static readonly FIND_KEEPS_OPEN =
+    "#find-bar, #toolbar, #title-drag, #toolbar-peek, #popovers, #windows";
+
+  /** Reaching past the bar puts it away, the way the Theme and Settings menus
+      do. Anything below the toolbar is somewhere else — the document, the
+      contents, a link — and going there is done with the search, whether or
+      not it was said out loud. */
+  private onFindOutside = (event: PointerEvent): void => {
+    const node = event.target as Node | null;
+    const element = node instanceof Element ? node : node?.parentElement ?? null;
+    if (element?.closest(App.FIND_KEEPS_OPEN)) return;
+    this.closeFind();
+  };
+
+  /** Push the three switches out to the parts that answer to them, and show
+      them as they stand. Called at startup and after any of them is thrown. */
+  private applySearchOptions(): void {
+    this.search.setOptions({
+      matchCase: this.settings.search_match_case,
+      wholeWords: this.settings.search_whole_words,
+    });
+    this.viewer.setHighlightAll(this.settings.search_highlight_all);
+    el.findHighlight.setAttribute("aria-pressed", String(this.settings.search_highlight_all));
+    el.findCase.setAttribute("aria-pressed", String(this.settings.search_match_case));
+    el.findWords.setAttribute("aria-pressed", String(this.settings.search_whole_words));
   }
 
   private onSearchUpdate(state: SearchState): void {
@@ -1102,6 +1140,25 @@ class App {
     el.findNext.addEventListener("click", () => this.search.step(1));
     el.findPrev.addEventListener("click", () => this.search.step(-1));
     el.findClose.addEventListener("click", () => this.closeFind());
+
+    // Two of the three change what counts as a match, so the query has to be
+    // asked again; "Highlight all" only changes what is painted, and the
+    // viewer has already repainted by the time this returns. Either way the
+    // field keeps the keyboard: a switch is thrown in the middle of typing.
+    const option = (
+      button: HTMLButtonElement,
+      key: "search_highlight_all" | "search_match_case" | "search_whole_words",
+      rescan: boolean,
+    ) =>
+      button.addEventListener("click", () => {
+        this.set(key, !this.settings[key]);
+        this.applySearchOptions();
+        if (rescan) void this.runSearch();
+        el.findInput.focus();
+      });
+    option(el.findHighlight, "search_highlight_all", false);
+    option(el.findCase, "search_match_case", true);
+    option(el.findWords, "search_whole_words", true);
 
     this.wireSidebarResize();
     this.wireToolbarPeek();

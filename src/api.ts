@@ -16,6 +16,9 @@ export type Settings = {
   page_gap: number;
   recolor_images: boolean;
   remember_position: boolean;
+  search_highlight_all: boolean;
+  search_match_case: boolean;
+  search_whole_words: boolean;
   show_toolbar: boolean;
   show_sidebar: boolean;
   sidebar_width: number;
@@ -81,6 +84,9 @@ const fallbackDefaults: Settings = {
   page_gap: 16,
   recolor_images: false,
   remember_position: true,
+  search_highlight_all: true,
+  search_match_case: false,
+  search_whole_words: false,
   show_toolbar: true,
   show_sidebar: false,
   sidebar_width: 232,

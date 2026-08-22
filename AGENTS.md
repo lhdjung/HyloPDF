@@ -32,8 +32,47 @@ Ignoring some settings, we have:
 - Pzazz: cool and glamorous dark theme inspired by the Charm / Bubble Tea aesthetic.
 - Dracula: text is pink, background is dark blue-ish. Some light blue and/or green is sprinkled in. Maybe that's not accurate – check the Dracula themes other apps use, and how that would translate into PDF theming.
 - Gruvbox, for the oldies.
+- Sepia: background is sepia, text is dark. Use whatever good sepia themes use.
+- High contrast: background is perfect black, text is white.
+
 
 ---
+
+
+# TODO
+Tackle each chunk in a separate session. Make a Git commit after each numbered task except those in Chunk C, and except there's a reason to combine two or more tasks.
+
+## Chunk B
+4. In the theme editor, "Accent" says "Selected text, the current page, and [...]" but selected text is the same color as unselected text, except (maybe?) the "Selected text" color laid on top. Need a real option to directly set color of selected text. Also, "Selected text" is a poor name for that option: already included in the helper text quoted before, and misleading even on its own because it colors the area around/behind the selected text, not the text itself. Add a true "Selected text" option and make it default to the inverse of the selection area around the selected text, i.e., what is governed by the existing option. Rename this existing option to "Selection area" or something else that's sensible; your call.
+6. Similarly, at least in dev mode, editing "Background" and then saving doesn't immediately recolor the page but only the space left and right. The page is stale and only recolors on restarting the app. The landing page background is different from the space left and right of the page but should be the same. Link color is stale the same way.
+7. The toolbar should have the same colors (text and background) as the document.
+8. 1. I don't think the Pzazz theme really captures the Charm CLI aesthetic. Charm uses colors that are roughly:
+  - Pink: R: 252, G: 113, B: 255
+  - Purple: R: 94, G: 69, B: 247
+  - Green: R: 27, G: 253, B: 184
+  I tried using the according hex colors in src-tauri/themes/pzazz.toml but green as accent color doesn't work – the accent color is always dark purple. However, the green does properly show in the "Open a document" button on the landing page.
+2. Add sepia and high contrast themes; see above. Make good decisions on colors not mentioned there.
+3. "A theme is two colours: the ink and the paper. Everything else follows from them." – is that still correct given the other colors?
+
+## Chunk C
+1. Below talks about switching the viewer to pdfium-render and lists some options for doing this in a performant way. Would the switch be good? (It should then be on the pdfium-prototype branch.) If so, which option or options?
+2. Any other ways to use more Rust in the app, especially relative to JS/TS?
+
+## Chunk D
+CI hit issues (not sure if still relevant when all other issues were tackled):
+    Checking tauri-plugin-single-instance v2.4.3
+error[E0599]: no variant named `Opened` found for enum `tauri::RunEvent`
+   --> src/lib.rs:667:37
+    |
+667 |             if let tauri::RunEvent::Opened { urls } = event {
+    |                                     ^^^^^^ variant not found in `tauri::RunEvent`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `hylopdf` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `hylopdf` (lib test) due to 1 previous error
+Error: Process completed with exit code 101.
+
 
 # Architecture of the built app
 
@@ -67,7 +106,7 @@ src/                TypeScript: the interface
   main.ts           the App object: state, menus, keyboard, wiring
   viewer.ts         layout, rendering, scrolling, links   ← the heart of it
   themes.ts         theme → CSS variables, and the page recolouring itself
-  search.ts         the full-document index and match stepping
+  search.ts         the full-document index, the fold, and match stepping
   sidebar.ts        contents and thumbnails
   settings.ts       the settings window
   ui.ts             menus, switches, the modal window, the notice line
@@ -134,6 +173,22 @@ the chrome uses — surface, line, three grades of muted text, the positive gree
 ## The viewer
 
 `viewer.ts` earns its size. Six things are worth knowing before changing it.
+
+*The side margin belongs to the modes that have something to frame.* `PAD_X`
+is what sets a page off from the window when it is narrower than one, and fit
+width is the mode whose whole point is that it is not — so fit width computes
+against the full `clientWidth` and the content ends up exactly as wide as the
+viewport. Charging it for the margin left forty pixels of ground either side
+of a page that had supposedly reached both edges. `PAD_Y` is not conditional,
+because there is always something above a page.
+
+*Landing on a page means landing on the space above it.* `scrollTo` with an
+offset of zero backs off by the distance from the bottom of the page before to
+the top of this one — read off the boxes rather than taken from a constant,
+because that distance is the gap between pages in the middle of a document and
+`PAD_Y` at the start of it, and they are not the same number. Using one for
+the other left a strip of the previous page showing above a page just turned
+to.
 
 *The first page is measured; the rest are estimated and then corrected.* Page
 one's size stands in for every page, the layout is built from it, and the app
@@ -279,6 +334,26 @@ closes the document) and to open the inspector.
 does the modal window; the app-level shortcut handler bows out while either is
 open. Clicking the button that opened a menu closes it — `showPopover` tracks
 its anchor for exactly that.
+
+**The find bar is not a popover and dismisses itself by hand.** It holds the
+keyboard and a query, so it cannot live in `#popovers`; `App.FIND_KEEPS_OPEN`
+is the list of places the pointer may go without putting it away — itself, the
+top strip, and the two layers that only ever open from up there. Everything
+below the toolbar closes it, which is what the menus beside it do.
+
+**Two of the three search switches change what is found, and one does not.**
+"Match case" is a parameter to `fold`, and "Whole words" a boundary test done
+against the folded text — so a word hyphenated across a line, whose soft hyphen
+the fold has already taken out, is one whole word by the time it is tested.
+"Highlight all" changes only how much of the result is painted, and so lives on
+the viewer. All three are settings and outlive both the bar and the session. A
+page already extracted is refolded rather than re-extracted when the case
+setting moves: the trip into the worker is the expensive half.
+
+**Option is not a letter on a Mac.** ⌥⌘G — go to a page, which is what Preview
+binds it to — has to be matched on `event.code`, because Option turns a G into
+a © and `event.key` has nothing left to compare. ⌘G, which steps through
+matches, is guarded with `!event.altKey` or it takes the keystroke first.
 
 ## Testing the interface without taking the screen
 

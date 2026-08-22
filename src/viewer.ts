@@ -519,7 +519,13 @@ export class Viewer {
     if (!this.doc || this.sizes.length === 0) return;
     const held = focus ? this.pointAt(focus) : null;
     const anchor = this.position();
-    const availableWidth = Math.max(this.container.clientWidth - PAD_X * 2, 120);
+    // The side margin frames a page that is narrower than the window. Fit
+    // width is the one mode whose whole job is that there is no such gap, so
+    // it does not get one: charging the page for a margin it is meant to fill
+    // left a strip of ground down each side of a page that had supposedly
+    // reached both edges.
+    const padX = this.fit === "width" ? 0 : PAD_X;
+    const availableWidth = Math.max(this.container.clientWidth - padX * 2, 120);
     const availableHeight = Math.max(this.container.clientHeight - PAD_Y * 2, 120);
 
     const scaleFor = (size: { width: number; height: number }): number => {
@@ -541,7 +547,7 @@ export class Viewer {
       const scale = scaleFor(size);
       width = Math.max(width, Math.round(size.width * scale));
     }
-    this.contentWidth = Math.max(width, availableWidth) + PAD_X * 2;
+    this.contentWidth = Math.max(width, availableWidth) + padX * 2;
 
     let top = PAD_Y;
     for (const index of visible) {

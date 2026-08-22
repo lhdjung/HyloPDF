@@ -96,6 +96,37 @@ test("moving around", async (t) => {
   });
 });
 
+test("fit width fits the width", async (t) => {
+  const strips = () =>
+    app.page.evaluate(() => {
+      const viewer = document.getElementById("viewer").getBoundingClientRect();
+      const page = document.querySelector("#pages .page").getBoundingClientRect();
+      return { left: page.left - viewer.left, right: viewer.right - page.right };
+    });
+
+  await t.test("with nothing beside it", async () => {
+    const { left, right } = await strips();
+    assert.ok(left < 1 && right < 1, `${left}px and ${right}px of ground left over`);
+  });
+
+  await t.test("with the sidebar out", async () => {
+    await app.page.keyboard.press("Meta+b");
+    await app.page.waitForTimeout(400);
+    const { left, right } = await strips();
+    assert.ok(left < 1 && right < 1, `${left}px and ${right}px of ground left over`);
+    await app.page.keyboard.press("Meta+b");
+    await app.page.waitForTimeout(400);
+  });
+
+  await t.test("and does not put a sideways scrollbar under it", async () => {
+    const over = await app.page.evaluate(() => {
+      const viewer = document.getElementById("viewer");
+      return viewer.scrollWidth - viewer.clientWidth;
+    });
+    assert.equal(over, 0, `${over}px wider than the window`);
+  });
+});
+
 test("ctrl+wheel zooms", async () => {
   const before = (await app.state()).zoom;
   await app.wheel(4, -40, { ctrl: true });

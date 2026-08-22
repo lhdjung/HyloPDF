@@ -78,6 +78,22 @@ test("moving around", async (t) => {
     await app.press("ArrowLeft");
     assert.equal((await app.state()).page, "1");
   });
+
+  await t.test("a turned page starts at the top of the window", async () => {
+    await app.press("ArrowRight");
+    const { above, before } = await app.page.evaluate(() => {
+      const viewer = document.getElementById("viewer");
+      const top = (n) =>
+        document.querySelector(`.page[data-page="${n}"]`)?.getBoundingClientRect().top -
+        viewer.getBoundingClientRect().top;
+      return { above: top(2), before: top(1) + document.querySelector('.page[data-page="1"]').offsetHeight };
+    });
+    // The gap above the page is at the top of the window, and the page before
+    // it ends exactly where the window starts rather than hanging into it.
+    assert.ok(above > 0 && above < 40, `page two started ${above}px down`);
+    assert.ok(Math.abs(before) < 1.5, `page one still showed ${before}px`);
+    await app.press("ArrowLeft");
+  });
 });
 
 test("ctrl+wheel zooms", async () => {

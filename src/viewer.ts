@@ -794,7 +794,15 @@ export class Viewer {
     }
     const box = this.boxes[index];
     if (!box) return;
-    const target = box.top + offset * box.height - (offset === 0 ? PAD_Y : 0);
+    // Landing on a page means the space above it starts at the top of the
+    // window and the page follows: the gap between two pages, or the margin
+    // above the first. Taken from where the page before this one actually
+    // ends rather than from a constant — those are two different distances,
+    // and using the margin between pages left a strip of the previous page
+    // showing above a page the reader had just turned to.
+    const previous = this.boxes[index - 1];
+    const above = previous ? box.top - (previous.top + previous.height) : PAD_Y;
+    const target = box.top + offset * box.height - (offset === 0 ? above : 0);
     this.container.scrollTo({ top: Math.max(0, target), behavior: smooth ? "smooth" : "auto" });
     this.current = index + 1;
     this.callbacks.onPageChange(this.current, this.pageCount);

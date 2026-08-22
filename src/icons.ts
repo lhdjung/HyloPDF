@@ -41,6 +41,7 @@ const paths: Record<string, string> = {
   keyboard:
     '<rect x="2.8" y="6.5" width="18.4" height="11" rx="2.2"/><path d="M6.5 10h.01M9.8 10h.01M13.1 10h.01M16.4 10h.01M6.5 13.2h.01M9.8 13.2h.01M13.1 13.2h.01M16.4 13.2h.01M8.5 16h7"/>',
   info: '<circle cx="12" cy="12" r="8.2"/><path d="M12 11v5.2"/><path d="M12 7.9h.01"/>',
+  power: '<path d="M12 3.5v8"/><path d="M7.5 6.6a7.2 7.2 0 1 0 9 0"/>',
 };
 
 export type IconName = keyof typeof paths;

@@ -277,6 +277,22 @@ test("menus answer the keyboard", async (t) => {
   });
 });
 
+test("the way out is on the start screen and nowhere else", async () => {
+  const seen = () =>
+    app.page.evaluate(() => {
+      const button = document.getElementById("welcome-quit");
+      return button.getBoundingClientRect().width > 0 && button.offsetParent !== null;
+    });
+
+  // A document is open by the time this runs; the start screen is behind it.
+  assert.equal(await seen(), false, "the quit button showed over a document");
+
+  await app.page.click("#close-doc");
+  await app.page.waitForTimeout(300);
+  assert.equal((await app.state()).onStartScreen, true);
+  assert.equal(await seen(), true, "no way out of the start screen");
+});
+
 test("nothing went wrong on the way", () => {
   const noise = app.logs.filter(
     (line) =>

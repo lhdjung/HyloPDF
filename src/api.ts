@@ -352,6 +352,15 @@ export async function onWindowGeometryChange(handler: () => void): Promise<void>
   await window.onMoved(() => handler());
 }
 
+/** Ask for the window to go, the same way its close button does — the close
+    handler below runs first, so the place in the document and anything not
+    yet written are saved on the way out. In a browser there is no window of
+    ours to close, so this does nothing. */
+export async function quitApp(): Promise<void> {
+  if (!hasBackend) return;
+  await getCurrentWindow().close();
+}
+
 export async function onCloseRequested(handler: () => Promise<void>): Promise<void> {
   if (!hasBackend) return;
   await getCurrentWindow().onCloseRequested(async () => {

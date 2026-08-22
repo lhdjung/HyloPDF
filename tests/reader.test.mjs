@@ -79,6 +79,30 @@ test("moving around", async (t) => {
     assert.equal((await app.state()).page, "1");
   });
 
+  await t.test("a shortcut hands over the page number, ready to type into", async () => {
+    for (const keys of ["g", "Meta+Alt+g"]) {
+      await app.press("End");
+      await app.page.keyboard.press(keys);
+      await app.page.waitForTimeout(120);
+      const held = await app.page.evaluate(() => {
+        const field = document.getElementById("page-number");
+        return {
+          focused: document.activeElement === field,
+          selected: field.value.slice(field.selectionStart, field.selectionEnd),
+        };
+      });
+      assert.ok(held.focused, `${keys} did not reach the page number`);
+      assert.equal(held.selected, String(PAGES), `${keys} left the number unselected`);
+
+      // What it is for: the number typed over the top of it goes there.
+      await app.page.keyboard.type("42");
+      await app.page.keyboard.press("Enter");
+      await app.page.waitForTimeout(200);
+      assert.equal((await app.state()).page, "42");
+    }
+    await app.press("Home");
+  });
+
   await t.test("a turned page starts at the top of the window", async () => {
     await app.press("ArrowRight");
     const { above, before } = await app.page.evaluate(() => {

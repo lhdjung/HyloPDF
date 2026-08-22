@@ -523,6 +523,7 @@ function keyboardPage(pane: HTMLElement): void {
         ["Open a document", shortcut("⌘O", "Ctrl+O")],
         ["Search this document", shortcut("⌘F", "Ctrl+F")],
         ["Next match, previous match", shortcut("⌘G, ⌘⇧G", "Ctrl+G, Ctrl+Shift+G")],
+        ["Close search", "Escape"],
         ["Settings", shortcut("⌘,", "Ctrl+,")],
       ],
     ],
@@ -534,7 +535,7 @@ function keyboardPage(pane: HTMLElement): void {
         ["Down a screen, up a screen", "Space, ⇧Space"],
         ["Down a screen, up a screen", "Page Down, Page Up"],
         ["First page, last page", "Home, End"],
-        ["Jump to a page", "g"],
+        ["Go to a page: type the number, press Enter", shortcut("⌥⌘G, or g", "Ctrl+Alt+G, or g")],
       ],
     ],
     [
@@ -546,7 +547,7 @@ function keyboardPage(pane: HTMLElement): void {
         ["Contents sidebar", shortcut("⌘B", "Ctrl+B")],
         ["Toolbar", shortcut("⌘⇧T", "Ctrl+Shift+T")],
         ["Full screen", shortcut("⌘⇧F, ⌃⌘F", "F11, Ctrl+Shift+F")],
-        ["Close search, or leave full screen", "Escape"],
+        ["Leave full screen", "Escape"],
       ],
     ],
   ];

@@ -74,6 +74,11 @@ const ZOOM_LADDER = [25, 33, 50, 67, 75, 90, 100, 110, 125, 150, 175, 200, 250, 
     naming: it sits beside ⌘⇧T for the toolbar. */
 const FULLSCREEN_KEYS = isMac ? "⌘⇧F" : "F11";
 
+/** The other two worth naming out loud, for the same reason. */
+const TOOLBAR_KEYS = isMac ? "⌘⇧T" : "Ctrl+Shift+T";
+/** Preview's own "Go to Page…", which is the one people already know. */
+const JUMP_KEYS = isMac ? "⌥⌘G" : "Ctrl+Alt+G";
+
 const el = {
   shell: byId<HTMLDivElement>("shell"),
   toolbar: byId<HTMLElement>("toolbar"),
@@ -641,6 +646,24 @@ class App {
     this.setFit("actual", next / 100);
   }
 
+  /* ------------------------------------------------------------ page jump */
+
+  /** Put the cursor in the page number with the number already selected, so
+      that reaching page 340 is the shortcut, three digits and Enter.
+
+      There is nowhere to put the cursor when the toolbar is away, and a key
+      that silently does nothing is worse than one that says why: the answer
+      is a keystroke, so it is worth two seconds of a notice. */
+  focusPageNumber(): void {
+    if (this.viewer.isEmpty) return;
+    if (!this.settings.show_toolbar) {
+      ui.notice(`The page number is in the toolbar — ${TOOLBAR_KEYS} brings it back.`);
+      return;
+    }
+    el.pageNumber.focus();
+    el.pageNumber.select();
+  }
+
   /* --------------------------------------------------------------- search */
 
   openFind(): void {
@@ -1098,6 +1121,7 @@ class App {
       if (!editable && !selected) event.preventDefault();
     });
 
+    el.pageNumber.title = `Go to a page — ${JUMP_KEYS}, or g`;
     el.pageNumber.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         const page = Number.parseInt(el.pageNumber.value, 10);
@@ -1283,7 +1307,14 @@ class App {
         this.setFit("width");
         return;
       }
-      if (meta && event.key.toLowerCase() === "g") {
+      // ⌥⌘G before ⌘G, and by `code` rather than by `key`: Option turns a G
+      // into a © on a Mac, so the letter is not there to test any more.
+      if (meta && event.altKey && event.code === "KeyG") {
+        event.preventDefault();
+        this.focusPageNumber();
+        return;
+      }
+      if (meta && !event.altKey && event.key.toLowerCase() === "g") {
         event.preventDefault();
         this.search.step(event.shiftKey ? -1 : 1);
         return;
@@ -1352,8 +1383,7 @@ class App {
           break;
         case "g":
           event.preventDefault();
-          el.pageNumber.focus();
-          el.pageNumber.select();
+          this.focusPageNumber();
           break;
         default:
           break;

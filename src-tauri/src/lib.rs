@@ -679,11 +679,18 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building HyloPDF")
-        .run(|app, event| {
-            if let tauri::RunEvent::Opened { urls } = event {
+        .run(|_app, _event| {
+            // How macOS says "open this PDF": an Apple Event into the running
+            // app rather than a second process. The variant exists on Apple
+            // platforms alone — naming it anywhere else does not compile — so
+            // it is matched there alone, and everywhere else the same job is
+            // done by the single-instance plugin above. The arguments are
+            // underscored because on those platforms this closure is empty.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
                 for url in urls {
                     if let Ok(path) = url.to_file_path() {
-                        hand_over(app, path.to_string_lossy().to_string());
+                        hand_over(_app, path.to_string_lossy().to_string());
                     }
                 }
             }

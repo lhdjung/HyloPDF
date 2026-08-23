@@ -339,7 +339,10 @@ fires on macOS alone; everywhere else the system answers "open this PDF" by
 launching the app again with the path in `argv`. `tauri-plugin-single-instance`
 routes that into `hand_over` — without it, three double-clicked documents meant
 three processes writing over each other's `settings.toml`, which no lock inside
-one of them can help with.
+one of them can help with. The variant does not merely go unused off Apple
+platforms, it does not exist there, so matching on it has to be `#[cfg]`-gated
+or Linux and Windows will not compile — which is invisible from a Mac and is
+the whole of what CI caught.
 
 **Declining a password is not an empty password.** pdf.js reads any string
 handed to `onPassword` as another attempt, so answering `""` when the reader

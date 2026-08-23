@@ -66,6 +66,12 @@ body {
 
 /* ---------------------------------------------------------------- toolbar */
 
+/* The paper the pages are on, not a surface of its own. The bar runs along the
+   top of the document and belongs to it: a strip in a different colour reads
+   as a second thing in the window, and there is only one thing in this window.
+   Everything that floats — menus, the settings window, the handle that brings
+   the bar back — keeps `--surface`, because those do have to be told apart
+   from the page they are over. */
 #toolbar {
   display: flex;
   align-items: center;
@@ -73,7 +79,7 @@ body {
   height: var(--toolbar-height);
   flex: 0 0 auto;
   padding: 0 10px;
-  background: var(--surface);
+  background: var(--page-paper);
   border-bottom: 1px solid var(--line);
   user-select: none;
   -webkit-user-select: none;

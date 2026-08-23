@@ -507,11 +507,25 @@ fn set_titlebar_buttons(window: WebviewWindow, visible: bool) {
     }
 }
 
+/// The smallest the window is allowed to be, and the same two numbers
+/// `tauri.conf.json` gives it as `minWidth` and `minHeight`.
+///
+/// They used to be 480×360 here and 520×400 there. The window manager enforces
+/// its own, so the smaller pair never did anything — it was dead code
+/// describing an intention the app did not have. Two numbers in two files is
+/// the arrangement Tauri leaves us with; the least that can be done is have
+/// them agree and say where the other copy is.
+const MIN_WIDTH: f64 = 520.0;
+const MIN_HEIGHT: f64 = 400.0;
+
 fn restore_window(window: &WebviewWindow, stored: &settings::Settings) {
     let number = |key: &str| stored.get(key).and_then(|v| v.as_f64());
 
     if let (Some(width), Some(height)) = (number("window_width"), number("window_height")) {
-        let _ = window.set_size(tauri::LogicalSize::new(width.max(480.0), height.max(360.0)));
+        let _ = window.set_size(tauri::LogicalSize::new(
+            width.max(MIN_WIDTH),
+            height.max(MIN_HEIGHT),
+        ));
     }
     if let (Some(x), Some(y)) = (number("window_x"), number("window_y")) {
         let _ = window.set_position(tauri::LogicalPosition::new(x, y));

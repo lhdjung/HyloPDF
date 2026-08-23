@@ -105,8 +105,24 @@ fn to_toml(value: &Value) -> Option<toml::Value> {
 
 /// Stored values layered over the defaults, so a half-written or partial file
 /// still yields a complete, usable set.
+///
+/// Every value is checked on the way in, against the same `same_shape` a write
+/// is checked against. It was not, and that was the one hole in a module whose
+/// whole subject is that a setting is a known key holding a known kind of
+/// thing: `set_many` refused anything else, and then `load` layered whatever
+/// the file happened to say straight over the defaults and handed it to the
+/// frontend. This file's own header invites hand-editing, so `zoom = "big"`
+/// is a thing a person can write — and it arrived in `viewer.setFit` typed as
+/// a number, `scroll_mode = "sideways"` arrived at a switch with no arm for
+/// it, and nothing anywhere had said no.
+///
+/// A value of the wrong shape is dropped rather than repaired, so the default
+/// stands and the app is usable. Unknown keys are still carried through
+/// untouched — those belong to a version that is not this one, and dropping
+/// them is how a downgrade eats your settings.
 pub fn load(dir: &Path) -> Settings {
-    let mut settings = defaults();
+    let known = defaults();
+    let mut settings = known.clone();
     let Ok(body) = fs::read_to_string(path(dir)) else {
         return settings;
     };
@@ -114,7 +130,11 @@ pub fn load(dir: &Path) -> Settings {
         return settings;
     };
     for (key, value) in table {
-        settings.insert(key, from_toml(value));
+        let value = from_toml(value);
+        match known.get(&key) {
+            Some(default) if !same_shape(default, &value) => continue,
+            _ => settings.insert(key, value),
+        };
     }
     settings
 }
@@ -141,11 +161,21 @@ fn write(dir: &Path, settings: &Settings) -> Result<(), String> {
 /// defaults to null and its real shape cannot be read off that. Null is legal
 /// there and nowhere else: it is how "the window has never been placed" is
 /// written down, and anything else offered for it still has to be a number.
+///
+/// A whole number is its own shape. `page_gap` and `sidebar_width` are
+/// distances in pixels and are integers everywhere they are used; letting 16.5
+/// through because "a number is a number" is the sort of thing that surfaces
+/// later as a layout that is half a pixel out and nobody knowing why. A
+/// setting whose default is a float — `zoom` — takes either, because a whole
+/// number is a perfectly good zoom.
 fn same_shape(default: &Value, value: &Value) -> bool {
     match (default, value) {
         (Value::Null, Value::Null) => true,
         (Value::Null, other) => other.is_number(),
         (Value::Bool(_), Value::Bool(_)) => true,
+        (Value::Number(d), Value::Number(v)) if d.is_i64() || d.is_u64() => {
+            v.is_i64() || v.is_u64()
+        }
         (Value::Number(_), Value::Number(_)) => true,
         (Value::String(_), Value::String(_)) => true,
         _ => false,
@@ -249,6 +279,43 @@ mod tests {
         let reloaded = load(&dir);
         assert_eq!(reloaded.get("page_gap"), Some(&json!(20)));
         assert_eq!(reloaded.get("show_toolbar"), Some(&json!(true)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A hand-edited file is the one place a setting can be the wrong kind of
+    /// thing, and the file's own header invites hand-editing. What reaches the
+    /// frontend has to be what the frontend's types say it is.
+    #[test]
+    fn a_hand_edited_file_cannot_change_what_a_setting_is() {
+        let dir = std::env::temp_dir().join(format!("hylopdf-shape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.toml"),
+            r#"
+zoom = "big"
+scroll_mode = 7
+page_gap = 20
+sidebar_width = 12.5
+something_a_later_version_added = "kept"
+"#,
+        )
+        .unwrap();
+
+        let loaded = load(&dir);
+        // Wrong kind: the default stands.
+        assert_eq!(loaded.get("zoom"), Some(&json!(1.0)));
+        assert_eq!(loaded.get("scroll_mode"), Some(&json!("continuous")));
+        // A distance in pixels is a whole number of them.
+        assert_eq!(loaded.get("sidebar_width"), Some(&json!(232)));
+        // Right kind: taken.
+        assert_eq!(loaded.get("page_gap"), Some(&json!(20)));
+        // Not ours to judge, and dropping it is how a downgrade eats settings.
+        assert_eq!(
+            loaded.get("something_a_later_version_added"),
+            Some(&json!("kept"))
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

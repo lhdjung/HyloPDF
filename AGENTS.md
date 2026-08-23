@@ -390,6 +390,28 @@ nothing left to take. Every figure there is ±50MB between one report and the
 next, which is itself worth knowing — the GPU process gives memory back in
 bursts rather than steadily, so a single reading is not evidence of anything.
 
+**What is left is accounted for, and the document gives it back.** After the
+change below, the plateau was checked against what it should be rather than
+just noted. On forty pages of scan the GPU process holds 113MB of *resident*
+IOSurface, which is the three mounted canvases at about 30MB each plus the
+compositor's own tiles; the web content process holds its heap and the page
+proxies. Nothing is unexplained.
+
+Two things about looking, both of which cost time to learn:
+
+*Read the resident column.* `vmmap` reports 612MB of IOSurface against 113MB
+resident, across 160 regions, for a document with three pages on screen. WebKit
+keeps a pool of surfaces mapped and mostly not backed, so the virtual figure
+looks like a catastrophe and is not one — it does not appear in the footprint
+and it is not costing the machine anything.
+
+*A plateau is only half the question.* Memory that stops climbing may still be
+memory the app will never give back. Closing the document is the test, and it
+passes: the whole process group returns to what the start screen costs — 135MB
+in the harness, against 124–139MB a few seconds after closing a scan or a deck
+of slides. `scripts/memory-probe.mjs` does this at the end of every run now, and
+`--regions` prints the table above.
+
 **Images cross the worker boundary compressed, not expanded.** The cap above is
 a way of living with a cost; this is the cost going away, and it is one option
 to `getDocument`. pdf.js in a browser defaults to expanding every image to RGBA
@@ -446,8 +468,10 @@ path that does not put the canvas on screen.
 
 `scripts/memory-probe.mjs` is how any of this is checked. It reads the
 footprint from outside the browser, because there is no memory API in WebKit
-worth the name, and `--regions` prints the `vmmap` breakdown that says which
-process is holding what. It is not part of `npm test`: it wants a real
+worth the name; `--regions` prints the `vmmap` breakdown that says which
+process is holding what, in virtual, resident and dirty — resident is the
+column to read — and every run ends by closing the document, because a plateau
+does not say whether the memory was ever the document's to begin with. It is not part of `npm test`: it wants a real
 document, it takes minutes, and half of what it measures is the machine.
 
 For scale, the shipped bundle is 5.8MB on disk (4.2MB as a `.dmg`), of which

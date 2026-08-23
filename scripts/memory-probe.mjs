@@ -20,6 +20,11 @@
  * as image buffers. That distinction is the whole reason this file exists: the
  * first sighting of the problem it was written for was three gigabytes with
  * nothing on the JavaScript heap to explain it.
+ *
+ * Every run ends by closing the document, because the plateau is only half the
+ * question. A number that stops climbing may still be memory the app will never
+ * give back, and the way to tell is to take the document away and see whether
+ * the start screen costs what it cost before.
  */
 
 import { execSync } from "node:child_process";
@@ -95,13 +100,39 @@ for (let step = 1; step <= viewports; step++) {
   }
 }
 
+/* The regions that hold pixels, virtual against resident.
+ *
+ * Read the resident column and only the resident column. WebKit keeps a pool
+ * of IOSurfaces mapped and mostly not backed — 612MB of address space against
+ * 113MB actually resident, over 160 regions, is a normal reading of a document
+ * with three pages on screen — so the virtual figure looks like a catastrophe
+ * and is not one. It is the column the first pass through this read, and it
+ * sent the hunt after a leak that was not there. */
 if (wantRegions) {
   for (const pid of ours()) {
-    const surfaces = execSync(
-      `vmmap ${pid} 2>/dev/null | grep IOSurface | awk '{print $4, $NF}' | sort | uniq -c | sort -rn | head -6`,
-    ).toString().trim();
-    if (surfaces) console.log(`\n${nameOf(pid)} — largest image surfaces\n${surfaces}`);
+    const name = nameOf(pid);
+    if (!/WebContent|GPU/.test(name)) continue;
+    const rows = execSync(
+      // Only the summary's region table; the malloc-zone table below it repeats
+      // some of the same names with a different shape.
+      `vmmap --summary ${pid} 2>/dev/null | sed -n '/REGION TYPE/,/^ *$/p'` +
+        ` | grep -E '^(IOSurface|IOAccelerator \\(graphics\\)|owned unmapped \\(graphics\\)|MALLOC_LARGE|JS |WebKit Malloc)' || true`,
+    ).toString().trimEnd();
+    console.log(`\n${name} — virtual · resident · dirty\n${rows || "  (nothing of note)"}`);
   }
 }
+
+/* Whether the document gives it back.
+ *
+ * The plateau above says the app stops growing; it does not say the memory is
+ * the document's rather than the app's. Closing it should return the whole
+ * process group to what the start screen costs, and if it does not, whatever
+ * is left is held by something that has no page to be on. */
+report("before closing");
+await app.page.click("#close-doc").catch(() => {});
+await app.page.waitForTimeout(6000);
+report("closed");
+await app.page.waitForTimeout(8000);
+report("…8s later");
 
 await app.close();

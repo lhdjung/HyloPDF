@@ -80,17 +80,37 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
             librsvg2-dev patchelf libxdo-dev
       - run: npm ci
-      - name: Build the app
-        # Signing is the one thing this cannot do without secrets. On macOS an
-        # unsigned build is quarantined on any machine but the one that made
-        # it, and on Windows it draws a SmartScreen warning — so a release
-        # workflow has to supply these. They are read straight from the
-        # environment by the Tauri bundler; nothing here has to pass them on.
+      # Signing is the one thing this cannot do without secrets. On macOS an
+      # unsigned build is quarantined on any machine but the one that made it,
+      # and on Windows it draws a SmartScreen warning — so a release workflow
+      # has to supply these, and the Tauri bundler reads them straight from the
+      # environment.
+      #
+      # It reads them by presence, though, and a secret this repository does not
+      # have arrives as an empty string rather than as nothing at all. Named
+      # directly in the build step's `env`, `APPLE_CERTIFICATE` is therefore
+      # always set, always empty, and always taken as "here is a certificate" —
+      # and the build dies at `security import` having compiled perfectly. So
+      # they come in under names the bundler does not read, and only the ones
+      # carrying something are promoted to the names it does.
+      - name: Signing certificates, if this repository has any
+        if: matrix.os == 'macos-latest'
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          ID: ${{ secrets.APPLE_ID }}
+          PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in CERTIFICATE CERTIFICATE_PASSWORD SIGNING_IDENTITY ID PASSWORD TEAM_ID; do
+            if [ -n "${!name}" ]; then
+              {
+                echo "APPLE_$name<<HYLOPDF_EOF"
+                echo "${!name}"
+                echo "HYLOPDF_EOF"
+              } >> "$GITHUB_ENV"
+            fi
+          done
+      - name: Build the app
         run: npm run tauri build -- --ci

@@ -732,9 +732,13 @@ npm run tauri build            # .app and .dmg
 `.github/workflows/ci.yml` runs the types, the tests and a build on every push,
 and bundles the app on all three platforms — which is the only way the engines
 this is not developed on get exercised at all. Signing is the one thing it
-cannot do without secrets; the workflow names the variables the Tauri bundler
-reads, and an unsigned macOS build is quarantined anywhere but the machine that
-made it.
+cannot do without secrets, and naming the variables the Tauri bundler reads is
+not the way to leave the door open for them: the bundler goes by whether
+`APPLE_CERTIFICATE` is *present*, and a secret the repository does not have
+arrives as an empty string rather than as nothing at all, so the macOS job
+compiled and then died at `security import` on every push. They come in under
+other names now, and a macOS-only step promotes the ones that carry something.
+An unsigned macOS build is quarantined anywhere but the machine that made it.
 
 `scripts/sync-pdfjs.mjs` copies pdf.js's cmaps, standard fonts, ICC profiles and
 wasm decoders into `public/pdfjs` before every dev run and build. Nothing is

@@ -1,0 +1,14 @@
+# High Contrast — black paper, white ink, and nothing in between. For reading
+# where every other theme is too soft: the ramp that recolours a page runs the
+# full range here, so a grey rule stays grey and everything else is at one end
+# or the other.
+name = "High Contrast"
+text = "#ffffff"
+background = "#000000"
+# Yellow and cyan are the pair high-contrast modes have used for decades, and
+# they are the pair that survives every kind of colour blindness on black.
+accent = "#ffd400"
+link = "#00e5ff"
+# Straight inversion, which is what selecting means on a theme like this one.
+selection = "#ffffff"
+selection_text = "#000000"

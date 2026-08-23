@@ -17,6 +17,8 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ("pzazz", include_str!("../themes/pzazz.toml")),
     ("dracula", include_str!("../themes/dracula.toml")),
     ("gruvbox", include_str!("../themes/gruvbox.toml")),
+    ("sepia", include_str!("../themes/sepia.toml")),
+    ("high-contrast", include_str!("../themes/high-contrast.toml")),
 ];
 
 pub const DEFAULT_LIGHT: &str = "hylo-light";
@@ -121,8 +123,8 @@ const BANNER: &str = "\
 # Edit it and your changes will be gone at the next launch.
 #
 # To make it yours: copy it to a new name in this folder — any name but the
-# five reserved ones — change the `name` inside, and it will appear in the
-# theme list alongside these. The app does the same thing when you press
+# ones the shipped themes use — change the `name` inside, and it will appear in
+# the theme list alongside these. The app does the same thing when you press
 # \"Make a copy of this theme\".
 
 ";

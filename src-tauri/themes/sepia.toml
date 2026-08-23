@@ -1,0 +1,17 @@
+# Sepia — the printed-paper theme: warm ground, brown-black ink, nothing that
+# glows. The colours below are close to what the e-readers settled on, which is
+# a light background that has had the blue taken out of it rather than a tinted
+# one laid over the page.
+name = "Sepia"
+text = "#43382c"
+background = "#f4ecd8"
+# Warm as the paper it sits on, and the only saturated thing here.
+accent = "#9c5f2e"
+# The one cool colour, because a link on warm paper has to be told apart from
+# the emphasis around it and not merely from the text.
+link = "#2a6b78"
+# A deeper shade of the same paper, with the page's own ink on top of it: on a
+# theme this quiet an inverted selection would be the loudest thing in the
+# room.
+selection = "#e3cfa8"
+selection_text = "#43382c"

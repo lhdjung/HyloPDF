@@ -43,7 +43,6 @@ Ignoring some settings, we have:
 Tackle each chunk in a separate session. Make a Git commit after each numbered task except those in Chunk C, and except there's a reason to combine two or more tasks.
 
 ## Chunk B
-4. Add sepia and high contrast themes (one each); see above. Make good decisions on colors not mentioned there.
 5. "A theme is two colours: the ink and the paper. Everything else follows from them." – is that still correct given the other colors?
 6. The toolbar should have the same colors (text and background) as the document.
 7. Deseleccting "Show toolbar" should close the "Settings" dropdown.
@@ -86,7 +85,7 @@ src-tauri/          Rust: settings, themes, reading history, the window
   src/settings.rs   settings.toml — one flat table, one key written at a time
   src/theme.rs      one TOML file per theme, built-ins installed on first run
   src/library.rs    library.toml — where you were in each document
-  themes/*.toml     the five packaged themes, embedded with include_str!
+  themes/*.toml     the seven packaged themes, embedded with include_str!
 
 tests/              node --test; `npm test` starts a dev server for them
   search.test.mjs   text folding and where a match lands
@@ -156,7 +155,7 @@ re-reading what the other had just done. `App.setSoon` queues the same way but
 waits 400ms, for values that move continuously like zoom during a pinch.
 Anything still queued is flushed on the way out, before the window goes.
 
-**Themes are files.** Five built-ins are written into the user's themes
+**Themes are files.** Seven built-ins are written into the user's themes
 directory on every run so they can be read and copied, and so a change to a
 shipped theme reaches a machine that already has the old one; the embedded
 copies are authoritative, and a built-in file edited in place is overwritten.

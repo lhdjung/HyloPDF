@@ -73,6 +73,11 @@ export class Search {
   private query = "";
   private run = 0;
   private capped = false;
+  /** Whether a scan is still running. Stepping through matches has to say so:
+      it is a different thing from the scan, it can happen while one is in
+      flight, and reporting `false` from there told the find bar the count was
+      final when it was still climbing. */
+  private scanning = false;
   private options: SearchOptions = { matchCase: false, wholeWords: false };
 
   constructor(
@@ -111,6 +116,7 @@ export class Search {
     this.matches = [];
     this.index = -1;
     this.capped = false;
+    this.scanning = false;
     this.viewer.setMatches([], -1);
     this.onUpdate({ query: "", total: 0, index: -1, scanning: false, capped: false });
   }
@@ -126,6 +132,7 @@ export class Search {
     this.matches = [];
     this.index = -1;
     this.capped = false;
+    this.scanning = false;
 
     if (query.trim().length === 0) {
       this.viewer.setMatches([], -1);
@@ -157,6 +164,7 @@ export class Search {
     // A long document with no hits in it would otherwise leave the last
     // search's count sitting there while this one works.
     this.viewer.setMatches([], -1);
+    this.scanning = true;
     this.onUpdate({ query, total: 0, index: -1, scanning: true, capped: false });
 
     for (const page of order) {
@@ -166,7 +174,10 @@ export class Search {
 
       const hits = locate(text, needle, page, this.options.wholeWords);
       if (hits.length > 0) {
-        if (total + hits.length >= MATCH_LIMIT) {
+        // Strictly greater: a document with exactly `MATCH_LIMIT` matches has
+        // had none of them dropped, and "2000+" would be a floor on a count
+        // that is exact.
+        if (total + hits.length > MATCH_LIMIT) {
           hits.length = MATCH_LIMIT - total;
           this.capped = true;
         }
@@ -202,6 +213,7 @@ export class Search {
   /** Hand the results over: rebuild the list in page order, keep the reader on
       the match they were on, and tell the viewer once. */
   private publish(preferred: Match | null, reveal: boolean, scanning: boolean): void {
+    this.scanning = scanning;
     const standing = this.matches[this.index] ?? preferred;
     this.matches = [];
     for (const page of [...this.found.keys()].sort((a, b) => a - b)) {
@@ -230,7 +242,7 @@ export class Search {
       query: this.query,
       total: this.matches.length,
       index: this.index,
-      scanning: false,
+      scanning: this.scanning,
       capped: this.capped,
     });
   }

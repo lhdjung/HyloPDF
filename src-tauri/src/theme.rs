@@ -153,7 +153,13 @@ pub fn install_built_ins(dir: &Path) {
         // exactly this.
         let on_disk = fs::read_to_string(&path).unwrap_or_default();
         if on_disk != wanted {
-            let _ = fs::write(path, wanted);
+            // Through `atomic_write` like every other write in this crate. A
+            // plain `fs::write` truncates and then fills, so there is a moment
+            // when the file on disk is a shipped theme with no colours in it —
+            // and this directory is watched, and read by anything the reader
+            // has open beside the app. Rewriting seven files at every launch
+            // is seven chances at that moment.
+            let _ = atomic_write(&path, wanted.as_bytes());
         }
     }
 }

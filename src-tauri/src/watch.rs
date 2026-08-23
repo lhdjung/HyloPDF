@@ -74,12 +74,25 @@ enum Signal {
     Follow(Option<PathBuf>),
 }
 
+/// What a whole document looked like: its length, when it was last written,
+/// and a fingerprint of the end of it.
+///
+/// The tail is in here because the first two are not enough on their own. A
+/// file system with a coarse modification time — HFS+ keeps whole seconds —
+/// answers a recompile that came out the same length within the same second
+/// with a mark identical to the one before it, and the reload never fires. The
+/// end of a PDF is its cross-reference table and trailer, which carry byte
+/// offsets into everything above them, so two different drafts of the same
+/// paper agreeing there is not a thing that happens. It is also free: `whole`
+/// has already read those bytes to look for `%%EOF`.
+type Mark = (u64, SystemTime, u64);
+
 /// The document being followed, the directory the watch is actually on, and
 /// what the file looked like when it was last whole.
 struct Followed {
     path: PathBuf,
     dir: PathBuf,
-    mark: Option<(u64, SystemTime)>,
+    mark: Option<Mark>,
 }
 
 /// Start watching the themes directory. The document half stays idle until
@@ -217,8 +230,8 @@ fn follow(
 /// look at the size again after a pause. None of it proves the document is
 /// readable; all of it rules out the case that actually happens, which is
 /// catching a compiler halfway through writing one.
-fn whole(path: &Path) -> Option<(u64, SystemTime)> {
-    let mark = identity(path)?;
+fn whole(path: &Path) -> Option<Mark> {
+    let (length, modified) = identity(path)?;
     let mut file = File::open(path).ok()?;
 
     let mut head = [0u8; 5];
@@ -227,7 +240,7 @@ fn whole(path: &Path) -> Option<(u64, SystemTime)> {
         return None;
     }
 
-    file.seek(SeekFrom::Start(mark.0.saturating_sub(TAIL)))
+    file.seek(SeekFrom::Start(length.saturating_sub(TAIL)))
         .ok()?;
     let mut tail = Vec::new();
     file.read_to_end(&mut tail).ok()?;
@@ -238,10 +251,22 @@ fn whole(path: &Path) -> Option<(u64, SystemTime)> {
     // Still being written to? Then this is a moment in the middle of a run
     // that happens to end in `%%EOF`, and the next burst will ask again.
     std::thread::sleep(STEADY);
-    if identity(path)? != mark {
+    if identity(path)? != (length, modified) {
         return None;
     }
-    Some(mark)
+    Some((length, modified, fingerprint(&tail)))
+}
+
+/// FNV-1a over the bytes already read. Not a checksum of the document — it
+/// only has to tell two trailers apart, and it must not cost a read of its
+/// own.
+fn fingerprint(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 fn identity(path: &Path) -> Option<(u64, SystemTime)> {
@@ -304,6 +329,33 @@ mod tests {
         body.extend_from_slice(b"\n%%EOF\n");
         let path = scratch("long.pdf", &body);
         assert!(whole(&path).is_some());
+    }
+
+    /// The case a coarse modification time hides: a recompile that came out
+    /// the same length, inside the same tick. Length and time alone said
+    /// nothing had happened; the trailer says otherwise, and the trailer is
+    /// already in hand.
+    #[test]
+    fn a_rewrite_of_the_same_length_is_still_a_rewrite() {
+        let path = scratch("redraft.pdf", b"%PDF-1.7\ntrailer\n0000000042\n%%EOF\n");
+        let first = whole(&path).expect("whole");
+
+        std::fs::write(&path, b"%PDF-1.7\ntrailer\n0000000317\n%%EOF\n").expect("rewrite");
+        let second = whole(&path).expect("whole again");
+
+        assert_eq!(
+            first.0, second.0,
+            "the test needs both drafts the same length"
+        );
+        assert_ne!(first, second, "a new draft went unnoticed");
+    }
+
+    /// And the other half of it: reading the same file twice must not look
+    /// like a change, or every burst would reload the document.
+    #[test]
+    fn the_same_document_marks_the_same_way_twice() {
+        let path = scratch("steady.pdf", b"%PDF-1.7\ntrailer\n%%EOF\n");
+        assert_eq!(whole(&path), whole(&path));
     }
 
     /// A watcher that does nothing but say what it was asked to do, so that

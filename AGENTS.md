@@ -88,6 +88,28 @@ to the chunks. All three are fixed; each left a note below.
   hidden, never came back — thirteen failures, none of them about what they
   said they were about. `HYLOPDF_PLATFORM=other` now reaches that from a Mac.
 
+## What Chunk E left behind
+Four changes to the bar and one measurement. The bar now derives its chips from
+the paper it sits on rather than from the backdrop, so a hover, a held-down
+button, the zoom group and the page field belong to whatever theme is on; the
+three search switches wear the accent the way the buttons above them do; the
+way out of the app is a Quit button beside Open instead of a corner of the
+start screen; and the seventy-eight pixels macOS keeps for the traffic lights
+are charged only when there are traffic lights to keep them for. What the fifth
+question found is in "What a reading session costs" below.
+- The chips are mixed towards the theme's own ink unless the paper cannot
+  support it, which happens when a theme leaves the document alone and its
+  chrome lands on white. The guard keeps the field visible; it does not fix the
+  larger version of the same problem, which is that a dark theme with
+  `recolor = false` shows light labels on a white bar. No built-in theme is in
+  that shape, and any theme that is looks broken well before the chips do.
+- High Contrast still puts a black page on a black backdrop, from Chunk B. The
+  bar's own fields on it are now `#131313` on black — present, but only just.
+  It is the theme's nature rather than the derivation's.
+- The measurement says `PAGE_CACHE` is sized in the wrong unit: forty-eight
+  pages is nothing for text and three gigabytes for a scan. Not changed, only
+  found. Sizing it by what a page actually costs — bytes, or a budget the
+  cache spends — is the shape of the fix.
 
 # Architecture of the built app
 
@@ -280,6 +302,54 @@ taken before recolouring, and both put it back under a *single* clip covering
 every rectangle at once — one clip and one `drawImage` per page, not one per
 picture, which on a page of typeset mathematics is the difference between a
 frame and a stall.
+
+## What a reading session costs
+
+Measured on the release bundle — `npm run tauri build`, then the `.app` run on
+a document — on an Apple silicon Mac, in a 1280×860 window at two device pixels
+to the point, fit width, no recolouring. Scrolled a viewport at a time with a
+quarter second between, which is a fast reader rather than a benchmark. The
+figure is physical footprint, which is what Activity Monitor calls Memory and
+what counts against the machine; `vmmap` agrees with `footprint` to the
+megabyte, and `ps` does not, because a gigabyte of this ends up compressed and
+RSS does not count compressed pages. All four processes a Tauri app runs in are
+summed: the app itself, and WebKit's WebContent, GPU and Networking helpers.
+
+| what is open                        | on opening | after 60 viewports | where it settles      |
+| ----------------------------------- | ---------: | -----------------: | --------------------: |
+| nothing — the start screen          |      81MB  |                  — |                     — |
+| 400 pages of plain text (the fixture) | 293MB    |            324MB   |                       |
+| 1048 pages of typeset mathematics   |     343MB  |            480MB   | ~600MB after 200      |
+| 197 pages of textbook with figures  |     382MB  |            517MB   |                       |
+| 27 slides, 22MB of pictures         |     271MB  |    619MB after 30  |                       |
+| 315 pages of scan, 33MB             |     373MB  |           1.75GB   | 3.2GB after 160       |
+
+**The Rust side is 26–33MB and never moves**, whatever is open and however long
+it is read. Every number above that is the webview, and two things set it.
+
+*The canvases of the mounted pages.* A page at fit width in that window is
+2480×3210 device pixels, which is 32MB of canvas, and `OVERSCAN` keeps two or
+three alive at once. That is most of the 200–300MB a document costs the moment
+it opens, and it scales with the window: the same document read full screen on
+a larger display costs proportionally more.
+
+*`PAGE_CACHE`, and this is the one that hurts.* Forty-eight page proxies, each
+holding pdf.js's parsed operator list — which means every decoded image on the
+page — until `cleanup()` is called on it. For text a proxy is small. For a scan
+a proxy is a decoded full-page bitmap, and forty-eight of them is where the
+3.2GB comes from: 145 pages read, 48 kept, about 67MB each.
+
+It is a cache and not a leak — 200 viewports is no worse than 160, and going
+back to the top gives about 200MB back as the GPU process releases its buffers
+— but it is a cache **sized in pages when the thing it holds is measured in
+bytes**, and a page can be a kilobyte or fifty megabytes. A budget in bytes,
+spent down by whatever each page actually costs, is the same code with a
+different accumulator. Nothing here has been changed; this is what the
+measurement found.
+
+For scale, the shipped bundle is 5.8MB on disk (4.2MB as a `.dmg`), of which
+5.7MB is the one binary — the whole frontend, pdf.js's worker, cmaps, standard
+fonts and wasm decoders included, is compressed inside it.
 
 ## Things that will bite
 

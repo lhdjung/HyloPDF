@@ -38,16 +38,35 @@ test("a document opens and knows how long it is", async () => {
 
 test("the scrollbar tells the truth about the whole book", async () => {
   // Pages beyond the first are measured in the background, so the layout
-  // settles shortly after the document opens rather than before it appears.
-  await app.page.waitForTimeout(1500);
+  // settles shortly after the document opens rather than before it appears —
+  // and how shortly is four hundred page proxies' worth of the machine's time,
+  // not a number that can be written down here.
+  const tall = PAGES * 500;
+  await app.page
+    .waitForFunction(
+      (want) => document.getElementById("pages").offsetHeight > want,
+      tall,
+      { timeout: 30_000, polling: 100 },
+    )
+    .catch(() => {});
   const height = await app.page.evaluate(
     () => document.getElementById("pages").offsetHeight,
   );
   // Four hundred pages of a page each; the exact height depends on the fit.
-  assert.ok(height > PAGES * 500, `scroll height was only ${height}px`);
+  assert.ok(height > tall, `scroll height was only ${height}px`);
 });
 
 test("pages are drawn", async () => {
+  // Waited for here rather than inherited: this used to run late enough to
+  // find a painted page only because the test before it slept, and that test
+  // now waits on the layout, which settles well before any pixel does.
+  await app.page
+    .waitForFunction(
+      () => [...document.querySelectorAll(".page canvas")].some((c) => c.width > 1),
+      null,
+      { timeout: 30_000, polling: 100 },
+    )
+    .catch(() => {});
   const drawn = await app.page.evaluate(
     () => [...document.querySelectorAll(".page canvas")].filter((c) => c.width > 1).length,
   );
@@ -62,21 +81,37 @@ test("only the pages near the viewport exist", async () => {
 });
 
 test("moving around", async (t) => {
+  // A page turn is an instant scroll, but the remount that follows it is not:
+  // only the pages near the viewport are in the DOM, so jumping the length of
+  // the book means discarding one neighbourhood and building another, and how
+  // long that takes belongs to the machine. `press` waits a fixed moment,
+  // which is enough here and was not enough on CI. So the page number is
+  // waited for, and the assertion still reports the page it stopped on.
+  const reaches = async (want) => {
+    await app.page
+      .waitForFunction((n) => document.getElementById("page-number")?.value === String(n), want, {
+        timeout: 15_000,
+        polling: 50,
+      })
+      .catch(() => {});
+    assert.equal((await app.state()).page, String(want));
+  };
+
   await t.test("End reaches the last page", async () => {
     await app.press("End");
-    assert.equal((await app.state()).page, String(PAGES));
+    await reaches(PAGES);
   });
 
   await t.test("Home comes back", async () => {
     await app.press("Home");
-    assert.equal((await app.state()).page, "1");
+    await reaches(1);
   });
 
   await t.test("the arrow keys turn pages", async () => {
     await app.press("ArrowRight");
-    assert.equal((await app.state()).page, "2");
+    await reaches(2);
     await app.press("ArrowLeft");
-    assert.equal((await app.state()).page, "1");
+    await reaches(1);
   });
 
   await t.test("a shortcut hands over the page number, ready to type into", async () => {
@@ -104,7 +139,19 @@ test("moving around", async (t) => {
   });
 
   await t.test("a turned page starts at the top of the window", async () => {
+    // The subtest before this one jumped to page 42 and came back, so both the
+    // page turned from and the page turned to have to be back in the DOM
+    // before there is anything to measure.
+    await reaches(1);
     await app.press("ArrowRight");
+    await reaches(2);
+    await app.page.waitForFunction(
+      () =>
+        document.querySelector('.page[data-page="1"]') &&
+        document.querySelector('.page[data-page="2"]'),
+      null,
+      { timeout: 15_000, polling: 50 },
+    );
     const { above, before } = await app.page.evaluate(() => {
       const viewer = document.getElementById("viewer");
       const top = (n) =>
@@ -117,6 +164,7 @@ test("moving around", async (t) => {
     assert.ok(above > 0 && above < 40, `page two started ${above}px down`);
     assert.ok(Math.abs(before) < 1.5, `page one still showed ${before}px`);
     await app.press("ArrowLeft");
+    await reaches(1);
   });
 });
 
@@ -134,12 +182,28 @@ test("fit width fits the width", async (t) => {
   });
 
   await t.test("with the sidebar out", async () => {
+    // The sidebar opening relays the pages out, and the relayout is a frame or
+    // several rather than a fixed 400ms. Waited for both ways round: the
+    // subtest after this one measures the window the sidebar has just left.
+    const framed = () =>
+      app.page
+        .waitForFunction(
+          () => {
+            const viewer = document.getElementById("viewer").getBoundingClientRect();
+            const page = document.querySelector("#pages .page")?.getBoundingClientRect();
+            return !!page && page.left - viewer.left < 1 && viewer.right - page.right < 1;
+          },
+          null,
+          { timeout: 15_000, polling: 50 },
+        )
+        .catch(() => {});
+
     await app.page.keyboard.press(`${MOD}+b`);
-    await app.page.waitForTimeout(400);
+    await framed();
     const { left, right } = await strips();
     assert.ok(left < 1 && right < 1, `${left}px and ${right}px of ground left over`);
     await app.page.keyboard.press(`${MOD}+b`);
-    await app.page.waitForTimeout(400);
+    await framed();
   });
 
   await t.test("and does not put a sideways scrollbar under it", async () => {
@@ -160,14 +224,49 @@ test("ctrl+wheel zooms", async () => {
 });
 
 test("search", async (t) => {
+  // Indexing four hundred pages takes as long as the machine takes, and the bar
+  // says so while it is at it: `…` until the scan is done, then a count or
+  // "None". Each step used to sleep 2.5 seconds, which was generous here and a
+  // guess about CI.
+  //
+  // Waiting for the scan to *end* is not enough on its own — between the query
+  // changing and the scan starting, the bar still holds the last answer, and a
+  // wait for "not scanning" would return on it. So it waits for what the step
+  // expects the bar to say, and then asserts it: a slow scan is waited out, and
+  // a scan that ends somewhere else is still reported as what it ended on
+  // rather than as a timeout.
+  const says = async (want) => {
+    const literal = typeof want === "string";
+    await app.page
+      .waitForFunction(
+        ({ literal: exact, expected }) => {
+          const text = document.getElementById("find-status")?.textContent ?? "";
+          if (text === "…") return false;
+          return exact ? text === expected : new RegExp(expected).test(text);
+        },
+        { literal, expected: literal ? want : want.source },
+        { timeout: 30_000, polling: 50 },
+      )
+      .catch(() => {});
+    const status = (await app.state()).findStatus ?? "";
+    if (literal) assert.equal(status, want);
+    else assert.match(status, want);
+  };
+
+  const scanned = () =>
+    app.page
+      .waitForFunction(
+        () => (document.getElementById("find-status")?.textContent ?? "") !== "…",
+        null,
+        { timeout: 30_000, polling: 50 },
+      )
+      .catch(() => {});
+
   await t.test("finds matches and highlights them", async () => {
     await app.page.keyboard.press(`${MOD}+f`);
     await app.page.waitForTimeout(150);
     await app.page.fill("#find-input", "quick brown");
-    await app.page.waitForTimeout(2500);
-
-    const state = await app.state();
-    assert.match(state.findStatus ?? "", /\d+ of \d+/);
+    await says(/\d+ of \d+/);
 
     const marks = await app.page.evaluate(
       () => document.querySelectorAll(".find-highlight").length,
@@ -204,35 +303,29 @@ test("search", async (t) => {
     // Every "he" in the fixture is inside "the", and every "row" inside
     // "brown", so whole words leaves the query with nothing.
     await app.page.fill("#find-input", "row");
-    await app.page.waitForTimeout(2500);
-    assert.match((await app.state()).findStatus ?? "", /\d+ of \d+/);
+    await says(/\d+ of \d+/);
 
     await app.page.click("#find-words");
-    await app.page.waitForTimeout(2500);
-    assert.equal((await app.state()).findStatus, "None");
+    await says("None");
 
     await app.page.click("#find-words");
-    await app.page.waitForTimeout(2500);
-    assert.match((await app.state()).findStatus ?? "", /\d+ of \d+/);
+    await says(/\d+ of \d+/);
   });
 
   await t.test("match case takes the query at its word", async () => {
     // The fixture writes "Page" and never "page", so the same six letters
     // find everything or nothing depending on this switch alone.
     await app.page.fill("#find-input", "page");
-    await app.page.waitForTimeout(2500);
-    assert.match((await app.state()).findStatus ?? "", /\d+ of \d+/);
+    await says(/\d+ of \d+/);
 
     await app.page.click("#find-case");
-    await app.page.waitForTimeout(2500);
-    assert.equal((await app.state()).findStatus, "None");
+    await says("None");
 
     await app.page.fill("#find-input", "Page");
-    await app.page.waitForTimeout(2500);
-    assert.match((await app.state()).findStatus ?? "", /\d+ of \d+/);
+    await says(/\d+ of \d+/);
 
     await app.page.click("#find-case");
-    await app.page.waitForTimeout(2500);
+    await scanned();
   });
 
   await t.test("clicking the document puts it away", async () => {
@@ -327,8 +420,21 @@ test("selected text is repainted from the page, not from the text layer", async 
     const rect = range.getBoundingClientRect();
     return { width: Math.round(rect.width), height: Math.round(rect.height) };
   });
-  await app.page.waitForTimeout(200);
 
+  // Copying a line off the page and recolouring it is real work, and clearing
+  // the copies again waits on the same repaint. Both are waited for rather
+  // than slept through, so that the count each assertion reports is the count
+  // it settled on rather than the count it happened to be passing through.
+  const runs = (n) =>
+    app.page
+      .waitForFunction(
+        (want) => document.querySelectorAll("#pages .selection-layer canvas").length === want,
+        n,
+        { timeout: 15_000, polling: 50 },
+      )
+      .catch(() => {});
+
+  await runs(1);
   const painted = await copies();
   assert.equal(painted.length, 1, `expected one run, got ${painted.length}`);
   assert.ok(painted[0].drawn, "the copy was never drawn");
@@ -340,7 +446,7 @@ test("selected text is repainted from the page, not from the text layer", async 
   );
 
   await app.page.evaluate(() => getSelection().removeAllRanges());
-  await app.page.waitForTimeout(200);
+  await runs(0);
   assert.deepEqual(await copies(), [], "the copies outlived the selection");
 });
 

@@ -484,13 +484,30 @@ is the shape Linux may actually be in. It is also a good deal slower, which
 makes it the switch to reach for when a test is suspected of waiting on a fixed
 number of milliseconds.
 
-**Wait for the condition, not for the clock.** A recolour is a whole canvas of
-work per mounted page, and how long that takes is a property of the machine:
-locally a theme edit repaints in about 90ms, 170ms down the pixel fallback, and
-on a CI runner it went past the 800ms a test had slept for — one failure that
-said the editor had not reached the page, when it had reached it late. Fixed
-waits in `reader.test.mjs` are for ordering, where something has to happen
-*before* the next step; anything waiting for a result polls for the result.
+**Wait for the condition, not for the clock.** Everything this app does after a
+keystroke — recolouring a canvas, remounting a neighbourhood of pages, indexing
+four hundred of them, relaying out for the sidebar — takes as long as the
+machine takes. Locally a theme edit repaints in about 90ms, 170ms down the pixel
+fallback; on a CI runner it went past the 800ms a test had slept for. Three
+consecutive CI runs failed in three different places on the same cause, each
+one passing on the run that found the next.
+
+So fixed waits in `reader.test.mjs` are for *ordering* — something that has to
+happen before the next step can be taken — and anything waiting for a *result*
+polls for the result. The polls all share a shape: `waitForFunction` with a
+generous timeout, `.catch(() => {})`, and then the original assertion, so a
+thing that never arrives is reported as the state it is stuck in rather than as
+a timeout, and the message stays the one worth reading.
+
+Two things learned doing it. Waiting for work to *finish* is not the same as
+waiting for the answer: between a query changing and the search starting, the
+find bar still holds the last count, so a wait for "not scanning any more"
+returns on the previous answer — wait for what the step expects instead. And a
+test that has no wait of its own may be living on the one before it: "pages are
+drawn" only ever passed because the test above it slept 1.5 seconds, and it
+started failing the moment that sleep became a condition that is met sooner.
+
+The suite got faster: 36s of sleeping down to about 11s of waiting.
 
 Settings are seeded through the `localStorage` fallback in `api.ts`, so the
 whole browser path is exercised: no Rust, no window, no traffic lights. Reading

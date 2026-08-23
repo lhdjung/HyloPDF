@@ -147,3 +147,29 @@ test("whole words", async (t) => {
     assert.equal(locate(accented, fold("resumes").text, 1, true).length, 2);
   });
 });
+
+
+/* Characters above the basic plane.
+ *
+ * `fold` used to walk the string by index, which is UTF-16 code units, so
+ * anything above U+FFFF arrived as two halves and `normalize` had nothing to
+ * work with. A document set in mathematical bold — which is one Unicode block,
+ * not a font — could not be searched with the letters on the keyboard. */
+
+test("a character outside the basic plane folds to its plain letter", () => {
+  // U+1D400 MATHEMATICAL BOLD CAPITAL A. Its NFKD is "A".
+  const { text } = fold("\u{1D400}BC");
+  assert.equal(text, "abc");
+});
+
+test("and offsets still count in the units the text layer is indexed by", () => {
+  // The surrogate pair is two units wide, so what follows it starts at 2.
+  const { text, origin } = fold("\u{1D400}x");
+  assert.equal(text, "ax");
+  assert.deepEqual(origin, [0, 2, 3]);
+});
+
+test("a character that folds to nothing at all still leaves the rest in place", () => {
+  const { text } = fold("ty\u00adpo\u200bgraphy");
+  assert.equal(text, "typography");
+});

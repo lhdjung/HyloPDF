@@ -316,19 +316,27 @@ function fold(input: string, caseSensitive = false): { text: string; origin: num
   let text = "";
   const origin: number[] = [];
 
-  for (let i = 0; i < input.length; i++) {
-    const source = i;
+  // A character at a time — a whole one. Iterating the string by index walks
+  // UTF-16 code units, which splits everything above the basic plane into two
+  // halves, and `normalize` on half a character has nothing to work with: 𝐀
+  // (U+1D400, whose NFKD is a plain "A") went through untouched, so searching
+  // for "A" could not find it. Rare in a PDF and not rare in one about
+  // mathematics. `source` is still counted in code units, because that is what
+  // `starts` and the text layer are indexed by.
+  let source = 0;
+  for (const character of input) {
     // NFKD splits the ligatures into their letters and the accented letters
     // into a letter plus its marks; the marks are then dropped. Done a
     // character at a time so that every piece of the result knows which
     // character of the original it came from.
-    const decomposed = input[i].normalize("NFKD");
+    const decomposed = character.normalize("NFKD");
     const pieces = caseSensitive ? decomposed : decomposed.toLowerCase();
     for (const piece of pieces) {
       if (COMBINING.test(piece) || IGNORED.test(piece)) continue;
       text += piece;
       origin.push(source);
     }
+    source += character.length;
   }
   // One past the end, so a match that runs to the last character has somewhere
   // to point its end at.

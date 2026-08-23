@@ -394,6 +394,8 @@ function recolorByPixel(
   const spanX = area ? area.w : width;
   const spanY = area ? area.h : height;
 
+  const mask = regions?.length ? maskFor(regions, originX, originY, spanX, spanY) : null;
+
   const image = ctx.getImageData(originX, originY, spanX, spanY);
   const pixels = image.data;
   // The same ramp the blend chain walks: flatten to a single channel, then
@@ -409,12 +411,12 @@ function recolorByPixel(
     ramp[level * 3 + 2] = text[2] + (bg[2] - text[2]) * t;
   }
   for (let row = 0; row < spanY; row++) {
-    const y = originY + row;
+    const rowStart = row * spanX;
     for (let column = 0; column < spanX; column++) {
       // Overlapping rectangles would otherwise be run through the ramp twice,
       // which is a different colour rather than the same one.
-      if (regions?.length && !within(regions, originX + column, y)) continue;
-      const i = (row * spanX + column) * 4;
+      if (mask && !mask[rowStart + column]) continue;
+      const i = (rowStart + column) * 4;
       // Rec. 601 luma, which is what the `saturation` + greyscale path amounts
       // to and is cheap in integers. The half added before the shift is what
       // rounds it rather than flooring it: the white point multiplies whatever
@@ -452,11 +454,40 @@ function bounds(regions: Rect[], width: number, height: number): Rect {
   return { x: left, y: top, w: right - left, h: bottom - top };
 }
 
-function within(regions: Rect[], x: number, y: number): boolean {
+/**
+ * One byte a pixel, saying whether it falls inside any of the rectangles.
+ *
+ * Built once by filling each rectangle, rather than asked per pixel by
+ * scanning the list. Asking cost rectangles × pixels, and the shape that makes
+ * that bite is an ordinary one: a bibliography has links from the top of the
+ * page to the bottom, so their bounding box is the whole page, and there are a
+ * couple of hundred of them. Twelve million pixels against two hundred
+ * rectangles is two and a half billion tests for one repaint — on the path an
+ * engine without blend modes takes for every step of a zoom. Filling costs the
+ * sum of the rectangles' own areas, which is the ink actually being coloured.
+ *
+ * Rounded outwards, the way `bounds` rounds, so a rectangle that lands on a
+ * fraction colours the pixel it touches rather than stopping short of it.
+ */
+function maskFor(
+  regions: Rect[],
+  originX: number,
+  originY: number,
+  spanX: number,
+  spanY: number,
+): Uint8Array {
+  const mask = new Uint8Array(spanX * spanY);
   for (const rect of regions) {
-    if (x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h) return true;
+    const left = Math.max(0, Math.floor(rect.x) - originX);
+    const right = Math.min(spanX, Math.ceil(rect.x + rect.w) - originX);
+    const top = Math.max(0, Math.floor(rect.y) - originY);
+    const bottom = Math.min(spanY, Math.ceil(rect.y + rect.h) - originY);
+    if (right <= left) continue;
+    for (let row = top; row < bottom; row++) {
+      mask.fill(1, row * spanX + left, row * spanX + right);
+    }
   }
-  return false;
+  return mask;
 }
 
 /**

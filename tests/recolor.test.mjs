@@ -173,3 +173,47 @@ test("the fallback colours only the region it was given", async () => {
   // Applied once, not twice: a second pass would move it off the ramp.
   assert.equal(seen.whereTheyOverlap, "255,0,0", "the overlap was coloured twice");
 });
+
+
+/* A page of links, on the path without blend modes.
+ *
+ * A bibliography's links run from the top of the page to the bottom, so their
+ * bounding box is the whole page — and the fallback used to ask, for every
+ * pixel in that box, whether it was inside any of the rectangles. Rectangles
+ * times pixels. This is that shape at a size a test can afford, and it checks
+ * the answer rather than the clock: what must be true is that only the
+ * rectangles moved, however many of them there are. */
+test("many rectangles colour only themselves", async () => {
+  const seen = await page.evaluate((theme) => {
+    globalThis.T.setBlend(false);
+    const W = 300, H = 400;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, W, H);
+
+    // Two hundred link-shaped rectangles down the page, none of them touching.
+    const rects = [];
+    for (let i = 0; i < 200; i++) rects.push({ x: 10, y: i * 2, w: 60, h: 1 });
+
+    const started = performance.now();
+    globalThis.T.recolor(ctx, W, H, { ...theme, text: "#ff0000", background: "#ffffff" }, rects);
+    const ms = performance.now() - started;
+
+    const at = (x, y) => ctx.getImageData(x, y, 1, 1).data.slice(0, 3).join(",");
+    return {
+      ms,
+      insideFirst: at(20, 0),
+      insideLast: at(20, 398),
+      betweenTwo: at(20, 1),
+      rightOfThem: at(200, 100),
+    };
+  }, THEME);
+
+  assert.equal(seen.insideFirst, "255,0,0");
+  assert.equal(seen.insideLast, "255,0,0");
+  assert.equal(seen.betweenTwo, "0,0,0", "coloured the gap between two links");
+  assert.equal(seen.rightOfThem, "0,0,0", "coloured beyond the rectangles");
+});

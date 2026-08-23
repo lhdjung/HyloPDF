@@ -111,10 +111,12 @@ question found is in "What a reading session costs" below.
   have a cap of their own. 900MB, and flat. "What a reading session costs"
   below carries the numbers, where the memory actually was, and the three
   plausible fixes that turned out to change nothing.
-- `IMAGE_PAGE_CACHE` is six because six is comfortably more than the three
-  pages that can be on screen. Nobody has measured what a reader loses by
-  scrolling back further than that into a scan — it is a page decode, and it
-  would be worth knowing before anyone lowers it.
+- `IMAGE_PAGE_CACHE` was six because six is comfortably more than the three
+  pages that can be on screen, and nobody had measured what the room behind
+  them cost. It is three now, and the measurement is in "What a reading session
+  costs" below: on a forty-page scan, six settles around 790MB and three around
+  630MB. Three is the mounted set and nothing behind it, and what it charges is
+  one page decode when a reader scrolls back further than the screen.
 
 # Architecture of the built app
 
@@ -353,14 +355,30 @@ page until `cleanup()` is called on it, a bitonal scan decodes to four bytes a
 pixel — 3600×4400 is sixty megabytes — and `PAGE_CACHE` kept forty-eight
 proxies. 48 × 60MB is the plateau, and the plateau is where it stopped.
 
-So `IMAGE_PAGE_CACHE` caps the pages that carry pictures at six, and everything
-else keeps the count of forty-eight; a typeset book never reaches the second cap
-and reads exactly as it did. `holdsPictures` decides which is which, and it has
-to ask the page's own object store rather than `recordImages`, which reports
+So `IMAGE_PAGE_CACHE` caps the pages that carry pictures at three, and
+everything else keeps the count of forty-eight; a typeset book never reaches
+the second cap and reads exactly as it did. `holdsPictures` decides which is
+which, and it has to ask the page's own object store rather than `recordImages`, which reports
 where image *XObjects* landed: a bitonal scan arrives as an image mask and is
 not among them, so every page of the scan reported no pictures at all. That
 mistake is worth remembering, because it is the same one behind "scanned
 documents lose all their text" below — masks are where a scan keeps everything.
+
+Where the second cap should sit was measured afterwards, on forty pages of
+synthetic scan — 3600×4400 bitonal, the shape that hurt — read end to end
+through `scripts/memory-probe.mjs`:
+
+| `IMAGE_PAGE_CACHE` | plateau |
+| -----------------: | ------: |
+| 6                  | ~790MB  |
+| 3                  | ~630MB  |
+| 2                  | ~600MB  |
+
+About 36MB a page, and it stops paying at three because `OVERSCAN` keeps three
+pages mounted and a mounted page is never evicted: below three the cap has
+nothing left to take. Every figure there is ±50MB between one report and the
+next, which is itself worth knowing — the GPU process gives memory back in
+bursts rather than steadily, so a single reading is not evidence of anything.
 
 Three things were tried on the way and are not here, which is worth as much as
 what is:

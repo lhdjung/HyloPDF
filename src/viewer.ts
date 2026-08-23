@@ -95,8 +95,15 @@ const PAGE_CACHE = 48;
  * keep theirs. Which is which is not guessed — see `holdsPictures` — and it is
  * remembered once found, because a page does not change its mind about what is
  * printed on it.
+ *
+ * Three, because `OVERSCAN` keeps three pages mounted and a mounted page is
+ * never evicted — so three is the mounted set and no room behind it, and the
+ * room behind it is what the measurement says costs. On a forty-page scan the
+ * cap at six settles around 790MB and the cap at three around 630MB, which is
+ * about 36MB a page. What it charges for that is one page decode when a reader
+ * scrolls further back than the screen.
  */
-const IMAGE_PAGE_CACHE = 6;
+const IMAGE_PAGE_CACHE = 3;
 /** How far beyond the viewport pages are kept alive, in viewport heights. */
 const OVERSCAN = 0.6;
 /** How far a wheel has to push past the end of a page before it turns it.

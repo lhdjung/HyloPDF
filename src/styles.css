@@ -91,7 +91,12 @@ body {
   -webkit-user-select: none;
 }
 
-#shell[data-platform="macos"] #toolbar {
+/* Room for the traffic lights, and only where there are traffic lights. They
+   are furniture of ours in all but name — they leave with the toolbar, and
+   macOS takes them away in full screen, which is where this app expects to be
+   read. Charging the bar for them the rest of the time left the first button
+   stranded seventy-eight pixels in with nothing at all in front of it. */
+#shell[data-platform="macos"][data-fullscreen="false"] #toolbar {
   padding-left: 78px;
 }
 

@@ -1008,7 +1008,13 @@ class App {
         menu.append(
           ui.row(
             "Show toolbar",
-            ui.toggle(this.settings.show_toolbar, (on) => this.toggleToolbar(on)),
+            // And then leave: this menu hangs off a button in the toolbar, so
+            // turning the toolbar off leaves it anchored to nothing, floating
+            // over the document with no way back to what opened it.
+            ui.toggle(this.settings.show_toolbar, (on) => {
+              this.toggleToolbar(on);
+              if (!on) close();
+            }),
             isMac ? "⌘⇧T" : "Ctrl+Shift+T",
           ),
           ui.row(

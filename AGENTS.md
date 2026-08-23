@@ -42,8 +42,17 @@ Ignoring some settings, we have:
 # TODO
 Tackle each chunk in a separate session. Make a Git commit after each numbered task except those in Chunk C, and except there's a reason to combine two or more tasks.
 
-## Chunk B
-7. Deseleccting "Show toolbar" should close the "Settings" dropdown.
+## What Chunk B left behind
+- High Contrast puts a black page on a black backdrop, so nothing marks where
+  one page ends and the next begins. The page shadow is the thing that would
+  say so and it cannot, on black. Worth a look if that theme gets used.
+- The toolbar takes the paper's colour but the chips inside it — a hover, a
+  pressed switch, the zoom group — are still derived from `--surface`. On Sepia
+  that reads as a cold note on warm paper. It is subtle, and the fix is a
+  second family of derived shades, which is more than it is worth today.
+- Selected text is painted by a custom highlight. WebKitGTK is where that is
+  least certain, and nothing here has ever run on it; an engine without the
+  Highlight API silently keeps the old wash rather than breaking.
 
 ## Chunk C
 1. Below talks about switching the viewer to pdfium-render and lists some options for doing this in a performant way. Would the switch be good? (It should then be on the pdfium-prototype branch.) If so, which option or options?

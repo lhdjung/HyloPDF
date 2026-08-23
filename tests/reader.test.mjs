@@ -277,6 +277,29 @@ test("menus answer the keyboard", async (t) => {
   });
 });
 
+test("hiding the toolbar takes the menu hanging off it away too", async () => {
+  await app.page.click("#settings");
+  await app.page.waitForTimeout(200);
+  assert.equal((await app.state()).menuOpen, true);
+
+  await app.page.click('#popovers .popover-row:has(label:text-is("Show toolbar")) .switch');
+  await app.page.waitForTimeout(300);
+  const state = await app.state();
+  assert.equal(
+    await app.page.evaluate(() => document.getElementById("shell").dataset.toolbar),
+    "hidden",
+  );
+  // Left open, it would be anchored to a button that is no longer there.
+  assert.equal(state.menuOpen, false, "the menu outlived the bar it hung off");
+
+  await app.press("Meta+Shift+KeyT");
+  await app.page.waitForTimeout(300);
+  assert.equal(
+    await app.page.evaluate(() => document.getElementById("shell").dataset.toolbar),
+    "shown",
+  );
+});
+
 test("selected text is painted by the theme, not by the engine", async () => {
   // WebKit will not paint a ::selection background at the colour it was given,
   // so the viewer says the selection a second time as a custom highlight and

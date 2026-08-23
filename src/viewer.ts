@@ -49,6 +49,17 @@ GlobalWorkerOptions.workerSrc = workerUrl;
  * masks, and CJK documents lose their glyphs. */
 const asset = (path: string): string => new URL(path, window.location.href).href;
 
+/** Whether a render ended because something called it off rather than because
+ *  it failed.
+ *
+ * Exported because the sidebar needs the same question answered and must not
+ * import pdf.js to ask it: this file is the only one that reaches for the
+ * library rather than its types, which is what keeps swapping the renderer a
+ * change to one file. */
+export function isRenderCancelled(error: unknown): boolean {
+  return error instanceof RenderingCancelledException;
+}
+
 /** Thrown when the reader is asked for a document's password and would rather
     not give one. Not a failure — there is nothing to report and nothing to put
     right — so the only thing anyone does with this is recognise it and say
@@ -1297,7 +1308,7 @@ export class Viewer {
       try {
         await task.promise;
       } catch (error) {
-        if (!(error instanceof RenderingCancelledException)) {
+        if (!isRenderCancelled(error)) {
           // Give up on this page rather than retry it forever.
           slot.renderedKey = key;
           this.callbacks.onError(`Page ${slot.index + 1} could not be drawn.`);

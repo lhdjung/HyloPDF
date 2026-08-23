@@ -41,8 +41,8 @@ import {
   setTitlebarButtons,
   setWindowTitle,
   signalReady,
+  log,
 } from "./api";
-import { invoke } from "@tauri-apps/api/core";
 
 import { hydrateIcons, iconMarkup } from "./icons";
 import { type SearchState, Search } from "./search";
@@ -56,7 +56,7 @@ if (import.meta.env.DEV && hasBackend) {
   // The webview has no terminal of its own; send what it says to the one
   // running `tauri dev`.
   const forward = (kind: string, parts: unknown[]) =>
-    void invoke("log", { message: `${kind}: ${parts.map(String).join(" ")}` }).catch(() => {});
+    log(`${kind}: ${parts.map(String).join(" ")}`);
   for (const kind of ["log", "warn", "error"] as const) {
     const original = console[kind].bind(console);
     console[kind] = (...parts: unknown[]) => {

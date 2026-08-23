@@ -2,7 +2,6 @@
    of page thumbnails. Both are built lazily — a thumbnail is only drawn once
    it is about to be looked at. */
 
-import { RenderingCancelledException } from "pdfjs-dist";
 import type {
   PDFDocumentProxy,
   PDFPageProxy,
@@ -11,7 +10,7 @@ import type {
 
 import type { Theme } from "./api";
 import { recolor } from "./themes";
-import type { Viewer } from "./viewer";
+import { isRenderCancelled, type Viewer } from "./viewer";
 
 type OutlineNode = {
   title: string;
@@ -272,7 +271,7 @@ export class Sidebar {
     } catch (error) {
       // A cancelled render has already been forgotten by whoever cancelled it,
       // and forgetting it again here would undo the redraw that replaced it.
-      if (!(error instanceof RenderingCancelledException)) this.drawn.delete(page);
+      if (!isRenderCancelled(error)) this.drawn.delete(page);
     } finally {
       // The reason the viewer has an LRU and two caps: pdf.js holds a page's
       // parsed operator list — every decoded image on it — from the first

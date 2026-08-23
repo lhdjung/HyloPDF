@@ -308,6 +308,19 @@ export async function copyText(text: string): Promise<void> {
   if (!copied) throw new Error("Nothing could be put on the clipboard.");
 }
 
+/** A line in the terminal running `tauri dev`.
+ *
+ * The webview has no terminal of its own, so this is the only way anything it
+ * says reaches the one place a developer is looking. It lives here for the
+ * same reason everything else does: this file is the only door into Rust, and
+ * a `log` that went straight to `invoke` from `main.ts` made that false — the
+ * claim is load-bearing (it is half of why the renderer is replaceable) and it
+ * is only worth anything if one `grep` can still settle it. */
+export function log(message: string): void {
+  if (!hasBackend) return;
+  void invoke("log", { message }).catch(() => {});
+}
+
 export async function saveWindowState(): Promise<void> {
   if (!hasBackend) return;
   await invoke("save_window_state");

@@ -316,6 +316,35 @@ frame and a stall.
 
 ## What a reading session costs
 
+**Where it stands.** Two changes, measured together in the harness on one
+machine in one sitting so the columns are like for like:
+
+| document                        | before | after |
+| ------------------------------- | -----: | ----: |
+| 400 pages of plain text         |  348MB | 346MB |
+| 40 pages of bitonal scan        |  905MB | 351MB |
+| 27 pages of photographs         |  440MB | 323MB |
+| one page of 12000×16000 bitonal | 2521MB | 327MB |
+
+Nearly all of that is one option to `getDocument`. pdf.js was handing the main
+thread ready-made `ImageBitmap`s, and a bitmap costs four bytes a pixel in the
+GPU process however few bits the picture has on the disk — so a scan, which has
+one, was costing sixty megabytes a page to have read.
+`isOffscreenCanvasSupported: false` sends the decoded data instead; the pages
+come out identical to the pixel and draw slightly quicker. `IMAGE_PAGE_CACHE`
+went from six to three for what was left. Plain text never had the problem and
+does not move.
+
+What remains is the two or three page canvases on screen at about 30MB each,
+which any renderer would pay and which scale with the window — and all of it is
+given back when the document closes. Absolute figures drift by as much as 80MB
+between sittings as the GPU process's own floor moves, so read the pairs rather
+than the numbers: the tables below isolate one change at a time and were taken
+on a lower floor than these.
+
+The rest of this section is how that was found, and what was tried and ruled
+out.
+
 Measured on the release bundle — `npm run tauri build`, then the `.app` run on
 a document — on an Apple silicon Mac with 8GB, in a 1280×860 window at two
 device pixels to the point, fit width, no recolouring. Scrolled a viewport at a

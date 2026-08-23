@@ -7,6 +7,7 @@
  * for it, and closes the same three ways. */
 
 import { hydrateIcons, iconMarkup } from "./icons";
+import { parseColor, toHex } from "./themes";
 
 let openMenu: (() => void) | null = null;
 let openAnchor: HTMLElement | null = null;
@@ -180,11 +181,18 @@ export function menuItem(options: MenuItemOptions): HTMLButtonElement {
   return button;
 }
 
+/** A theme, two letters wide.
+ *
+ * The colours go through the same reader the page does. Handing the raw
+ * strings to CSS meant the browser understood things the renderer does not —
+ * `steelblue` showed as steel blue here and rendered as black on the page, so
+ * the one place in the app that is supposed to show you what you are about to
+ * get was the one place that lied about it. */
 export function swatch(text: string, background: string, letter = "A"): HTMLElement {
   const element = document.createElement("span");
   element.className = "swatch";
-  element.style.background = background;
-  element.style.color = text;
+  element.style.background = toHex(parseColor(background, [255, 255, 255]));
+  element.style.color = toHex(parseColor(text));
   element.textContent = letter;
   return element;
 }

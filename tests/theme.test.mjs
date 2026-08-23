@@ -9,10 +9,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./helpers.mjs";
 
-const { selectionArea, selectionInk, toHex, contrastRatio, parseColor } = await load(
-  "src/themes.ts",
-  ["selectionArea", "selectionInk", "toHex", "contrastRatio", "parseColor"],
-);
+const { selectionArea, selectionInk, toHex, contrastRatio, parseColor, readColor, unreadableColors } =
+  await load("src/themes.ts", [
+    "selectionArea",
+    "selectionInk",
+    "toHex",
+    "contrastRatio",
+    "parseColor",
+    "readColor",
+    "unreadableColors",
+  ]);
 
 /** A theme with nothing named but the two colours every theme has. */
 const theme = (over = {}) => ({
@@ -64,4 +70,49 @@ test("a theme that names both is taken at its word", () => {
   const it = theme({ selection: "#123456", selection_text: "#fedcba" });
   assert.deepEqual(selectionArea(it), parseColor("#123456"));
   assert.deepEqual(selectionInk(it), parseColor("#fedcba"));
+});
+
+
+/* ------------------------------------------------------------ reading a colour
+
+   The three ways a hand-written theme goes wrong, and the one that used to be
+   worst: a hex string with a stray character in it came back as a colour
+   rather than as a refusal, because `parseInt` stops at what it cannot read
+   and keeps what it had. A theme that renders wrong is a bug report; a theme
+   that renders black is a support question. */
+
+test("a stray character is refused rather than half-read", () => {
+  // parseInt("12345g", 16) is 0x12345 — a perfectly plausible colour, from a
+  // string that is not one.
+  assert.equal(readColor("#12345g"), null);
+  assert.equal(readColor("#00zzzz"), null);
+  assert.deepEqual(parseColor("#12345g", [1, 2, 3]), [1, 2, 3]);
+});
+
+test("hex is read in all four lengths, and an alpha is dropped", () => {
+  assert.deepEqual(readColor("#1e2a3b"), [30, 42, 59]);
+  assert.deepEqual(readColor("#0f0"), [0, 255, 0]);
+  // A theme naming a colour with an alpha means the colour.
+  assert.deepEqual(readColor("#1e2a3bff"), [30, 42, 59]);
+  assert.deepEqual(readColor("#0f08"), [0, 255, 0]);
+  // The hash is optional, and whitespace either side is not an error.
+  assert.deepEqual(readColor("  1e2a3b "), [30, 42, 59]);
+  assert.deepEqual(readColor("#1E2A3B"), [30, 42, 59]);
+});
+
+test("anything that is not hex is refused", () => {
+  for (const value of ["steelblue", "rgb(30, 42, 59)", "", "#", "#12", "#1234567"]) {
+    assert.equal(readColor(value), null, value);
+  }
+});
+
+test("a theme says which of its colours could not be read", () => {
+  assert.deepEqual(unreadableColors(theme()), []);
+  assert.deepEqual(unreadableColors(theme({ text: "steelblue" })), ["text"]);
+  assert.deepEqual(
+    unreadableColors(theme({ background: "rgb(1,2,3)", link: "#12345g" })),
+    ["background", "link"],
+  );
+  // An absent optional colour is derived, not wrong.
+  assert.deepEqual(unreadableColors(theme({ accent: null, selection: null })), []);
 });

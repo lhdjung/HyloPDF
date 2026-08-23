@@ -13,7 +13,7 @@
 import { type Settings, type Theme, deleteTheme, isMac, saveTheme } from "./api";
 import { hydrateIcons } from "./icons";
 import * as ui from "./ui";
-import { isDarkTheme, selectionArea, selectionInk, toHex } from "./themes";
+import { isDarkTheme, parseColor, selectionArea, selectionInk, toHex } from "./themes";
 import type { FitMode } from "./viewer";
 
 export interface SettingsHost {
@@ -386,15 +386,22 @@ function themeCard(theme: Theme, current: boolean, onSelect: () => void): HTMLEl
 
   const preview = document.createElement("span");
   preview.className = "preview";
-  preview.style.background = theme.recolor ? theme.background : "#ffffff";
-  preview.style.color = theme.recolor ? theme.text : "#2f3237";
+  // Through the same reader the page uses, for the reason `ui.swatch` says:
+  // a card that shows a colour the renderer cannot read is showing you
+  // something you are not going to get.
+  const ink = (value: string, fallback: string) =>
+    toHex(parseColor(value, parseColor(fallback)));
+  preview.style.background = theme.recolor ? ink(theme.background, "#ffffff") : "#ffffff";
+  preview.style.color = theme.recolor ? ink(theme.text, "#000000") : "#2f3237";
   const letters = document.createElement("span");
   letters.textContent = "Aa";
   const link = document.createElement("span");
   link.className = "preview-link";
   link.textContent = "Link";
   // A theme that leaves the document alone leaves its links alone too.
-  link.style.color = theme.recolor ? theme.link ?? theme.accent ?? theme.text : "#1a5fb4";
+  link.style.color = theme.recolor
+    ? ink(theme.link ?? theme.accent ?? theme.text, "#000000")
+    : "#1a5fb4";
   preview.append(letters, link);
 
   const name = document.createElement("span");

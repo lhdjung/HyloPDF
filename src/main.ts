@@ -48,7 +48,7 @@ import { hydrateIcons, iconMarkup } from "./icons";
 import { type SearchState, Search } from "./search";
 import { isEditingTheme, refreshSettingsWindow, showSettingsWindow } from "./settings";
 import { Sidebar } from "./sidebar";
-import { applyTheme, isDarkTheme } from "./themes";
+import { applyTheme, isDarkTheme, unreadableColors } from "./themes";
 import * as ui from "./ui";
 import { Cancelled, type FitMode, Viewer } from "./viewer";
 
@@ -185,6 +185,7 @@ class App {
 
     applyTheme(this.theme);
     this.applyChrome();
+    this.reportUnreadableColors(this.theme);
     this.viewer.setTheme(this.theme, !this.settings.recolor_images);
     this.viewer.setGap(this.settings.page_gap);
     this.viewer.setScrollMode(this.settings.scroll_mode);
@@ -631,12 +632,45 @@ class App {
     applyTheme(theme);
     this.viewer.setTheme(theme, !this.settings.recolor_images);
     this.sidebar.setTheme(theme);
+    this.reportUnreadableColors(theme);
     if (!remember) return;
     this.set("theme", theme.id);
     // Remember which light and which dark theme this reader prefers, so the
     // dark-mode switch returns to the right one rather than a default.
     if (isDarkTheme(theme)) this.set("dark_theme", theme.id);
     else this.set("light_theme", theme.id);
+  }
+
+  /** Themes already complained about, so a theme reapplied on every save of
+      its file says it once rather than every time. */
+  private complainedAbout = new Set<string>();
+
+  /**
+   * Say when a theme file names a colour the app cannot read.
+   *
+   * The whole argument for keeping themes as TOML is that somebody — or
+   * something asked on their behalf — can write one by hand, and what they
+   * will get wrong is the notation: `steelblue`, `rgb(30, 42, 59)`, a stray
+   * character in a hex string. Every one of those fell through to a fallback,
+   * which for the ink is black and for the paper is white, and nothing
+   * anywhere said so. The file was wrong and the screen looked like a bug in
+   * the app.
+   */
+  private reportUnreadableColors(theme: Theme): void {
+    const bad = unreadableColors(theme);
+    if (bad.length === 0) {
+      // Put right since it was last complained about, so it is worth
+      // complaining about again if it goes wrong again.
+      this.complainedAbout.delete(theme.id);
+      return;
+    }
+    if (this.complainedAbout.has(theme.id)) return;
+    this.complainedAbout.add(theme.id);
+    const fields = bad.join(", ");
+    ui.notice(
+      `${theme.name}: ${fields} ${bad.length === 1 ? "is not a colour" : "are not colours"} ` +
+        `HyloPDF can read. Colours are hex — #1e2a3b.`,
+    );
   }
 
   toggleDark(on = !isDarkTheme(this.theme)): void {

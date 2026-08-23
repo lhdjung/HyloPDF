@@ -40,18 +40,66 @@ const GREEN_LIGHT: Rgb = [0x6c, 0xc0, 0x8b];
  */
 const WHITE_POINT = 235;
 
+/**
+ * Read a colour out of a theme file.
+ *
+ * Hex, in the four lengths anyone writes: `#abc`, `#abcd`, `#aabbcc`,
+ * `#aabbccdd`. The two with an alpha channel are accepted and the alpha
+ * dropped — a theme's colours are opaque, and a file that names one with an
+ * alpha means the colour rather than the transparency. `readColor` below is
+ * the same function for anyone who needs to know whether it worked.
+ *
+ * Every length is checked against the alphabet before it is read.
+ * `parseInt("12345g", 16)` stops at the character it cannot read and returns
+ * what it had, so the six-digit path used to answer `#12345g` with a
+ * plausible-looking colour rather than with the fallback — which is the worst
+ * of the three possible behaviours, because it is the one nobody notices.
+ */
 export function parseColor(value: string, fallback: Rgb = BLACK): Rgb {
+  return readColor(value) ?? fallback;
+}
+
+/** The same, but saying so when it cannot: `null` rather than a guess, which
+    is what lets a theme with an unreadable colour be reported instead of
+    quietly rendering as black on white. */
+export function readColor(value: string): Rgb | null {
   const hex = value.trim().replace(/^#/, "");
-  if (hex.length === 3) {
-    const [r, g, b] = [...hex].map((c) => parseInt(c + c, 16));
-    return [r, g, b].some(Number.isNaN) ? fallback : ([r, g, b] as Rgb);
-  }
-  if (hex.length === 6) {
-    const n = parseInt(hex, 16);
-    if (Number.isNaN(n)) return fallback;
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  }
-  return fallback;
+  if (!/^(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(hex)) return null;
+  // The short forms double each digit; the alpha, where there is one, is read
+  // and thrown away.
+  const full = hex.length <= 4 ? [...hex].map((c) => c + c).join("") : hex;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+/**
+ * Which of a theme's colours could not be read.
+ *
+ * A theme file is meant to be written by hand, or by something asked to write
+ * one, and the thing it will get wrong is the notation: `steelblue`,
+ * `rgb(30, 42, 59)`, a stray character in a hex string. Every one of those
+ * fell through to a fallback — black for the ink, white for the paper — with
+ * nothing said anywhere, so the file was wrong and the screen looked like a
+ * bug in the app.
+ *
+ * Returns the names of the fields at fault, in the order they appear in a
+ * file, so the reader can be told which line to look at.
+ */
+export function unreadableColors(theme: Theme): string[] {
+  const named: [string, string | null][] = [
+    ["text", theme.text],
+    ["background", theme.background],
+    ["accent", theme.accent],
+    ["link", theme.link],
+    ["selection", theme.selection],
+    ["selection_text", theme.selection_text],
+  ];
+  return named
+    .filter(([, value]) => value !== null && value !== "" && readColor(value) === null)
+    .map(([name]) => name);
 }
 
 export function toHex([r, g, b]: Rgb): string {

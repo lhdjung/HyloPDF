@@ -22,8 +22,10 @@ import {
   isMac,
   listThemes,
   onCloseRequested,
+  onDocumentChanged,
   onExternalDocument,
   onFileDrop,
+  onThemesChanged,
   onWindowGeometryChange,
   openDocument,
   openExternal,
@@ -44,7 +46,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { hydrateIcons, iconMarkup } from "./icons";
 import { type SearchState, Search } from "./search";
-import { showSettingsWindow } from "./settings";
+import { refreshSettingsWindow, showSettingsWindow } from "./settings";
 import { Sidebar } from "./sidebar";
 import { applyTheme, isDarkTheme } from "./themes";
 import * as ui from "./ui";
@@ -194,6 +196,7 @@ class App {
     // Listen before reporting in: the answer to `ready` may itself be a
     // document, and anything arriving after it comes through as an event.
     await this.listenForDocuments();
+    await this.listenForFileChanges();
     const startWith = await signalReady();
     if (startWith) await this.open(startWith);
 
@@ -222,6 +225,55 @@ class App {
         else ui.notice("That is not a PDF.");
       },
     });
+  }
+
+  /** Files this app reads but does not own: the themes, and the document.
+      Rust watches both and says when one of them has really changed. */
+  private async listenForFileChanges(): Promise<void> {
+    await onThemesChanged((themes) => this.themesChanged(themes));
+    await onDocumentChanged((path) => void this.reload(path));
+  }
+
+  /** A theme file was written — by hand, by an LLM, or by this app saving one.
+   *
+   * Whatever is in use is reapplied from the new set, so that editing a theme
+   * beside the app shows up in the app. It goes through `useTheme` with
+   * `remember` off: nobody chose a theme here, and remembering would write
+   * `settings.toml` for every save an editor makes. A theme whose file has
+   * gone takes the reader somewhere else rather than leaving the colours of
+   * something that no longer exists on screen. */
+  private themesChanged(themes: Theme[]): void {
+    const before = this.theme;
+    this.themes = themes;
+    const current = themes.find((theme) => theme.id === before.id);
+    if (current) {
+      // Unconditional: the viewer and the sidebar both compare colours before
+      // they repaint anything, so reapplying an unchanged theme costs a few
+      // CSS variables and nothing else.
+      this.useTheme(current, false);
+    } else {
+      const replacement = this.replacementFor(before);
+      if (replacement) {
+        this.useTheme(replacement);
+        ui.notice(`${before.name} is gone. Now reading in ${replacement.name}.`);
+      }
+    }
+    refreshSettingsWindow();
+  }
+
+  /** The open document was rewritten underneath the reader.
+   *
+   * Where they were is taken from the viewer rather than from the library,
+   * because the library only has the last position written down and this is
+   * the one place where the two can differ by a whole scroll. A document that
+   * got shorter lands on its last page; `scrollTo` clamps. */
+  private async reload(path: string): Promise<void> {
+    if (path !== this.path) return;
+    const at = this.viewer.position();
+    await this.open(path);
+    if (this.path !== path) return;
+    this.viewer.scrollTo(at.page, at.offset);
+    ui.notice("Reloaded — the document changed on disk.");
   }
 
   themeById(id: string): Theme {

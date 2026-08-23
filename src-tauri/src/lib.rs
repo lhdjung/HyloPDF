@@ -1,6 +1,7 @@
 mod library;
 mod settings;
 mod theme;
+mod watch;
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -283,8 +284,16 @@ async fn open_document(paths: State<'_, Paths>, path: String) -> Result<Opened, 
 /// a single page was drawn, and every one of those bytes was read before the
 /// first one was shown.
 #[tauri::command]
-async fn open_for_reading(open: State<'_, OpenFile>, path: String) -> Result<u64, String> {
-    open.begin(&path)
+async fn open_for_reading(
+    open: State<'_, OpenFile>,
+    watching: State<'_, watch::Watching>,
+    path: String,
+) -> Result<u64, String> {
+    let length = open.begin(&path)?;
+    // Only a document that opened is worth following, and this is also where
+    // a second document displaces the first: nothing closes in between.
+    watching.document(Some(&path));
+    Ok(length)
 }
 
 /// A slice of the open document. Returned raw rather than as JSON, so the
@@ -302,8 +311,12 @@ async fn read_range(
 
 /// Let go of the open document, so the handle does not outlive the reading.
 #[tauri::command]
-async fn close_document(open: State<'_, OpenFile>) -> Result<(), String> {
+async fn close_document(
+    open: State<'_, OpenFile>,
+    watching: State<'_, watch::Watching>,
+) -> Result<(), String> {
     open.close();
+    watching.document(None);
     Ok(())
 }
 
@@ -641,6 +654,9 @@ pub fn run() {
             theme::install_built_ins(&themes);
 
             let stored = settings::load(&config);
+            // Started after the shipped themes are written, so that writing
+            // them is not itself the first thing it reports.
+            app.manage(watch::start(app.handle().clone(), themes.clone()));
             app.manage(Paths { config, themes });
             app.manage(OpenFile::default());
             app.manage(Pending {

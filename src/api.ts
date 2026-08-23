@@ -368,6 +368,25 @@ export async function onExternalDocument(
   await listen<string>("open-document", (event) => handler(event.payload));
 }
 
+/** Theme files rewritten on the disk, by an editor or by the app itself.
+    The whole set comes with the event — there are seven of them and a handful
+    of colours each, so asking again would cost more than sending it. */
+export async function onThemesChanged(
+  handler: (themes: Theme[]) => void,
+): Promise<void> {
+  if (!hasBackend) return;
+  await listen<Theme[]>("themes-changed", (event) => handler(event.payload));
+}
+
+/** The open document, rewritten underneath the reader — a paper recompiled,
+    usually. Rust only says so once what is on the disk is a whole PDF again. */
+export async function onDocumentChanged(
+  handler: (path: string) => void,
+): Promise<void> {
+  if (!hasBackend) return;
+  await listen<string>("document-changed", (event) => handler(event.payload));
+}
+
 export async function onFileDrop(handlers: {
   hover: () => void;
   cancel: () => void;

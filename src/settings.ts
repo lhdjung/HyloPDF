@@ -56,6 +56,18 @@ type Draft = Theme;
 // with a sidebar is expected to do.
 let currentPage: PageId = "reading";
 
+/** Redraw the open Settings window, if there is one.
+ *
+ * The theme list in Appearance is a picture of what is on the disk, and the
+ * disk can now change while the window is open. Nothing happens mid-edit: a
+ * half-finished theme is in the draft rather than in a file, and pulling the
+ * pane out from under it would lose it. */
+let redraw: (() => void) | null = null;
+
+export function refreshSettingsWindow(): void {
+  redraw?.();
+}
+
 export function showSettingsWindow(
   host: SettingsHost,
   opening?: { page?: PageId; edit?: { from: Theme | null } },
@@ -145,8 +157,16 @@ export function showSettingsWindow(
     };
 
     render();
+    // Only while this window is up, and only when it is not in the middle of
+    // a theme being written.
+    redraw = () => {
+      if (!editing) render();
+    };
     return body;
-  }, cancelEdit, "full");
+  }, () => {
+    redraw = null;
+    cancelEdit();
+  }, "full");
 }
 
 /* --------------------------------------------------------------- reading */

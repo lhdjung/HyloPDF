@@ -55,9 +55,23 @@ Tackle each chunk in a separate session. Make a Git commit after each numbered t
   one for a photograph, and telling the two apart is more than the case is
   worth today.
 
-## Chunk C
-1. Below talks about switching the viewer to pdfium-render and lists some options for doing this in a performant way. Would the switch be good? (It should then be on the pdfium-prototype branch.) If so, which option or options?
-2. Any other ways to use more Rust in the app, especially relative to JS/TS?
+## What Chunk C left behind
+Both questions were answered rather than built: the renderer stays pdf.js, and
+the Rust/TypeScript seam stays where it is. "The renderer is the replaceable
+part, and it was tried" now carries the verdict on each of the three options
+and on two more that were weighed, and "Where Rust ends and TypeScript begins"
+carries the rule the first question produced. `pdfium-prototype` stays parked
+and unmerged; nothing in it changed.
+- Built since: `watch.rs`, which is what the second question was pointing at —
+  the themes directory and the open document, watched in Rust. The Settings
+  window redraws its theme list when the disk changes, but only between edits;
+  a theme being written in the app is left alone.
+- Keybindings as a config file, parsed and validated in Rust the way themes
+  are. Wanted by the brief's customisation aims, and it costs one door.
+- The pdfium prototype has two things worth keeping whatever happens to it: it
+  opens a document two orders of magnitude quicker than pdf.js, and it can
+  read an encrypted one. Neither is a reason to swap the renderer, and both
+  will look like one the next time this comes up.
 
 ## Chunk D
 CI hit issues before chunks were tackled:
@@ -93,6 +107,7 @@ src-tauri/          Rust: settings, themes, reading history, the window
   src/settings.rs   settings.toml — one flat table, one key written at a time
   src/theme.rs      one TOML file per theme, built-ins installed on first run
   src/library.rs    library.toml — where you were in each document
+  src/watch.rs      the themes directory and the open document, watched
   themes/*.toml     the seven packaged themes, embedded with include_str!
 
 tests/              node --test; `npm test` starts a dev server for them
@@ -176,6 +191,17 @@ on that selection — is optional and derived from `selection` when it is
 absent. `applyTheme` derives every shade
 the chrome uses — surface, line, three grades of muted text, the positive green
 — from those colours, which is why a five-line file is enough.
+
+**Two of the files the app reads can change without the app changing them, and
+Rust says when they do.** A theme is TOML so that somebody can open it in an
+editor, and a document is often a paper being recompiled underneath the reader;
+`watch.rs` follows the themes directory always and the open document while
+there is one, and emits `themes-changed` (with the whole set — seven themes of
+five colours is cheaper to send than to ask for) or `document-changed` (with
+the path). The frontend reapplies the theme in use without remembering it, or
+reopens the document and puts the reader back where they were. This is the
+shape of work that belongs on the Rust side: it lives on the disk, and what
+crosses the bridge is a filename.
 
 ## The viewer
 
@@ -353,6 +379,26 @@ clicked, and `el.viewer.focus()` is not enough to get it back — only
 `syncFullscreen`, once the window has stopped moving, rather than the moment
 the switch is thrown: AppKit passes focus around until the animation ends.
 
+**A file is watched through its directory, and a change is a burst.** A
+document is replaced by writing another one beside it and renaming it over the
+top — which is what `atomic_write` does and what compilers do — and a watch on
+a file follows the file rather than the name, so it would go on watching
+something nobody can see. Hence the watch on the parent directory, filtered by
+name. For the same reason nothing acts on a single event: a save is three or
+four, an atomic write is a create and a rename, and a LaTeX run is hundreds
+over several seconds, so events are collected until the disk has been quiet for
+`SETTLE`. And because the app writes into the themes directory itself, a theme
+reload is decided by loading the themes and comparing them against the set the
+frontend already has, never by the fact that something moved.
+
+**A document is not believed until it ends the way a PDF ends.** A compiler
+writes its output across the whole of a run, and reopening what is on the disk
+in the middle of one would take the reader's document away and leave them on
+the start screen. `whole()` reads five bytes at the front and a kilobyte at the
+back, wants `%PDF-` and `%%EOF`, and then wants the size to be the same a
+moment later. It does not prove the document is readable; it rules out the case
+that actually happens.
+
 **The webview's own context menu is suppressed** everywhere except editable
 fields and live text selections, because it offers to reload the app (which
 closes the document) and to open the inspector.
@@ -453,7 +499,7 @@ viewers over the same layout, `proto/pdfium.ts` through pdfium and
 `proto/pdfjs.ts` through the app's own `Viewer`, so the only difference between
 a run of one and a run of the other is which renderer answered. The branch
 carries its own instructions. Nothing of it is on `main`, because the answer
-came back "not yet".
+came back no.
 
 **pdfium draws faster than pdf.js, by between a third and eight times.** Per
 page, at the 10.5 megapixels the app actually renders (fit width, retina, the
@@ -496,19 +542,57 @@ costs more than the copy did. Both numbers are after fixing the obvious faults
 (rendering off the main thread, `no-store`, releasing bitmaps on unmount); what
 is left is the transport itself.
 
-**So: not yet, and here is what would change it.** The costs that would have
-justified the swap are not where they were assumed to be. What pdfium is
-plainly better at is *drawing*, and drawing is not the bottleneck — the frontier
-is the bridge. The versions of this that could win:
+**So: no, and the three ways out were costed one at a time.** The costs that
+would have justified the swap are not where they were assumed to be. What
+pdfium is plainly better at is *drawing*, and drawing is not the bottleneck —
+the frontier is the bridge, and every version of the swap still has to get 43MB
+a page across it.
 
-- Draw at the window's scale rather than the device's on a first pass and
-  refine, so the bytes crossing are a quarter of what they are now.
-- Keep the bitmap on the native side entirely — a layer under or over the
-  webview, which is how Chrome's own PDF viewer does it. That is a much larger
-  change than swapping a renderer, and it takes the text layer, selection and
-  find-in-page with it.
-- Wait for something that shares memory across the boundary. Nothing in Tauri
-  exposes an `IOSurface` today.
+*Draw at the window's scale and refine.* The bytes crossing are a quarter of
+what they are now and the time goes very nearly with them: the transport is
+linear in bytes, and the two parts of it that can be timed from inside a web
+content process say the same — a 42MB page costs 5ms to `putImageData` and 11ms
+to copy once, the same page at a quarter of the size costs 1ms and 1ms. (That
+pair is measured in headless WebKit rather than in the app, but it is the same
+work, and it accounts for 16 of the 43ms; the rest is the crossing itself.) So a first
+pass would land in about 12ms against pdf.js's 27ms on plain text and 80ms on a
+scan. What it does not do is finish. A page the reader stops on still has to be
+redrawn at the device's scale, so the settled cost is that 12ms *and* the full
+47ms, every page that is actually read crosses the bridge one and a quarter
+times over, and the memory — the other half of the objection — is unchanged for
+exactly the pages that hold it. The reader also sees the seam: a page that
+arrives soft and sharpens a moment later is the opposite of what "no animations
+unless the user takes an action" is asking for. It buys latency during a fast
+scroll through documents pdf.js is already slow on, and charges for it
+everywhere else.
+
+*Keep the bitmap on the native side.* This is the only one that wins outright,
+because it does not cross the bridge at all — and it is no longer a change of
+renderer. A layer under or over the webview owns the pixels, so the text layer,
+the selection, find-in-page, the links, the outline and the thumbnails either
+follow it into native drawing or stop lining up with the page they are drawn
+over. `paintSelection`, `tintLinks`, `restoreImages` and every line of
+`renderText` are "the pixels and the DOM are in one process" code, and that is
+most of what makes this app pleasant to read in. It is a different application,
+and a much larger one than the thing it would be replacing.
+
+*Wait for shared memory.* This one is not a wait. Tauri's IPC is message
+passing by deliberate choice, taken over shared memory for the isolation it
+buys, and shared memory is not planned; the `SharedArrayBuffer` route that gets
+raised whenever this comes up shares between frontend contexts and not between
+the frontend and Rust, which the maintainers said in as many words in 2024.
+There is nothing coming that this plan could arrive on.
+
+Two more were weighed and are worse. *pdfium as wasm, inside the webview*
+attacks the right thing — from wasm memory to a canvas is a copy, not a process
+boundary — but the prebuilt that does not fall over on a document longer than a
+few pages is the 13MB one, against the 5.5MB of pdf.js it would replace; it is
+single-threaded, so the drawing advantage narrows to whatever wasm leaves of
+it; and it is a C++ blob either way, so "more Rust" is not what it buys.
+*pdfium for the small answers only* — text extraction, the outline, opening an
+encrypted document, thumbnails, everywhere the answer is kilobytes rather than
+megabytes — is the one shape the bridge does not spoil, and it fails on the
+other axis: it ships both renderers to keep pdf.js drawing the pages anyway.
 
 **What it would cost on disk, measured.** `libpdfium.dylib` for macOS arm64 is
 7.7MB (3.5MB compressed), the bindings add 0.4MB to the Rust binary, and what
@@ -517,6 +601,27 @@ of wasm decoders, 0.8MB of standard fonts and about 0.35MB of the bundle. Call
 it +2.6MB on one architecture, and rather more on a universal build, where
 pdfium is 15MB. "Roughly a wash" was the guess and it is close to right,
 slightly the wrong side of it.
+
+**The decision is to keep pdf.js.** The 47ms measured above is 3.6ms of drawing
+and about 43ms of bridge, and the bridge does not care what is on the page — so
+adding each document's draw time to it says where the swap would actually land:
+
+| document                | pdf.js | pdfium, end to end |
+| ----------------------- | -----: | -----------------: |
+| 400 pages of plain text | 27ms   | 47ms (measured)    |
+| a typeset paper         | 33ms   | ~64ms              |
+| a paper full of figures | 82ms   | ~79ms              |
+| a scanned manual        | 80ms   | ~53ms              |
+| slides                  | 66ms   | ~95ms              |
+
+Slower on three of the five, and ahead only where pdf.js is spending its time
+decoding images. Against what the brief asks for — fast with no lag, little
+memory, a small binary — that is 1.8 times the memory and 2.6MB more on the
+smallest build, for no reliable gain in speed. Encrypted documents and forms
+would come with it and those are real; they are not worth this. Two things
+would reopen it: the second option above, taken deliberately as a rewrite of
+the viewer rather than as a swap of renderer, or a webview that lets a native
+buffer become a canvas without copying it. Neither is close.
 
 **Three things that will bite whoever picks this up again.** pdfium renders
 into a buffer of your choosing (`PdfBitmap::from_bytes`), which is how the
@@ -539,6 +644,70 @@ for rendering (`search.ts` and `sidebar.ts` use it only through a
 `PDFDocumentProxy` they are handed) and `api.ts` is the only door into Rust.
 Keep both of those true and this stays a decision that can be made later — the
 prototype needed no change to either.
+
+## Where Rust ends and TypeScript begins
+
+The renderer question answers a more general one, and the rule it leaves is
+worth stating plainly: **work belongs in Rust when its inputs and outputs are
+small next to the work itself, and in TypeScript when it touches pixels or the
+DOM.** Pixels and the DOM live in the web content process, and nothing reaches
+them without crossing a boundary that costs about a millisecond a megabyte.
+Everything in `api.ts` already obeys that rule — settings, themes, the library,
+the file picker, ranges of a file, the traffic lights — which is why the door
+is as narrow as it is.
+
+There is a second constraint and it catches most proposals before the first
+one does: **every door in `api.ts` has a browser twin.** The harness runs the
+whole interface with no Rust behind it, which is how reading, search,
+recolouring and the password window get tested without taking anybody's screen.
+Move something into Rust and you either write it twice or lose the test — and
+pure computation, which is what looks most tempting to move, is exactly what
+the tests reach for.
+
+So, the candidates, and what happens to them:
+
+*The search index, the fold and the match stepping.* The shape of the traffic
+is right — a query in, a few offsets out — and the text would only have to
+cross once, a megabyte or two a book. It still fails. `fold` is the most
+tested function in the app, the browser path needs a matcher of its own
+regardless, and the JavaScript is not the weak version: NFKD a character at a
+time with an origin map back to the unfolded text is what the Rust would also
+have to do. Nothing is bought.
+
+*Recolouring.* Already measured on the branch, and the canvas wins before the
+pixels even move: 1.5-5.6ms for the blend chain against 13-17ms scalar in Rust,
+2.8-3.5ms across all the cores. Then the page would have to come back.
+
+*The shades `applyTheme` derives.* Five colours in and fifteen out is a perfect
+shape, and it is also forty lines of arithmetic that would need a twin. The
+door costs more than the work.
+
+*Layout, the LRU, the binary searches over `boxes[]`.* Microseconds, on numbers
+that are already in the page.
+
+What passes the rule is not moved work but new work, and all of it is about the
+disk:
+
+*Watching the themes directory.* Themes are files, and the brief wants them
+hand-written and LLM-written; today an edit is seen on the next run. `notify`
+in Rust, a path out over the bridge, `applyTheme` again — the payload is a
+filename and the effect is that a theme can be written with the app open beside
+it. The clearest win on this list, and the same watcher answers the document
+recompiled by LaTeX under the reader's feet.
+
+*Keybindings as a file.* Parsed and validated in Rust the way themes are,
+dispatched in TypeScript. Config in, no traffic afterwards.
+
+*Whatever comes next that has to be remembered* — annotations, bookmarks, a
+thumbnail cache, per-document settings, printing, export. These belong beside
+`library.rs` for the same reason it does, and each is a new door rather than a
+moved one.
+
+More Rust is not itself the goal; the brief asks for small, fast and calm, and
+the seam that serves those is the one the app already has — Rust owns what is
+on the disk and what the window does, TypeScript owns what is on the screen.
+The renderer measurement is the strongest evidence for it: the largest piece of
+work that could move to Rust is the one that most clearly should not.
 
 ## Running it
 

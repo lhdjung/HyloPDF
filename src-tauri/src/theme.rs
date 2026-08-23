@@ -18,13 +18,16 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ("dracula", include_str!("../themes/dracula.toml")),
     ("gruvbox", include_str!("../themes/gruvbox.toml")),
     ("sepia", include_str!("../themes/sepia.toml")),
-    ("high-contrast", include_str!("../themes/high-contrast.toml")),
+    (
+        "high-contrast",
+        include_str!("../themes/high-contrast.toml"),
+    ),
 ];
 
 pub const DEFAULT_LIGHT: &str = "hylo-light";
 pub const DEFAULT_DARK: &str = "hylo-dark";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
     /// Slug, taken from the file name. Not stored in the file itself.
     #[serde(default)]

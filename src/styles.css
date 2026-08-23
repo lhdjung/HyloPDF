@@ -267,6 +267,13 @@ body {
   display: none;
 }
 
+/* The other way out, and it belongs beside the one way in. With a document
+   open this spot carries that document's own Close, and leaving the app is no
+   longer one of the two things the window is offering, so it stands down. */
+#shell:not([data-empty="true"]) #quit {
+  display: none;
+}
+
 /* ---------------------------------------------------------------- layout */
 
 #body {
@@ -653,41 +660,6 @@ body {
 .welcome-hint {
   margin-top: 22px;
   color: var(--text-note);
-}
-
-/* Down in the corner, not in the column. Leaving is a thing to be able to do
-   from here and not one of the two things this screen is offering, so it sits
-   out of the way of the reading and stays quiet until it is looked at. */
-.welcome-quit {
-  position: absolute;
-  right: 16px;
-  bottom: 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text-faint);
-  font: inherit;
-  font-size: 13.5px;
-  cursor: pointer;
-}
-
-.welcome-quit svg {
-  width: 15px;
-  height: 15px;
-}
-
-.welcome-quit:hover {
-  background: var(--surface-hover);
-  color: var(--text-soft);
-}
-
-.welcome-quit:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .recents {

@@ -513,7 +513,7 @@ test("a colour changed in the editor reaches the page it recolours", async () =>
 test("the way out is on the start screen and nowhere else", async () => {
   const seen = () =>
     app.page.evaluate(() => {
-      const button = document.getElementById("welcome-quit");
+      const button = document.getElementById("quit");
       return button.getBoundingClientRect().width > 0 && button.offsetParent !== null;
     });
 

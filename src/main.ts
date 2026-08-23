@@ -107,7 +107,7 @@ const el = {
   pages: byId<HTMLDivElement>("pages"),
   welcome: byId<HTMLElement>("welcome"),
   welcomeOpen: byId<HTMLButtonElement>("welcome-open"),
-  welcomeQuit: byId<HTMLButtonElement>("welcome-quit"),
+  quit: byId<HTMLButtonElement>("quit"),
   recents: byId<HTMLDivElement>("recents"),
   findBar: byId<HTMLDivElement>("find-bar"),
   findInput: byId<HTMLInputElement>("find-input"),
@@ -1154,7 +1154,7 @@ class App {
     el.open.addEventListener("click", opens(() => void this.openDialog()));
     el.welcomeOpen.addEventListener("click", () => void this.openDialog());
     // The close handler runs on the way out, so this saves what a quit saves.
-    el.welcomeQuit.addEventListener("click", () => void quitApp());
+    el.quit.addEventListener("click", () => void quitApp());
     el.contents.addEventListener("click", opens(() => this.toggleSidebar()));
     el.closeDoc.addEventListener("click", opens(() => this.closeDocument()));
     el.theme.addEventListener("click", opens(() => this.showThemeMenu()));

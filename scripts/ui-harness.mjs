@@ -67,6 +67,29 @@ export async function openApp(options = {}) {
   });
   const page = await context.newPage();
 
+  // `HYLOPDF_NO_BLEND=1` refuses the non-separable blend modes the way an engine
+  // that does not implement them on a canvas does — silently, by keeping the
+  // property's previous value rather than by throwing. `canBlend()` in themes.ts
+  // probes for exactly that and falls back to `recolorByPixel`, so this runs the
+  // whole interface down the slow path: what WebKitGTK may be doing on Linux,
+  // and the thing least likely to be exercised anywhere else. `recolor.test.mjs`
+  // tests the fallback function; this tests reading under it.
+  if (process.env.HYLOPDF_NO_BLEND) {
+    await page.addInitScript(() => {
+      const proto = CanvasRenderingContext2D.prototype;
+      const real = Object.getOwnPropertyDescriptor(proto, "globalCompositeOperation");
+      const unsupported = ["saturation", "color-dodge", "luminosity", "color", "hue"];
+      Object.defineProperty(proto, "globalCompositeOperation", {
+        get() {
+          return real.get.call(this);
+        },
+        set(value) {
+          if (!unsupported.includes(value)) real.set.call(this, value);
+        },
+      });
+    });
+  }
+
   // Before anything reads it: api.ts computes `isMac` at module load.
   if (PRETEND) {
     await page.addInitScript((platform) => {

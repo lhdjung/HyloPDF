@@ -352,11 +352,35 @@ test("a colour changed in the editor reaches the page it recolours", async () =>
     const paper = () =>
       editing.page.evaluate(() => {
         const canvas = document.querySelector("#pages canvas");
+        if (!canvas) return null;
         const [r, g, b] = canvas.getContext("2d").getImageData(4, 4, 1, 1).data;
         return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
       });
-    await editing.page.waitForTimeout(1200);
-    assert.equal(await paper(), "#24272f", "the page did not open in the theme's colours");
+
+    // Waited for rather than slept on. Recolouring a page is a whole canvas of
+    // work — and on an engine without blend modes on a canvas it is the pixel
+    // fallback doing it a byte at a time, for every mounted page — so how long
+    // it takes is a property of the machine, not of the app. A fixed wait long
+    // enough for CI would be a fixed wait wasted on every run here. On timeout
+    // this falls through to the assertion, so a page that never arrives is
+    // still reported as the colour it is stuck on rather than as a timeout.
+    const settlesOn = async (want, message) => {
+      await editing.page
+        .waitForFunction(
+          (expected) => {
+            const canvas = document.querySelector("#pages canvas");
+            if (!canvas) return false;
+            const [r, g, b] = canvas.getContext("2d").getImageData(4, 4, 1, 1).data;
+            return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}` === expected;
+          },
+          want,
+          { timeout: 15_000, polling: 100 },
+        )
+        .catch(() => {});
+      assert.equal(await paper(), want, message);
+    };
+
+    await settlesOn("#24272f", "the page did not open in the theme's colours");
 
     await editing.page.keyboard.press(`${MOD}+Comma`);
     await editing.page.waitForTimeout(300);
@@ -370,12 +394,11 @@ test("a colour changed in the editor reaches the page it recolours", async () =>
     await editing.page
       .locator('#windows .field:has(.field-label:text-is("Background")) input[type=text]')
       .fill("#3a0a0a");
-    await editing.page.waitForTimeout(800);
 
     // The editor previews by handing the viewer the draft it goes on editing,
     // so a viewer that kept the object rather than a copy of it would find
     // nothing had changed and leave the page as it was printed.
-    assert.equal(await paper(), "#3a0a0a", "the page kept the old background");
+    await settlesOn("#3a0a0a", "the page kept the old background");
   } finally {
     await editing.close();
   }

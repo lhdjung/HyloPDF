@@ -475,6 +475,23 @@ to `navigator.platform` too, so the app and the test agree about which machine
 they are on. `HYLOPDF_PLATFORM=other npm test` is the cheap way to find out
 what Linux will say, and it is worth running before touching a shortcut.
 
+**`HYLOPDF_NO_BLEND=1` reads the whole app down the pixel fallback.** It refuses
+the non-separable blend modes the way an engine without them does — silently,
+by keeping the property's previous value — so `canBlend()` says no and every
+recolour goes through `recolorByPixel`. `recolor.test.mjs` tests that function
+against the blend chain; this is the only way to test *reading* under it, which
+is the shape Linux may actually be in. It is also a good deal slower, which
+makes it the switch to reach for when a test is suspected of waiting on a fixed
+number of milliseconds.
+
+**Wait for the condition, not for the clock.** A recolour is a whole canvas of
+work per mounted page, and how long that takes is a property of the machine:
+locally a theme edit repaints in about 90ms, 170ms down the pixel fallback, and
+on a CI runner it went past the 800ms a test had slept for — one failure that
+said the editor had not reached the page, when it had reached it late. Fixed
+waits in `reader.test.mjs` are for ordering, where something has to happen
+*before* the next step; anything waiting for a result polls for the result.
+
 Settings are seeded through the `localStorage` fallback in `api.ts`, so the
 whole browser path is exercised: no Rust, no window, no traffic lights. Reading
 a document goes through the same range-based path as the real app — the

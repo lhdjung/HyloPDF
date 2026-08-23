@@ -174,6 +174,20 @@ fn follow(
     held: &mut Option<Followed>,
     next: Option<PathBuf>,
 ) {
+    // Being pointed at the document already being followed is not a change of
+    // subject, and treating it as one is worse than doing nothing. It is also
+    // the ordinary case: a reload goes back through `open_for_reading`, which
+    // says "follow this" about the document it has just reopened. Remaking the
+    // watch would lose whatever landed in the gap, and — the part that bites —
+    // the baseline would be retaken from what is on the disk *now* rather than
+    // from the version just handed over, so a draft that arrived during the
+    // reload would match its own mark and never be reported at all.
+    if let (Some(current), Some(next)) = (held.as_ref(), next.as_ref()) {
+        if &current.path == next {
+            return;
+        }
+    }
+
     if let Some(old) = held.take() {
         // The themes directory is watched for its own sake, and must not be
         // dropped along with a document that happened to be sitting in it.
@@ -290,5 +304,85 @@ mod tests {
         body.extend_from_slice(b"\n%%EOF\n");
         let path = scratch("long.pdf", &body);
         assert!(whole(&path).is_some());
+    }
+
+    /// A watcher that does nothing but say what it was asked to do, so that
+    /// `follow` can be checked without a file system underneath it.
+    #[derive(Default)]
+    struct Recorded {
+        watched: Vec<PathBuf>,
+        unwatched: Vec<PathBuf>,
+    }
+
+    impl Watcher for Recorded {
+        fn new<F: notify::EventHandler>(_: F, _: notify::Config) -> notify::Result<Self> {
+            unreachable!("built directly, never through the trait")
+        }
+
+        fn watch(&mut self, path: &Path, _: RecursiveMode) -> notify::Result<()> {
+            self.watched.push(path.to_path_buf());
+            Ok(())
+        }
+
+        fn unwatch(&mut self, path: &Path) -> notify::Result<()> {
+            self.unwatched.push(path.to_path_buf());
+            Ok(())
+        }
+
+        fn kind() -> notify::WatcherKind {
+            notify::WatcherKind::NullWatcher
+        }
+    }
+
+    /// Every reload says "follow this" about the document it has just reopened,
+    /// and that must change nothing. Remaking the watch would lose whatever
+    /// landed in the gap, and retaking the baseline would swallow a draft that
+    /// arrived during the reload — the next burst would find the file matching
+    /// its own mark and report nothing.
+    #[test]
+    fn reopening_the_same_document_leaves_the_watch_alone() {
+        let path = scratch("reopened.pdf", b"%PDF-1.7\ntrailer\n%%EOF\n");
+        let dir = path.parent().expect("a parent").to_path_buf();
+        let themes = dir.join("themes");
+        let mut watcher = Recorded::default();
+        let mut held = None;
+
+        follow(&mut watcher, &themes, &mut held, Some(path.clone()));
+        let first = held.as_ref().expect("followed").mark;
+        assert_eq!(watcher.watched, vec![dir.clone()]);
+
+        // A new draft lands, and the reload it causes comes back through here.
+        std::fs::write(&path, b"%PDF-1.7\nrather longer than it was\n%%EOF\n").expect("rewrite");
+        follow(&mut watcher, &themes, &mut held, Some(path.clone()));
+
+        assert!(watcher.unwatched.is_empty(), "the watch was remade");
+        assert_eq!(watcher.watched, vec![dir]);
+        assert_eq!(
+            held.expect("still followed").mark,
+            first,
+            "the baseline moved"
+        );
+    }
+
+    /// A different document, though, is a different subject.
+    #[test]
+    fn another_document_moves_the_watch() {
+        let first = scratch("first.pdf", b"%PDF-1.7\n%%EOF\n");
+        let dir = first.parent().expect("a parent").to_path_buf();
+        let elsewhere = dir.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).expect("second directory");
+        let second = elsewhere.join("second.pdf");
+        std::fs::write(&second, b"%PDF-1.7\n%%EOF\n").expect("second document");
+
+        let themes = dir.join("themes");
+        let mut watcher = Recorded::default();
+        let mut held = None;
+
+        follow(&mut watcher, &themes, &mut held, Some(first));
+        follow(&mut watcher, &themes, &mut held, Some(second.clone()));
+
+        assert_eq!(watcher.unwatched, vec![dir.clone()]);
+        assert_eq!(watcher.watched, vec![dir, elsewhere]);
+        assert_eq!(held.expect("followed").path, second);
     }
 }

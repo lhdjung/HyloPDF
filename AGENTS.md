@@ -389,7 +389,13 @@ four, an atomic write is a create and a rename, and a LaTeX run is hundreds
 over several seconds, so events are collected until the disk has been quiet for
 `SETTLE`. And because the app writes into the themes directory itself, a theme
 reload is decided by loading the themes and comparing them against the set the
-frontend already has, never by the fact that something moved.
+frontend already has, never by the fact that something moved. Lastly, `follow`
+returns without touching anything when it is handed the document it is already
+following, which is what every reload does on its way back through
+`open_for_reading`: remaking the watch would lose whatever landed in the gap,
+and retaking the baseline from the disk would swallow a draft that arrived
+during the reload — the next burst would find the file matching its own mark
+and say nothing.
 
 **A document is not believed until it ends the way a PDF ends.** A compiler
 writes its output across the whole of a run, and reopening what is on the disk

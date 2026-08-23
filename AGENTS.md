@@ -106,10 +106,15 @@ question found is in "What a reading session costs" below.
 - High Contrast still puts a black page on a black backdrop, from Chunk B. The
   bar's own fields on it are now `#131313` on black — present, but only just.
   It is the theme's nature rather than the derivation's.
-- The measurement says `PAGE_CACHE` is sized in the wrong unit: forty-eight
-  pages is nothing for text and three gigabytes for a scan. Not changed, only
-  found. Sizing it by what a page actually costs — bytes, or a budget the
-  cache spends — is the shape of the fix.
+- The measurement found the app using 3.2GB to read a scanned book on a
+  machine with 8GB, and the fix went in after it: pages carrying pictures now
+  have a cap of their own. 900MB, and flat. "What a reading session costs"
+  below carries the numbers, where the memory actually was, and the three
+  plausible fixes that turned out to change nothing.
+- `IMAGE_PAGE_CACHE` is six because six is comfortably more than the three
+  pages that can be on screen. Nobody has measured what a reader loses by
+  scrolling back further than that into a scan — it is a page decode, and it
+  would be worth knowing before anyone lowers it.
 
 # Architecture of the built app
 
@@ -306,23 +311,24 @@ frame and a stall.
 ## What a reading session costs
 
 Measured on the release bundle — `npm run tauri build`, then the `.app` run on
-a document — on an Apple silicon Mac, in a 1280×860 window at two device pixels
-to the point, fit width, no recolouring. Scrolled a viewport at a time with a
-quarter second between, which is a fast reader rather than a benchmark. The
-figure is physical footprint, which is what Activity Monitor calls Memory and
-what counts against the machine; `vmmap` agrees with `footprint` to the
-megabyte, and `ps` does not, because a gigabyte of this ends up compressed and
-RSS does not count compressed pages. All four processes a Tauri app runs in are
-summed: the app itself, and WebKit's WebContent, GPU and Networking helpers.
+a document — on an Apple silicon Mac with 8GB, in a 1280×860 window at two
+device pixels to the point, fit width, no recolouring. Scrolled a viewport at a
+time with a quarter second between, which is a fast reader rather than a
+benchmark. The figure is physical footprint, which is what Activity Monitor
+calls Memory and what counts against the machine; `vmmap` agrees with
+`footprint` to the megabyte, and `ps` does not, because a gigabyte of this ends
+up compressed and RSS does not count compressed pages. All four processes a
+Tauri app runs in are summed: the app itself, and WebKit's WebContent, GPU and
+Networking helpers.
 
-| what is open                        | on opening | after 60 viewports | where it settles      |
-| ----------------------------------- | ---------: | -----------------: | --------------------: |
-| nothing — the start screen          |      81MB  |                  — |                     — |
-| 400 pages of plain text (the fixture) | 293MB    |            324MB   |                       |
-| 1048 pages of typeset mathematics   |     343MB  |            480MB   | ~600MB after 200      |
-| 197 pages of textbook with figures  |     382MB  |            517MB   |                       |
-| 27 slides, 22MB of pictures         |     271MB  |    619MB after 30  |                       |
-| 315 pages of scan, 33MB             |     373MB  |           1.75GB   | 3.2GB after 160       |
+| what is open                          | on opening | after 60 viewports | where it settles |
+| ------------------------------------- | ---------: | -----------------: | ---------------: |
+| nothing — the start screen            |      81MB  |                  — |                — |
+| 400 pages of plain text (the fixture)  |    293MB  |             365MB  |                  |
+| 1048 pages of typeset mathematics      |    374MB  |             480MB  | 690MB after 200  |
+| 197 pages of textbook with figures     |    420MB  |             510MB  |                  |
+| 27 slides, 22MB of pictures            |    285MB  |     491MB after 40 |                  |
+| 315 pages of scan, 33MB                |    375MB  |             797MB  | 900MB after 200  |
 
 **The Rust side is 26–33MB and never moves**, whatever is open and however long
 it is read. Every number above that is the webview, and two things set it.
@@ -333,19 +339,54 @@ three alive at once. That is most of the 200–300MB a document costs the moment
 it opens, and it scales with the window: the same document read full screen on
 a larger display costs proportionally more.
 
-*`PAGE_CACHE`, and this is the one that hurts.* Forty-eight page proxies, each
-holding pdf.js's parsed operator list — which means every decoded image on the
-page — until `cleanup()` is called on it. For text a proxy is small. For a scan
-a proxy is a decoded full-page bitmap, and forty-eight of them is where the
-3.2GB comes from: 145 pages read, 48 kept, about 67MB each.
+*The pictures on the pages that have been read.* This is the one that used to
+hurt: the last column for the scan read 3.2GB, on a machine with eight, and
+climbed for as long as anybody kept reading.
 
-It is a cache and not a leak — 200 viewports is no worse than 160, and going
-back to the top gives about 200MB back as the GPU process releases its buffers
-— but it is a cache **sized in pages when the thing it holds is measured in
-bytes**, and a page can be a kilobyte or fifty megabytes. A budget in bytes,
-spent down by whatever each page actually costs, is the same code with a
-different accumulator. Nothing here has been changed; this is what the
-measurement found.
+**Where the memory is matters more than how much of it there is, and it is not
+where it looks.** The web content process — the JavaScript heap, the text
+layers, the canvases on screen — sat at 150MB throughout and never moved. The
+growth was all in the *GPU* process, and `vmmap` on it mid-scroll names the
+owner exactly: fifteen `ImageBufferShareableMapped` regions of 60.1MB each,
+one more appearing per page read. A page proxy holds every decoded image on its
+page until `cleanup()` is called on it, a bitonal scan decodes to four bytes a
+pixel — 3600×4400 is sixty megabytes — and `PAGE_CACHE` kept forty-eight
+proxies. 48 × 60MB is the plateau, and the plateau is where it stopped.
+
+So `IMAGE_PAGE_CACHE` caps the pages that carry pictures at six, and everything
+else keeps the count of forty-eight; a typeset book never reaches the second cap
+and reads exactly as it did. `holdsPictures` decides which is which, and it has
+to ask the page's own object store rather than `recordImages`, which reports
+where image *XObjects* landed: a bitonal scan arrives as an image mask and is
+not among them, so every page of the scan reported no pictures at all. That
+mistake is worth remembering, because it is the same one behind "scanned
+documents lose all their text" below — masks are where a scan keeps everything.
+
+Three things were tried on the way and are not here, which is worth as much as
+what is:
+
+- *A byte budget rather than two caps.* The right idea in the abstract and it
+  has no honest input: the size of a decoded image is not on offer anywhere in
+  pdf.js's public surface, the main thread's copy of an image object is `null`
+  by the time anyone can look at it, and estimating from the area a picture
+  covers on the page is wrong by twenty times for a photograph scaled into a
+  column. Two caps need no estimate.
+- *A pool of canvases*, to stop the churn of one created per render. Built,
+  measured, reverted: it changed nothing, because the canvases were never the
+  thing accumulating.
+- *A smaller `MAX_CANVAS_PIXELS`.* Halving it halved the canvases and moved the
+  total not at all, which is what first said the problem was not the drawing.
+
+What did survive from the hunt is a leak by a different door: an abandoned
+render — the reader scrolled on, the theme changed, the render was cancelled —
+dropped its canvas rather than releasing it. `renderSlot` now releases on every
+path that does not put the canvas on screen.
+
+`scripts/memory-probe.mjs` is how any of this is checked. It reads the
+footprint from outside the browser, because there is no memory API in WebKit
+worth the name, and `--regions` prints the `vmmap` breakdown that says which
+process is holding what. It is not part of `npm test`: it wants a real
+document, it takes minutes, and half of what it measures is the machine.
 
 For scale, the shipped bundle is 5.8MB on disk (4.2MB as a `.dmg`), of which
 5.7MB is the one binary — the whole frontend, pdf.js's worker, cmaps, standard

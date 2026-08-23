@@ -114,9 +114,13 @@ question found is in "What a reading session costs" below.
 - `IMAGE_PAGE_CACHE` was six because six is comfortably more than the three
   pages that can be on screen, and nobody had measured what the room behind
   them cost. It is three now, and the measurement is in "What a reading session
-  costs" below: on a forty-page scan, six settles around 790MB and three around
-  630MB. Three is the mounted set and nothing behind it, and what it charges is
-  one page decode when a reader scrolls back further than the screen.
+  costs" below. Three is the mounted set and nothing behind it, and what it
+  charges is one page decode when a reader scrolls back further than the screen.
+- The thing the cap was containing has largely gone: pdf.js was asked to stop
+  handing over ready-made bitmaps, and a scan that cost 630MB to read now costs
+  263MB, flat, with the pages identical to the pixel and quicker to draw. See
+  "Images cross the worker boundary compressed" below. The cap is still worth
+  keeping, but it is photographs it earns its keep on now rather than scans.
 
 # Architecture of the built app
 
@@ -332,6 +336,12 @@ Networking helpers.
 | 27 slides, 22MB of pictures            |    285MB  |     491MB after 40 |                  |
 | 315 pages of scan, 33MB                |    375MB  |             797MB  | 900MB after 200  |
 
+That table predates `isOffscreenCanvasSupported: false` — see "Images cross the
+worker boundary compressed" below — which takes a large bite out of its last
+three rows. It has not been re-run on the release bundle since; the numbers that
+have are the harness ones further down, and the two instruments are comparable
+only with themselves.
+
 **The Rust side is 26–33MB and never moves**, whatever is open and however long
 it is read. Every number above that is the webview, and two things set it.
 
@@ -380,6 +390,40 @@ nothing left to take. Every figure there is ±50MB between one report and the
 next, which is itself worth knowing — the GPU process gives memory back in
 bursts rather than steadily, so a single reading is not evidence of anything.
 
+**Images cross the worker boundary compressed, not expanded.** The cap above is
+a way of living with a cost; this is the cost going away, and it is one option
+to `getDocument`. pdf.js in a browser defaults to expanding every image to RGBA
+in the worker, painting it into an `OffscreenCanvas` at the image's own
+resolution and transferring an `ImageBitmap` — which is what those 60.1MB
+regions in the GPU process are, and why a picture that is one bit per pixel on
+the disk costs four bytes a pixel to have read. `isOffscreenCanvasSupported:
+false` sends the decoded data instead and lets the main thread build the mask
+canvas per render, where it is freed when the render ends. Measured in the
+harness, which is not the release bundle but is the same instrument on both
+sides:
+
+| document                          | default | data, not bitmaps |
+| --------------------------------- | ------: | ----------------: |
+| 400 pages of plain text           |  265MB  |            263MB  |
+| 40 pages of bitonal scan          |  634MB  |     **263MB**, flat |
+| 27 pages of photographs           |  348MB  |            231MB  |
+| one page of 12000×16000 bitonal   | 2489MB  |            248MB  |
+
+It is not a trade against speed. Timed straight through pdf.js with no app
+around it, a scan page goes from 92ms to 71ms and a photograph page from 122ms
+to 110ms, because what leaves the worker is the compressed thing rather than the
+expanded one; a page of type is unchanged. What it is a trade against is *where*
+the work happens — the expansion is on the main thread now, so an image-heavy
+page costs one frame of about 60ms that used to be spent in the worker. Against
+that, the pixels are identical: every screenshot compared came back at an RMSE
+of zero, under both themes and with picture recolouring both on and off.
+
+The one thing given up is `ImageResizer`, which runs only on the default path
+and shrinks an image the browser could not otherwise make a canvas for. That
+sounds like a safety net and the last row of the table is what it actually does:
+the resizer is reached by first building the 192-megapixel bitmap that is the
+problem.
+
 Three things were tried on the way and are not here, which is worth as much as
 what is:
 
@@ -418,6 +462,15 @@ where a relative address resolves against the worker script rather than the
 page. When they are wrong the worker silently drops what it cannot fetch, and
 the failure is oblique: scanned documents lose all their text, because that text
 lives in image masks. `asset()` in `viewer.ts` exists for this.
+
+**pdf.js's image defaults are tuned for a browser tab, not for a reader.**
+`isOffscreenCanvasSupported` defaults to on and hands the main thread
+`ImageBitmap`s, which is the right call when a page is opened once and thrown
+away and the wrong one when a document is read for an hour: a bitmap is four
+bytes a pixel in the GPU process for as long as its page proxy lives. It is off
+here, and "Images cross the worker boundary compressed" above has the numbers.
+Anything that reaches for a pdf.js default around images is worth measuring
+rather than trusting.
 
 **Do not tint the document with `mix-blend-mode`.** WebKit drops the blend
 against a composited canvas, and a dropped blend renders as a solid band across

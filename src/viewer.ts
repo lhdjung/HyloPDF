@@ -98,10 +98,15 @@ const PAGE_CACHE = 48;
  *
  * Three, because `OVERSCAN` keeps three pages mounted and a mounted page is
  * never evicted — so three is the mounted set and no room behind it, and the
- * room behind it is what the measurement says costs. On a forty-page scan the
- * cap at six settles around 790MB and the cap at three around 630MB, which is
- * about 36MB a page. What it charges for that is one page decode when a reader
- * scrolls further back than the screen.
+ * room behind it is what the measurement says costs. What it charges for that
+ * is one page decode when a reader scrolls further back than the screen.
+ *
+ * The cap survived `isOffscreenCanvasSupported: false` (see `load`), which took
+ * away most of what it was holding back. What a cached page costs is smaller
+ * now and it is on the JavaScript heap rather than in the GPU process, but it
+ * is still there — on forty pages of scan, three against forty-eight is 263MB
+ * against 338MB, and on twenty-seven pages of photographs it is 231MB against
+ * 579MB. Photographs are the case that needs it now; a scan barely does.
  */
 const IMAGE_PAGE_CACHE = 3;
 /** How far beyond the viewport pages are kept alive, in viewport heights. */
@@ -449,6 +454,38 @@ export class Viewer {
       // which is exactly the cost the range transport exists to avoid.
       disableAutoFetch: true,
       disableStream: true,
+      // Let the worker hand over image *data* rather than ready-made bitmaps.
+      //
+      // With this on — pdf.js's default in a browser — the worker expands every
+      // image to RGBA, paints it into an `OffscreenCanvas` at the image's own
+      // resolution and transfers an `ImageBitmap`. The page proxy then holds
+      // that bitmap until `cleanup()`, and a bitmap lives in the GPU process at
+      // four bytes a pixel whatever the image was: a bitonal scan page of
+      // 3600×4400 arrives as sixty megabytes of a picture that is one bit per
+      // pixel on the disk. That is the whole of what `IMAGE_PAGE_CACHE` was
+      // invented to contain.
+      //
+      // Off, the worker sends the decoded data as it stands — the scan stays
+      // 1bpp — and the main thread builds the mask canvas per render, which is
+      // freed when the render ends. Measured on forty pages of bitonal scan:
+      // 630MB down to 263MB, and flat. Twenty-seven pages of photographs: 348MB
+      // to 231MB. A single 12000×16000 page, which is where the default is at
+      // its worst: 2489MB to 248MB.
+      //
+      // It is not a trade against speed — the page is quicker to draw, because
+      // what crosses out of the worker is the compressed thing rather than the
+      // expanded one (92ms to 71ms on the scan, 122ms to 110ms on the slides,
+      // unchanged on type). It is a trade against *where* the work happens: the
+      // expansion is on the main thread now, so drawing an image-heavy page
+      // costs one frame of about 60ms that used to be spent in the worker. The
+      // pixels are identical either way — every screenshot compared came back
+      // at an RMSE of zero, under both themes and with picture recolouring both
+      // on and off.
+      //
+      // What it gives up is pdf.js's `ImageResizer`, which only runs on this
+      // path and shrinks an image the browser could not make a canvas for. The
+      // 12000×16000 measurement above is that case, and it is better without it.
+      isOffscreenCanvasSupported: false,
       cMapUrl: asset("pdfjs/cmaps/"),
       cMapPacked: true,
       standardFontDataUrl: asset("pdfjs/standard_fonts/"),

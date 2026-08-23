@@ -260,7 +260,7 @@ function appearancePage(
 ): void {
   pane.append(
     ui.text("title", "Appearance"),
-    ui.text("lede", "A theme is two colours: the ink and the paper. Everything else follows from them."),
+    ui.text("lede", "Two colours make a theme: the ink and the paper. The accent, the links and the selection follow from those two until you say otherwise."),
   );
 
   pane.append(

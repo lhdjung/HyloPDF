@@ -43,7 +43,6 @@ Ignoring some settings, we have:
 Tackle each chunk in a separate session. Make a Git commit after each numbered task except those in Chunk C, and except there's a reason to combine two or more tasks.
 
 ## Chunk B
-5. "A theme is two colours: the ink and the paper. Everything else follows from them." – is that still correct given the other colors?
 6. The toolbar should have the same colors (text and background) as the document.
 7. Deseleccting "Show toolbar" should close the "Settings" dropdown.
 

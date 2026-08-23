@@ -1,6 +1,11 @@
-/* A theme names two colours. Everything else — the toolbar, the borders, the
-   muted text, the shadow under a page — is derived from those two, so that a
-   five-line TOML file is genuinely enough to describe a whole look. */
+/* A theme needs two colours and may name three more.
+ *
+ * Ink and paper are the required pair. Accent, link and selection can each be
+ * given outright, and each has a derivation here for when it is not — as does
+ * every shade the chrome uses and never asks about: the toolbar, the borders,
+ * the muted text, the shadow under a page. So a five-line TOML file is
+ * genuinely enough to describe a whole look, and a longer one is only ever a
+ * theme disagreeing with a default. */
 
 import type { Theme } from "./api";
 

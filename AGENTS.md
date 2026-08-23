@@ -43,11 +43,6 @@ Ignoring some settings, we have:
 Tackle each chunk in a separate session. Make a Git commit after each numbered task except those in Chunk C, and except there's a reason to combine two or more tasks.
 
 ## Chunk B
-3. I don't think the Pzazz theme really captures the Charm CLI aesthetic (and edited to try capture it better, but feel free to override). Charm uses colors that are roughly:
-  - Pink: R: 252, G: 113, B: 255
-  - Purple: R: 94, G: 69, B: 247
-  - Green: R: 27, G: 253, B: 184
-  I tried using the according hex colors in src-tauri/themes/pzazz.toml but green as accent color doesn't work – the accent color is always dark purple. However, the green does properly show in the "Open a document" button on the landing page.
 4. Add sepia and high contrast themes (one each); see above. Make good decisions on colors not mentioned there.
 5. "A theme is two colours: the ink and the paper. Everything else follows from them." – is that still correct given the other colors?
 6. The toolbar should have the same colors (text and background) as the document.
@@ -144,8 +139,11 @@ file.
 
 **`api.ts` is the only door.** Nothing else imports `@tauri-apps/api`. It also
 carries a browser fallback — settings in `localStorage`, a file input instead of
-the native picker — so `npm run dev` can be opened in an ordinary browser while
-working on the interface.
+the native picker, and the packaged themes read out of `src-tauri/themes/*.toml`
+at build time — so `npm run dev` can be opened in an ordinary browser while
+working on the interface. The themes are read rather than restated because the
+restated copy went stale, and a stale copy of a theme is invisible: the file is
+right, and what is on screen is the copy.
 
 **Settings are written a group at a time.** Each write still changes only the
 entries it names and leaves unknown keys alone; the defaults table in

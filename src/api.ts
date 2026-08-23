@@ -101,13 +101,48 @@ const fallbackDefaults: Settings = {
   window_maximized: true,
 };
 
-const fallbackThemes: Theme[] = [
-  { id: "hylo-light", name: "Hylo Light", text: "#2f3237", background: "#f2f1ed", accent: "#3f7d94", link: "#2f6f8f", selection: null, selection_text: null, recolor: false, built_in: true },
-  { id: "hylo-dark", name: "Hylo Dark", text: "#e9eaee", background: "#24272f", accent: "#8fb0d4", link: "#8ec5e8", selection: null, selection_text: null, recolor: true, built_in: true },
-  { id: "pzazz", name: "Pzazz", text: "#f4b8e4", background: "#1b1029", accent: "#c77dff", link: "#9d7bff", selection: "#4a2f6b", selection_text: null, recolor: true, built_in: true },
-  { id: "dracula", name: "Dracula", text: "#f8f8f2", background: "#282a36", accent: "#ff79c6", link: "#8be9fd", selection: "#44475a", selection_text: null, recolor: true, built_in: true },
-  { id: "gruvbox", name: "Gruvbox", text: "#ebdbb2", background: "#282828", accent: "#fe8019", link: "#83a598", selection: "#504945", selection_text: null, recolor: true, built_in: true },
-];
+/* The packaged themes, for the browser.
+ *
+ * With Rust behind it the app reads these from the user's theme directory,
+ * where they were installed from the same files this reads here. Keeping a
+ * second copy of the colours in TypeScript is what made `npm run dev` show a
+ * theme nobody had shipped for months, and the drift is invisible until
+ * somebody edits a theme and it does not change: the file was right and the
+ * copy was what was on screen.
+ *
+ * The parsing is a fraction of TOML — a flat table of quoted strings and
+ * booleans, which is all a theme file is. Anything cleverer is Rust's job. */
+const packagedOrder = ["hylo-light", "hylo-dark", "pzazz", "dracula", "gruvbox", "sepia", "high-contrast"];
+
+const packagedSources = import.meta.glob("../src-tauri/themes/*.toml", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+function parsePackaged(id: string, source: string): Theme {
+  const read = (key: string): string | null => {
+    const found = source.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"`, "m"));
+    return found ? found[1] : null;
+  };
+  return {
+    id,
+    name: read("name") ?? id,
+    text: read("text") ?? "#000000",
+    background: read("background") ?? "#ffffff",
+    accent: read("accent"),
+    link: read("link"),
+    selection: read("selection"),
+    selection_text: read("selection_text"),
+    recolor: !/^\s*recolor\s*=\s*false/m.test(source),
+    built_in: true,
+  };
+}
+
+const fallbackThemes: Theme[] = packagedOrder.flatMap((id) => {
+  const source = packagedSources[`../src-tauri/themes/${id}.toml`];
+  return source ? [parsePackaged(id, source)] : [];
+});
 
 function fallbackSettings(): Settings {
   try {

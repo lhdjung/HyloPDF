@@ -1,14 +1,24 @@
-# Pzazz — glamorous rather than quiet: pink ink and purple light, on a deep
-# violet ground. The Charm / Bubble Tea palette lives here.
+# Pzazz — glamorous rather than quiet, and the one theme that borrows its
+# palette wholesale. Charm's three colours are pink #fc71ff, purple #5e45f7 and
+# green #1bfdb8; all three are here, each doing the job it does in their own
+# tools. The ground is violet rather than black, because black is what High
+# Contrast is for and because neon on violet is the look being borrowed.
 name = "Pzazz"
-text = "#f4b8e4"
-# background used to be: 1b1029
-background = "#010105"
-# accent used to be: c77dff
+# The pink, lifted towards white. Charm sets it on a line or two at a time; a
+# page is a great deal more pink than that, and the full #fc71ff over a whole
+# chapter is a glare rather than a glamour.
+text = "#f7a9fa"
+background = "#100a1a"
+# The green, untouched. It lands on small, deliberate things — the page you are
+# on, the switch that is on, the button you are about to press — which is
+# exactly the weight it carries in a Charm interface.
 accent = "#1bfdb8"
-# Links lean violet where the body text leans pink: a different hue and a
-# darker one, so they are still links to someone who reads colour differently.
-link = "#da02de"
-# The accent is loud enough to read as a highlight on its own, so selection
-# gets a quieter violet of its own rather than a wash of it.
-selection = "#4a2f6b"
+# The purple, lifted the same way the pink was: #5e45f7 on this ground is a
+# little under 3.5:1, and a link in the middle of a paragraph has to be read,
+# not spotted.
+link = "#8b74ff"
+# Purple again, at full strength, with the green on top of it. Both are the
+# palette's own, and green on violet is the one pairing in it that nobody could
+# mistake for ordinary text.
+selection = "#4a2f9e"
+selection_text = "#1bfdb8"

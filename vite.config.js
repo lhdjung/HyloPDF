@@ -13,7 +13,12 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    watch: { ignored: ["**/src-tauri/**"] },
+    // Rust's build output is enormous and changes constantly; watching it means
+    // a reload every time cargo breathes. The rest of `src-tauri` is watched,
+    // because the packaged themes live there and the browser fallback reads
+    // them — ignoring the whole directory meant editing a theme and reloading
+    // to find it unchanged.
+    watch: { ignored: ["**/src-tauri/target/**", "**/src-tauri/gen/**"] },
   },
   build: {
     target: ["safari15", "chrome105"],

@@ -9,6 +9,12 @@
   --surface-hover: #ececE7;
   --surface-sunk: #efeeea;
   --line: #dedcd6;
+  /* The toolbar's own family, mixed from the paper it sits on rather than from
+     the backdrop — see `applyTheme`. */
+  --bar-hover: #ebebec;
+  --bar-sunk: #f3f3f3;
+  --bar-line: #dedee0;
+  --bar-accent: #e5ecef;
   --text: #2f3237;
   --text-soft: #6a6d73;
   --text-note: #7c7f84;
@@ -158,6 +164,23 @@ body {
   color: var(--accent);
 }
 
+/* On the bar, all three of those come from the bar's own family. Everything
+   else wearing `.btn` — in a menu, in the find bar, in the settings window —
+   floats on `--surface` and keeps the surface's. */
+#toolbar .btn:hover {
+  background: var(--bar-hover);
+}
+
+#toolbar .btn:active {
+  background: var(--bar-sunk);
+}
+
+#toolbar .btn[aria-pressed="true"],
+#toolbar .btn[aria-expanded="true"],
+#toolbar .btn.on {
+  background: var(--bar-accent);
+}
+
 .btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -191,7 +214,7 @@ body {
 .zoom-group {
   display: flex;
   align-items: center;
-  background: var(--surface-sunk);
+  background: var(--bar-sunk);
   border-radius: var(--radius);
   padding: 2px;
   gap: 2px;
@@ -214,9 +237,9 @@ body {
   width: 44px;
   height: 28px;
   padding: 0 6px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--bar-line);
   border-radius: 7px;
-  background: var(--surface-sunk);
+  background: var(--bar-sunk);
   color: var(--text);
   font: inherit;
   font-variant-numeric: tabular-nums;

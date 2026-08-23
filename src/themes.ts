@@ -178,7 +178,32 @@ export function applyTheme(theme: Theme): void {
   set("--positive", toHex(mix(dark ? GREEN_LIGHT : GREEN_DARK, text, 0.14)));
   // The paper behind a page that has not finished rendering: the colour it is
   // about to become, so nothing flashes white on the way in.
-  set("--page-paper", theme.recolor ? toHex(bg) : "#ffffff");
+  const paper = theme.recolor ? bg : WHITE;
+  set("--page-paper", toHex(paper));
+
+  // The chips on the toolbar.
+  //
+  // The bar takes the paper's colour rather than the surface's, because it
+  // belongs to the document instead of floating over it — and until now the
+  // things inside it did not follow: a hover, a held-down button, the zoom
+  // group and the page field were all derived from `--surface`, which comes
+  // off the backdrop. On a warm theme that is a cold chip on warm paper, and
+  // on a theme whose paper is not its background it is a chip from another
+  // theme entirely. So the bar gets a family of its own, mixed from the paper
+  // it sits on towards the ink the reader is already looking at.
+  const paperDark = luminance(paper) < 0.35;
+  // Which ink that is: the theme's own, almost always, because that is what
+  // carries the tint. A theme may name a text colour its paper cannot support
+  // — a dark theme that leaves the document alone shows its chrome on white —
+  // and a field nobody can see is worse than one that is merely grey.
+  const chipInk = contrastRatio(text, paper) >= 3 ? text : paperDark ? WHITE : BLACK;
+  set("--bar-hover", toHex(mix(paper, chipInk, paperDark ? 0.13 : 0.09)));
+  set("--bar-sunk", toHex(mix(paper, chipInk, paperDark ? 0.075 : 0.055)));
+  set("--bar-line", toHex(mix(paper, chipInk, paperDark ? 0.2 : 0.17)));
+  // What a button on the bar wears while it is holding something open. The
+  // same idea as `--accent-soft` and the same accent, over the bar's paper
+  // instead of the surface.
+  set("--bar-accent", toHex(mix(accent, paper, paperDark ? 0.8 : 0.86)));
   set(
     "--page-shadow",
     dark

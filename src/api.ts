@@ -440,24 +440,57 @@ export async function onCloseRequested(handler: () => Promise<void>): Promise<vo
 
 /* ------------------------------------------- browser-only file selection */
 
+/** The documents this page can still read, standing in for the file handle
+ *  Rust would be holding.
+ *
+ * Only the last few. A `File` is a handle rather than the bytes, but it pins
+ * whatever is behind it, and this used to be every document ever picked or
+ * dropped for as long as the tab was open. The recents list is six, so this
+ * outlives anything the interface can still offer to reopen. */
 const browserFiles = new Map<string, File>();
+const BROWSER_FILE_LIMIT = 8;
+
+function rememberBrowserFile(file: File): string {
+  // Re-inserting moves it to the end, which is what makes this an LRU.
+  browserFiles.delete(file.name);
+  browserFiles.set(file.name, file);
+  for (const name of browserFiles.keys()) {
+    if (browserFiles.size <= BROWSER_FILE_LIMIT) break;
+    browserFiles.delete(name);
+  }
+  return file.name;
+}
 
 function browsePdf(): Promise<string | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "application/pdf";
+    // `change` does not fire when the picker is dismissed, so a promise that
+    // only listened for it never settled: every cancelled Open left one
+    // pending forever, and the `await` in `openDialog` behind it. `cancel` is
+    // the event for that, and the focus check is for the engines that do not
+    // send it — the window getting the keyboard back with no file chosen
+    // means the picker has been and gone.
+    let settled = false;
+    const done = (answer: string | null) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("focus", onFocus);
+      resolve(answer);
+    };
+    // Focus can come back before `change` lands, so give it a moment to.
+    const onFocus = () => setTimeout(() => done(null), 300);
     input.addEventListener("change", () => {
       const file = input.files?.[0];
-      if (!file) return resolve(null);
-      browserFiles.set(file.name, file);
-      resolve(file.name);
+      done(file ? rememberBrowserFile(file) : null);
     });
+    input.addEventListener("cancel", () => done(null));
+    window.addEventListener("focus", onFocus, { once: true });
     input.click();
   });
 }
 
 export function registerBrowserFile(file: File): string {
-  browserFiles.set(file.name, file);
-  return file.name;
+  return rememberBrowserFile(file);
 }

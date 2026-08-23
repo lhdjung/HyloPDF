@@ -80,6 +80,23 @@ const RANGE_CHUNK = 64 * 1024;
     every decoded image on the page — until it is cleaned up, so this is the
     ceiling on what a long book costs after being read end to end. */
 const PAGE_CACHE = 48;
+/**
+ * …and how many of those may be pages that turned out to carry pictures.
+ *
+ * The count above is the wrong unit on its own, and a scanned book is where
+ * that shows. A page of type costs a few kilobytes of parsed operator list; a
+ * scanned page is one decoded image, and at the resolution a scanner works at
+ * that is sixty megabytes, held in the GPU process until `cleanup()` is
+ * called on the page. Forty-eight of those is three gigabytes — measured, on a
+ * machine with eight — while forty-eight pages of a typeset book is nothing at
+ * all and worth keeping.
+ *
+ * So pages with pictures on them get a cap of their own and the plain ones
+ * keep theirs. Which is which is not guessed — see `holdsPictures` — and it is
+ * remembered once found, because a page does not change its mind about what is
+ * printed on it.
+ */
+const IMAGE_PAGE_CACHE = 6;
 /** How far beyond the viewport pages are kept alive, in viewport heights. */
 const OVERSCAN = 0.6;
 /** How far a wheel has to push past the end of a page before it turns it.
@@ -187,6 +204,8 @@ export class Viewer {
   private boxes: Box[] = [];
   private slots = new Map<number, Slot>();
   private pageCache = new Map<number, Promise<PDFPageProxy>>();
+  /** Pages whose render reported pictures on them. See `IMAGE_PAGE_CACHE`. */
+  private pictorial = new Set<number>();
   private linkCache = new Map<number, Link[]>();
   /** A match asked for but not yet shown, because its page had no text layer
       when it was asked for. Index into `matches`; -1 when there is none. */
@@ -575,14 +594,31 @@ export class Viewer {
     return pending;
   }
 
-  /** Drop the least recently wanted proxies, never one that is on screen. */
+  /** Drop the least recently wanted proxies, never one that is on screen.
+   *
+   * Two caps rather than one: everything is held to `PAGE_CACHE`, and the
+   * pages carrying pictures are held to `IMAGE_PAGE_CACHE` on top of that,
+   * because those are the ones that are measured in tens of megabytes each. A
+   * book of type is unaffected — it never reaches the second cap — and a
+   * scanned one stops at half a gigabyte instead of three. */
   private trimPages(): void {
-    if (this.pageCache.size <= PAGE_CACHE) return;
+    let pictures = 0;
+    for (const index of this.pageCache.keys()) {
+      if (this.pictorial.has(index)) pictures++;
+    }
+    if (this.pageCache.size <= PAGE_CACHE && pictures <= IMAGE_PAGE_CACHE) return;
+
+    // Oldest first: `page()` re-inserts on every hit, so this is the LRU order.
     for (const index of [...this.pageCache.keys()]) {
-      if (this.pageCache.size <= PAGE_CACHE) break;
+      if (this.pageCache.size <= PAGE_CACHE && pictures <= IMAGE_PAGE_CACHE) break;
+      // Never one that is on screen, whichever cap is over.
       if (this.slots.has(index)) continue;
+      const picture = this.pictorial.has(index);
+      // Under the count cap, only pictures are worth evicting.
+      if (this.pageCache.size <= PAGE_CACHE && !picture) continue;
       const pending = this.pageCache.get(index)!;
       this.pageCache.delete(index);
+      if (picture) pictures--;
       // `cleanup` defers while a render is running, so this cannot pull a page
       // out from under one.
       void pending.then((page) => page.cleanup()).catch(() => {});
@@ -594,6 +630,7 @@ export class Viewer {
       void pending.then((page) => page.cleanup()).catch(() => {});
     }
     this.pageCache.clear();
+    this.pictorial.clear();
   }
 
   /* -------------------------------------------------------------- getters */
@@ -1189,69 +1226,96 @@ export class Viewer {
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) {
       slot.renderedKey = key;
+      release(canvas);
       return;
     }
 
-    const wantsImages = Boolean(theme?.recolor) && this.preserveImages;
-    const task = page.render({
-      canvas,
-      canvasContext: ctx,
-      viewport,
-      background: "#ffffff",
-      recordImages: wantsImages,
-    });
-    slot.task = task;
-
+    // Everything from here to the moment the canvas is put on screen can be
+    // abandoned: the reader scrolls on and the slot is discarded, the theme
+    // changes, the document is closed, the render is cancelled. Every one of
+    // those paths used to drop the canvas rather than release it, and dropping
+    // the last reference to one is not the same as freeing it — which is the
+    // whole reason `release` exists, and is said two screens up about the
+    // canvas a discarded slot leaves behind. A fast scroll abandons renders
+    // steadily, so this is the same leak by a different door.
+    let adopted = false;
     try {
-      await task.promise;
-    } catch (error) {
-      if (!(error instanceof RenderingCancelledException)) {
-        // Give up on this page rather than retry it forever.
-        slot.renderedKey = key;
-        this.callbacks.onError(`Page ${slot.index + 1} could not be drawn.`);
-      }
-      return;
-    } finally {
-      if (slot.task === task) slot.task = null;
-    }
-    if (this.doc !== doc || this.slots.get(slot.index) !== slot) return;
+      const wantsImages = Boolean(theme?.recolor) && this.preserveImages;
+      const task = page.render({
+        canvas,
+        canvasContext: ctx,
+        viewport,
+        background: "#ffffff",
+        recordImages: wantsImages,
+      });
+      slot.task = task;
 
-    if (theme) {
-      // Links are coloured under every theme, including the ones that leave the
-      // document alone otherwise. A link that reads exactly like the sentence
-      // around it is a link nobody can see, and whether the page has been
-      // recoloured is beside that point.
-      const links = await this.linksFor(slot.index, page);
+      try {
+        await task.promise;
+      } catch (error) {
+        if (!(error instanceof RenderingCancelledException)) {
+          // Give up on this page rather than retry it forever.
+          slot.renderedKey = key;
+          this.callbacks.onError(`Page ${slot.index + 1} could not be drawn.`);
+        }
+        return;
+      } finally {
+        if (slot.task === task) slot.task = null;
+      }
       if (this.doc !== doc || this.slots.get(slot.index) !== slot) return;
-      const coordinates: ArrayLike<number> | null = wantsImages
-        ? task.imageCoordinates
-        : null;
-      const hasImages = Boolean(coordinates && coordinates.length > 0);
-      // A copy of the page as it was drawn, to paint back over the recolouring.
-      // Only a recoloured page has anything to undo, and the copy is the whole
-      // canvas — at a high zoom that is tens of megabytes, so a theme that
-      // leaves the document alone must not pay for it. Every zoom step
-      // repaints every visible page, which is where that cost would land.
-      const pristine = theme.recolor && (hasImages || links.length > 0)
-        ? copyCanvas(canvas)
-        : null;
-      if (theme.recolor) recolor(ctx, canvas.width, canvas.height, theme);
-      if (links.length > 0) {
-        tintLinks(ctx, pristine, canvas.width, canvas.height, links, theme);
-      }
-      if (pristine && coordinates && hasImages) {
-        restoreImages(ctx, pristine, canvas.width, canvas.height, coordinates);
-      }
-      // As big as the page it copied, and finished with.
-      release(pristine);
-    }
 
-    const replaced = slot.canvas;
-    slot.canvas = canvas;
-    slot.el.prepend(canvas);
-    replaced?.remove();
-    release(replaced);
-    slot.renderedKey = key;
+      // What this page turned out to cost. A page is only known to carry
+      // pictures once it has been drawn, which is also the moment its pictures
+      // start taking up room.
+      if (holdsPictures(page)) {
+        this.pictorial.add(slot.index);
+        this.trimPages();
+      }
+
+      if (theme) {
+        // Links are coloured under every theme, including the ones that leave the
+        // document alone otherwise. A link that reads exactly like the sentence
+        // around it is a link nobody can see, and whether the page has been
+        // recoloured is beside that point.
+        const links = await this.linksFor(slot.index, page);
+        if (this.doc !== doc || this.slots.get(slot.index) !== slot) return;
+        const coordinates: ArrayLike<number> | null = wantsImages
+          ? task.imageCoordinates
+          : null;
+        const hasImages = Boolean(coordinates && coordinates.length > 0);
+        // A copy of the page as it was drawn, to paint back over the recolouring.
+        // Only a recoloured page has anything to undo, and the copy is the whole
+        // canvas — at a high zoom that is tens of megabytes, so a theme that
+        // leaves the document alone must not pay for it. Every zoom step
+        // repaints every visible page, which is where that cost would land.
+        const pristine = theme.recolor && (hasImages || links.length > 0)
+          ? copyCanvas(canvas)
+          : null;
+        try {
+          if (theme.recolor) recolor(ctx, canvas.width, canvas.height, theme);
+          if (links.length > 0) {
+            tintLinks(ctx, pristine, canvas.width, canvas.height, links, theme);
+          }
+          if (pristine && coordinates && hasImages) {
+            restoreImages(ctx, pristine, canvas.width, canvas.height, coordinates);
+          }
+        } finally {
+          // As big as the page it copied, and finished with either way.
+          release(pristine);
+        }
+      }
+
+      const replaced = slot.canvas;
+      slot.canvas = canvas;
+      slot.el.prepend(canvas);
+      adopted = true;
+      replaced?.remove();
+      release(replaced);
+      slot.renderedKey = key;
+    } finally {
+      // Adopted means the slot owns it now and `discard` will do this instead.
+      if (!adopted) release(canvas);
+    }
 
     // The pixels the selection was copied from have just been replaced.
     this.refreshSelection();
@@ -1680,6 +1744,34 @@ function tintLinks(
   ctx.restore();
 }
 
+function copyCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
+  const copy = document.createElement("canvas");
+  copy.width = source.width;
+  copy.height = source.height;
+  copy.getContext("2d")?.drawImage(source, 0, 0);
+  return copy;
+}
+
+/** Whether a drawn page is holding decoded pictures.
+ *
+ * `recordImages` cannot answer this: it reports where pdf.js painted image
+ * XObjects, and a bitonal scan — which is the expensive case and the reason
+ * any of this exists — arrives as an image *mask* and is not among them. The
+ * page's own object store is the honest answer, because holding those objects
+ * is the cost being counted. It is iterable in pdf.js's public types; the ids
+ * are all that is wanted, and the data behind an image id may well be null by
+ * the time anyone looks, because the pixels went to the compositor. */
+function holdsPictures(page: PDFPageProxy): boolean {
+  try {
+    for (const [id] of page.objs) {
+      if (typeof id === "string" && id.startsWith("img")) return true;
+    }
+  } catch {
+    // An object store that will not be walked is not a reason to stop drawing.
+  }
+  return false;
+}
+
 /** Let go of a canvas's backing store at once.
  *
  * Dropping the reference is enough to make it collectable and not enough to
@@ -1691,13 +1783,7 @@ function release(canvas: HTMLCanvasElement | null): void {
   canvas.height = 0;
 }
 
-function copyCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
-  const copy = document.createElement("canvas");
-  copy.width = source.width;
-  copy.height = source.height;
-  copy.getContext("2d")?.drawImage(source, 0, 0);
-  return copy;
-}
+
 
 /** A DOM range covering one match, which may run across several text runs. */
 function rangeFor(divs: HTMLElement[], match: Match): Range | null {

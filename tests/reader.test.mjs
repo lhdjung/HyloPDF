@@ -11,7 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { openApp } from "../scripts/ui-harness.mjs";
+import { MOD, openApp } from "../scripts/ui-harness.mjs";
 
 const PDF = "tests/fixtures/book.pdf";
 const PAGES = 400;
@@ -80,7 +80,7 @@ test("moving around", async (t) => {
   });
 
   await t.test("a shortcut hands over the page number, ready to type into", async () => {
-    for (const keys of ["g", "Meta+Alt+g"]) {
+    for (const keys of ["g", `${MOD}+Alt+g`]) {
       await app.press("End");
       await app.page.keyboard.press(keys);
       await app.page.waitForTimeout(120);
@@ -134,11 +134,11 @@ test("fit width fits the width", async (t) => {
   });
 
   await t.test("with the sidebar out", async () => {
-    await app.page.keyboard.press("Meta+b");
+    await app.page.keyboard.press(`${MOD}+b`);
     await app.page.waitForTimeout(400);
     const { left, right } = await strips();
     assert.ok(left < 1 && right < 1, `${left}px and ${right}px of ground left over`);
-    await app.page.keyboard.press("Meta+b");
+    await app.page.keyboard.press(`${MOD}+b`);
     await app.page.waitForTimeout(400);
   });
 
@@ -161,7 +161,7 @@ test("ctrl+wheel zooms", async () => {
 
 test("search", async (t) => {
   await t.test("finds matches and highlights them", async () => {
-    await app.page.keyboard.press("Meta+f");
+    await app.page.keyboard.press(`${MOD}+f`);
     await app.page.waitForTimeout(150);
     await app.page.fill("#find-input", "quick brown");
     await app.page.waitForTimeout(2500);
@@ -243,7 +243,7 @@ test("search", async (t) => {
   });
 
   await t.test("Escape puts it away", async () => {
-    await app.page.keyboard.press("Meta+f");
+    await app.page.keyboard.press(`${MOD}+f`);
     await app.page.waitForTimeout(150);
     assert.equal((await app.state()).findOpen, true);
     await app.page.keyboard.press("Escape");
@@ -292,7 +292,7 @@ test("hiding the toolbar takes the menu hanging off it away too", async () => {
   // Left open, it would be anchored to a button that is no longer there.
   assert.equal(state.menuOpen, false, "the menu outlived the bar it hung off");
 
-  await app.press("Meta+Shift+KeyT");
+  await app.press(`${MOD}+Shift+KeyT`);
   await app.page.waitForTimeout(300);
   assert.equal(
     await app.page.evaluate(() => document.getElementById("shell").dataset.toolbar),
@@ -358,7 +358,7 @@ test("a colour changed in the editor reaches the page it recolours", async () =>
     await editing.page.waitForTimeout(1200);
     assert.equal(await paper(), "#24272f", "the page did not open in the theme's colours");
 
-    await editing.page.keyboard.press("Meta+Comma");
+    await editing.page.keyboard.press(`${MOD}+Comma`);
     await editing.page.waitForTimeout(300);
     await editing.page.click("#windows .window-nav button:has-text('Appearance')");
     await editing.page.click("#windows .pane-actions button:has-text('Make a copy')");

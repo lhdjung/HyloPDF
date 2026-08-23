@@ -25,6 +25,23 @@ import path from "node:path";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const URL_BASE = process.env.HYLOPDF_URL ?? "http://localhost:1420/";
 
+/* The app takes its whole shortcut scheme from the browser's platform — `isMac`
+ * in api.ts, off `navigator.platform` — so ⌘F opens the find bar on a Mac and
+ * does nothing at all anywhere else, where it is Ctrl+F. A test that presses a
+ * hard-coded Meta therefore passes on the machine it was written on and fails
+ * on CI, which is Linux, and the failure looks like a broken find bar rather
+ * than a wrong key.
+ *
+ * So the modifier comes from the platform here, and `HYLOPDF_PLATFORM=other`
+ * forces the other scheme — it lies to `navigator.platform` as well, so the app
+ * and the test agree about which machine they are on. That is what makes the
+ * Linux keyboard reachable from a Mac without waiting seven minutes for CI. */
+const PRETEND = process.env.HYLOPDF_PLATFORM;
+export const onMac = PRETEND ? PRETEND === "mac" : process.platform === "darwin";
+
+/** The modifier this platform's shortcuts hang off: ⌘ on a Mac, Ctrl elsewhere. */
+export const MOD = onMac ? "Meta" : "Control";
+
 /**
  * Boot the interface and, if asked, open a document in it.
  *
@@ -49,6 +66,13 @@ export async function openApp(options = {}) {
     deviceScaleFactor: 2,
   });
   const page = await context.newPage();
+
+  // Before anything reads it: api.ts computes `isMac` at module load.
+  if (PRETEND) {
+    await page.addInitScript((platform) => {
+      Object.defineProperty(navigator, "platform", { get: () => platform });
+    }, onMac ? "MacIntel" : "Linux x86_64");
+  }
 
   const logs = [];
   page.on("console", (message) => logs.push(`${message.type()}: ${message.text()}`));

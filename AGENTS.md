@@ -74,19 +74,19 @@ and unmerged; nothing in it changed.
   will look like one the next time this comes up.
 
 ## Chunk D
-CI hit issues before chunks were tackled:
-    Checking tauri-plugin-single-instance v2.4.3
-error[E0599]: no variant named `Opened` found for enum `tauri::RunEvent`
-   --> src/lib.rs:667:37
-    |
-667 |             if let tauri::RunEvent::Opened { urls } = event {
-    |                                     ^^^^^^ variant not found in `tauri::RunEvent`
-
-For more information about this error, try `rustc --explain E0599`.
-error: could not compile `hylopdf` (lib) due to 1 previous error
-warning: build failed, waiting for other jobs to finish...
-error: could not compile `hylopdf` (lib test) due to 1 previous error
-Error: Process completed with exit code 101.
+CI had never been green, and the three reasons were unrelated to each other and
+to the chunks. All three are fixed; each left a note below.
+- `RunEvent::Opened` is an Apple Events variant and does not exist off Apple
+  platforms, so Linux and Windows would not compile. Now `#[cfg]`-gated.
+- The bundle step named the Apple signing variables in its `env`, and a secret
+  this repository does not have arrives as an empty string rather than as
+  nothing — which the Tauri bundler reads as a certificate and fails to import.
+  macOS compiled perfectly and died at `security import` every time.
+- `reader.test.mjs` pressed a hard-coded `Meta`, and the app takes its shortcut
+  scheme from `navigator.platform`. On CI, which is Linux, ⌘F was not a
+  keystroke the app knows, so the find bar never opened and the toolbar, once
+  hidden, never came back — thirteen failures, none of them about what they
+  said they were about. `HYLOPDF_PLATFORM=other` now reaches that from a Mac.
 
 
 # Architecture of the built app
@@ -463,6 +463,17 @@ Needs `npm run dev` running first. **WebKit, not Chromium**, and the default for
 a reason: the app lives in a WKWebView, and the engines disagree about exactly
 the things this app leans on — blend modes on a composited canvas, pinch zoom,
 text layout. `{ engine: "chromium" }` is there for comparing the two.
+
+**Press `MOD`, never `Meta`.** The app takes its whole shortcut scheme from
+`navigator.platform` — `isMac` in `api.ts` — so the modifier is ⌘ on a Mac and
+Ctrl on the two platforms this is not developed on. A test that hard-codes
+`Meta` passes here and does nothing at all on CI, and the damage is quiet: the
+find bar simply never opens, and a toolbar hidden by one test is never brought
+back for the next four. The harness exports `MOD` for this, and
+`HYLOPDF_PLATFORM=other` runs the whole suite under the other scheme — it lies
+to `navigator.platform` too, so the app and the test agree about which machine
+they are on. `HYLOPDF_PLATFORM=other npm test` is the cheap way to find out
+what Linux will say, and it is worth running before touching a shortcut.
 
 Settings are seeded through the `localStorage` fallback in `api.ts`, so the
 whole browser path is exercised: no Rust, no window, no traffic lights. Reading

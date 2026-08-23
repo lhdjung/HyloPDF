@@ -47,6 +47,7 @@ const listWebKit = () =>
 const before = new Set(listWebKit());
 const ours = () => listWebKit().filter((pid) => !before.has(pid)).map(Number);
 
+/** @param {number} pid */
 const footprintMB = (pid) => {
   try {
     const line = execSync(`footprint -p ${pid} 2>/dev/null | awk '/phys_footprint:/{print $2, $3}'`)
@@ -59,6 +60,7 @@ const footprintMB = (pid) => {
   }
 };
 
+/** @param {number} pid */
 const nameOf = (pid) => {
   try {
     return execSync(`ps -p ${pid} -o comm= | sed 's|.*/||;s|com.apple.WebKit.||;s|.Development||'`)
@@ -68,6 +70,7 @@ const nameOf = (pid) => {
   }
 };
 
+/** @param {string} label */
 const report = (label) => {
   const parts = [];
   let total = 0;

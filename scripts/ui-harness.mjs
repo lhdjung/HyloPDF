@@ -78,13 +78,16 @@ export async function openApp(options = {}) {
     await page.addInitScript(() => {
       const proto = CanvasRenderingContext2D.prototype;
       const real = Object.getOwnPropertyDescriptor(proto, "globalCompositeOperation");
+      if (!real?.get || !real.set) return;
+      const { get, set } = real;
       const unsupported = ["saturation", "color-dodge", "luminosity", "color", "hue"];
       Object.defineProperty(proto, "globalCompositeOperation", {
         get() {
-          return real.get.call(this);
+          return get.call(this);
         },
+        /** @param {string} value */
         set(value) {
-          if (!unsupported.includes(value)) real.set.call(this, value);
+          if (!unsupported.includes(value)) set.call(this, value);
         },
       });
     });
@@ -97,6 +100,7 @@ export async function openApp(options = {}) {
     }, onMac ? "MacIntel" : "Linux x86_64");
   }
 
+  /** @type {string[]} */
   const logs = [];
   page.on("console", (message) => logs.push(`${message.type()}: ${message.text()}`));
   page.on("pageerror", (error) => logs.push(`pageerror: ${error.message}`));
@@ -137,7 +141,11 @@ export async function openApp(options = {}) {
     browser,
     logs,
 
-    /** A key to the document, the way the app's own shortcut handler sees it. */
+    /** A key to the document, the way the app's own shortcut handler sees it.
+     *
+     * @param {string} key
+     * @param {{ delay?: number }} [options]
+     */
     async press(key, options) {
       await page.locator("#viewer").focus();
       await page.keyboard.press(key, options);
@@ -145,9 +153,15 @@ export async function openApp(options = {}) {
     },
 
     /** A wheel gesture over the document: `ticks` events of `deltaY` each.
-        `ctrl` makes it the pinch that a trackpad sends. */
+     *  `ctrl` makes it the pinch that a trackpad sends.
+     *
+     * @param {number} ticks
+     * @param {number} deltaY
+     * @param {{ ctrl?: boolean, pause?: number }} [options]
+     */
     async wheel(ticks, deltaY, { ctrl = false, pause = 16 } = {}) {
       const box = await page.locator("#viewer").boundingBox();
+      if (!box) throw new Error("the viewer has no box to aim at");
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       if (ctrl) await page.keyboard.down("Control");
       for (let i = 0; i < ticks; i++) {
@@ -162,8 +176,11 @@ export async function openApp(options = {}) {
     async state() {
       return page.evaluate(() => {
         const window = document.querySelector("#windows .window");
+        const number = /** @type {HTMLInputElement | null} */ (
+          document.getElementById("page-number")
+        );
         return {
-          page: document.getElementById("page-number")?.value,
+          page: number?.value,
           pages: document.getElementById("page-count")?.textContent,
           zoom: document.getElementById("zoom-level")?.textContent,
           scrollTop: document.getElementById("viewer")?.scrollTop,
@@ -177,6 +194,7 @@ export async function openApp(options = {}) {
       });
     },
 
+    /** @param {string} file */
     async shot(file) {
       await page.screenshot({ path: file });
       return file;

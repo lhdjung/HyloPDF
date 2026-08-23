@@ -11,7 +11,11 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
+    // Deliberately empty: the app runs in a webview and has no business
+    // seeing `process` or `Buffer`. The Node-side files — the harness, the
+    // tests, the build scripts — are checked by `tsconfig.node.json`, which
+    // is where those globals belong.
     "types": []
   },
-  "include": ["src/**/*.ts", "vite.config.js", "scripts/**/*.mjs"]
+  "include": ["src/**/*.ts"]
 }

@@ -147,6 +147,9 @@ class App {
       Keyed so the last value for a key wins. */
   private pendingWrites = new Map<keyof Settings, Settings[keyof Settings]>();
   private writeTimer = 0;
+  /** When the queued write is due, so a later deadline cannot displace an
+      earlier one. */
+  private writeAt = 0;
   private pillTimer = 0;
   private geometryTimer = 0;
   private fullscreenTimer = 0;
@@ -305,8 +308,12 @@ class App {
   set<K extends keyof Settings>(key: K, value: Settings[K]): void {
     this.settings[key] = value;
     this.pendingWrites.set(key, value);
-    if (this.writeTimer) return;
-    this.writeTimer = window.setTimeout(() => void this.flushSettings(), 0);
+    // Soonest wins. The two methods share a queue but not an urgency, and they
+    // used to share the timer as well: a pinch calls `setSoon` every frame and
+    // pushed the deadline out each time, so a theme chosen mid-gesture waited
+    // for the fingers to stop. A `set` now pulls the deadline in and never
+    // lets a `setSoon` push it back out.
+    this.scheduleFlush(0);
   }
 
   /** Like `set`, but for a value that moves many times a second: the interface
@@ -314,8 +321,16 @@ class App {
   setSoon<K extends keyof Settings>(key: K, value: Settings[K]): void {
     this.settings[key] = value;
     this.pendingWrites.set(key, value);
+    this.scheduleFlush(400);
+  }
+
+  /** Write what is queued in at most `delay`, never later. */
+  private scheduleFlush(delay: number): void {
+    const at = Date.now() + delay;
+    if (this.writeTimer && at >= this.writeAt) return;
     window.clearTimeout(this.writeTimer);
-    this.writeTimer = window.setTimeout(() => void this.flushSettings(), 400);
+    this.writeAt = at;
+    this.writeTimer = window.setTimeout(() => void this.flushSettings(), delay);
   }
 
   /** Send whatever is waiting. Awaited on the way out, so nothing typed or

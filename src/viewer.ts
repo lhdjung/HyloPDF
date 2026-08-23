@@ -1703,7 +1703,12 @@ export class Viewer {
     slot.highlightEl = overlay;
 
     if (scrollIntoView && scrollTarget) {
+      // Guarded like every other read of `boxes` in this file. Paged mode
+      // lays out one page and leaves the rest of the array empty, so a slot
+      // that has not been discarded yet has no box — and this is the one read
+      // that was assuming otherwise without saying so.
       const box = this.boxes[slot.index];
+      if (!box) return;
       const y = box.top + parseFloat(scrollTarget.style.top);
       const view = this.container.scrollTop;
       const height = this.container.clientHeight;
@@ -1719,17 +1724,6 @@ function linkColor(theme: Theme): string {
   return theme.link ?? theme.accent ?? theme.text;
 }
 
-/**
- * Colour the links on a page that has just been recoloured.
- *
- * The obvious way — a tinted box over each link, blended into the ink below —
- * is at the mercy of the compositor, and where the blend is dropped the reader
- * gets a solid band across the line instead of a coloured word. So the tint is
- * painted into the bitmap: the untouched page is put back inside the link's
- * rectangle and recoloured again, this time towards the link colour rather
- * than the text colour. The paper maps to the same background either way, so
- * only the letters change, and the edges of the rectangle leave no seam.
- */
 /**
  * The rectangles a selection covers on one page, in that page's own
  * coordinates, tidied into the runs a reader would draw with a highlighter.
@@ -1771,6 +1765,17 @@ function joinRuns(rects: DOMRect[], page: DOMRect): Rect[] {
   return joined;
 }
 
+/**
+ * Colour the links on a page that has just been recoloured.
+ *
+ * The obvious way — a tinted box over each link, blended into the ink below —
+ * is at the mercy of the compositor, and where the blend is dropped the reader
+ * gets a solid band across the line instead of a coloured word. So the tint is
+ * painted into the bitmap: the untouched page is put back inside the link's
+ * rectangle and recoloured again, this time towards the link colour rather
+ * than the text colour. The paper maps to the same background either way, so
+ * only the letters change, and the edges of the rectangle leave no seam.
+ */
 function tintLinks(
   ctx: CanvasRenderingContext2D,
   pristine: CanvasImageSource | null,
@@ -1852,8 +1857,6 @@ function release(canvas: HTMLCanvasElement | null): void {
   canvas.width = 0;
   canvas.height = 0;
 }
-
-
 
 /** A DOM range covering one match, which may run across several text runs. */
 function rangeFor(divs: HTMLElement[], match: Match): Range | null {

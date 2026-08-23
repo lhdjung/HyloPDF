@@ -64,6 +64,28 @@ let currentPage: PageId = "reading";
  * pane out from under it would lose it. */
 let redraw: (() => void) | null = null;
 
+/**
+ * Whether a theme is being written right now.
+ *
+ * The draft is installed as the live theme so that the app around you is the
+ * preview, and while it is, `host.theme` is not a theme that exists on disk —
+ * a new one has no id at all. So the watcher's "these are the themes now"
+ * cannot be applied the way it is applied at any other time: looking the
+ * current theme up in the new list finds nothing, which reads as "the theme
+ * you are reading in was deleted", and the answer to that is to pick another
+ * one and write the choice down. That would throw the draft away, record a
+ * theme nobody chose, and say so in a notice that is simply false.
+ *
+ * Hence a flag rather than a guess. It lives at module scope because the
+ * editor's state is a closure inside `showSettingsWindow` and the question is
+ * asked from outside it.
+ */
+let editingTheme = false;
+
+export function isEditingTheme(): boolean {
+  return editingTheme;
+}
+
 export function refreshSettingsWindow(): void {
   redraw?.();
 }
@@ -77,9 +99,15 @@ export function showSettingsWindow(
   // What is being edited in Appearance, if anything. Cleared when the window
   // closes, so it never reopens half-way through something.
   let editing: { draft: Draft; before: Theme } | null = null;
+  // One place to change it, so the module-level flag above can never drift
+  // from the closure it describes.
+  const setEditing = (next: { draft: Draft; before: Theme } | null) => {
+    editing = next;
+    editingTheme = next !== null;
+  };
   if (opening?.edit) {
-    editing = { draft: draftFrom(opening.edit.from, host.theme), before: host.theme };
-    host.useTheme(editing.draft, false);
+    setEditing({ draft: draftFrom(opening.edit.from, host.theme), before: host.theme });
+    host.useTheme(editing!.draft, false);
   }
 
   // Backing out of a half-finished theme — by cancelling, by walking to
@@ -87,7 +115,7 @@ export function showSettingsWindow(
   const cancelEdit = () => {
     if (!editing) return;
     host.useTheme(editing.before, false);
-    editing = null;
+    setEditing(null);
   };
 
   ui.showWindow("Settings", () => {
@@ -127,8 +155,8 @@ export function showSettingsWindow(
           appearancePage(host, pane, {
             editing,
             begin: (from) => {
-              editing = { draft: draftFrom(from, host.theme), before: host.theme };
-              host.useTheme(editing.draft, false);
+              setEditing({ draft: draftFrom(from, host.theme), before: host.theme });
+              host.useTheme(editing!.draft, false);
               render();
             },
             preview: () => host.useTheme(editing!.draft, false),
@@ -137,7 +165,7 @@ export function showSettingsWindow(
               render();
             },
             done: () => {
-              editing = null;
+              setEditing(null);
               render();
             },
           });
@@ -166,6 +194,10 @@ export function showSettingsWindow(
   }, () => {
     redraw = null;
     cancelEdit();
+    // Belt and braces: `cancelEdit` clears the flag, but only if there was
+    // something to cancel, and this is the last word on whether an edit is
+    // still open.
+    editingTheme = false;
   }, "full");
 }
 

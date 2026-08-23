@@ -46,7 +46,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { hydrateIcons, iconMarkup } from "./icons";
 import { type SearchState, Search } from "./search";
-import { refreshSettingsWindow, showSettingsWindow } from "./settings";
+import { isEditingTheme, refreshSettingsWindow, showSettingsWindow } from "./settings";
 import { Sidebar } from "./sidebar";
 import { applyTheme, isDarkTheme } from "./themes";
 import * as ui from "./ui";
@@ -241,10 +241,23 @@ class App {
    * `remember` off: nobody chose a theme here, and remembering would write
    * `settings.toml` for every save an editor makes. A theme whose file has
    * gone takes the reader somewhere else rather than leaving the colours of
-   * something that no longer exists on screen. */
+   * something that no longer exists on screen.
+   *
+   * None of that applies while a theme is being written. The draft is the live
+   * theme for as long as the editor is open — that is how the app around you
+   * becomes the preview — and a new one has no id at all, so looking it up in
+   * the new set finds nothing and the branch below reads that as "the theme
+   * you are reading in has been deleted". It would then throw the preview
+   * away, write a theme choice nobody made, and say so out loud. The list
+   * still updates, and the window still redraws; the colours on screen belong
+   * to the draft until the reader saves it or backs out. */
   private themesChanged(themes: Theme[]): void {
     const before = this.theme;
     this.themes = themes;
+    if (isEditingTheme()) {
+      refreshSettingsWindow();
+      return;
+    }
     const current = themes.find((theme) => theme.id === before.id);
     if (current) {
       // Unconditional: the viewer and the sidebar both compare colours before

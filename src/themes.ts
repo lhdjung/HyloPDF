@@ -333,7 +333,23 @@ export function recolor(
  * was meant to recolour it, which reads as the theme being broken.
  *
  * The check is the standard one: an unsupported value is refused, and the
- * property keeps whatever it had before. Asked once, kept thereafter. */
+ * property keeps whatever it had before. Asked once, kept thereafter.
+ *
+ * All five of them, not three. `difference` and `lighter` are only on the
+ * inverted path — light ink on dark paper — so they were left out, and an
+ * engine that dropped either would have gone down the fast path and produced
+ * a page inverted rather than recoloured. That is the silent-wrong-picture
+ * failure this function exists to prevent, so the list has to be the whole
+ * list. Two of them are separable and one is not even a blend mode, so this
+ * costs nothing and closes the gap. */
+const BLEND_MODES = [
+  "saturation",
+  "color-dodge",
+  "difference",
+  "multiply",
+  "lighter",
+] as const;
+
 let blendable: boolean | null = null;
 
 function canBlend(): boolean {
@@ -341,13 +357,10 @@ function canBlend(): boolean {
   try {
     const probe = document.createElement("canvas").getContext("2d");
     if (!probe) return (blendable = false);
-    probe.globalCompositeOperation = "saturation";
-    const saturation = probe.globalCompositeOperation === "saturation";
-    probe.globalCompositeOperation = "multiply";
-    const multiply = probe.globalCompositeOperation === "multiply";
-    probe.globalCompositeOperation = "color-dodge";
-    const dodge = probe.globalCompositeOperation === "color-dodge";
-    return (blendable = saturation && multiply && dodge);
+    return (blendable = BLEND_MODES.every((mode) => {
+      probe.globalCompositeOperation = mode;
+      return probe.globalCompositeOperation === mode;
+    }));
   } catch {
     return (blendable = false);
   }

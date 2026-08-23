@@ -43,7 +43,6 @@ Ignoring some settings, we have:
 Tackle each chunk in a separate session. Make a Git commit after each numbered task except those in Chunk C, and except there's a reason to combine two or more tasks.
 
 ## Chunk B
-2. Similarly, at least in dev mode, editing "Background" and then saving doesn't immediately recolor the page but only the space left and right. The page is stale and only recolors on restarting the app. The landing page background is different from the space left and right of the page but should be the same. Link color is stale the same way.
 3. I don't think the Pzazz theme really captures the Charm CLI aesthetic (and edited to try capture it better, but feel free to override). Charm uses colors that are roughly:
   - Pink: R: 252, G: 113, B: 255
   - Purple: R: 94, G: 69, B: 247

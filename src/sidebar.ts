@@ -75,12 +75,14 @@ export class Sidebar {
     if (!this.hasOutline) this.showTab("pages");
   }
 
+  /** A copy, for the reason `Viewer.setTheme` keeps one: the theme editor
+      previews by handing over the draft it goes on editing in place. */
   setTheme(theme: Theme): void {
     const changed =
       this.theme?.text !== theme.text ||
       this.theme?.background !== theme.background ||
       this.theme?.recolor !== theme.recolor;
-    this.theme = theme;
+    this.theme = { ...theme };
     if (!changed) return;
     // Thumbnails carry the theme too, so the panel and the page agree.
     this.redrawVisible();

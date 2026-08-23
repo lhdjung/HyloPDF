@@ -463,6 +463,14 @@ export class Viewer {
 
   /* -------------------------------------------------------------- options */
 
+  /** Take a theme, and repaint every page if it is not the one already in use.
+   *
+   * The copy is the point. The theme editor previews by handing over the draft
+   * it is editing and then editing it further in place, so holding the object
+   * meant holding the new colours under the name of the old ones: every
+   * comparison below found the two sides equal, nothing repainted, and a
+   * background changed in the editor moved the app around the page while the
+   * page itself stayed as it was printed until the next launch. */
   setTheme(theme: Theme, preserveImages: boolean): void {
     const changed =
       this.theme?.id !== theme.id ||
@@ -472,7 +480,7 @@ export class Viewer {
       this.theme?.link !== theme.link ||
       this.theme?.accent !== theme.accent ||
       this.preserveImages !== preserveImages;
-    this.theme = theme;
+    this.theme = { ...theme };
     this.preserveImages = preserveImages;
     if (changed) this.repaint();
   }

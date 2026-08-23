@@ -579,16 +579,17 @@ body {
 
 /* --------------------------------------------------------------- welcome */
 
-/* With no document open there is no page to set off against a backdrop, so the
-   start screen carries on from the toolbar above it: one clean surface, light
-   enough to read quiet text against, rather than the grey the pages float on. */
+/* The same ground a page floats on, because it is the same place: what the
+   start screen occupies is the room the document is about to take, and a
+   different colour there means the app changes shade the moment anything is
+   opened. */
 #welcome {
   position: absolute;
   inset: 0;
   display: none;
   align-items: center;
   justify-content: center;
-  background: var(--surface);
+  background: var(--bg);
   font-size: 14.5px;
 }
 

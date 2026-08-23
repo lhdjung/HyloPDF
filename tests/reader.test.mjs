@@ -310,6 +310,43 @@ test("selected text is painted by the theme, not by the engine", async () => {
   );
 });
 
+test("a colour changed in the editor reaches the page it recolours", async () => {
+  // Its own window: this one has to be reading under a theme that recolours,
+  // and the shared app is on the light theme, which by design does not.
+  const editing = await openApp({ pdf: PDF, settings: { theme: "hylo-dark", sidebar: false } });
+  try {
+    const paper = () =>
+      editing.page.evaluate(() => {
+        const canvas = document.querySelector("#pages canvas");
+        const [r, g, b] = canvas.getContext("2d").getImageData(4, 4, 1, 1).data;
+        return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+      });
+    await editing.page.waitForTimeout(1200);
+    assert.equal(await paper(), "#24272f", "the page did not open in the theme's colours");
+
+    await editing.page.keyboard.press("Meta+Comma");
+    await editing.page.waitForTimeout(300);
+    await editing.page.click("#windows .window-nav button:has-text('Appearance')");
+    await editing.page.click("#windows .pane-actions button:has-text('Make a copy')");
+    // Let the copy settle before touching it. Starting an edit already repaints
+    // once — the draft arrives under an id of its own — and a colour typed
+    // before that repaint has run would be picked up by it, which is a page
+    // that is right for the wrong reason.
+    await editing.page.waitForTimeout(600);
+    await editing.page
+      .locator('#windows .field:has(.field-label:text-is("Background")) input[type=text]')
+      .fill("#3a0a0a");
+    await editing.page.waitForTimeout(800);
+
+    // The editor previews by handing the viewer the draft it goes on editing,
+    // so a viewer that kept the object rather than a copy of it would find
+    // nothing had changed and leave the page as it was printed.
+    assert.equal(await paper(), "#3a0a0a", "the page kept the old background");
+  } finally {
+    await editing.close();
+  }
+});
+
 test("the way out is on the start screen and nowhere else", async () => {
   const seen = () =>
     app.page.evaluate(() => {

@@ -55,6 +55,12 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      # What these cover is concurrency and file-system timing — two settings
+      # written at once, and a document caught halfway through being written by
+      # a compiler. Both break quietly and neither reproduces on demand, so a
+      # machine has to be the one asking.
+      - name: Tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
   bundle:
     name: Bundle (${{ matrix.os }})

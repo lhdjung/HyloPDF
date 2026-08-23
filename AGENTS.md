@@ -243,6 +243,9 @@ machine in one sitting so the columns are like for like:
 | 27 pages of photographs         |  440MB | 323MB |
 | one page of 12000×16000 bitonal | 2521MB | 327MB |
 
+If and only if you need to know more about app memory, see changes in:
+645032673fcc51947c4164a360177a666d6b5fa9
+
 ## Things that will bite
 
 **pdf.js runtime data must be given absolute URLs.** `cMapUrl`,

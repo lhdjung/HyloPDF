@@ -730,19 +730,34 @@ export class Viewer {
    * meant holding the new colours under the name of the old ones: every
    * comparison below found the two sides equal, nothing repainted, and a
    * background changed in the editor moved the app around the page while the
-   * page itself stayed as it was printed until the next launch. */
+   * page itself stayed as it was printed until the next launch.
+   *
+   * Two questions, not one. The pages repaint when something that is baked
+   * into a bitmap moves; the selection is drawn from the page every time, so
+   * it repaints on its own terms. Asking only the first question meant the
+   * selection colours were not on the list at all — change one in the editor
+   * with a sentence selected, and the sentence kept the colours it already
+   * had until the reader happened to move the selection. */
   setTheme(theme: Theme, preserveImages: boolean): void {
-    const changed =
-      this.theme?.id !== theme.id ||
-      this.theme?.text !== theme.text ||
-      this.theme?.background !== theme.background ||
-      this.theme?.recolor !== theme.recolor ||
-      this.theme?.link !== theme.link ||
-      this.theme?.accent !== theme.accent ||
+    const before = this.theme;
+    const repaint =
+      before?.id !== theme.id ||
+      before?.text !== theme.text ||
+      before?.background !== theme.background ||
+      before?.recolor !== theme.recolor ||
+      before?.link !== theme.link ||
+      before?.accent !== theme.accent ||
       this.preserveImages !== preserveImages;
+    const reselect =
+      repaint ||
+      before?.selection !== theme.selection ||
+      before?.selection_text !== theme.selection_text;
     this.theme = { ...theme };
     this.preserveImages = preserveImages;
-    if (changed) this.repaint();
+    if (repaint) this.repaint();
+    // A repaint redraws the selection when the new pixels land, so this is
+    // only for the case where nothing else changed.
+    else if (reselect) this.refreshSelection();
   }
 
   /** Change the zoom, optionally keeping a point on the screen still.

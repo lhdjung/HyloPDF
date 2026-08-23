@@ -300,37 +300,48 @@ test("hiding the toolbar takes the menu hanging off it away too", async () => {
   );
 });
 
-test("selected text is painted by the theme, not by the engine", async () => {
-  // WebKit will not paint a ::selection background at the colour it was given,
-  // so the viewer says the selection a second time as a custom highlight and
-  // the stylesheet spends the theme's colours there. If this stops being
-  // registered, selection quietly goes back to a wash over the printed words.
-  const selected = await app.page.evaluate(() => {
+test("selected text is repainted from the page, not from the text layer", async () => {
+  // The text layer is pdf.js's and exists to be selected rather than seen: no
+  // weight, no style, a generic family at a stretched width. Colouring it
+  // would put a page's bold type back as regular and its symbols back as
+  // boxes, so the selected words are copied off the page canvas and
+  // recoloured instead. What this checks is that the copies are made, are the
+  // shape of the lines selected, and go away again.
+  const copies = () =>
+    app.page.evaluate(() =>
+      [...document.querySelectorAll("#pages .selection-layer canvas")].map((canvas) => ({
+        width: Math.round(canvas.getBoundingClientRect().width),
+        height: Math.round(canvas.getBoundingClientRect().height),
+        drawn: canvas.width > 0 && canvas.height > 0,
+      })),
+    );
+
+  const line = await app.page.evaluate(() => {
     const span = document.querySelector("#pages .textLayer span");
     const range = document.createRange();
     range.setStart(span.firstChild, 0);
-    range.setEnd(span.firstChild, 6);
+    range.setEnd(span.firstChild, 20);
     const selection = getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
-    return range.toString();
+    const rect = range.getBoundingClientRect();
+    return { width: Math.round(rect.width), height: Math.round(rect.height) };
   });
-  await app.page.waitForTimeout(100);
+  await app.page.waitForTimeout(200);
 
-  const painted = await app.page.evaluate(() => {
-    const highlight = CSS.highlights.get("document-selection");
-    if (!highlight) return null;
-    return [...highlight].map((range) => range.toString());
-  });
-  assert.deepEqual(painted, [selected]);
+  const painted = await copies();
+  assert.equal(painted.length, 1, `expected one run, got ${painted.length}`);
+  assert.ok(painted[0].drawn, "the copy was never drawn");
+  // Rounded outwards, so a hairline of unselected page cannot show between two
+  // runs that meet — never smaller than what was selected, never much larger.
+  assert.ok(
+    painted[0].width >= line.width && painted[0].width <= line.width + 2,
+    `run was ${painted[0].width}px wide for a ${line.width}px selection`,
+  );
 
   await app.page.evaluate(() => getSelection().removeAllRanges());
-  await app.page.waitForTimeout(100);
-  assert.equal(
-    await app.page.evaluate(() => CSS.highlights.has("document-selection")),
-    false,
-    "the highlight outlived the selection",
-  );
+  await app.page.waitForTimeout(200);
+  assert.deepEqual(await copies(), [], "the copies outlived the selection");
 });
 
 test("a colour changed in the editor reaches the page it recolours", async () => {

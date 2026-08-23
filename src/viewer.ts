@@ -27,7 +27,16 @@ import type {
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import { openForReading, readRange, type Theme } from "./api";
-import { recolor, type Rect, restoreImages } from "./themes";
+import {
+  luminance,
+  parseColor,
+  recolor,
+  type Rect,
+  restoreImages,
+  selectionArea,
+  selectionInk,
+  toHex,
+} from "./themes";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -79,8 +88,6 @@ const WHEEL_TURN = 60;
 /** Canvases larger than this are scaled down; browsers refuse to allocate
     beyond roughly this many pixels, and nothing is gained past it anyway. */
 const MAX_CANVAS_PIXELS = 12_000_000;
-/** The name `styles.css` reaches the selection by. */
-const SELECTION_HIGHLIGHT = "document-selection";
 
 type Slot = {
   index: number;
@@ -89,6 +96,10 @@ type Slot = {
   textLayer: TextLayer | null;
   textEl: HTMLDivElement | null;
   highlightEl: HTMLDivElement | null;
+  selectionEl: HTMLDivElement | null;
+  /** The runs of selected type drawn over this page, by what they were drawn
+      from, so a drag redraws only what moved. */
+  selectionRuns: Map<string, HTMLCanvasElement>;
   linkEl: HTMLDivElement | null;
   task: RenderTask | null;
   renderedKey: string;
@@ -204,6 +215,11 @@ export class Viewer {
   /** Bumped whenever the background measuring should stop, so a document put
       down mid-measure does not go on laying out the one after it. */
   private measuring = 0;
+  /** Whether anything on a page is selected, and the frame that will repaint
+      it. Pages that scroll into view under a live selection need their share
+      of it drawn, which is the only reason mounting has to know. */
+  private selected = false;
+  private selectionFrame = 0;
 
   constructor(
     private container: HTMLElement,
@@ -215,32 +231,184 @@ export class Viewer {
     this.watchDensity();
   }
 
-  /**
-   * Say again, in a custom highlight, what the reader has selected.
-   *
-   * The theme's selection colours are spent by `::highlight(document-selection)`
-   * rather than by `::selection` — see the note in `styles.css`. Nothing here
-   * changes what is selected; it only gives the same range a second, honest
-   * painter. Rebuilding it costs no layout, so it can follow a drag key by key
-   * and pixel by pixel, and an engine without the Highlight API simply never
-   * gets one.
-   */
   private onSelectionChange = (): void => {
-    const registry = CSS.highlights;
-    if (!registry) return;
-    const selection = document.getSelection();
-    const ranges: Range[] = [];
+    // A drag reports every few pixels; one repaint a frame is enough.
+    if (this.selectionFrame) return;
+    this.selectionFrame = requestAnimationFrame(() => {
+      this.selectionFrame = 0;
+      this.paintSelection();
+    });
+  };
+
+  /**
+   * Draw the selected words again, in the theme's selection colours.
+   *
+   * The obvious way to colour selected text is to give `::selection` a
+   * `color`, and it is wrong here. The layer that holds the selection is
+   * pdf.js's text layer, whose spans exist to be selected and not to be seen:
+   * they carry no weight, no style and a generic family — `serif`, whatever
+   * the page was set in — with a per-span horizontal scale that stretches the
+   * wrong glyphs to the right total width. Painting them puts that on screen.
+   * Bold stops being bold, a mathematical symbol becomes a box, and every
+   * letter shifts a little as the line is stretched to fit.
+   *
+   * So the words that get coloured are the printed ones. For each rectangle
+   * the selection covers, the pixels underneath are copied off the page canvas
+   * and run through the same luminance ramp that recolours a page — ink lands
+   * on the selection's text colour, paper on the selection's own — and the
+   * result is laid back over the line at the size it came from. Real glyphs,
+   * real weight, real symbols, in the colours the theme asked for.
+   *
+   * The copies are small, they are only ever the lines the reader dragged
+   * across, and they are thrown away the moment the selection is.
+   */
+  private paintSelection(): void {
+    const theme = this.theme;
+    const selection = theme ? document.getSelection() : null;
+    this.selected = false;
+
+    // Which rectangles, on which page. A selection can run over a page break,
+    // and the two pages are separate canvases with separate coordinates.
+    const perSlot = new Map<Slot, DOMRect[]>();
     for (let index = 0; index < (selection?.rangeCount ?? 0); index++) {
       const range = selection!.getRangeAt(index);
-      // Only what is on a page. A selection in the settings window is the
-      // chrome's business, and the chrome keeps ::selection.
-      if (!range.collapsed && this.pagesEl.contains(range.commonAncestorContainer)) {
-        ranges.push(range);
+      // A selection in the settings window is the chrome's business.
+      if (range.collapsed || !this.pagesEl.contains(range.commonAncestorContainer)) continue;
+      this.selected = true;
+      for (const rect of range.getClientRects()) {
+        if (rect.width < 0.5 || rect.height < 0.5) continue;
+        const slot = this.slotAt(rect);
+        if (!slot?.canvas) continue;
+        const held = perSlot.get(slot);
+        if (held) held.push(rect);
+        else perSlot.set(slot, [rect]);
       }
     }
-    if (ranges.length === 0) registry.delete(SELECTION_HIGHLIGHT);
-    else registry.set(SELECTION_HIGHLIGHT, new Highlight(...ranges));
-  };
+
+    const painting = theme ? this.selectionPaint(theme) : null;
+    for (const slot of this.slots.values()) {
+      const rects = perSlot.get(slot);
+      if (!rects || !painting) this.clearSelection(slot);
+      else this.drawSelection(slot, rects, painting);
+    }
+  }
+
+  /** The pair of colours the copies are stretched between.
+   *
+   * Which way round they go depends on the page being read, not on the theme:
+   * a recoloured dark page is already light ink on dark paper, so its bright
+   * pixels are the words. The ramp always sends black to `text` and white to
+   * `background`, so on such a page the two go over swapped. */
+  private selectionPaint(theme: Theme): Theme {
+    const ink = toHex(selectionInk(theme));
+    const area = toHex(selectionArea(theme));
+    const lit =
+      theme.recolor &&
+      luminance(parseColor(theme.text)) > luminance(parseColor(theme.background));
+    return { ...theme, recolor: true, text: lit ? area : ink, background: lit ? ink : area };
+  }
+
+  /**
+   * One page's share of the selection, redrawn from the page itself.
+   *
+   * A run already on screen at the same place, in the same colours, off a
+   * canvas of the same density is the same picture, so it is kept rather than
+   * drawn again. That is what makes a drag cheap: pulling a selection down a
+   * page adds a line at a time, and only the line that changed is new work.
+   * Repainting all of it every frame was thirty-odd milliseconds a frame on a
+   * page of a textbook, which is a drag that visibly lags the pointer.
+   */
+  private drawSelection(slot: Slot, rects: DOMRect[], painting: Theme): void {
+    const canvas = slot.canvas!;
+    const pageRect = slot.el.getBoundingClientRect();
+    // The canvas is drawn at the screen's density, and at a high zoom below
+    // it — one number covers both.
+    const density = canvas.width / Math.max(pageRect.width, 1);
+    const colours = `${painting.text}|${painting.background}|${density.toFixed(3)}`;
+
+    let overlay = slot.selectionEl;
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.className = "selection-layer";
+      slot.el.append(overlay);
+      slot.selectionEl = overlay;
+    }
+
+    const kept = slot.selectionRuns;
+    const next = new Map<string, HTMLCanvasElement>();
+    for (const run of joinRuns(rects, pageRect)) {
+      const key = `${run.x},${run.y},${run.w},${run.h}|${colours}`;
+      const held = next.get(key) ?? kept.get(key);
+      if (held) kept.delete(key);
+      const copy = held ?? this.drawRun(canvas, run, density, painting);
+      if (!copy) continue;
+      next.set(key, copy);
+      overlay.append(copy);
+    }
+    for (const stale of kept.values()) {
+      release(stale);
+      stale.remove();
+    }
+    slot.selectionRuns = next;
+  }
+
+  /** One line of selected type, copied off the page and recoloured. */
+  private drawRun(
+    canvas: HTMLCanvasElement,
+    run: Rect,
+    density: number,
+    painting: Theme,
+  ): HTMLCanvasElement | null {
+    const copy = document.createElement("canvas");
+    copy.width = Math.max(1, Math.round(run.w * density));
+    copy.height = Math.max(1, Math.round(run.h * density));
+    const ctx = copy.getContext("2d", { alpha: false });
+    if (!ctx) return null;
+    ctx.drawImage(
+      canvas,
+      run.x * density,
+      run.y * density,
+      copy.width,
+      copy.height,
+      0,
+      0,
+      copy.width,
+      copy.height,
+    );
+    recolor(ctx, copy.width, copy.height, painting);
+    copy.style.left = `${run.x}px`;
+    copy.style.top = `${run.y}px`;
+    copy.style.width = `${run.w}px`;
+    copy.style.height = `${run.h}px`;
+    return copy;
+  }
+
+  /** Take away a page's share of the selection, and the bitmaps with it. A
+      line of type is a small canvas, but a book selected end to end is not. */
+  private clearSelection(slot: Slot): void {
+    for (const copy of slot.selectionRuns.values()) release(copy);
+    slot.selectionRuns.clear();
+    slot.selectionEl?.remove();
+    slot.selectionEl = null;
+  }
+
+  /** Draw the selection again, if there is one. The rectangles it was drawn
+      from are read off the page, so anything that moves a page or repaints one
+      leaves them describing where the words used to be. */
+  private refreshSelection(): void {
+    if (this.selected) this.onSelectionChange();
+  }
+
+  /** The mounted page a rectangle is on, by where its middle falls. */
+  private slotAt(rect: DOMRect): Slot | null {
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    for (const slot of this.slots.values()) {
+      const box = slot.el.getBoundingClientRect();
+      if (x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) return slot;
+    }
+    return null;
+  }
 
   /* ------------------------------------------------------------ lifecycle */
 
@@ -612,6 +780,7 @@ export class Viewer {
     if (held) this.restorePoint(held);
     else this.scrollTo(anchor.page, anchor.offset);
     this.update();
+    this.refreshSelection();
   }
 
   /** The spot in the document under a point on the screen, described so that
@@ -746,8 +915,10 @@ export class Viewer {
       }
     }
 
+    let mounted = false;
     for (const index of wanted) {
       if (this.slots.has(index)) continue;
+      mounted = true;
       const slot = this.createSlot(index);
       this.slots.set(index, slot);
       // Links do not wait for paint. They are placed in fractions of the page,
@@ -757,6 +928,10 @@ export class Viewer {
       // has worked its way round to it.
       void this.attachLinks(slot);
     }
+
+    // A page that has just come into view under a live selection has its own
+    // share of it to draw.
+    if (mounted) this.refreshSelection();
 
     // Nearest to the middle of the viewport first: what the reader is looking
     // at should sharpen before what they are scrolling towards.
@@ -921,6 +1096,8 @@ export class Viewer {
       textLayer: null,
       textEl: null,
       highlightEl: null,
+      selectionEl: null,
+      selectionRuns: new Map(),
       linkEl: null,
       task: null,
       renderedKey: "",
@@ -942,6 +1119,7 @@ export class Viewer {
     // stays climbed.
     release(slot.canvas);
     slot.canvas = null;
+    this.clearSelection(slot);
     slot.el.remove();
   }
 
@@ -1074,6 +1252,9 @@ export class Viewer {
     replaced?.remove();
     release(replaced);
     slot.renderedKey = key;
+
+    // The pixels the selection was copied from have just been replaced.
+    this.refreshSelection();
 
     await this.renderText(slot, page, box.scale);
     // Links do not hold up the queue: the page is already readable without
@@ -1415,6 +1596,47 @@ function linkColor(theme: Theme): string {
  * than the text colour. The paper maps to the same background either way, so
  * only the letters change, and the edges of the rectangle leave no seam.
  */
+/**
+ * The rectangles a selection covers on one page, in that page's own
+ * coordinates, tidied into the runs a reader would draw with a highlighter.
+ *
+ * Two things are done to them. They are rounded outwards, because two
+ * rectangles that meet — the end of one run of type and the start of the next
+ * — meet at a fraction, and a copy that stopped short of it left a hairline of
+ * unselected page between them. And rectangles on the same line with a word's
+ * worth of space between them are joined, because pdf.js's spans do not abut:
+ * the browser's own selection shows those gaps as white lines through the
+ * middle of a highlighted sentence, and there is no reason to copy the fault.
+ * A gap wider than half the line is left alone — that is a column of its own,
+ * not a space.
+ */
+function joinRuns(rects: DOMRect[], page: DOMRect): Rect[] {
+  const runs = rects
+    .map((rect) => {
+      const left = Math.floor(rect.left - page.left);
+      const top = Math.floor(rect.top - page.top);
+      return {
+        x: left,
+        y: top,
+        w: Math.ceil(rect.right - page.left) - left,
+        h: Math.ceil(rect.bottom - page.top) - top,
+      };
+    })
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+
+  const joined: Rect[] = [];
+  for (const run of runs) {
+    const last = joined[joined.length - 1];
+    const sameLine = last && Math.abs(last.y - run.y) <= 1 && Math.abs(last.h - run.h) <= 1;
+    if (sameLine && run.x - (last.x + last.w) <= run.h / 2) {
+      last.w = Math.max(last.x + last.w, run.x + run.w) - last.x;
+    } else {
+      joined.push(run);
+    }
+  }
+  return joined;
+}
+
 function tintLinks(
   ctx: CanvasRenderingContext2D,
   pristine: CanvasImageSource | null,

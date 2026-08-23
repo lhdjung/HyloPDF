@@ -50,9 +50,10 @@ Tackle each chunk in a separate session. Make a Git commit after each numbered t
   pressed switch, the zoom group — are still derived from `--surface`. On Sepia
   that reads as a cold note on warm paper. It is subtle, and the fix is a
   second family of derived shades, which is more than it is worth today.
-- Selected text is painted by a custom highlight. WebKitGTK is where that is
-  least certain, and nothing here has ever run on it; an engine without the
-  Highlight API silently keeps the old wash rather than breaking.
+- A selection dragged across a picture recolours that part of the picture, the
+  same way it recolours type. It is the right answer for words and an arguable
+  one for a photograph, and telling the two apart is more than the case is
+  worth today.
 
 ## Chunk C
 1. Below talks about switching the viewer to pdfium-render and lists some options for doing this in a performant way. Would the switch be good? (It should then be on the pdfium-prototype branch.) If so, which option or options?
@@ -267,19 +268,25 @@ lives in image masks. `asset()` in `viewer.ts` exists for this.
 against a composited canvas, and a dropped blend renders as a solid band across
 the line. Anything that has to change the colour of ink goes onto the canvas.
 
-**A `::selection` background is not the colour it was given.** WebKit
-composites one at 80%, whatever the stylesheet says, so a fifth of whatever is
-underneath survives it. Under a page that matters: the text layer is
-transparent ink, so colouring selected words means giving `::selection` a
-`color` — and the printed words that show through the wash sit half a letter
-away from the ones being painted, because the text layer scales a whole span to
-the width the printer gave it and the two sets of glyphs drift apart across a
-line. The survivor reads as a shadow. A custom highlight has no such rule and
-paints exactly what it is given, so `onSelectionChange` in `viewer.ts` says the
-selection again as `::highlight(document-selection)` and `styles.css` spends the
-theme's two selection colours there. Nothing about what is selected changes;
-`::selection` keeps the same pair, and an engine without the Highlight API
-simply gets the wash and the shadow, which is what every engine had before.
+**Selected words are repainted from the page, never from the text layer.**
+The obvious way to colour selected text is to give `::selection` a `color`, and
+it puts pdf.js's text layer on screen — spans that exist to be selected rather
+than seen, carrying no weight, no style and a generic family, each stretched
+horizontally to the total width the printer used. A page's bold type comes back
+as regular, its mathematics comes back as boxes, and every letter shifts as its
+line is stretched to fit. So `paintSelection` in `viewer.ts` copies the pixels
+under each selected line off the page canvas, runs the copy through the same
+luminance ramp that recolours a page — ink to the selection's text colour,
+paper to its own — and lays it back over the line. Real glyphs, real weight,
+real symbols. Three things about it are load-bearing: which way round the ramp
+goes depends on the *page*, not the theme, because a recoloured dark page is
+already light ink on dark paper; the rectangles are rounded outwards and
+adjacent runs on a line are joined, because pdf.js's spans do not abut and the
+gaps otherwise show as white rules through a highlighted sentence; and a run is
+kept between repaints when its place, its colours and its density are
+unchanged, which is what keeps a drag down a page to about half a millisecond a
+frame rather than redrawing all of it. `::selection` keeps a plain background
+underneath for the frame before the copies land.
 
 **Canvas blend modes are checked before they are trusted.** `recolor()` is
 built on `saturation`, which is non-separable and not implemented on a canvas

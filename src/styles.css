@@ -431,29 +431,32 @@ body {
 
 /* Selected text on the page.
  *
- * The layer above the canvas is transparent ink — until it is selected. Giving
- * ::selection a colour makes those spans paint for the length of the
- * selection, so selected words are genuinely the theme's colour rather than
- * the printed ones seen through a wash. That is what a theme's second
- * selection colour is for.
+ * This is the wash, and it is only ever seen for a frame: `paintSelection` in
+ * the viewer draws the selected words properly, by copying them off the page
+ * and recolouring the copy, and lays that over the top. What is left here is
+ * what shows while a drag is between frames, and what a page that has not
+ * finished drawing has to offer.
  *
- * The wash still has to hide what was printed underneath, and ::selection
- * cannot: WebKit composites a selection background at 80% whatever the page
- * asked for, so a fifth of the printed line survives it — and because the text
- * layer scales a whole span to the width the printer gave it, the two sets of
- * glyphs drift apart across a line and the survivor reads as a shadow half a
- * letter behind. A custom highlight has no such rule and paints exactly the
- * colour it is given, so `syncSelection` in the viewer mirrors the selection
- * into one, and this pair paints on top of it. Engines without the Highlight
- * API keep the wash and the shadow, which is what every engine did before. */
-.textLayer ::highlight(document-selection) {
-  background-color: var(--selection);
-  color: var(--selection-text);
-}
-
+ * The spans stay transparent, deliberately. They are pdf.js's, they exist to
+ * be selected rather than seen, and they carry a generic family at a stretched
+ * width — colouring them puts a page's bold type back as regular, its symbols
+ * back as boxes, and every letter a fraction out of place. */
 .textLayer ::selection {
   background: var(--selection);
-  color: var(--selection-text);
+}
+
+/* The selected words, copied off the page and recoloured. Above the text
+   layer, below the links, and never in the way of the pointer that is dragging
+   through it. */
+.selection-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.selection-layer canvas {
+  position: absolute;
 }
 
 /* The document's own links. Sized in percentages of the page, so a zoom moves
@@ -467,7 +470,7 @@ body {
 .link-layer {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 3;
   pointer-events: none;
 }
 
@@ -565,11 +568,13 @@ body {
   display: block;
 }
 
+/* Above the selection: a search is a transient thing that has to be seen
+   through whatever else is on the page. */
 .find-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 1;
+  z-index: 2;
 }
 
 .find-highlight {

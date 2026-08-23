@@ -1440,6 +1440,14 @@ class App {
       }
       if (this.viewer.isEmpty) return;
 
+      // Everything below is a bare key, and only a bare key. Anything still
+      // holding a modifier at this point was not caught above and belongs to
+      // the system: ⌘↓ and ⌘← mean "end of document" and "start of line"
+      // everywhere else on a Mac and were turning pages here, and ⌥j was
+      // scrolling. A shortcut this app does want is added above, where the
+      // modifier is part of the test.
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
       switch (event.key) {
         // Left and right turn pages, in every scroll mode. Continuous
         // scrolling makes a page boundary easy to lose, and landing on the top
@@ -1484,10 +1492,14 @@ class App {
           event.preventDefault();
           this.viewer.scrollByViewport(event.shiftKey ? -1 : 1);
           break;
+        // j and k claim the key like every other movement key here: an
+        // unhandled one carries on to whatever else is listening.
         case "j":
+          event.preventDefault();
           this.viewer.scrollByStep(1);
           break;
         case "k":
+          event.preventDefault();
           this.viewer.scrollByStep(-1);
           break;
         case "g":

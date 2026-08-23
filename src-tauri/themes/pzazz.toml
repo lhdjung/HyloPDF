@@ -2,11 +2,13 @@
 # violet ground. The Charm / Bubble Tea palette lives here.
 name = "Pzazz"
 text = "#f4b8e4"
-background = "#1b1029"
-accent = "#c77dff"
+# background used to be: 1b1029
+background = "#010105"
+# accent used to be: c77dff
+accent = "#1bfdb8"
 # Links lean violet where the body text leans pink: a different hue and a
 # darker one, so they are still links to someone who reads colour differently.
-link = "#9d7bff"
+link = "#da02de"
 # The accent is loud enough to read as a highlight on its own, so selection
 # gets a quieter violet of its own rather than a wash of it.
 selection = "#4a2f6b"

@@ -82,15 +82,60 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
   return (high + 0.05) / (low + 0.05);
 }
 
+/** The accent a theme works with, named or derived. */
+export function accentOf(theme: Theme): Rgb {
+  const fallback = mix(parseColor(theme.text, BLACK), parseColor(theme.background, WHITE), 0.3);
+  return theme.accent ? parseColor(theme.accent, fallback) : fallback;
+}
+
+/**
+ * What sits behind selected text.
+ *
+ * A theme may name it outright; most do not, and this derivation is why they
+ * do not have to. It has one job — to be visible behind the theme's own ink
+ * without becoming the loudest thing on the page — so it is the accent pulled
+ * most of the way back towards the paper, which keeps it in the palette and
+ * out of the way. A theme with a very saturated accent will want to say so
+ * itself.
+ */
+export function selectionArea(theme: Theme): Rgb {
+  const pulled = mix(accentOf(theme), parseColor(theme.background, WHITE), isDarkTheme(theme) ? 0.62 : 0.72);
+  return theme.selection ? parseColor(theme.selection, pulled) : pulled;
+}
+
+/**
+ * The colour selected text itself is drawn in.
+ *
+ * The default is the inverse of the area behind it, channel by channel, which
+ * is the one colour guaranteed to belong to the same choice the reader already
+ * made: change the selection and the ink on it follows. It is also the reason
+ * selection is legible at all now — before this, the wash went over the page
+ * and the words under it kept whatever the printer gave them, which on a dark
+ * theme meant reading grey through slate.
+ *
+ * The one thing an inverse cannot do is separate itself from a middle grey,
+ * which inverts to another middle grey. So a derived colour that does not
+ * clear 3:1 against its own background gives up and takes black or white,
+ * whichever reads. A theme that wants something else says so.
+ */
+export function selectionInk(theme: Theme): Rgb {
+  const area = selectionArea(theme);
+  const inverse: Rgb = [255 - area[0], 255 - area[1], 255 - area[2]];
+  const derived = contrastRatio(inverse, area) >= 3
+    ? inverse
+    : luminance(area) > 0.18
+      ? BLACK
+      : WHITE;
+  return theme.selection_text ? parseColor(theme.selection_text, derived) : derived;
+}
+
 /** Apply a theme to the app chrome. The document itself is recoloured at
     render time — see `recolor` below. */
 export function applyTheme(theme: Theme): void {
   const bg = parseColor(theme.background, WHITE);
   const text = parseColor(theme.text, BLACK);
   const dark = luminance(bg) < 0.35;
-  const accent = theme.accent
-    ? parseColor(theme.accent, mix(text, bg, 0.3))
-    : mix(text, bg, 0.3);
+  const accent = accentOf(theme);
 
   const backdrop = mix(bg, BLACK, dark ? 0.34 : 0.07);
   const surface = mix(bg, WHITE, dark ? 0.06 : 0.55);
@@ -114,18 +159,10 @@ export function applyTheme(theme: Theme): void {
   // theme card.
   set("--link", toHex(theme.link ? parseColor(theme.link, accent) : accent));
   set("--accent-soft", toHex(mix(accent, surface, dark ? 0.8 : 0.86)));
-  // What sits behind selected text.
-  //
-  // A theme may name it outright; most do not, and the derivation below is why
-  // they do not have to. It has one job — to be visible behind the theme's own
-  // ink without becoming the loudest thing on the page — so it is the accent
-  // pulled most of the way back towards the paper, which keeps it in the
-  // palette and out of the way. A theme with a very saturated accent will want
-  // to say so itself.
-  const selection = theme.selection
-    ? parseColor(theme.selection, mix(accent, bg, dark ? 0.62 : 0.72))
-    : mix(accent, bg, dark ? 0.62 : 0.72);
-  set("--selection", toHex(selection));
+  // Selection is two colours, and both of them are derived unless the theme
+  // says otherwise — see `selectionArea` and `selectionInk`.
+  set("--selection", toHex(selectionArea(theme)));
+  set("--selection-text", toHex(selectionInk(theme)));
   set(
     "--accent-contrast",
     toHex(contrastRatio(accent, WHITE) >= 3 ? WHITE : mix(accent, BLACK, 0.82)),

@@ -41,6 +41,11 @@ pub struct Theme {
     /// still the right answer for most of them.
     #[serde(default)]
     pub selection: Option<String>,
+    /// The colour selected text itself is drawn in. Absent means "derive it
+    /// from the colour behind it", which is what most themes want: the two
+    /// only ever appear together, so one of them can always answer for both.
+    #[serde(default)]
+    pub selection_text: Option<String>,
     /// When false the document keeps its own colors and only the app chrome is
     /// themed. Used by Hylo Light.
     #[serde(default = "yes")]
@@ -66,6 +71,8 @@ struct ThemeFile<'a> {
     link: &'a Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     selection: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selection_text: &'a Option<String>,
     recolor: bool,
 }
 
@@ -208,6 +215,7 @@ pub fn save(dir: &Path, theme: &Theme) -> Result<Theme, String> {
         accent: &theme.accent,
         link: &theme.link,
         selection: &theme.selection,
+        selection_text: &theme.selection_text,
         recolor: theme.recolor,
     };
     let body = toml::to_string_pretty(&stored).map_err(|e| e.to_string())?;

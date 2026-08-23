@@ -277,6 +277,39 @@ test("menus answer the keyboard", async (t) => {
   });
 });
 
+test("selected text is painted by the theme, not by the engine", async () => {
+  // WebKit will not paint a ::selection background at the colour it was given,
+  // so the viewer says the selection a second time as a custom highlight and
+  // the stylesheet spends the theme's colours there. If this stops being
+  // registered, selection quietly goes back to a wash over the printed words.
+  const selected = await app.page.evaluate(() => {
+    const span = document.querySelector("#pages .textLayer span");
+    const range = document.createRange();
+    range.setStart(span.firstChild, 0);
+    range.setEnd(span.firstChild, 6);
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return range.toString();
+  });
+  await app.page.waitForTimeout(100);
+
+  const painted = await app.page.evaluate(() => {
+    const highlight = CSS.highlights.get("document-selection");
+    if (!highlight) return null;
+    return [...highlight].map((range) => range.toString());
+  });
+  assert.deepEqual(painted, [selected]);
+
+  await app.page.evaluate(() => getSelection().removeAllRanges());
+  await app.page.waitForTimeout(100);
+  assert.equal(
+    await app.page.evaluate(() => CSS.highlights.has("document-selection")),
+    false,
+    "the highlight outlived the selection",
+  );
+});
+
 test("the way out is on the start screen and nowhere else", async () => {
   const seen = () =>
     app.page.evaluate(() => {

@@ -13,7 +13,7 @@
 import { type Settings, type Theme, deleteTheme, isMac, saveTheme } from "./api";
 import { hydrateIcons } from "./icons";
 import * as ui from "./ui";
-import { isDarkTheme, parseColor, toHex } from "./themes";
+import { isDarkTheme, selectionArea, selectionInk, toHex } from "./themes";
 import type { FitMode } from "./viewer";
 
 export interface SettingsHost {
@@ -227,6 +227,7 @@ function draftFrom(from: Theme | null, current: Theme): Draft {
       accent: current.accent,
       link: current.link,
       selection: current.selection,
+      selection_text: current.selection_text,
       recolor: true,
       built_in: false,
     };
@@ -240,6 +241,7 @@ function draftFrom(from: Theme | null, current: Theme): Draft {
     accent: from.accent,
     link: from.link,
     selection: from.selection,
+    selection_text: from.selection_text,
     recolor: from.recolor,
     built_in: false,
   };
@@ -361,6 +363,14 @@ function themeEditor(
   const box = document.createElement("div");
   box.append(ui.text("group", draft.id ? "Edit theme" : "New theme"));
 
+  // Held on its own because the field above writes to it: moving the selection
+  // area moves the derived ink with it, and a swatch that still showed the old
+  // one would be showing something the reader is not going to get.
+  const inkField = ui.colorField(toHex(selectionInk(draft)), (value) => {
+    draft.selection_text = value;
+    edit.preview();
+  });
+
   box.append(
     ui.field(
       "Name",
@@ -390,7 +400,7 @@ function themeEditor(
         draft.accent = value;
         edit.preview();
       }),
-      "Selected text, the current page, and anything else that needs to stand out.",
+      "The current page, the ring around whatever has the keyboard, and anything else that needs to stand out.",
     ),
     ui.field(
       "Links",
@@ -401,12 +411,20 @@ function themeEditor(
       "Links in the document take this colour, wherever the page is recoloured.",
     ),
     ui.field(
-      "Selected text",
-      ui.colorField(draft.selection ?? selectionDefault(draft), (value) => {
+      "Selection area",
+      ui.colorField(toHex(selectionArea(draft)), (value) => {
         draft.selection = value;
+        // The ink on the selection follows the area under it unless it has
+        // been set on its own, so the field below has to be told.
+        inkField.show(toHex(selectionInk(draft)));
         edit.preview();
       }),
       "The colour behind text you have selected. Left alone it follows the accent.",
+    ),
+    ui.field(
+      "Selected text",
+      inkField,
+      "The words inside that area. Left alone they take the opposite of it.",
     ),
     ui.field(
       "Recolour the document",
@@ -443,21 +461,6 @@ function themeEditor(
   box.append(buttons);
   box.append(ui.text("note", "Colours apply as you pick them, so the app around you is the preview."));
   return box;
-}
-
-/** What selection looks like when a theme has not said. The same derivation
-    `applyTheme` uses, so the editor opens on the colour already in force
-    rather than on something the reader has never seen. */
-function selectionDefault(theme: Theme): string {
-  const accent = parseColor(theme.accent ?? theme.text);
-  const background = parseColor(theme.background);
-  const dark = isDarkTheme(theme);
-  const t = dark ? 0.62 : 0.72;
-  return toHex([
-    accent[0] + (background[0] - accent[0]) * t,
-    accent[1] + (background[1] - accent[1]) * t,
-    accent[2] + (background[2] - accent[2]) * t,
-  ]);
 }
 
 /* ---------------------------------------------------------------- window */

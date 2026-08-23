@@ -55,6 +55,7 @@ body {
 
 ::selection {
   background: var(--selection);
+  color: var(--selection-text);
 }
 
 #shell {
@@ -422,11 +423,31 @@ body {
   --scale-round-y: 1px;
 }
 
-/* Selected text on the page. The layer above the canvas is transparent ink, so
-   the colour here is the whole of what selection looks like — and it is the
-   theme's own, whether the theme named it or it was derived from the accent. */
+/* Selected text on the page.
+ *
+ * The layer above the canvas is transparent ink — until it is selected. Giving
+ * ::selection a colour makes those spans paint for the length of the
+ * selection, so selected words are genuinely the theme's colour rather than
+ * the printed ones seen through a wash. That is what a theme's second
+ * selection colour is for.
+ *
+ * The wash still has to hide what was printed underneath, and ::selection
+ * cannot: WebKit composites a selection background at 80% whatever the page
+ * asked for, so a fifth of the printed line survives it — and because the text
+ * layer scales a whole span to the width the printer gave it, the two sets of
+ * glyphs drift apart across a line and the survivor reads as a shadow half a
+ * letter behind. A custom highlight has no such rule and paints exactly the
+ * colour it is given, so `syncSelection` in the viewer mirrors the selection
+ * into one, and this pair paints on top of it. Engines without the Highlight
+ * API keep the wash and the shadow, which is what every engine did before. */
+.textLayer ::highlight(document-selection) {
+  background-color: var(--selection);
+  color: var(--selection-text);
+}
+
 .textLayer ::selection {
   background: var(--selection);
+  color: var(--selection-text);
 }
 
 /* The document's own links. Sized in percentages of the page, so a zoom moves

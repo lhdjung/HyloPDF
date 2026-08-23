@@ -39,6 +39,9 @@ export type Theme = {
   link: string | null;
   /** The colour behind selected text. Null means "derive it from the accent". */
   selection: string | null;
+  /** The colour selected text is drawn in. Null means "derive it from the
+      colour behind it". */
+  selection_text: string | null;
   recolor: boolean;
   built_in: boolean;
 };
@@ -99,11 +102,11 @@ const fallbackDefaults: Settings = {
 };
 
 const fallbackThemes: Theme[] = [
-  { id: "hylo-light", name: "Hylo Light", text: "#2f3237", background: "#f2f1ed", accent: "#3f7d94", link: "#2f6f8f", selection: null, recolor: false, built_in: true },
-  { id: "hylo-dark", name: "Hylo Dark", text: "#e9eaee", background: "#24272f", accent: "#8fb0d4", link: "#8ec5e8", selection: null, recolor: true, built_in: true },
-  { id: "pzazz", name: "Pzazz", text: "#f4b8e4", background: "#1b1029", accent: "#c77dff", link: "#9d7bff", selection: "#4a2f6b", recolor: true, built_in: true },
-  { id: "dracula", name: "Dracula", text: "#f8f8f2", background: "#282a36", accent: "#ff79c6", link: "#8be9fd", selection: "#44475a", recolor: true, built_in: true },
-  { id: "gruvbox", name: "Gruvbox", text: "#ebdbb2", background: "#282828", accent: "#fe8019", link: "#83a598", selection: "#504945", recolor: true, built_in: true },
+  { id: "hylo-light", name: "Hylo Light", text: "#2f3237", background: "#f2f1ed", accent: "#3f7d94", link: "#2f6f8f", selection: null, selection_text: null, recolor: false, built_in: true },
+  { id: "hylo-dark", name: "Hylo Dark", text: "#e9eaee", background: "#24272f", accent: "#8fb0d4", link: "#8ec5e8", selection: null, selection_text: null, recolor: true, built_in: true },
+  { id: "pzazz", name: "Pzazz", text: "#f4b8e4", background: "#1b1029", accent: "#c77dff", link: "#9d7bff", selection: "#4a2f6b", selection_text: null, recolor: true, built_in: true },
+  { id: "dracula", name: "Dracula", text: "#f8f8f2", background: "#282a36", accent: "#ff79c6", link: "#8be9fd", selection: "#44475a", selection_text: null, recolor: true, built_in: true },
+  { id: "gruvbox", name: "Gruvbox", text: "#ebdbb2", background: "#282828", accent: "#fe8019", link: "#83a598", selection: "#504945", selection_text: null, recolor: true, built_in: true },
 ];
 
 function fallbackSettings(): Settings {

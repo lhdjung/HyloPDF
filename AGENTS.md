@@ -43,23 +43,23 @@ Ignoring some settings, we have:
 Tackle each chunk in a separate session. Make a Git commit after each numbered task except those in Chunk C, and except there's a reason to combine two or more tasks.
 
 ## Chunk B
-4. In the theme editor, "Accent" says "Selected text, the current page, and [...]" but selected text is the same color as unselected text, except (maybe?) the "Selected text" color laid on top. Need a real option to directly set color of selected text. Also, "Selected text" is a poor name for that option: already included in the helper text quoted before, and misleading even on its own because it colors the area around/behind the selected text, not the text itself. Add a true "Selected text" option and make it default to the inverse of the selection area around the selected text, i.e., what is governed by the existing option. Rename this existing option to "Selection area" or something else that's sensible; your call.
-6. Similarly, at least in dev mode, editing "Background" and then saving doesn't immediately recolor the page but only the space left and right. The page is stale and only recolors on restarting the app. The landing page background is different from the space left and right of the page but should be the same. Link color is stale the same way.
-7. The toolbar should have the same colors (text and background) as the document.
-8. 1. I don't think the Pzazz theme really captures the Charm CLI aesthetic. Charm uses colors that are roughly:
+2. Similarly, at least in dev mode, editing "Background" and then saving doesn't immediately recolor the page but only the space left and right. The page is stale and only recolors on restarting the app. The landing page background is different from the space left and right of the page but should be the same. Link color is stale the same way.
+3. I don't think the Pzazz theme really captures the Charm CLI aesthetic (and edited to try capture it better, but feel free to override). Charm uses colors that are roughly:
   - Pink: R: 252, G: 113, B: 255
   - Purple: R: 94, G: 69, B: 247
   - Green: R: 27, G: 253, B: 184
   I tried using the according hex colors in src-tauri/themes/pzazz.toml but green as accent color doesn't work – the accent color is always dark purple. However, the green does properly show in the "Open a document" button on the landing page.
-2. Add sepia and high contrast themes; see above. Make good decisions on colors not mentioned there.
-3. "A theme is two colours: the ink and the paper. Everything else follows from them." – is that still correct given the other colors?
+4. Add sepia and high contrast themes (one each); see above. Make good decisions on colors not mentioned there.
+5. "A theme is two colours: the ink and the paper. Everything else follows from them." – is that still correct given the other colors?
+6. The toolbar should have the same colors (text and background) as the document.
+7. Deseleccting "Show toolbar" should close the "Settings" dropdown.
 
 ## Chunk C
 1. Below talks about switching the viewer to pdfium-render and lists some options for doing this in a performant way. Would the switch be good? (It should then be on the pdfium-prototype branch.) If so, which option or options?
 2. Any other ways to use more Rust in the app, especially relative to JS/TS?
 
 ## Chunk D
-CI hit issues (not sure if still relevant when all other issues were tackled):
+CI hit issues before chunks were tackled:
     Checking tauri-plugin-single-instance v2.4.3
 error[E0599]: no variant named `Opened` found for enum `tauri::RunEvent`
    --> src/lib.rs:667:37
@@ -97,6 +97,7 @@ src-tauri/          Rust: settings, themes, reading history, the window
 tests/              node --test; `npm test` starts a dev server for them
   search.test.mjs   text folding and where a match lands
   recolor.test.mjs  the two recolouring paths, in WebKit
+  theme.test.mjs    what a theme's five colours turn into
   reader.test.mjs   the whole interface, through the harness
   password.test.mjs an encrypted document: asking, refusing, and giving up
   helpers.mjs       compiling a .ts module to reach what it does not export
@@ -166,7 +167,9 @@ Editing a built-in through the app saves a copy under an id of its own, which
 is never touched, and every shipped file carries a banner saying so — silently
 reverting someone's edit is a trap however defensible the policy is. A theme
 names colours and a `recolor` flag, and nothing else; `selection` is optional
-and derived from the accent when it is absent. `applyTheme` derives every shade
+and derived from the accent when it is absent, and `selection_text` — the ink
+on that selection — is optional and derived from `selection` when it is
+absent. `applyTheme` derives every shade
 the chrome uses — surface, line, three grades of muted text, the positive green
 — from those colours, which is why a five-line file is enough.
 
@@ -260,6 +263,20 @@ lives in image masks. `asset()` in `viewer.ts` exists for this.
 **Do not tint the document with `mix-blend-mode`.** WebKit drops the blend
 against a composited canvas, and a dropped blend renders as a solid band across
 the line. Anything that has to change the colour of ink goes onto the canvas.
+
+**A `::selection` background is not the colour it was given.** WebKit
+composites one at 80%, whatever the stylesheet says, so a fifth of whatever is
+underneath survives it. Under a page that matters: the text layer is
+transparent ink, so colouring selected words means giving `::selection` a
+`color` — and the printed words that show through the wash sit half a letter
+away from the ones being painted, because the text layer scales a whole span to
+the width the printer gave it and the two sets of glyphs drift apart across a
+line. The survivor reads as a shadow. A custom highlight has no such rule and
+paints exactly what it is given, so `onSelectionChange` in `viewer.ts` says the
+selection again as `::highlight(document-selection)` and `styles.css` spends the
+theme's two selection colours there. Nothing about what is selected changes;
+`::selection` keeps the same pair, and an engine without the Highlight API
+simply gets the wash and the shadow, which is what every engine had before.
 
 **Canvas blend modes are checked before they are trusted.** `recolor()` is
 built on `saturation`, which is non-separable and not implemented on a canvas

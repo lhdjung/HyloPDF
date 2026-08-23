@@ -79,6 +79,8 @@ const WHEEL_TURN = 60;
 /** Canvases larger than this are scaled down; browsers refuse to allocate
     beyond roughly this many pixels, and nothing is gained past it anyway. */
 const MAX_CANVAS_PIXELS = 12_000_000;
+/** The name `styles.css` reaches the selection by. */
+const SELECTION_HIGHLIGHT = "document-selection";
 
 type Slot = {
   index: number;
@@ -209,8 +211,36 @@ export class Viewer {
     private callbacks: ViewerCallbacks,
   ) {
     this.container.addEventListener("scroll", this.onScroll, { passive: true });
+    document.addEventListener("selectionchange", this.onSelectionChange);
     this.watchDensity();
   }
+
+  /**
+   * Say again, in a custom highlight, what the reader has selected.
+   *
+   * The theme's selection colours are spent by `::highlight(document-selection)`
+   * rather than by `::selection` — see the note in `styles.css`. Nothing here
+   * changes what is selected; it only gives the same range a second, honest
+   * painter. Rebuilding it costs no layout, so it can follow a drag key by key
+   * and pixel by pixel, and an engine without the Highlight API simply never
+   * gets one.
+   */
+  private onSelectionChange = (): void => {
+    const registry = CSS.highlights;
+    if (!registry) return;
+    const selection = document.getSelection();
+    const ranges: Range[] = [];
+    for (let index = 0; index < (selection?.rangeCount ?? 0); index++) {
+      const range = selection!.getRangeAt(index);
+      // Only what is on a page. A selection in the settings window is the
+      // chrome's business, and the chrome keeps ::selection.
+      if (!range.collapsed && this.pagesEl.contains(range.commonAncestorContainer)) {
+        ranges.push(range);
+      }
+    }
+    if (ranges.length === 0) registry.delete(SELECTION_HIGHLIGHT);
+    else registry.set(SELECTION_HIGHLIGHT, new Highlight(...ranges));
+  };
 
   /* ------------------------------------------------------------ lifecycle */
 

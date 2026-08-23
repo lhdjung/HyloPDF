@@ -252,7 +252,14 @@ export function textField(value: string, onInput: (value: string) => void): HTML
   return input;
 }
 
-export function colorField(value: string, onInput: (value: string) => void): HTMLElement {
+/** A colour, as a swatch and as the hex behind it.
+ *
+ * `show` is on it because one colour in the theme editor is derived from
+ * another: moving the selection area moves the ink on it, and the field that
+ * did not move still has to say what it is now. */
+export type ColorField = HTMLElement & { show(value: string): void };
+
+export function colorField(value: string, onInput: (value: string) => void): ColorField {
   const wrap = document.createElement("span");
   wrap.style.display = "flex";
   wrap.style.gap = "6px";
@@ -278,7 +285,12 @@ export function colorField(value: string, onInput: (value: string) => void): HTM
   });
 
   wrap.append(picker, text);
-  return wrap;
+  return Object.assign(wrap, {
+    show(next: string) {
+      picker.value = next;
+      text.value = next;
+    },
+  });
 }
 
 export function actions(...buttons: HTMLElement[]): HTMLElement {

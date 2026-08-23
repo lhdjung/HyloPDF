@@ -562,6 +562,10 @@ let noticeTimer = 0;
 export function notice(message: string, kind: "plain" | "done" = "plain"): void {
   const element = document.getElementById("notice");
   if (!element) return;
+  // Unhidden first, then filled. It is a live region, and a `hidden` one is
+  // out of the accessibility tree entirely — so a message written before the
+  // element came back is a message nothing announces.
+  element.hidden = false;
   element.replaceChildren();
   if (kind === "done") {
     const tick = document.createElement("span");
@@ -570,7 +574,6 @@ export function notice(message: string, kind: "plain" | "done" = "plain"): void 
     element.append(tick);
   }
   element.append(message);
-  element.hidden = false;
   window.clearTimeout(noticeTimer);
   noticeTimer = window.setTimeout(() => {
     element.hidden = true;

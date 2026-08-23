@@ -177,6 +177,11 @@ class App {
 
   async start(): Promise<void> {
     hydrateIcons();
+    // index.html has no `<html>` element — vite serves it as it is and the
+    // browser implies the rest of the document around it — so this is the only
+    // place the page's language can be stated. Without it a screen reader
+    // reads the interface in whatever voice it was last set to.
+    document.documentElement.lang = "en";
     el.shell.dataset.platform = isMac ? "macos" : "other";
 
     const data: Bootstrap = await bootstrap();

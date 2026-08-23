@@ -1537,6 +1537,16 @@ export class Viewer {
       // opening a link means.
       link.setAttribute("role", "link");
       link.tabIndex = 0;
+      // A name, because the element has no text of its own — it is a bare
+      // rectangle over printed words, and the words are in the text layer
+      // where this cannot reach them. Without one, every cross-reference was
+      // an unlabelled tab stop and a page of them read as "link, link, link".
+      //
+      // An external link says where it goes. An internal one does not name its
+      // page: resolving a destination is a trip into the worker each, and a
+      // page of typeset mathematics has hundreds of them — that cost is
+      // already deferred to the moment somebody follows one.
+      link.setAttribute("aria-label", url ?? "Elsewhere in this document");
       const follow = (event: Event) => {
         event.preventDefault();
         if (url) this.callbacks.onExternalLink(url);

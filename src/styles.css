@@ -1001,8 +1001,13 @@ body {
   color: var(--text-soft);
 }
 
+/* On, and saying so as loudly as the buttons up in the bar do. These three are
+   settings that outlive the bar and the session, so "Highlight all" being on
+   is a thing to be able to see at a glance rather than a tick to go looking
+   for — and the accent it wears is the theme's, whoever wrote the theme. */
 .find-option[aria-pressed="true"] {
-  color: var(--text-soft);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .find-option[aria-pressed="true"] svg {

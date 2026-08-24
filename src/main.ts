@@ -662,8 +662,11 @@ class App {
   }
 
   /** Themes already complained about, so a theme reapplied on every save of
-      its file says it once rather than every time. */
-  private complainedAbout = new Set<string>();
+      its file says it once rather than every time. Keyed by id and *what* is
+      wrong, not id alone — every in-progress draft shares `id: ""`, so id
+      alone would let one abandoned draft's bad colour silently swallow the
+      notice for an unrelated draft started later. */
+  private complainedAbout = new Map<string, string>();
 
   /**
    * Say when a theme file names a colour the app cannot read.
@@ -684,8 +687,9 @@ class App {
       this.complainedAbout.delete(theme.id);
       return;
     }
-    if (this.complainedAbout.has(theme.id)) return;
-    this.complainedAbout.add(theme.id);
+    const what = bad.map((field) => `${field}=${theme[field as keyof Theme]}`).join(",");
+    if (this.complainedAbout.get(theme.id) === what) return;
+    this.complainedAbout.set(theme.id, what);
     const fields = bad.join(", ");
     ui.notice(
       `${theme.name}: ${fields} ${bad.length === 1 ? "is not a colour" : "are not colours"} ` +

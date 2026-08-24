@@ -92,7 +92,7 @@ be edited by hand afterwards, and anything you write by hand shows up in the
 app.
 
 Preinstalled: **Hylo Light** (the default, which leaves documents untouched),
-**Hylo Dark**, **Pzazz**, **Dracula** and **Gruvbox**.
+**Hylo Dark**, **Glamour**, **Dracula** and **Gruvbox**.
 
 ## Settings
 

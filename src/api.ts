@@ -112,7 +112,7 @@ const fallbackDefaults: Settings = {
  *
  * The parsing is a fraction of TOML — a flat table of quoted strings and
  * booleans, which is all a theme file is. Anything cleverer is Rust's job. */
-const packagedOrder = ["hylo-light", "hylo-dark", "pzazz", "dracula", "gruvbox", "sepia", "high-contrast"];
+const packagedOrder = ["hylo-light", "hylo-dark", "glamour", "dracula", "gruvbox", "sepia", "high-contrast"];
 
 const packagedSources = import.meta.glob("../src-tauri/themes/*.toml", {
   query: "?raw",

@@ -54,6 +54,11 @@ export class Sidebar {
       about to replace rather than starting a second render into the same
       canvas — which pdf.js refuses outright. */
   private tasks = new Map<number, RenderTask>();
+  /** One token per page currently being drawn, so a `draw()` evicted by
+      someone else's `trim()` while still awaiting `doc.getPage` — before it
+      has a `RenderTask` for `forget()` to cancel — notices and stops, rather
+      than finishing unwatched and permanently escaping `THUMB_CACHE`. */
+  private flights = new Map<number, symbol>();
   /** The panel width the pictures on screen were drawn for. */
   private drawnAt = 0;
   private observer: IntersectionObserver | null = null;
@@ -159,6 +164,7 @@ export class Sidebar {
   private forget(page: number, release: boolean): void {
     this.tasks.get(page)?.cancel();
     this.tasks.delete(page);
+    this.flights.delete(page);
     const canvas = this.drawn.get(page);
     this.drawn.delete(page);
     if (release && canvas) {
@@ -210,6 +216,7 @@ export class Sidebar {
     this.thumbs.clear();
     this.drawn.clear();
     this.tasks.clear();
+    this.flights.clear();
     this.outlineButtons = [];
     this.outlinePanel.replaceChildren();
     this.pagesPanel.replaceChildren();
@@ -251,13 +258,22 @@ export class Sidebar {
   private async draw(page: number, canvas: HTMLCanvasElement): Promise<void> {
     if (this.drawn.has(page) || !this.doc) return;
     this.drawn.set(page, canvas);
+    // A token for this flight, so it can tell — once `doc.getPage` hands
+    // control back — whether it is still the one `this.drawn` wants. Between
+    // now and then there is no `RenderTask` yet for `forget()` to cancel, so
+    // a `trim()` from an unrelated page's `draw()` can otherwise evict this
+    // entry — release the canvas, drop it from `this.drawn` — while this
+    // coroutine sails on regardless, finishes unwatched, and the picture it
+    // leaves behind never counts against `THUMB_CACHE` again.
+    const flight = Symbol();
+    this.flights.set(page, flight);
     this.trim();
     const doc = this.doc;
     const theme = this.theme;
     let proxy: PDFPageProxy | null = null;
     try {
       proxy = await doc.getPage(page);
-      if (this.doc !== doc) return;
+      if (this.doc !== doc || this.flights.get(page) !== flight) return;
       const base = proxy.getViewport({ scale: 1 });
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       const width = this.thumbWidth();
@@ -293,6 +309,7 @@ export class Sidebar {
       // the viewer's own `trimPages` checks before evicting, and this is that
       // same rule applied through the door the viewer's accounting cannot see.
       if (!this.viewer.isMounted(page)) proxy?.cleanup();
+      if (this.flights.get(page) === flight) this.flights.delete(page);
     }
   }
 

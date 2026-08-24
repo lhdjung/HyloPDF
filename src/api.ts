@@ -479,8 +479,17 @@ function browsePdf(): Promise<string | null> {
       window.removeEventListener("focus", onFocus);
       resolve(answer);
     };
-    // Focus can come back before `change` lands, so give it a moment to.
-    const onFocus = () => setTimeout(() => done(null), 300);
+    // Focus can come back before `change` lands, so give it a moment to. If
+    // `change` still hasn't fired by then, check `input.files` directly rather
+    // than assuming cancelled: the spec updates it before queuing the event
+    // that reports it, so a picker slow enough to blow the 300ms budget — a
+    // network volume, a slow GTK dialog — still leaves the answer sitting
+    // there to be read instead of silently dropping it.
+    const onFocus = () =>
+      setTimeout(() => {
+        const file = input.files?.[0];
+        done(file ? rememberBrowserFile(file) : null);
+      }, 300);
     input.addEventListener("change", () => {
       const file = input.files?.[0];
       done(file ? rememberBrowserFile(file) : null);

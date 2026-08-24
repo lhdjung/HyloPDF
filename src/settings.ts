@@ -106,8 +106,9 @@ export function showSettingsWindow(
     editingTheme = next !== null;
   };
   if (opening?.edit) {
-    setEditing({ draft: draftFrom(opening.edit.from, host.theme), before: host.theme });
-    host.useTheme(editing!.draft, false);
+    const next = { draft: draftFrom(opening.edit.from, host.theme), before: host.theme };
+    setEditing(next);
+    host.useTheme(next.draft, false);
   }
 
   // Backing out of a half-finished theme — by cancelling, by walking to
@@ -155,11 +156,12 @@ export function showSettingsWindow(
           appearancePage(host, pane, {
             editing,
             begin: (from) => {
-              setEditing({ draft: draftFrom(from, host.theme), before: host.theme });
-              host.useTheme(editing!.draft, false);
+              const next = { draft: draftFrom(from, host.theme), before: host.theme };
+              setEditing(next);
+              host.useTheme(next.draft, false);
               render();
             },
-            preview: () => host.useTheme(editing!.draft, false),
+            preview: (draft) => host.useTheme(draft, false),
             cancel: () => {
               cancelEdit();
               render();
@@ -305,7 +307,7 @@ function appearancePage(
   edit: {
     editing: { draft: Draft; before: Theme } | null;
     begin: (from: Theme | null) => void;
-    preview: () => void;
+    preview: (draft: Draft) => void;
     cancel: () => void;
     done: () => void;
   },
@@ -417,7 +419,7 @@ function themeCard(theme: Theme, current: boolean, onSelect: () => void): HTMLEl
 function themeEditor(
   host: SettingsHost,
   draft: Draft,
-  edit: { preview: () => void; cancel: () => void; done: () => void },
+  edit: { preview: (draft: Draft) => void; cancel: () => void; done: () => void },
 ): HTMLElement {
   const box = document.createElement("div");
   box.append(ui.text("group", draft.id ? "Edit theme" : "New theme"));
@@ -427,7 +429,7 @@ function themeEditor(
   // one would be showing something the reader is not going to get.
   const inkField = ui.colorField(toHex(selectionInk(draft)), (value) => {
     draft.selection_text = value;
-    edit.preview();
+    edit.preview(draft);
   });
 
   box.append(
@@ -441,7 +443,7 @@ function themeEditor(
       "Text",
       ui.colorField(draft.text, (value) => {
         draft.text = value;
-        edit.preview();
+        edit.preview(draft);
       }),
       "The colour the words are printed in.",
     ),
@@ -449,7 +451,7 @@ function themeEditor(
       "Background",
       ui.colorField(draft.background, (value) => {
         draft.background = value;
-        edit.preview();
+        edit.preview(draft);
       }),
       "The colour of the paper behind them.",
     ),
@@ -457,7 +459,7 @@ function themeEditor(
       "Accent",
       ui.colorField(draft.accent ?? draft.text, (value) => {
         draft.accent = value;
-        edit.preview();
+        edit.preview(draft);
       }),
       "The current page, the ring around whatever has the keyboard, and anything else that needs to stand out.",
     ),
@@ -465,7 +467,7 @@ function themeEditor(
       "Links",
       ui.colorField(draft.link ?? draft.accent ?? draft.text, (value) => {
         draft.link = value;
-        edit.preview();
+        edit.preview(draft);
       }),
       "Links in the document take this colour, wherever the page is recoloured.",
     ),
@@ -476,7 +478,7 @@ function themeEditor(
         // The ink on the selection follows the area under it unless it has
         // been set on its own, so the field below has to be told.
         inkField.show(toHex(selectionInk(draft)));
-        edit.preview();
+        edit.preview(draft);
       }),
       "The colour behind text you have selected. Left alone it follows the accent.",
     ),
@@ -489,7 +491,7 @@ function themeEditor(
       "Recolour the document",
       ui.toggle(draft.recolor, (on) => {
         draft.recolor = on;
-        edit.preview();
+        edit.preview(draft);
       }),
       "Off leaves every page exactly as it was printed.",
     ),

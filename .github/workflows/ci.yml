@@ -64,6 +64,13 @@ jobs:
 
   bundle:
     name: Bundle (${{ matrix.os }})
+    # Three full platform builds is the most expensive thing this workflow
+    # does — compiling the Rust side and packaging it, times three OSes.
+    # Nothing here depended on `frontend` or `rust` passing first, so a broken
+    # type or a failing Rust test still got a full matrix build anyway, on
+    # every push. Waiting the few seconds those take costs far less than the
+    # minutes a bundle does.
+    needs: [frontend, rust]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

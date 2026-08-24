@@ -1,24 +1,13 @@
-# Pzazz — glamorous rather than quiet, and the one theme that borrows its
-# palette wholesale. Charm's three colours are pink #fc71ff, purple #5e45f7 and
-# green #1bfdb8; all three are here, each doing the job it does in their own
-# tools. The ground is violet rather than black, because black is what High
-# Contrast is for and because neon on violet is the look being borrowed.
 name = "Pzazz"
-# The pink, lifted towards white. Charm sets it on a line or two at a time; a
-# page is a great deal more pink than that, and the full #fc71ff over a whole
-# chapter is a glare rather than a glamour.
-text = "#f7a9fa"
+# White
+text = "#ffffff"
+# Dark purple
 background = "#100a1a"
-# The green, untouched. It lands on small, deliberate things — the page you are
-# on, the switch that is on, the button you are about to press — which is
-# exactly the weight it carries in a Charm interface.
+# Green
 accent = "#1bfdb8"
-# The purple, lifted the same way the pink was: #5e45f7 on this ground is a
-# little under 3.5:1, and a link in the middle of a paragraph has to be read,
-# not spotted.
-link = "#8b74ff"
-# Purple again, at full strength, with the green on top of it. Both are the
-# palette's own, and green on violet is the one pairing in it that nobody could
-# mistake for ordinary text.
+# Green
+link = "#1bfdb8"
+# Light purple
 selection = "#4a2f9e"
-selection_text = "#1bfdb8"
+# Pink
+selection_text = "#f7a9fa"

@@ -706,6 +706,14 @@ export class Viewer {
     return this.doc === null;
   }
 
+  /** Whether a page (1-based) is currently mounted on screen. A page's proxy
+      must never be cleaned up out from under a slot drawing it — this is what
+      lets callers outside the viewer, like the sidebar, obey the same rule
+      `trimPages` does for its own cache. */
+  isMounted(page: number): boolean {
+    return this.slots.has(page - 1);
+  }
+
   /** Where the reader is, precisely enough to come back to it at any zoom. */
   position(): { page: number; offset: number } {
     const box = this.boxes[this.current - 1];

@@ -279,9 +279,12 @@ export class Sidebar {
       // parsed every page of it and gave none of it back, which is exactly the
       // cost `IMAGE_PAGE_CACHE` was measured into existence to prevent, coming
       // in through a door the viewer's accounting cannot see. `cleanup` defers
-      // while a render is running, so it cannot pull a page out from under the
-      // viewer drawing the same one.
-      proxy?.cleanup();
+      // while a render is running, so it cannot pull a page out from under a
+      // render of the same page — but the viewer's own page can be idle and
+      // still mounted, which `cleanup` has no way to see; `isMounted` is what
+      // the viewer's own `trimPages` checks before evicting, and this is that
+      // same rule applied through the door the viewer's accounting cannot see.
+      if (!this.viewer.isMounted(page)) proxy?.cleanup();
     }
   }
 

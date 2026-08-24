@@ -124,11 +124,19 @@ export class Sidebar {
     this.redrawVisible();
   }
 
+  /**
+   * Only a page that already carries a picture needs anything done to it: an
+   * undrawn thumbnail is still a placeholder, tied to no theme, and will draw
+   * under the current one whenever it next comes into view on its own.
+   * Walking `this.thumbs` instead — every page in the document — cost a
+   * `getBoundingClientRect` per page on every call, and `setTheme` calls this
+   * on every tick of a colour dragged live in the editor. Walking `this.drawn`
+   * bounds it to `THUMB_CACHE`.
+   */
   private redrawVisible(): void {
-    for (const [page, button] of this.thumbs) {
-      const canvas = button.querySelector("canvas");
-      if (!canvas) continue;
-      const visible = this.isVisible(button);
+    for (const [page, canvas] of [...this.drawn]) {
+      const button = this.thumbs.get(page);
+      const visible = button ? this.isVisible(button) : false;
       // A picture drawn under the old theme is wrong wherever it is. The ones
       // on screen are redrawn now; the rest are forgotten and will be drawn
       // when they next come into view, which they were going to be anyway.
@@ -288,7 +296,20 @@ export class Sidebar {
     }
   }
 
+  /**
+   * Whether a thumbnail's button is close enough to the viewport to count as
+   * on screen.
+   *
+   * `offsetParent` is null exactly when something up the tree is
+   * `display: none` — the sidebar closed, or the Outline tab showing instead
+   * of Pages — and that check has to come first. Every rect collapses to
+   * `0,0,0,0` under `display: none`, panel included, and the comparison below
+   * is true for `0,0` against `0,0`: every thumbnail in the document read as
+   * on screen the moment the panel was not, so a theme change with the
+   * sidebar closed — the default — drew and decoded every page in the book.
+   */
   private isVisible(element: HTMLElement): boolean {
+    if (element.offsetParent === null) return false;
     const panel = this.pagesPanel.getBoundingClientRect();
     const rect = element.getBoundingClientRect();
     return rect.bottom > panel.top - 200 && rect.top < panel.bottom + 200;

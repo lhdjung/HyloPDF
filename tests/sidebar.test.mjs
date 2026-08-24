@@ -148,3 +148,25 @@ test("putting the document down clears the column", async () => {
   );
   assert.equal(thumbs, 0);
 });
+
+test("a theme change does not draw the column while it is closed", async () => {
+  // The sidebar is closed by default — `show_sidebar` defaults to false — which
+  // makes every rect in it collapse to 0,0,0,0, `display: none` cascading down
+  // from an ancestor. `isVisible`'s comparison used to read that as every
+  // thumbnail being on screen at once, so a theme change with the column never
+  // opened drew and decoded all four hundred pages of it.
+  const closed = await openApp({ pdf: PDF });
+  try {
+    await closed.press(`${MOD}+d`);
+    await closed.page.waitForTimeout(800);
+    const drawn = await closed.page.evaluate(
+      () =>
+        [...document.querySelectorAll("#pages-panel .thumb canvas")].filter(
+          (c) => c.width > 168,
+        ).length,
+    );
+    assert.equal(drawn, 0, "a closed sidebar drew thumbnails on a theme change");
+  } finally {
+    await closed.close();
+  }
+});

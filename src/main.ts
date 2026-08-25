@@ -149,6 +149,10 @@ class App {
       earlier one. */
   private writeAt = 0;
   private pillTimer = 0;
+  /** The toolbar shown for a page jump, without being asked to stay: it goes
+      back into hiding the moment the field is left, and never touches the
+      setting or writes to disk. */
+  private toolbarPeeking = false;
   private geometryTimer = 0;
   private fullscreenTimer = 0;
   private searchTimer = 0;
@@ -493,7 +497,7 @@ class App {
   }
 
   private get toolbarShown(): boolean {
-    return this.settings.show_toolbar;
+    return this.settings.show_toolbar || this.toolbarPeeking;
   }
 
   updateZoomLabel(): void {
@@ -775,11 +779,17 @@ class App {
       that reaching page 340 is the shortcut, three digits and Enter.
 
       There is nowhere to put the cursor when the toolbar is away, so the
-      shortcut brings it back itself — the same thing reaching for the top
-      edge does — rather than making the reader do that first. */
+      shortcut brings it into view itself rather than making the reader do
+      that first — but only for as long as the field is in use: unlike ⌘⇧T
+      this does not change the setting, and the field's own `blur` handler
+      puts the toolbar back into hiding once the jump is made or abandoned. */
   focusPageNumber(): void {
     if (this.viewer.isEmpty) return;
-    if (!this.settings.show_toolbar) this.toggleToolbar(true);
+    if (!this.settings.show_toolbar) {
+      this.toolbarPeeking = true;
+      this.applyChrome();
+      this.viewer.relayout();
+    }
     el.pageNumber.focus();
     el.pageNumber.select();
   }
@@ -1272,6 +1282,11 @@ class App {
     });
     el.pageNumber.addEventListener("blur", () => {
       el.pageNumber.value = String(this.viewer.pageNumber);
+      if (this.toolbarPeeking) {
+        this.toolbarPeeking = false;
+        this.applyChrome();
+        this.viewer.relayout();
+      }
     });
 
     // One search per pause, not one per keystroke: a scan of a long document

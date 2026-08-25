@@ -77,8 +77,6 @@ const ZOOM_LADDER = [25, 33, 50, 67, 75, 90, 100, 110, 125, 150, 175, 200, 250, 
     naming: it sits beside ⌘⇧T for the toolbar. */
 const FULLSCREEN_KEYS = isMac ? "⌘⇧F" : "F11";
 
-/** The other two worth naming out loud, for the same reason. */
-const TOOLBAR_KEYS = isMac ? "⌘⇧T" : "Ctrl+Shift+T";
 /** Preview's own "Go to Page…", which is the one people already know. */
 const JUMP_KEYS = isMac ? "⌥⌘G" : "Ctrl+Alt+G";
 
@@ -776,15 +774,12 @@ class App {
   /** Put the cursor in the page number with the number already selected, so
       that reaching page 340 is the shortcut, three digits and Enter.
 
-      There is nowhere to put the cursor when the toolbar is away, and a key
-      that silently does nothing is worse than one that says why: the answer
-      is a keystroke, so it is worth two seconds of a notice. */
+      There is nowhere to put the cursor when the toolbar is away, so the
+      shortcut brings it back itself — the same thing reaching for the top
+      edge does — rather than making the reader do that first. */
   focusPageNumber(): void {
     if (this.viewer.isEmpty) return;
-    if (!this.settings.show_toolbar) {
-      ui.notice(`The page number is in the toolbar — ${TOOLBAR_KEYS} brings it back.`);
-      return;
-    }
+    if (!this.settings.show_toolbar) this.toggleToolbar(true);
     el.pageNumber.focus();
     el.pageNumber.select();
   }

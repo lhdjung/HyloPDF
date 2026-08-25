@@ -29,7 +29,7 @@ I guess, but I'm not certain, that themes are stored in some kind of config file
 Ignoring some settings, we have:
 - Hylo Light: the default light theme, and the overall default theme. Doesn't change colors at all.
 - Hylo Dark: the default dark theme. Text is white. Background is a dark grey, with maybe a tint of slate blue.
-- Hylo Ember: the app icon's palette. Warm white on a deep ember red, with the icon's coral as the accent.
+- Hylo Ember: the app icon's palette. The icon's warm yellow on a deep ember red, with its coral as the accent.
 - Glamour: cool and glamorous dark theme inspired by the Charm / Bubble Tea aesthetic.
 - Dracula: text is pink, background is dark blue-ish. Some light blue and/or green is sprinkled in. Maybe that's not accurate – check the Dracula themes other apps use, and how that would translate into PDF theming.
 - Gruvbox, for the oldies.

@@ -2,6 +2,7 @@
 # `recolor = false` means the document is shown exactly as its author made it;
 # only the app's own chrome uses the colors below.
 name = "Hylo Light"
+order = 1
 text = "#2f3237"
 background = "#f2f1ed"
 accent = "#3f7d94"

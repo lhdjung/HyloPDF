@@ -3,6 +3,7 @@
 # text it is far too pale to read white off, so the background is that same
 # hue banked down to an ember and the coral becomes the accent instead.
 name = "Hylo Ember"
+order = 3
 text = "#fdeeea"
 background = "#83322a"
 # The coral from the icon, lifted just enough to sit on the darker red.

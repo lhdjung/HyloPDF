@@ -77,3 +77,28 @@ test("the packaged dependencies are the ones that ship", () => {
     );
   }
 });
+
+test("every shipped theme says where it goes, and no two say the same", () => {
+  // The shipped set used to be listed twice, in `theme.rs` and in `api.ts`,
+  // and the copies drifted: a theme missing from the second one simply never
+  // appeared under `npm run dev`, with nothing to say why. Both lists are gone
+  // — each side reads the directory — and what is left to keep straight is the
+  // one thing a directory cannot say, which is what order to list them in.
+  //
+  // `build.rs` refuses to build a file without an `order`, so on the Rust side
+  // this is already loud. It is not loud here: `orderOf` in `api.ts` falls
+  // back rather than throwing, deliberately, so a half-written theme sorts to
+  // the end instead of taking the reader's list apart. This is what makes the
+  // browser path say so too, without waiting for a cargo build.
+  const dir = "src-tauri/themes";
+  const seen = new Map();
+  for (const file of readdirSync(dir).filter((name) => name.endsWith(".toml"))) {
+    const source = readFileSync(path.join(dir, file), "utf8");
+    const found = source.match(/^\s*order\s*=\s*(-?\d+)/m);
+    assert.ok(found, `${file} has no \`order\`, so nothing knows where to list it`);
+    const order = Number(found[1]);
+    assert.ok(!seen.has(order), `${file} and ${seen.get(order)} both claim order ${order}`);
+    seen.set(order, file);
+  }
+  assert.ok(seen.size > 0, "no themes found; the directory moved");
+});

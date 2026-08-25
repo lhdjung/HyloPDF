@@ -8,37 +8,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::atomic_write;
 
-/// The themes that ship with HyloPDF. They are written into the user's theme
-/// directory on first run so that they are visible, readable and copyable, but
-/// the embedded copies stay authoritative if a file is missing or unreadable.
-pub const BUILT_IN: &[(&str, &str)] = &[
-    ("hylo-light", include_str!("../themes/hylo-light.toml")),
-    ("hylo-dark", include_str!("../themes/hylo-dark.toml")),
-    ("hylo-ember", include_str!("../themes/hylo-ember.toml")),
-    ("glamour", include_str!("../themes/glamour.toml")),
-    ("dracula", include_str!("../themes/dracula.toml")),
-    ("gruvbox", include_str!("../themes/gruvbox.toml")),
-    ("sepia", include_str!("../themes/sepia.toml")),
-    (
-        "high-contrast",
-        include_str!("../themes/high-contrast.toml"),
-    ),
-    ("nord", include_str!("../themes/nord.toml")),
-    (
-        "solarized-light",
-        include_str!("../themes/solarized-light.toml"),
-    ),
-    (
-        "solarized-dark",
-        include_str!("../themes/solarized-dark.toml"),
-    ),
-    ("tokyo-night", include_str!("../themes/tokyo-night.toml")),
-    (
-        "tokyo-night-storm",
-        include_str!("../themes/tokyo-night-storm.toml"),
-    ),
-    ("rose-pine", include_str!("../themes/rose-pine.toml")),
-];
+// The shipped set is the contents of `themes/`, turned into a table by
+// `build.rs` — which also refuses to build a theme that will not parse or that
+// names a colour the renderer cannot read. Adding a theme is adding a file
+// with an `order` in it; there is no list here to keep in step with the
+// directory, and none in `api.ts` either.
+//
+// The themes are still embedded: the generated table is `include_str!` per
+// file, so the binary carries its own copies and `install_built_ins` can write
+// them out on a machine that has never seen them.
+include!(concat!(env!("OUT_DIR"), "/built_in.rs"));
 
 pub const DEFAULT_LIGHT: &str = "hylo-light";
 pub const DEFAULT_DARK: &str = "hylo-dark";
@@ -145,6 +124,9 @@ const BANNER: &str = "\
 # ones the shipped themes use — change the `name` inside, and it will appear in
 # the theme list alongside these. The app does the same thing when you press
 # \"Make a copy of this theme\".
+#
+# The `order` below says where this one sits among the shipped themes. It means
+# nothing in a theme of your own: those are listed after these, by name.
 
 ";
 

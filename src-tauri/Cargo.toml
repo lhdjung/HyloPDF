@@ -12,6 +12,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# The shipped themes are read and checked at build time; see build.rs.
+toml = "0.8"
 
 [dependencies]
 tauri = { version = "2", features = [] }

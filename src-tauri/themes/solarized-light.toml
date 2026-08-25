@@ -3,6 +3,7 @@
 # ink the palette has, which is what keeps it from reading as plain black on
 # white.
 name = "Solarized Light"
+order = 10
 text = "#657b83"
 background = "#fdf6e3"
 # Solarized blue, its own accent.

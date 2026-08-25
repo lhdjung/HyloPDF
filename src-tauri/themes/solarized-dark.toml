@@ -1,6 +1,7 @@
 # Solarized Dark — Ethan Schoonover's palette, the dark half. Same colours as
 # the light half, the ground and the ink simply swapped.
 name = "Solarized Dark"
+order = 11
 text = "#839496"
 background = "#002b36"
 # Solarized blue, its own accent.

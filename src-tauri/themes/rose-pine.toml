@@ -1,6 +1,7 @@
 # Rosé Pine — "all natural pine, faux fur and a bit of soho vibes for the
 # classy minimalist", per the palette's own tagline.
 name = "Rosé Pine"
+order = 14
 text = "#e0def4"
 background = "#191724"
 # Love: the palette's signature rose.

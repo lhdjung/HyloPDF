@@ -112,25 +112,14 @@ const fallbackDefaults: Settings = {
  * somebody edits a theme and it does not change: the file was right and the
  * copy was what was on screen.
  *
- * The parsing is a fraction of TOML — a flat table of quoted strings and
- * booleans, which is all a theme file is. Anything cleverer is Rust's job. */
-const packagedOrder = [
-  "hylo-light",
-  "hylo-dark",
-  "hylo-ember",
-  "glamour",
-  "dracula",
-  "gruvbox",
-  "sepia",
-  "high-contrast",
-  "nord",
-  "solarized-light",
-  "solarized-dark",
-  "tokyo-night",
-  "tokyo-night-storm",
-  "rose-pine",
-];
-
+ * The set and its order come from the files too. There used to be a list of
+ * ids here, restating the one in `theme.rs`, and it went stale the same way
+ * and worse: a theme missing from it simply never appeared under `npm run
+ * dev`, with nothing to say why. `order` is a key in each shipped file — see
+ * `build.rs`, which is where the same question is answered for Rust.
+ *
+ * The parsing is a fraction of TOML — a flat table of quoted strings, numbers
+ * and booleans, which is all a theme file is. Anything cleverer is Rust's job. */
 const packagedSources = import.meta.glob("../src-tauri/themes/*.toml", {
   query: "?raw",
   import: "default",
@@ -156,10 +145,18 @@ function parsePackaged(id: string, source: string): Theme {
   };
 }
 
-const fallbackThemes: Theme[] = packagedOrder.flatMap((id) => {
-  const source = packagedSources[`../src-tauri/themes/${id}.toml`];
-  return source ? [parsePackaged(id, source)] : [];
-});
+/* Where a shipped theme sits in the list. Absent puts it at the end rather
+ * than at the front, so a file that forgets it is odd rather than disruptive;
+ * `build.rs` refuses to build one, which is the loud half of the same check. */
+function orderOf(source: string): number {
+  const found = source.match(/^\s*order\s*=\s*(-?\d+)/m);
+  return found ? Number(found[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+const fallbackThemes: Theme[] = Object.entries(packagedSources)
+  .map(([path, source]) => ({ id: path.slice(path.lastIndexOf("/") + 1, -".toml".length), source }))
+  .sort((a, b) => orderOf(a.source) - orderOf(b.source) || a.id.localeCompare(b.id))
+  .map(({ id, source }) => parsePackaged(id, source));
 
 function fallbackSettings(): Settings {
   try {

@@ -23,6 +23,8 @@
   --accent-soft: #dfeaee;
   --accent-contrast: #ffffff;
   --positive: #3d8f5b;
+  --negative: #b02a37;
+  --negative-contrast: #ffffff;
   --page-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
   --radius: 9px;
 
@@ -213,6 +215,19 @@ body {
 .btn-primary:hover {
   background: var(--accent);
   color: var(--accent-contrast);
+  filter: brightness(1.08);
+}
+
+.btn-danger {
+  background: var(--negative);
+  color: var(--negative-contrast);
+  height: 36px;
+  padding: 0 16px;
+}
+
+.btn-danger:hover {
+  background: var(--negative);
+  color: var(--negative-contrast);
   filter: brightness(1.08);
 }
 

@@ -311,10 +311,11 @@ export function actions(...buttons: HTMLElement[]): HTMLElement {
 export function button(
   label: string,
   onClick: () => void,
-  variant: "plain" | "primary" = "plain",
+  variant: "plain" | "primary" | "danger" = "plain",
 ): HTMLButtonElement {
   const element = document.createElement("button");
-  element.className = variant === "primary" ? "btn btn-primary" : "btn";
+  element.className =
+    variant === "primary" ? "btn btn-primary" : variant === "danger" ? "btn btn-danger" : "btn";
   element.textContent = label;
   element.addEventListener("click", onClick);
   return element;
@@ -322,14 +323,18 @@ export function button(
 
 /* ------------------------------------------------------------------ window */
 
-let closeWindowFn: (() => void) | null = null;
+// Almost always one at a time — but a confirmation (`confirmDeleteTheme`) has
+// to stand in front of Settings without evicting it, so this is a stack
+// rather than a single slot. Only the topmost window's own key handler acts;
+// the others below it just let the event through to it.
+const windowStack: (() => void)[] = [];
 
 export function isWindowOpen(): boolean {
-  return closeWindowFn !== null;
+  return windowStack.length > 0;
 }
 
 export function closeWindow(): void {
-  closeWindowFn?.();
+  windowStack.at(-1)?.();
 }
 
 /** A panel in the middle of the screen with a title bar of its own: the one
@@ -342,7 +347,6 @@ export function showWindow(
   size: "fit" | "full" = "fit",
 ): void {
   closeMenus();
-  closeWindow();
 
   const returnFocusTo = document.activeElement as HTMLElement | null;
   const scrim = document.createElement("div");
@@ -359,7 +363,8 @@ export function showWindow(
   const close = () => {
     scrim.remove();
     document.removeEventListener("keydown", onKeyDown, true);
-    if (closeWindowFn === close) closeWindowFn = null;
+    const at = windowStack.indexOf(close);
+    if (at !== -1) windowStack.splice(at, 1);
     onClose?.();
     returnFocusTo?.focus();
   };
@@ -370,6 +375,7 @@ export function showWindow(
     )].filter((item) => !item.hasAttribute("disabled") && item.offsetParent !== null);
 
   const onKeyDown = (event: KeyboardEvent) => {
+    if (windowStack.at(-1) !== close) return;
     if (event.key === "Escape") {
       event.stopPropagation();
       event.preventDefault();
@@ -421,7 +427,7 @@ export function showWindow(
   hydrateIcons(scrim);
   document.addEventListener("keydown", onKeyDown, true);
   frame.focus();
-  closeWindowFn = close;
+  windowStack.push(close);
 }
 
 /** Ask for a document's password.
@@ -477,6 +483,40 @@ export function askForPassword(wrong: boolean): Promise<string | null> {
         return body;
       },
       () => resolve(answered),
+    );
+  });
+}
+
+/** Ask before a theme is gone for good. Resolves to whether the reader
+    confirmed the deletion. */
+export function confirmDeleteTheme(name: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let confirmed = false;
+
+    showWindow(
+      "Delete theme",
+      (close) => {
+        const body = document.createElement("div");
+        body.className = "window-ask";
+
+        body.append(
+          text("lede", `Do you really want to delete theme ${name}?`),
+          actions(
+            button("Cancel", close),
+            button(
+              "Delete",
+              () => {
+                confirmed = true;
+                close();
+              },
+              "danger",
+            ),
+          ),
+        );
+
+        return body;
+      },
+      () => resolve(confirmed),
     );
   });
 }

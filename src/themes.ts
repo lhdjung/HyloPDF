@@ -16,6 +16,8 @@ const WHITE: Rgb = [255, 255, 255];
 /** The two greens confirmation is drawn in: one for pale paper, one for dark. */
 const GREEN_DARK: Rgb = [0x3d, 0x8f, 0x5b];
 const GREEN_LIGHT: Rgb = [0x6c, 0xc0, 0x8b];
+const RED_DARK: Rgb = [0xb0, 0x2a, 0x37];
+const RED_LIGHT: Rgb = [0xd9, 0x63, 0x6b];
 
 /**
  * Where paper begins, on the 0–255 grey the recolouring reads the page as.
@@ -224,6 +226,15 @@ export function applyTheme(theme: Theme): void {
   // towards the theme's own ink so it belongs to the palette rather than
   // arriving from somewhere else.
   set("--positive", toHex(mix(dark ? GREEN_LIGHT : GREEN_DARK, text, 0.14)));
+  // The pair a filled "danger zone" button needs — same shape as
+  // `--accent`/`--accent-contrast`, but a red that reads as destructive
+  // regardless of the theme's own accent.
+  const negative = dark ? RED_LIGHT : RED_DARK;
+  set("--negative", toHex(negative));
+  set(
+    "--negative-contrast",
+    toHex(contrastRatio(negative, WHITE) >= 3 ? WHITE : mix(negative, BLACK, 0.82)),
+  );
   // The paper behind a page that has not finished rendering: the colour it is
   // about to become, so nothing flashes white on the way in.
   const paper = theme.recolor ? bg : WHITE;

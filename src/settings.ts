@@ -364,6 +364,7 @@ function appearancePage(
       ui.button(`Delete ${host.theme.name}`, () => {
         const removed = host.theme;
         void (async () => {
+          if (!(await ui.confirmDeleteTheme(removed.name))) return;
           try {
             await deleteTheme(removed.id);
             await host.refreshThemes();
@@ -374,7 +375,7 @@ function appearancePage(
           }
           edit.done();
         })();
-      }),
+      }, "danger"),
     );
   }
   pane.append(buttons);
@@ -519,6 +520,30 @@ function themeEditor(
       "primary",
     ),
   );
+  // Only a theme already on disk can be deleted — "New theme…" and a copy
+  // begun from a built-in one have not been saved yet.
+  if (draft.id) {
+    buttons.append(
+      ui.button(
+        "Delete this theme",
+        () => {
+          void (async () => {
+            if (!(await ui.confirmDeleteTheme(draft.name))) return;
+            try {
+              await deleteTheme(draft.id);
+              await host.refreshThemes();
+              host.useTheme(host.replacementFor(draft));
+              ui.notice(`Deleted ${draft.name}.`);
+              edit.done();
+            } catch (error) {
+              ui.notice(messageOf(error));
+            }
+          })();
+        },
+        "danger",
+      ),
+    );
+  }
   box.append(buttons);
   box.append(ui.text("note", "Colours apply as you pick them, so the app around you is the preview."));
   return box;

@@ -997,6 +997,7 @@ class App {
                 onSelect: async () => {
                   close();
                   const removed = this.theme;
+                  if (!(await ui.confirmDeleteTheme(removed.name))) return;
                   try {
                     this.themes = await deleteTheme(removed.id);
                     this.useTheme(this.replacementFor(removed));

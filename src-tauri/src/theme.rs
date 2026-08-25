@@ -14,6 +14,7 @@ use crate::atomic_write;
 pub const BUILT_IN: &[(&str, &str)] = &[
     ("hylo-light", include_str!("../themes/hylo-light.toml")),
     ("hylo-dark", include_str!("../themes/hylo-dark.toml")),
+    ("hylo-ember", include_str!("../themes/hylo-ember.toml")),
     ("glamour", include_str!("../themes/glamour.toml")),
     ("dracula", include_str!("../themes/dracula.toml")),
     ("gruvbox", include_str!("../themes/gruvbox.toml")),

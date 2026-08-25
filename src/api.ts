@@ -117,6 +117,7 @@ const fallbackDefaults: Settings = {
 const packagedOrder = [
   "hylo-light",
   "hylo-dark",
+  "hylo-ember",
   "glamour",
   "dracula",
   "gruvbox",

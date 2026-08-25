@@ -10,4 +10,13 @@ accent = "#3f7d94"
 # exactly like the sentence around it cannot be seen. The rest of the page is
 # left alone.
 link = "#2f6f8f"
+# The derivation pulls the accent most of the way back to the paper, and on
+# this theme that lands on a pale version of a colour the chrome is already
+# using — a selection that looks like more app rather than like a mark on the
+# page. Warm red is the one thing neither Hylo theme has anywhere else, which
+# is what makes it findable at a glance, and pale enough here to be a
+# highlighter rather than a block. The page's own ink stays on top: what a
+# reader has marked on paper is a marked passage, not an inverted one.
+selection = "#eac8c2"
+selection_text = "#2f3237"
 recolor = false

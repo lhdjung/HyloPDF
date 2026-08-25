@@ -8,5 +8,9 @@ background = "#191724"
 accent = "#eb6f92"
 # Foam, a teal-green well clear of the rose accent.
 link = "#9ccfd8"
-# Highlight Medium, the palette's own selection colour.
-selection = "#403d52"
+# Highlight Medium is the palette's own, and it is a neutral — which leaves the
+# one theme named after a flower selecting in grey. Love, banked into the base
+# until it is a plum rather than a pink, which is where the rest of Rosé Pine
+# already lives.
+selection = "#703a56"
+selection_text = "#e0def4"

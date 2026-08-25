@@ -6,7 +6,7 @@
 // hand and missing another produces a release that builds, ships, and then
 // disagrees with itself about what it is.
 //
-//   npm run set-version 0.2.0
+//   npm run set-version 0.1.0
 //
 // Prints the files it changed. Setting the version the tree already has is not
 // an error and writes nothing, which is what lets the release workflow run
@@ -20,7 +20,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * What a release version may look like. Deliberately narrow: the Windows
- * installer wants three numbers and nothing else, so a `0.2.0-beta.1` builds
+ * installer wants three numbers and nothing else, so a `0.1.0-beta.1` builds
  * on two platforms and fails on the third, at the end of the run.
  */
 const VERSION = /^\d+\.\d+\.\d+$/;

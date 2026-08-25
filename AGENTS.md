@@ -921,19 +921,136 @@ npm run dev                    # the interface alone, in a browser
 npm run check                  # tsc, over src/ and over the Node side
 npm test                       # node --test, with a dev server started for it
 npm run tauri build            # .app and .dmg
+npm run set-version 0.1.0      # the five files that carry the version number
 ```
 
-`.github/workflows/ci.yml` runs the types, both test suites — `npm test` and
-`cargo test` — and a build on every push,
-and bundles the app on all three platforms — which is the only way the engines
-this is not developed on get exercised at all. Signing is the one thing it
-cannot do without secrets, and naming the variables the Tauri bundler reads is
-not the way to leave the door open for them: the bundler goes by whether
-`APPLE_CERTIFICATE` is *present*, and a secret the repository does not have
-arrives as an empty string rather than as nothing at all, so the macOS job
-compiled and then died at `security import` on every push. They come in under
-other names now, and a macOS-only step promotes the ones that carry something.
-An unsigned macOS build is quarantined anywhere but the machine that made it.
+Three workflows, and the split is deliberate. `checks.yml` is the types and
+both test suites, and it is a *reusable* workflow rather than a job, because
+two things need it — a push and a release — and a second copy would drift.
+`ci.yml` runs it on every push to main and then bundles on all three platforms,
+which is the only way the engines this is not developed on get exercised at
+all; it throws the bundles away. `release.yml` is the only thing that names a
+version, and it runs only when you press the button.
+
+Signing is the one thing CI cannot do without secrets, and naming the variables
+the Tauri bundler reads is not the way to leave the door open for them: the
+bundler goes by whether `APPLE_CERTIFICATE` is *present*, and a secret the
+repository does not have arrives as an empty string rather than as nothing at
+all, so the macOS job compiled and then died at `security import` on every
+push. They come in under other names now, and a macOS-only step promotes the
+ones that carry something. An unsigned macOS build is quarantined anywhere but
+the machine that made it.
+
+## Releasing a version
+
+Releases are manual and nothing else triggers them. `release.yml` is a
+`workflow_dispatch` workflow, which means GitHub puts a **Run workflow** button
+on it and never runs it on its own — no push, no tag, no schedule. There is
+nothing to opt into beyond having Actions enabled for the repository; the
+button appears because the file is on the default branch, which is the one
+condition `workflow_dispatch` has.
+
+### Doing it
+
+1. Get everything you want in the release onto `main` and let CI go green.
+2. GitHub → **Actions** → **Release** in the left-hand list → **Run workflow**.
+3. Branch `main`, version `0.1.0` (three numbers, no `v`, no `-beta`), tick
+   *pre-release* if it is one, → **Run workflow**.
+4. Wait. The checks take two or three minutes, the four bundles fifteen to
+   twenty-five between them, and the run publishes the release itself at the
+   end. Nothing to do but read the log if it goes red.
+
+That is the whole of it. What the run does, in order: `checks` (the same types
+and tests CI runs, on the commit you are releasing), then `tag` — which writes
+the version into the five files that carry it, commits, tags `v0.1.0`, pushes
+both, and opens a **draft** release — then four `bundle` jobs in parallel, each
+uploading its installers to that draft, and finally `publish`, which takes the
+draft down. The release only becomes visible once every platform has produced
+something, so nobody downloads half a set.
+
+The first release is `0.1.0`, because that is what every file in the tree
+already says. Dispatching a version the tree is already at is not a special
+case and not an error: `set-version` finds nothing to change, `tag` finds
+nothing to commit, and `v0.1.0` lands on the head of main as it stands. The
+"Release" commit only appears from the second one onwards, when the number
+actually moves — and `--generate-notes` has no previous release to work from,
+so the notes come from the whole history.
+
+### What comes out
+
+Attached to the release, named for the version:
+
+| platform | files |
+| -------- | ----- |
+| macOS | `HyloPDF_0.1.0_aarch64.dmg`, `HyloPDF_0.1.0_x64.dmg` |
+| Linux | `HyloPDF_0.1.0_amd64.deb`, `HyloPDF-0.1.0-1.x86_64.rpm`, `HyloPDF_0.1.0_amd64.AppImage` |
+| Windows | `HyloPDF_0.1.0_x64_en-US.msi`, `HyloPDF_0.1.0_x64-setup.exe` |
+
+Release notes are generated from the commits since the last release, so they
+are as good as the commit messages are. Edit them on the releases page
+afterwards if they are not.
+
+### When it goes wrong
+
+*A bundle job failed.* Dispatch the same version again. The `tag` job finds the
+tag, finds the draft still a draft, skips the version bump, and the bundles
+rebuild and upload over what is there. Only when a release has been *published*
+does a repeat dispatch refuse, because at that point the version is somebody
+else's.
+
+*The version was wrong.* Delete the release and the tag on GitHub, `git push
+origin :refs/tags/v0.1.0`, and revert the "Release 0.1.0" commit if there is
+one — a dispatch that changed nothing made none. Then start again.
+
+*`git push` failed with 403.* Settings → Actions → General → Workflow
+permissions is on "Read repository contents", and the `tag` job cannot push a
+commit or a tag with a read-only token. "Read and write permissions".
+
+*It ran on a branch.* The `tag` job refuses anything but `main`, before it
+writes anything.
+
+### Building one locally
+
+The workflow does nothing you cannot do by hand, which is the way to debug a
+bundling problem without waiting on CI:
+
+```sh
+npm run set-version 0.1.0
+npm run tauri build                      # host platform, every bundle it makes
+npm run tauri build -- --target x86_64-apple-darwin --bundles dmg
+```
+
+Installers land in `src-tauri/target/<target>/release/bundle/<kind>/`, or
+`src-tauri/target/release/bundle/` when no `--target` was given. Put the
+version back with `npm run set-version` before committing anything, or let the
+release workflow do the bump for real.
+
+Keep in mind: the version lives in five places and a script writes all five.
+`scripts/set-version.mjs` does `package.json`, `package-lock.json`,
+`tauri.conf.json`, `Cargo.toml` and `Cargo.lock`. It edits by pattern, and a
+pattern that stops matching does not fail — it silently declines to change
+anything, which would tag 0.2.0 and build 0.1.0, and the first sign of it would
+be the file name on the releases page. `tests/version.test.mjs` is the gate:
+the five agree today, and all five patterns still find something to change,
+round-tripped on a copy in the temp directory rather than on the files vite is
+watching.
+
+### The runner images are a decision, not a default
+
+Both macOS builds run on Apple silicon and the Intel one cross-compiles,
+because the Intel runners were retired at the end of 2025 — Apple's toolchain
+targets either architecture from either host, and bundling never runs what it
+built. Two separate DMGs rather than one universal build, for the same reason
+the brief asks for a small binary: a universal installer carries both
+architectures to run one of them.
+
+Linux builds on `ubuntu-22.04` on purpose. A binary runs on the glibc it was
+built against and anything newer, never anything older, so the runner's age is
+what decides whether the `.deb` installs on Debian stable. That image is
+deprecated from September 2026 and unsupported from April 2027, and bumping the
+label is the wrong fix when it goes: it silently narrows the set of machines
+the release runs on. Build in a container of the oldest glibc worth supporting
+instead.
 
 `scripts/sync-pdfjs.mjs` copies pdf.js's cmaps, standard fonts, ICC profiles and
 wasm decoders into `public/pdfjs` before every dev run and build. Nothing is

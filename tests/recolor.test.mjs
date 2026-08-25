@@ -1,4 +1,10 @@
-/* Recolouring a page, both ways round.
+/* Recolouring a page, both ways round and both mappings.
+ *
+ * There are two. `duotone` puts everything onto the theme's two colours, which
+ * is what a link and a selected word want; `recolor` puts a page onto the
+ * theme and leaves the colours on it alone, which is what a figure wants. They
+ * are the same mapping where there is no colour, and these tests hold them to
+ * that.
  *
  * The fast path is a chain of canvas blend modes; `saturation` among them is
  * non-separable and not every engine really implements it on a canvas, so
@@ -14,7 +20,7 @@ import { sourceFor } from "./helpers.mjs";
 
 const source = await sourceFor(
   "src/themes.ts",
-  ["recolor"],
+  ["recolor", "duotone"],
   "setBlend: (on) => { blendable = on; }",
 );
 
@@ -59,7 +65,7 @@ test("the pixel fallback matches the blend modes", async () => {
     const run = (blend) => {
       globalThis.T.setBlend(blend);
       const ctx = paint();
-      globalThis.T.recolor(ctx, W, H, theme);
+      globalThis.T.duotone(ctx, W, H, theme);
       return [...ctx.getImageData(0, 0, W, H).data];
     };
 
@@ -96,7 +102,7 @@ test("near-white ink lands on the background, and ink does not", async () => {
         ctx.fillStyle = `rgb(${v},${v},${v})`;
         ctx.fillRect(v, 0, 1, 1);
       }
-      globalThis.T.recolor(ctx, levels.length, 1, theme);
+      globalThis.T.duotone(ctx, levels.length, 1, theme);
       const data = ctx.getImageData(0, 0, levels.length, 1).data;
       return levels.map((v) => [data[v * 4], data[v * 4 + 1], data[v * 4 + 2]]);
     };
@@ -145,7 +151,7 @@ test("the fallback colours only the region it was given", async () => {
 
     // Two rectangles that overlap and do not fill their own bounding box —
     // the shape a couple of links on a line actually make.
-    globalThis.T.recolor(ctx, W, H, { ...theme, text: "#ff0000", background: "#ffffff" }, [
+    globalThis.T.duotone(ctx, W, H, { ...theme, text: "#ff0000", background: "#ffffff" }, [
       { x: 5, y: 2, w: 10, h: 4 },
       { x: 12, y: 4, w: 10, h: 4 },
     ]);
@@ -199,7 +205,7 @@ test("many rectangles colour only themselves", async () => {
     for (let i = 0; i < 200; i++) rects.push({ x: 10, y: i * 2, w: 60, h: 1 });
 
     const started = performance.now();
-    globalThis.T.recolor(ctx, W, H, { ...theme, text: "#ff0000", background: "#ffffff" }, rects);
+    globalThis.T.duotone(ctx, W, H, { ...theme, text: "#ff0000", background: "#ffffff" }, rects);
     const ms = performance.now() - started;
 
     const at = (x, y) => ctx.getImageData(x, y, 1, 1).data.slice(0, 3).join(",");
@@ -216,4 +222,200 @@ test("many rectangles colour only themselves", async () => {
   assert.equal(seen.insideLast, "255,0,0");
   assert.equal(seen.betweenTwo, "0,0,0", "coloured the gap between two links");
   assert.equal(seen.rightOfThem, "0,0,0", "coloured beyond the rectangles");
+});
+
+
+/* The page mapping: `recolor`, which keeps the colours the page has.
+ *
+ * These say what "keeps" means — hue and saturation as they were printed,
+ * lightness wherever the theme puts it — and that a page with nothing coloured
+ * on it comes out exactly as the two-colour mapping would leave it, whichever
+ * path drew it. */
+
+/** HSL, for asking what became of a colour rather than what its channels are. */
+function hslOf([r, g, b]) {
+  const high = Math.max(r, g, b), low = Math.min(r, g, b);
+  const l = (high + low) / 2 / 255;
+  const c = (high - low) / 255;
+  const s = c === 0 ? 0 : c / (1 - Math.abs(2 * l - 1));
+  let h = 0;
+  if (c !== 0) {
+    const [R, G, B] = [r / 255, g / 255, b / 255];
+    h = high === r ? ((G - B) / c + 6) % 6 : high === g ? (B - R) / c + 2 : (R - G) / c + 4;
+    h *= 60;
+  }
+  return { h, s, l };
+}
+
+/** Rec. 601 luma, the weight the ramp reads a pixel by. */
+const luma = ([r, g, b]) => (r * 77 + g * 151 + b * 28 + 128) >> 8;
+
+/** How far apart two hues are, the short way round the circle. */
+const apart = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+
+test("a page of type is recoloured exactly as the two-colour mapping would", async () => {
+  const seen = await page.evaluate((theme) => {
+    const W = 120, H = 40;
+    const paint = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      for (let x = 0; x < W; x++) {
+        const v = Math.round((x / (W - 1)) * 255);
+        ctx.fillStyle = `rgb(${v},${v},${v})`;
+        ctx.fillRect(x, 0, 1, H);
+      }
+      return ctx;
+    };
+    const run = (blend, how) => {
+      globalThis.T.setBlend(blend);
+      const ctx = paint();
+      globalThis.T[how](ctx, W, H, theme);
+      return [...ctx.getImageData(0, 0, W, H).data];
+    };
+    const compare = (a, b) => {
+      let worst = 0;
+      for (let i = 0; i < a.length; i++) if (i % 4 !== 3) worst = Math.max(worst, Math.abs(a[i] - b[i]));
+      return worst;
+    };
+    const flat = run(true, "duotone");
+    return {
+      blended: compare(flat, run(true, "recolor")),
+      pixelled: compare(flat, run(false, "recolor")),
+    };
+  }, THEME);
+
+  assert.ok(seen.blended <= 1, `the blend path differs by ${seen.blended}`);
+  assert.ok(seen.pixelled <= 1, `the pixel path differs by ${seen.pixelled}`);
+});
+
+test("a printed colour keeps its hue and its saturation", async () => {
+  const INKS = [
+    [31, 119, 180],  // a plot's blue
+    [255, 127, 14],  // its orange
+    [44, 160, 44],   // its green
+    [148, 103, 189], // its purple
+  ];
+  // A light theme that recolours, for the other direction: sepia moves a page
+  // a little, where a dark theme turns it over.
+  const SEPIA = { ...THEME, text: "#3b3228", background: "#f4ecd8" };
+
+  const seen = await page.evaluate(
+    ({ themes, inks }) => {
+      const W = 400, H = 300;
+      const run = (blend, theme) => {
+        globalThis.T.setBlend(blend);
+        const canvas = document.createElement("canvas");
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext("2d", { alpha: false });
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, W, H);
+        inks.forEach(([r, g, b], i) => {
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+          ctx.fillRect(i * 80 + 20, 20, 40, 40);
+        });
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(20, 120, 40, 40);
+        globalThis.T.recolor(ctx, W, H, theme);
+        const data = ctx.getImageData(0, 0, W, H).data;
+        const at = (x, y) => {
+          const i = (y * W + x) * 4;
+          return [data[i], data[i + 1], data[i + 2]];
+        };
+        return {
+          paper: at(W - 5, H - 5),
+          ink: at(40, 140),
+          drawn: inks.map((_, i) => at(i * 80 + 40, 40)),
+        };
+      };
+      return {
+        blend: run(true, themes.dark),
+        pixel: run(false, themes.dark),
+        sepia: run(true, themes.sepia),
+      };
+    },
+    { themes: { dark: THEME, sepia: SEPIA }, inks: INKS },
+  );
+
+  for (const [path, got] of Object.entries(seen)) {
+    const theme = path === "sepia" ? SEPIA : THEME;
+    const hex = (s) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16));
+    // The page around the colours is untouched by any of this: paper is the
+    // theme's background and ink is its text colour, to the level.
+    assert.deepEqual(got.paper, hex(theme.background), `${path}: paper is not the background`);
+    assert.deepEqual(got.ink, hex(theme.text), `${path}: black ink is not the text colour`);
+
+    got.drawn.forEach((out, i) => {
+      const was = hslOf(INKS[i]);
+      const now = hslOf(out);
+      assert.ok(apart(was.h, now.h) < 8, `${path}: hue ${was.h} became ${now.h}`);
+      assert.ok(Math.abs(was.s - now.s) < 0.2, `${path}: saturation ${was.s} became ${now.s}`);
+    });
+
+    // What the theme does move is lightness, and it moves it the way it moves
+    // the type: a dark theme turns the page over, so the darker of two inks
+    // comes back the lighter one, and a light theme leaves the order alone.
+    const [blue, orange] = [luma(got.drawn[0]), luma(got.drawn[1])];
+    if (path === "sepia") assert.ok(blue < orange, `${path}: ${blue} is not below ${orange}`);
+    else assert.ok(blue > orange, `${path}: ${blue} did not come back above ${orange}`);
+  }
+});
+
+test("a hair-thin coloured line is found on a whole page of paper", async () => {
+  const seen = await page.evaluate((theme) => {
+    globalThis.T.setBlend(true);
+    const W = 800, H = 1000;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, H);
+    // One pixel of red across the page: a curve on a plot, at the width the
+    // downscale the probe reads has the least of to go on.
+    ctx.fillStyle = "rgb(214,39,40)";
+    ctx.fillRect(0, 500, W, 1);
+    globalThis.T.recolor(ctx, W, H, theme);
+    const data = ctx.getImageData(0, 500, W, 1).data;
+    return [data[400 * 4], data[400 * 4 + 1], data[400 * 4 + 2]];
+  }, THEME);
+
+  const [r, g, b] = seen;
+  assert.ok(r - Math.max(g, b) > 40, `the line came back as ${seen.join(",")}`);
+});
+
+test("a scan's warm paper is still the theme's paper", async () => {
+  const seen = await page.evaluate((theme) => {
+    const run = (blend) => {
+      globalThis.T.setBlend(blend);
+      const W = 200, H = 200;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      // The off-white of a scanned page, and a hint of the same cast in a grey.
+      ctx.fillStyle = "rgb(250,246,236)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "rgb(132,129,126)";
+      ctx.fillRect(0, 0, W, 20);
+      globalThis.T.recolor(ctx, W, H, theme);
+      const data = ctx.getImageData(0, 0, W, H).data;
+      const at = (x, y) => {
+        const i = (y * W + x) * 4;
+        return [data[i], data[i + 1], data[i + 2]];
+      };
+      return { paper: at(100, 100), grey: at(100, 10) };
+    };
+    return { blend: run(true), pixel: run(false) };
+  }, THEME);
+
+  for (const [path, got] of Object.entries(seen)) {
+    assert.deepEqual(got.paper, [0x24, 0x27, 0x2f], `${path}: the paper kept its cast`);
+    // A grey that is barely off neutral is a grey, not a colour: it stays on
+    // the ramp rather than carrying its cast across.
+    const [r, g, b] = got.grey;
+    assert.ok(Math.max(r, g, b) - Math.min(r, g, b) < 12, `${path}: the grey came back as ${got.grey}`);
+  }
 });

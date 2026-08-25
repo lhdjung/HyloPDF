@@ -28,6 +28,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import { openForReading, readRange, type Theme } from "./api";
 import {
+  duotone,
   luminance,
   parseColor,
   recolor,
@@ -417,7 +418,7 @@ export class Viewer {
       copy.width,
       copy.height,
     );
-    recolor(ctx, copy.width, copy.height, painting);
+    duotone(ctx, copy.width, copy.height, painting);
     copy.style.left = `${run.x}px`;
     copy.style.top = `${run.y}px`;
     copy.style.width = `${run.w}px`;
@@ -1357,8 +1358,16 @@ export class Viewer {
         // recoloured is beside that point.
         const links = await this.linksFor(slot.index, page);
         if (this.doc !== doc || this.slots.get(slot.index) !== slot) return;
+        // `page.imageCoordinates`, not `task.imageCoordinates`: the RenderTask
+        // getter reads `_internalRenderTask.imageCoordinates`, which pdf.js
+        // never sets — the `complete` callback inside `PDFPageProxy.render`
+        // writes the page's own field instead, before resolving the task's
+        // promise. Reading the task's copy meant this was always null, so
+        // every picture was recoloured whatever "Recolour pictures too" said.
+        // Which is now what it says by default, for the reason in
+        // `settings.rs`; this is what makes turning it off do anything.
         const coordinates: ArrayLike<number> | null = wantsImages
-          ? task.imageCoordinates
+          ? page.imageCoordinates
           : null;
         const hasImages = Boolean(coordinates && coordinates.length > 0);
         // A copy of the page as it was drawn, to paint back over the recolouring.
@@ -1821,8 +1830,8 @@ function tintLinks(
   // as it was printed, the paper is the white pdf.js drew it on, and mapping
   // it back to white is what keeps the seam invisible there.
   // The rectangles are handed over as well as clipped: where the engine
-  // cannot blend, `recolor` works on pixels, and pixels do not honour a clip.
-  recolor(
+  // cannot blend, `duotone` works on pixels, and pixels do not honour a clip.
+  duotone(
     ctx,
     width,
     height,

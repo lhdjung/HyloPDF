@@ -48,11 +48,14 @@ pub fn defaults() -> Settings {
     s.insert("fit_mode".into(), json!("width"));
     s.insert("zoom".into(), json!(1.0));
     s.insert("page_gap".into(), json!(16));
-    // Off by default: text recolours, pictures stay as they were printed.
-    // Flattening a photograph — or a chart whose series differ only in hue —
-    // to a two-tone ramp is the one thing recolouring can do that makes a page
-    // harder to read rather than easier.
-    s.insert("recolor_images".into(), json!(false));
+    // On by default, and it was not always: recolouring used to flatten a page
+    // onto two colours, which is the one thing it can do that makes a page
+    // harder to read rather than easier — a photograph goes to mud, and a
+    // chart whose series differ only in hue loses the difference. It keeps the
+    // colours now, so a picture belongs in it. Off is for wanting a photograph
+    // exactly as it was printed, and costs a figure drawn half in pictures and
+    // half in lines the agreement between its halves.
+    s.insert("recolor_images".into(), json!(true));
     s.insert("remember_position".into(), json!(true));
     // On by default: a page count shown briefly while scrolling is how a
     // reader with the toolbar hidden still knows where they are.

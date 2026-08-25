@@ -43,6 +43,48 @@ const RED_LIGHT: Rgb = [0xd9, 0x63, 0x6b];
 const WHITE_POINT = 235;
 
 /**
+ * How much colour a pixel needs before the theme lets it keep any, and how
+ * much before it keeps all of it — chroma, on the same 0–255 scale.
+ *
+ * The floor is what tells a colour apart from a cast. Scanned paper is never
+ * quite grey, a JPEG's flat areas carry a couple of levels of chroma noise,
+ * and neither is a colour anybody chose: below the floor a pixel is neutral
+ * and takes the theme's own ink and paper, which is what keeps a scanned page
+ * exactly the background of the app around it rather than a shade of its own.
+ * Above the ceiling a pixel is plainly coloured — a curve on a plot, a
+ * photograph — and keeps its hue outright. Between them it fades, so an
+ * antialiased edge does not show as a rim of colour around a themed letter.
+ */
+const COLOUR_FLOOR = 12;
+const COLOUR_FULL = 32;
+
+/**
+ * Where the colour is: the question the two paths hang off.
+ *
+ * A strip of page with nothing but type on it comes out the same whichever
+ * path draws it, and the blend chain is twenty times quicker, so the pixels
+ * are only walked where there is a colour to keep. The answer comes off a
+ * downscale of the page — cells of about `PROBE_CELL` pixels each way, which
+ * the engine averages on the GPU — so asking costs one `drawImage` and a few
+ * thousand comparisons rather than a read of ten million pixels. It is asked
+ * by the row, because a row is a rectangle and a rectangle is what both paths
+ * take: a paper with one figure on it turns out to have colour on a quarter of
+ * its rows, and pays for a quarter of a page.
+ *
+ * Averaging dilutes: a blue curve a few pixels wide, crossing a cell of white,
+ * arrives as a few levels of chroma rather than a hundred. That is why the
+ * floor here is far below `COLOUR_FLOOR` and nothing is decided by it — a row
+ * over the floor only means that row is worth reading properly. Guessing wrong
+ * the other way costs a figure its colours, so the doubt is spent that way
+ * round: the rows either side of a hit are taken too, and rows close enough
+ * together are joined rather than left as slivers.
+ */
+const PROBE_CELL = 12;
+const PROBE_CELLS_MAX = 256;
+const PROBE_FLOOR = 3;
+const PROBE_JOIN = 2;
+
+/**
  * Read a colour out of a theme file.
  *
  * Hex, in the four lengths anyone writes: `#abc`, `#abcd`, `#aabbcc`,
@@ -273,17 +315,32 @@ export function applyTheme(theme: Theme): void {
 }
 
 /**
- * Map a rendered page onto the theme's two colours.
+ * Map a rendered page onto the theme, keeping the colours the page has.
  *
- * The page comes out of pdf.js as ink on paper. Flatten it to luminance, then
- * stretch that single channel between the theme's text and background colour:
- * black ink lands on the text colour, white paper on the background, and
- * everything in between keeps its relative weight, so a grey rule stays a grey
- * rule instead of vanishing. `WHITE_POINT` is the one departure from that —
- * the palest greys are paper, not ink.
+ * The page comes out of pdf.js as ink on paper, and a theme is two colours to
+ * put in their place. For everything printed in grey that is the whole story:
+ * flatten to luminance and stretch that single channel between the theme's
+ * text and background colour, so black ink lands on the text colour, white
+ * paper on the background, and a grey rule stays a grey rule instead of
+ * vanishing. `WHITE_POINT` is the one departure from it — the palest greys are
+ * paper, not ink.
  *
- * Doing this with canvas blend modes keeps the whole thing on the GPU and,
- * more importantly, bakes the result into the bitmap — scrolling afterwards
+ * A figure is not printed in grey, and flattening one is throwing away what it
+ * is for: four curves that were blue, orange, green and red arrive as four
+ * curves of the same colour, told apart by nothing. So a pixel that has a
+ * colour of its own keeps it. What the theme moves is the *lightness*: the
+ * ramp says where a pixel of that weight belongs on this theme's page, and the
+ * pixel is put there with its hue and its saturation intact. On a dark theme
+ * that turns a dark blue curve into a light blue one, the same way it turns
+ * black type white, and the plot goes on reading as a plot.
+ *
+ * The two are one mapping, not two: colour is kept in proportion to how much
+ * of it there is, so ink with none of it lands exactly where it always did and
+ * nothing about a page of type changes. `COLOUR_FLOOR` is where that begins.
+ *
+ * Which path draws which part of it is a performance question and nothing else
+ * — see `colouredRows`. The blend chain keeps the whole thing on the GPU and,
+ * more importantly, bakes the result into the bitmap: scrolling afterwards
  * costs nothing, which a CSS filter over every page could not promise.
  */
 export function recolor(
@@ -291,48 +348,176 @@ export function recolor(
   width: number,
   height: number,
   theme: Theme,
-  regions?: Rect[],
 ): void {
   if (!theme.recolor) return;
   const bg = parseColor(theme.background, WHITE);
   const text = parseColor(theme.text, BLACK);
-  const inverted = luminance(text) > luminance(bg);
-
   if (!canBlend()) {
-    recolorByPixel(ctx, width, height, text, bg, regions);
+    recolorByPixel(ctx, width, height, text, bg, undefined, true);
     return;
   }
+  const coloured = colouredRows(ctx, width, height);
+  // The rows that have a colour on them are walked pixel by pixel, and the
+  // rest of the page — most of most pages — goes down the blend chain, which
+  // does the same thing to a grey and does it on the GPU.
+  flattenByBlend(ctx, width, height, text, bg, gapsBetween(coloured, width, height));
+  for (const band of coloured) {
+    recolorByPixel(ctx, width, height, text, bg, [band], true);
+  }
+}
+
+/**
+ * The same ramp with the colour taken out: everything onto two colours.
+ *
+ * This is what a link and a selected word want. Both are saying *this part of
+ * the page is different*, in a colour the theme chose for the purpose, and a
+ * link that was printed blue keeping its blue is a link that says nothing. So
+ * they flatten, where a page keeps what it has.
+ *
+ * `regions` is not an optimisation: where the blend path is bounded by the
+ * caller's clipping path, the pixel path has to be told, because `putImageData`
+ * is the one drawing operation that ignores a clip.
+ */
+export function duotone(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  theme: Theme,
+  regions?: Rect[],
+): void {
+  const bg = parseColor(theme.background, WHITE);
+  const text = parseColor(theme.text, BLACK);
+  if (!canBlend()) {
+    recolorByPixel(ctx, width, height, text, bg, regions, false);
+    return;
+  }
+  flattenByBlend(ctx, width, height, text, bg, null);
+}
+
+/** The luminance ramp, drawn with composite operations: a chain of five fills
+    over the whole canvas — or over `parts` of it, where something else is
+    drawing the rest — bounded by whatever clip the caller has set. */
+function flattenByBlend(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  text: Rgb,
+  bg: Rgb,
+  parts: Rect[] | null,
+): void {
+  const inverted = luminance(text) > luminance(bg);
+  const fill = (style: string) => {
+    ctx.fillStyle = style;
+    if (!parts) ctx.fillRect(0, 0, width, height);
+    else for (const part of parts) ctx.fillRect(part.x, part.y, part.w, part.h);
+  };
 
   ctx.save();
   ctx.globalCompositeOperation = "saturation";
-  ctx.fillStyle = "#808080";
-  ctx.fillRect(0, 0, width, height);
+  fill("#808080");
 
   // The white point, and the only bend in an otherwise straight ramp.
   // `color-dodge` against a constant is a division: the grey is scaled up by
   // 255 / WHITE_POINT and everything that reaches white stays there. Black is
   // dodge's fixed point, so full-strength ink is untouched by it.
   ctx.globalCompositeOperation = "color-dodge";
-  ctx.fillStyle = toHex(grey(255 - WHITE_POINT));
-  ctx.fillRect(0, 0, width, height);
+  fill(toHex(grey(255 - WHITE_POINT)));
 
   if (inverted) {
     // Light text on a dark page: flip the greyscale first, so the multiply
     // below has a positive range to work with.
     ctx.globalCompositeOperation = "difference";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, width, height);
+    fill("#ffffff");
   }
 
   const [from, to] = inverted ? [bg, text] : [text, bg];
   ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = toHex([to[0] - from[0], to[1] - from[1], to[2] - from[2]]);
-  ctx.fillRect(0, 0, width, height);
+  fill(toHex([to[0] - from[0], to[1] - from[1], to[2] - from[2]]));
 
   ctx.globalCompositeOperation = "lighter";
-  ctx.fillStyle = toHex(from);
-  ctx.fillRect(0, 0, width, height);
+  fill(toHex(from));
   ctx.restore();
+}
+
+/**
+ * Which rows of this page have a colour on them.
+ *
+ * Full-width bands in canvas pixels, top to bottom, none of them touching. An
+ * empty list means a page of type, which the blend chain draws identically and
+ * far faster; a page that cannot be read at all is answered with the whole of
+ * it, because losing a figure's colours is the worse of the two mistakes.
+ *
+ * See `PROBE_CELL` for why this is a downscale and what the floor is worth.
+ */
+let probeCanvas: HTMLCanvasElement | null = null;
+
+function colouredRows(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+): Rect[] {
+  const whole = [{ x: 0, y: 0, w: width, h: height }];
+  const across = Math.max(1, Math.min(PROBE_CELLS_MAX, Math.round(width / PROBE_CELL)));
+  const down = Math.max(1, Math.min(PROBE_CELLS_MAX, Math.round(height / PROBE_CELL)));
+  try {
+    const canvas = (probeCanvas ??= document.createElement("canvas"));
+    canvas.width = across;
+    canvas.height = down;
+    const small = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
+    if (!small) return whole;
+    // The quality is load-bearing, not a nicety. Averaging is the whole premise
+    // of reading a page this small — it is what makes a line one pixel thick
+    // show up as a few levels of chroma across its cell — and `low`, which is
+    // the default, samples instead: measured on a page carrying a 1px rule, a
+    // 2px rule and a plotted curve, it found the curve and neither rule.
+    // `medium` found all three and costs a couple of milliseconds over `low`;
+    // `high` costs six more than that and turns up a tenth more rows, all of
+    // them fainter than anything the eye was going to miss.
+    small.imageSmoothingQuality = "medium";
+    small.drawImage(ctx.canvas, 0, 0, width, height, 0, 0, across, down);
+    const cells = small.getImageData(0, 0, across, down).data;
+
+    const bands: Rect[] = [];
+    const cell = height / down;
+    for (let row = 0; row < down; row++) {
+      let coloured = false;
+      for (let column = 0; column < across && !coloured; column++) {
+        const i = (row * across + column) * 4;
+        const r = cells[i];
+        const g = cells[i + 1];
+        const b = cells[i + 2];
+        const high = r > g ? (r > b ? r : b) : g > b ? g : b;
+        const low = r < g ? (r < b ? r : b) : g < b ? g : b;
+        coloured = high - low >= PROBE_FLOOR;
+      }
+      if (!coloured) continue;
+      // A cell either side, and joined to the band above if the gap between
+      // them is not worth the two extra reads of the canvas.
+      const top = Math.max(0, Math.floor((row - 1) * cell));
+      const bottom = Math.min(height, Math.ceil((row + 2) * cell));
+      const last = bands[bands.length - 1];
+      if (last && top - (last.y + last.h) <= PROBE_JOIN * cell) {
+        last.h = bottom - last.y;
+      } else {
+        bands.push({ x: 0, y: top, w: width, h: bottom - top });
+      }
+    }
+    return bands;
+  } catch {
+    return whole;
+  }
+}
+
+/** The rest of the page: the full-width bands the given ones leave over. */
+function gapsBetween(bands: Rect[], width: number, height: number): Rect[] {
+  const gaps: Rect[] = [];
+  let y = 0;
+  for (const band of bands) {
+    if (band.y > y) gaps.push({ x: 0, y, w: width, h: band.y - y });
+    y = band.y + band.h;
+  }
+  if (y < height) gaps.push({ x: 0, y, w: width, h: height - y });
+  return gaps;
 }
 
 /** Whether this engine really does the blend modes `recolor` is built on.
@@ -378,12 +563,17 @@ function canBlend(): boolean {
 }
 
 /**
- * The same mapping, done a pixel at a time.
+ * The whole mapping, done a pixel at a time.
+ *
+ * This is the only path that can keep a colour — the blend chain flattens by
+ * construction — and it is also the fallback for an engine that will not do
+ * the blend modes at all. `keepColour` is the difference: with it off the ramp
+ * is all there is, which is the answer for a link, for a selected word, and
+ * for a page that has no colour on it in the first place.
  *
  * Slower than the blend modes by a good margin — a full page is tens of
- * milliseconds rather than one or two — but it is only reached where the fast
- * path would have quietly produced the wrong picture, and a page that takes a
- * moment longer beats a dark theme that does not work.
+ * milliseconds rather than one or two — which is what `hasColour` exists to
+ * spare a page of type.
  */
 function recolorByPixel(
   ctx: CanvasRenderingContext2D,
@@ -391,7 +581,8 @@ function recolorByPixel(
   height: number,
   text: Rgb,
   bg: Rgb,
-  regions?: Rect[],
+  regions: Rect[] | undefined,
+  keepColour: boolean,
 ): void {
   // `regions` is not an optimisation. `putImageData` is the one drawing
   // operation that ignores the clipping path, so where the blend path relies
@@ -405,7 +596,11 @@ function recolorByPixel(
   const spanX = area ? area.w : width;
   const spanY = area ? area.h : height;
 
-  const mask = regions?.length ? maskFor(regions, originX, originY, spanX, spanY) : null;
+  // One rectangle is its own bounding box, so every pixel read is inside it
+  // and there is nothing to ask. Which is the common case at both ends: a band
+  // of a page that has a colour on it, and a single link on a line.
+  const mask =
+    regions && regions.length > 1 ? maskFor(regions, originX, originY, spanX, spanY) : null;
 
   const image = ctx.getImageData(originX, originY, spanX, spanY);
   const pixels = image.data;
@@ -421,6 +616,51 @@ function recolorByPixel(
     ramp[level * 3 + 1] = text[1] + (bg[1] - text[1]) * t;
     ramp[level * 3 + 2] = text[2] + (bg[2] - text[2]) * t;
   }
+
+  /* Four tables, and between them they are the whole of keeping a colour.
+   *
+   * A colour is its hue, its saturation and its lightness, and only the last
+   * of those is the theme's business. Lightness here is HSL's — the midpoint
+   * of the highest and lowest channel — because that is the one under which
+   * hue and saturation can be put back without leaving the box: at any
+   * lightness there is exactly `roomAt` of chroma available, and a colour
+   * rescaled to the room at its new lightness lands inside it by construction.
+   * No clipping, and so no hue quietly bending as a channel is clamped.
+   *
+   * Which lightness is new is the ramp's answer, and the ramp is read by luma
+   * rather than by that midpoint, because luma is what says a yellow is light
+   * and a blue is dark. So `mapped` is where a pixel of a given luma ends up,
+   * and `room` is what fits there.
+   */
+  const mapped = new Uint8Array(256);
+  const room = new Uint8Array(256);
+  // The same question of the pixel that arrived, as a reciprocal: the chroma
+  // it is being scaled out of. Zero at the two ends of the range, where a
+  // pixel can have no chroma to scale.
+  const inverseRoom = new Float32Array(256);
+  // And, by chroma rather than by lightness, how much of its own colour a
+  // pixel keeps.
+  const share = new Float32Array(256);
+  // Left at zero when there is no colour to keep, which is what makes the loop
+  // below one loop: `keep` comes out zero for every pixel and the ramp is all
+  // that happens.
+  if (keepColour) {
+    for (let level = 0; level < 256; level++) {
+      const at = level * 3;
+      const high = Math.max(ramp[at], ramp[at + 1], ramp[at + 2]);
+      const low = Math.min(ramp[at], ramp[at + 1], ramp[at + 2]);
+      mapped[level] = (high + low) >> 1;
+      room[level] = roomAt(mapped[level]);
+      inverseRoom[level] = roomAt(level) ? 1 / roomAt(level) : 0;
+      share[level] =
+        level <= COLOUR_FLOOR
+          ? 0
+          : level >= COLOUR_FULL
+            ? 1
+            : (level - COLOUR_FLOOR) / (COLOUR_FULL - COLOUR_FLOOR);
+    }
+  }
+
   for (let row = 0; row < spanY; row++) {
     const rowStart = row * spanX;
     for (let column = 0; column < spanX; column++) {
@@ -428,20 +668,46 @@ function recolorByPixel(
       // which is a different colour rather than the same one.
       if (mask && !mask[rowStart + column]) continue;
       const i = (rowStart + column) * 4;
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
       // Rec. 601 luma, which is what the `saturation` + greyscale path amounts
       // to and is cheap in integers. The half added before the shift is what
       // rounds it rather than flooring it: the white point multiplies whatever
       // the two paths disagree about by 255 / WHITE_POINT, and half a level of
       // truncation here came out the other end as two.
-      const level =
-        (pixels[i] * 77 + pixels[i + 1] * 151 + pixels[i + 2] * 28 + 128) >> 8;
+      const level = (r * 77 + g * 151 + b * 28 + 128) >> 8;
       const at = level * 3;
-      pixels[i] = ramp[at];
-      pixels[i + 1] = ramp[at + 1];
-      pixels[i + 2] = ramp[at + 2];
+      const high = r > g ? (r > b ? r : b) : g > b ? g : b;
+      const low = r < g ? (r < b ? r : b) : g < b ? g : b;
+      // Anything this light is paper, whatever colour it is — the white point
+      // again, and the reason a scan's warm cast does not survive as a tint on
+      // a theme's own background. Below the floor there is no colour to keep,
+      // which is every pixel of a page of type.
+      const keep = level >= WHITE_POINT ? 0 : share[high - low];
+      if (keep === 0) {
+        pixels[i] = ramp[at];
+        pixels[i + 1] = ramp[at + 1];
+        pixels[i + 2] = ramp[at + 2];
+        continue;
+      }
+      // Hue and saturation as they were, at the lightness the ramp asked for:
+      // the channels keep their distances from the lowest of them, scaled by
+      // the room at the new lightness against the room at the old.
+      const scale = room[level] * inverseRoom[(high + low) >> 1];
+      const foot = mapped[level] - ((high - low) * scale) / 2;
+      pixels[i] = ramp[at] + (foot + (r - low) * scale - ramp[at]) * keep;
+      pixels[i + 1] = ramp[at + 1] + (foot + (g - low) * scale - ramp[at + 1]) * keep;
+      pixels[i + 2] = ramp[at + 2] + (foot + (b - low) * scale - ramp[at + 2]) * keep;
     }
   }
   ctx.putImageData(image, originX, originY);
+}
+
+/** How much chroma an HSL lightness has room for: all of it in the middle,
+    none of it at either end, because black is black and white is white. */
+function roomAt(lightness: number): number {
+  return 255 - Math.abs(2 * lightness - 255);
 }
 
 /** A rectangle in canvas pixels. */

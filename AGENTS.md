@@ -259,9 +259,32 @@ the page's text out of the worker on every zoom step — and throwing away
 whatever the reader had selected.
 
 *Recolouring is baked into the bitmap, not applied by CSS.* `recolor()` in
-`themes.ts` flattens the canvas to luminance with composite operations and
-stretches it between the theme's two colours, so scrolling afterwards costs
-nothing. The ramp is straight but for its top: `WHITE_POINT` calls everything
+`themes.ts` maps the page onto the theme and bakes the result in, so scrolling
+afterwards costs nothing — which a CSS filter over every page could not
+promise. What it maps is *lightness*: a pixel's luma says where on the ramp
+between the theme's ink and its paper it belongs, and a pixel that has a colour
+of its own is put there with that colour intact. Hue and saturation are the
+page's business and lightness is the theme's. So on a dark theme a plot's blue
+curve comes back light blue the same way black type comes back white, and four
+series that differed only in hue still do.
+
+It was a flattening until it was not, and the reason is worth keeping: mapping
+luma alone is right for everything printed in grey and throws away the whole of
+what a figure is for. `duotone()` is that old mapping, still exactly itself,
+because two things do want it — a link and a selected word, both of which are
+saying *this part of the page is different* in a colour the theme chose, and a
+link that keeps the blue it was printed in says nothing. The two are one
+mapping where there is no colour: `COLOUR_FLOOR` is where keeping any begins,
+so a page of type comes out identical either way, to the level.
+
+Keeping a colour means HSL, and only because of what it guarantees: at a given
+lightness there is exactly so much chroma available, so a colour rescaled to
+the room at its new lightness lands in the box by construction — no clipping,
+and so no hue quietly bending as a channel is clamped. Which lightness it moves
+to is still read off luma, because luma is what says a yellow is light and a
+blue is dark.
+
+The ramp is straight but for its top: `WHITE_POINT` calls everything
 above level 235 paper, because a hairline printed at 90% white is invisible on
 paper and, carried across by the same fraction, arrives as a bright cage around
 every hyperref box. The blend path reaches it as a `color-dodge` fill and the
@@ -270,14 +293,48 @@ rounded rather than truncated — the dodge multiplies any disagreement between
 the two by 255/235. What it costs is the other thing that lives up there: a
 code block shaded 4% grey now merges into the background rather than showing as
 a slightly paler block. That is the trade the constant makes, and the constant
-is the only place to change it. Two things are painted back on top of that result: pictures, if
+is the only place to change it. It is also what keeps a scan's warm paper from
+surviving as a tint: paper is paper whatever colour it is, so nothing that
+light keeps any.
+
+*Only the rows that have a colour on them are walked pixel by pixel.* Blend
+modes cannot keep a hue — the chain flattens by construction — so keeping one
+means reading the pixels, and at the ten megapixels a page is drawn at that is
+50-70ms against 4ms for the chain. So `colouredRows()` reads the page small
+first: one `drawImage` down to cells of about twelve pixels, `medium` quality
+because `low` samples rather than averages and loses a hairline outright, and
+then a row is coloured if any of its cells is. A paper with a figure on it
+turns out to have colour on a quarter to a half of its rows and pays for that
+much of a page; a page of type has none and goes down the chain entire. The
+bands and the gaps between them are rectangles, which is what both paths take —
+the chain fills a list instead of the canvas, the pixel path treats a single
+rectangle as its own bounding box and skips the mask. Measured on one paper, at
+10.4MP: 13ms to read the page small, then 34ms, 42ms and 50ms for pages with a
+quarter, a half and rather more of their rows coloured, against 54-68ms for
+walking all of it and 4ms for the chain alone.
+
+Two things are painted back on top of that result: pictures, if
 "Recolour pictures too" is off (pdf.js reports where images landed via
-`recordImages`), and links, which are redrawn from the untouched copy and
-recoloured towards the link colour. Both need a pristine copy of the canvas,
-taken before recolouring, and both put it back under a *single* clip covering
-every rectangle at once — one clip and one `drawImage` per page, not one per
-picture, which on a page of typeset mathematics is the difference between a
-frame and a stall.
+`recordImages` — on `page.imageCoordinates`, which is where the `complete`
+callback writes them; the `RenderTask` getter of the same name reads a field
+pdf.js never sets, so it is always null), and links, which are redrawn from the
+untouched copy and recoloured towards the link colour. Both need a pristine
+copy of the canvas, taken before recolouring, and both put it back under a
+*single* clip covering every rectangle at once — one clip and one `drawImage`
+per page, not one per picture, which on a page of typeset mathematics is the
+difference between a frame and a stall.
+
+That setting is on by default now, and the default is the interesting half. It
+was off, for the good reason that flattening a photograph is the one thing
+recolouring could do that made a page harder to read — and it never actually
+ran, because the coordinates were read off the wrong object. So the behaviour
+everyone has seen all along is the one it now names. Turning it off is for
+wanting a photograph exactly as printed, and it costs a figure drawn half in
+lines and half in pictures the agreement between its halves: the lines take the
+theme and the picture keeps its white ground. There is no seam to fix there —
+exempting some of a page is what was asked for — which is why the exemption is
+not the default and why keeping a picture's colours is done by recolouring it
+rather than by leaving it alone.
 
 ## What a reading session costs
 
@@ -354,17 +411,20 @@ unchanged, which is what keeps a drag down a page to about half a millisecond a
 frame rather than redrawing all of it. `::selection` keeps a plain background
 underneath for the frame before the copies land.
 
-**Canvas blend modes are checked before they are trusted.** `recolor()` is
+**Canvas blend modes are checked before they are trusted.** The fast path is
 built on `saturation`, which is non-separable and not implemented on a canvas
 by every engine — WebKitGTK on Linux is the one we have least visibility into,
 and a dropped blend mode does not throw, it silently does nothing and the page
 comes out as printed under a theme meant to recolour it. `canBlend()` probes
 once (an unsupported value is refused and the property keeps what it had) and
-`recolorByPixel` is the fallback. The two agree to within one level out of 255;
-`recolor.test.mjs` is what says so.
+`recolorByPixel` is the fallback — which is also the only path that can keep a
+colour, so it runs on the coloured rows of every page whatever the engine says.
+Flattening the two ways round agree to within one level out of 255, and a page
+of type recolours to the same pixels either way; `recolor.test.mjs` is what
+says so.
 
 **`putImageData` ignores the clipping path.** It is the one drawing operation
-that does. That is why `recolor()` takes an optional list of rectangles as well
+that does. That is why `duotone()` takes an optional list of rectangles as well
 as being called inside a clip: the fast path is bounded by the clip, the pixel
 fallback has to be told, and `tintLinks` passes both. Get this wrong and
 colouring the links repaints the entire page.
@@ -789,7 +849,11 @@ have to do. Nothing is bought.
 
 *Recolouring.* Already measured on the branch, and the canvas wins before the
 pixels even move: 1.5-5.6ms for the blend chain against 13-17ms scalar in Rust,
-2.8-3.5ms across all the cores. Then the page would have to come back.
+2.8-3.5ms across all the cores. Then the page would have to come back. Keeping
+a page's colours costs rather more than the chain does — tens of milliseconds,
+on the rows that have colour on them — so this is the one line above that a
+change has moved. It has not moved the answer: the work is a page in and the
+same page out, and the page is the thing that cannot cross.
 
 *The shades `applyTheme` derives.* Five colours in and fifteen out is a perfect
 shape, and it is also forty lines of arithmetic that would need a twin. The

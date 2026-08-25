@@ -86,7 +86,7 @@ const fallbackDefaults: Settings = {
   fit_mode: "width",
   zoom: 1,
   page_gap: 16,
-  recolor_images: false,
+  recolor_images: true,
   remember_position: true,
   show_page_pill: true,
   search_highlight_all: true,

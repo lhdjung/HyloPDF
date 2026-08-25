@@ -334,7 +334,7 @@ function appearancePage(
     ui.field(
       "Recolour pictures too",
       ui.toggle(host.settings.recolor_images, (on) => host.setRecolorImages(on)),
-      "Off keeps photographs and diagrams as they were printed.",
+      "Off leaves photographs exactly as they were printed, bright paper and all.",
     ),
   );
 

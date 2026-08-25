@@ -1,0 +1,9 @@
+# Tokyo Night Storm — the softer-contrast sibling of Tokyo Night: same ink and
+# the same accents, a lighter ground.
+name = "Tokyo Night Storm"
+text = "#a9b1d6"
+background = "#24283b"
+accent = "#7aa2f7"
+# Purple for links, clear of the blue accent beside it.
+link = "#bb9af7"
+selection = "#2f3549"

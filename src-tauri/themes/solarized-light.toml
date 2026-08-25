@@ -1,0 +1,13 @@
+# Solarized Light — Ethan Schoonover's palette, the light half. A warm paper
+# rather than a white one, and body text a full step lighter than the deepest
+# ink the palette has, which is what keeps it from reading as plain black on
+# white.
+name = "Solarized Light"
+text = "#657b83"
+background = "#fdf6e3"
+# Solarized blue, its own accent.
+accent = "#268bd2"
+# Solarized cyan for links, next to the blue accent rather than on top of it.
+link = "#2aa198"
+# One shade down from the page, the palette's own highlight.
+selection = "#eee8d5"

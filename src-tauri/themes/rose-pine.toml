@@ -1,0 +1,11 @@
+# Rosé Pine — "all natural pine, faux fur and a bit of soho vibes for the
+# classy minimalist", per the palette's own tagline.
+name = "Rosé Pine"
+text = "#e0def4"
+background = "#191724"
+# Love: the palette's signature rose.
+accent = "#eb6f92"
+# Foam, a teal-green well clear of the rose accent.
+link = "#9ccfd8"
+# Highlight Medium, the palette's own selection colour.
+selection = "#403d52"

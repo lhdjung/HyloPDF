@@ -22,6 +22,21 @@ pub const BUILT_IN: &[(&str, &str)] = &[
         "high-contrast",
         include_str!("../themes/high-contrast.toml"),
     ),
+    ("nord", include_str!("../themes/nord.toml")),
+    (
+        "solarized-light",
+        include_str!("../themes/solarized-light.toml"),
+    ),
+    (
+        "solarized-dark",
+        include_str!("../themes/solarized-dark.toml"),
+    ),
+    ("tokyo-night", include_str!("../themes/tokyo-night.toml")),
+    (
+        "tokyo-night-storm",
+        include_str!("../themes/tokyo-night-storm.toml"),
+    ),
+    ("rose-pine", include_str!("../themes/rose-pine.toml")),
 ];
 
 pub const DEFAULT_LIGHT: &str = "hylo-light";
@@ -157,8 +172,8 @@ pub fn install_built_ins(dir: &Path) {
             // plain `fs::write` truncates and then fills, so there is a moment
             // when the file on disk is a shipped theme with no colours in it —
             // and this directory is watched, and read by anything the reader
-            // has open beside the app. Rewriting seven files at every launch
-            // is seven chances at that moment.
+            // has open beside the app. Rewriting fourteen files at every
+            // launch is fourteen chances at that moment.
             let _ = atomic_write(&path, wanted.as_bytes());
         }
     }

@@ -34,6 +34,10 @@ Ignoring some settings, we have:
 - Gruvbox, for the oldies.
 - Sepia: background is sepia, text is dark. Use whatever good sepia themes use.
 - High contrast: background is perfect black, text is white.
+- Nord: the arctic, north-bluish palette — dark slate background, frost blue accents.
+- Solarized Light and Solarized Dark: Ethan Schoonover's palette, both halves.
+- Tokyo Night and Tokyo Night Storm: the two dark variants — Storm a step lighter than Night.
+- Rosé Pine: dark, with a muted rose accent against a deep plum background.
 
 
 ---
@@ -150,8 +154,8 @@ the chrome uses — surface, line, three grades of muted text, the positive gree
 Rust says when they do.** A theme is TOML so that somebody can open it in an
 editor, and a document is often a paper being recompiled underneath the reader;
 `watch.rs` follows the themes directory always and the open document while
-there is one, and emits `themes-changed` (with the whole set — seven themes of
-five colours is cheaper to send than to ask for) or `document-changed` (with
+there is one, and emits `themes-changed` (with the whole set — fourteen themes
+of five colours is cheaper to send than to ask for) or `document-changed` (with
 the path). The frontend reapplies the theme in use without remembering it, or
 reopens the document and puts the reader back where they were. This is the
 shape of work that belongs on the Rust side: it lives on the disk, and what

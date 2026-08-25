@@ -1,0 +1,11 @@
+# Solarized Dark — Ethan Schoonover's palette, the dark half. Same colours as
+# the light half, the ground and the ink simply swapped.
+name = "Solarized Dark"
+text = "#839496"
+background = "#002b36"
+# Solarized blue, its own accent.
+accent = "#268bd2"
+# Solarized cyan for links, next to the blue accent rather than on top of it.
+link = "#2aa198"
+# One shade up from the page, the palette's own highlight.
+selection = "#073642"

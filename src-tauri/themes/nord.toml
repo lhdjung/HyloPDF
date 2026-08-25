@@ -1,0 +1,13 @@
+# Nord — the arctic, north-bluish palette. Polar Night for the ground,
+# Snow Storm for the ink, Frost for everything that has to stand out.
+name = "Nord"
+text = "#d8dee9"
+background = "#2e3440"
+# Frost blue, the palette's own accent.
+accent = "#88c0d0"
+# A cooler frost for links, so they read as a different colour rather than a
+# brighter version of the accent.
+link = "#81a1c1"
+# One Polar Night step lighter than the page, the same way the palette itself
+# highlights a line.
+selection = "#434c5e"

@@ -145,10 +145,17 @@ copies are authoritative, and a built-in file edited in place is overwritten.
 Editing a built-in through the app saves a copy under an id of its own, which
 is never touched, and every shipped file carries a banner saying so — silently
 reverting someone's edit is a trap however defensible the policy is. A theme
-names colours and a `recolor` flag, and nothing else; `selection` is optional
-and derived from the accent when it is absent, and `selection_text` — the ink
-on that selection — is optional and derived from `selection` when it is
-absent. `applyTheme` derives every shade
+names colours and a `recolor` flag, and nothing else; `selection_area` is
+optional and derived from the accent when it is absent, and `selection_text` —
+the ink on that area — is optional and derived from `selection_area` when it is
+absent. That first key was `selection` until it was not: a theme naming
+`selection` beside `selection_text` was naming the whole of what selecting does
+and then one half of it again, and the editor's own labels had said "Selection
+area" and "Selected text" all along. `theme.rs` still *reads* the old spelling
+(`#[serde(alias)]`, mirrored in `api.ts` for the browser path) and writes only
+the new one, because a theme somebody wrote is a file on their disk that this
+app does not own — the same reason a built-in edited in place is left alone
+rather than reverted. `applyTheme` derives every shade
 the chrome uses — surface, line, three grades of muted text, the positive green
 — from those colours, which is why a five-line file is enough.
 

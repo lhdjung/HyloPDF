@@ -13,4 +13,4 @@ link = "#8be9fd"
 # Not the palette's own "current line" grey, which is a background colour and
 # disappears when it becomes a selection: the pink itself, at full strength.
 # Dracula is the one theme here loud enough to carry it.
-selection = "#e35fe8"
+selection_area = "#e35fe8"

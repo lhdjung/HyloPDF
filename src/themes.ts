@@ -1,11 +1,11 @@
 /* A theme needs two colours and may name three more.
  *
- * Ink and paper are the required pair. Accent, link and selection can each be
- * given outright, and each has a derivation here for when it is not — as does
- * every shade the chrome uses and never asks about: the toolbar, the borders,
- * the muted text, the shadow under a page. So a five-line TOML file is
- * genuinely enough to describe a whole look, and a longer one is only ever a
- * theme disagreeing with a default. */
+ * Ink and paper are the required pair. Accent, link and the selection area can
+ * each be given outright, and each has a derivation here for when it is not —
+ * as does every shade the chrome uses and never asks about: the toolbar, the
+ * borders, the muted text, the shadow under a page. So a five-line TOML file
+ * is genuinely enough to describe a whole look, and a longer one is only ever
+ * a theme disagreeing with a default. */
 
 import type { Theme } from "./api";
 
@@ -96,7 +96,7 @@ export function unreadableColors(theme: Theme): string[] {
     ["background", theme.background],
     ["accent", theme.accent],
     ["link", theme.link],
-    ["selection", theme.selection],
+    ["selection_area", theme.selection_area],
     ["selection_text", theme.selection_text],
   ];
   return named
@@ -155,7 +155,7 @@ export function accentOf(theme: Theme): Rgb {
  */
 export function selectionArea(theme: Theme): Rgb {
   const pulled = mix(accentOf(theme), parseColor(theme.background, WHITE), isDarkTheme(theme) ? 0.62 : 0.72);
-  return theme.selection ? parseColor(theme.selection, pulled) : pulled;
+  return theme.selection_area ? parseColor(theme.selection_area, pulled) : pulled;
 }
 
 /**
@@ -163,7 +163,7 @@ export function selectionArea(theme: Theme): Rgb {
  *
  * The default is the inverse of the area behind it, channel by channel, which
  * is the one colour guaranteed to belong to the same choice the reader already
- * made: change the selection and the ink on it follows. It is also the reason
+ * made: change the area and the ink on it follows. It is also the reason a
  * selection is legible at all now — before this, the wash went over the page
  * and the words under it kept whatever the printer gave them, which on a dark
  * theme meant reading grey through slate.
@@ -216,7 +216,7 @@ export function applyTheme(theme: Theme): void {
   set("--accent-soft", toHex(mix(accent, surface, dark ? 0.8 : 0.86)));
   // Selection is two colours, and both of them are derived unless the theme
   // says otherwise — see `selectionArea` and `selectionInk`.
-  set("--selection", toHex(selectionArea(theme)));
+  set("--selection-area", toHex(selectionArea(theme)));
   set("--selection-text", toHex(selectionInk(theme)));
   set(
     "--accent-contrast",

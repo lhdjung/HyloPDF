@@ -758,7 +758,7 @@ export class Viewer {
       this.preserveImages !== preserveImages;
     const reselect =
       repaint ||
-      before?.selection !== theme.selection ||
+      before?.selection_area !== theme.selection_area ||
       before?.selection_text !== theme.selection_text;
     this.theme = { ...theme };
     this.preserveImages = preserveImages;

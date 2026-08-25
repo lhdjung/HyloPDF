@@ -102,3 +102,20 @@ test("every shipped theme says where it goes, and no two say the same", () => {
   }
   assert.ok(seen.size > 0, "no themes found; the directory moved");
 });
+
+test("no shipped theme still spells it `selection`", () => {
+  // The key is `selection_area` now, and the old spelling is still *read* —
+  // `#[serde(alias)]` in `theme.rs`, the `??` in `parsePackaged` — because a
+  // theme somebody wrote is a file this app does not own. That mercy is not
+  // meant for the files we ship: a built-in on the old key would load fine,
+  // say nothing, and quietly keep the alias earning its place long after the
+  // rename was supposed to be over.
+  const dir = "src-tauri/themes";
+  for (const file of readdirSync(dir).filter((name) => name.endsWith(".toml"))) {
+    const source = readFileSync(path.join(dir, file), "utf8");
+    assert.ok(
+      !/^\s*selection\s*=/m.test(source),
+      `${file} uses the old \`selection\` key; it is \`selection_area\``,
+    );
+  }
+});

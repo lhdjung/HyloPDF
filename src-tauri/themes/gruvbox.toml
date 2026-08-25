@@ -10,5 +10,5 @@ link = "#83a598"
 # behind a cursor rather than behind a sentence, and reads as nothing at all
 # once it is the paper. This is the palette's orange banked into the ground
 # instead: burnt, retro, and unmistakably which theme you are in.
-selection = "#8f5010"
+selection_area = "#8f5010"
 selection_text = "#fbf1c7"

@@ -15,6 +15,6 @@ accent = "#e9917f"
 # body text in a slightly different mood, so links take the icon's other colour
 # instead of a warmer shade of its first one.
 link = "#ffab93"
-selection = "#b04a3d"
+selection_area = "#b04a3d"
 # A cream that leans yellow: the same ink, lit.
 selection_text = "#fff6de"

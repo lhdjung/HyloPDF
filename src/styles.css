@@ -62,7 +62,7 @@ body {
 }
 
 ::selection {
-  background: var(--selection);
+  background: var(--selection-area);
   color: var(--selection-text);
 }
 
@@ -492,7 +492,7 @@ body {
  * width — colouring them puts a page's bold type back as regular, its symbols
  * back as boxes, and every letter a fraction out of place. */
 .textLayer ::selection {
-  background: var(--selection);
+  background: var(--selection-area);
 }
 
 /* The selected words, copied off the page and recoloured. Above the text

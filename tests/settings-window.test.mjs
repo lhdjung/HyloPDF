@@ -68,7 +68,7 @@ test("a theme's colours apply as they are picked", async () => {
   // The second colour field is the background; the app follows it live.
   await app.page.evaluate(() => {
     const fields = [...document.querySelectorAll('#windows input[type="text"]')];
-    // name, text, background, accent, link, selection, selection ink
+    // name, text, background, accent, link, selection area, selection ink
     const backgroundField = fields[2];
     backgroundField.value = "#3b2a1e";
     backgroundField.dispatchEvent(new Event("input", { bubbles: true }));

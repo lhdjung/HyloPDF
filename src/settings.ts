@@ -285,7 +285,7 @@ function draftFrom(from: Theme | null, current: Theme): Draft {
       background: current.background,
       accent: current.accent,
       link: current.link,
-      selection: current.selection,
+      selection_area: current.selection_area,
       selection_text: current.selection_text,
       recolor: true,
       built_in: false,
@@ -299,7 +299,7 @@ function draftFrom(from: Theme | null, current: Theme): Draft {
     background: from.background,
     accent: from.accent,
     link: from.link,
-    selection: from.selection,
+    selection_area: from.selection_area,
     selection_text: from.selection_text,
     recolor: from.recolor,
     built_in: false,
@@ -319,7 +319,7 @@ function appearancePage(
 ): void {
   pane.append(
     ui.text("title", "Appearance"),
-    ui.text("lede", "Two colours make a theme: the ink and the paper. The accent, the links and the selection follow from those two until you say otherwise."),
+    ui.text("lede", "Two colours make a theme: the ink and the paper. The accent, the links and the selection area follow from those two until you say otherwise."),
   );
 
   pane.append(
@@ -480,7 +480,7 @@ function themeEditor(
     ui.field(
       "Selection area",
       ui.colorField(toHex(selectionArea(draft)), (value) => {
-        draft.selection = value;
+        draft.selection_area = value;
         // The ink on the selection follows the area under it unless it has
         // been set on its own, so the field below has to be told.
         inkField.show(toHex(selectionInk(draft)));

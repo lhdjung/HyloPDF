@@ -9,5 +9,5 @@ link = "#bb9af7"
 # The palette's own, and it suits the theme — but the ink on it was being
 # derived, and the inverse of a blue this deep is a warm sand, which is the
 # one colour Tokyo Night does not contain. fg, the brighter of its two inks.
-selection = "#283457"
+selection_area = "#283457"
 selection_text = "#c0caf5"

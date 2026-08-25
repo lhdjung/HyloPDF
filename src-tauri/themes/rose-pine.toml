@@ -12,5 +12,5 @@ link = "#9ccfd8"
 # one theme named after a flower selecting in grey. Love, banked into the base
 # until it is a plum rather than a pink, which is where the rest of Rosé Pine
 # already lives.
-selection = "#703a56"
+selection_area = "#703a56"
 selection_text = "#e0def4"

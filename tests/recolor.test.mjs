@@ -20,7 +20,7 @@ const source = await sourceFor(
 
 const THEME = {
   id: "t", name: "t", built_in: false, recolor: true,
-  text: "#e9eaee", background: "#24272f", accent: null, link: null, selection: null,
+  text: "#e9eaee", background: "#24272f", accent: null, link: null, selection_area: null,
 };
 
 let browser;

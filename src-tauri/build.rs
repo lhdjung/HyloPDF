@@ -15,7 +15,7 @@ const COLORS: &[&str] = &[
     "background",
     "accent",
     "link",
-    "selection",
+    "selection_area",
     "selection_text",
 ];
 

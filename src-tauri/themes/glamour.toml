@@ -9,6 +9,6 @@ accent = "#1bfdb8"
 # Green
 link = "#1bfdb8"
 # Light purple
-selection = "#4a2f9e"
+selection_area = "#4a2f9e"
 # Pink
 selection_text = "#f7a9fa"

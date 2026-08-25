@@ -39,7 +39,7 @@ export type Theme = {
   accent: string | null;
   link: string | null;
   /** The colour behind selected text. Null means "derive it from the accent". */
-  selection: string | null;
+  selection_area: string | null;
   /** The colour selected text is drawn in. Null means "derive it from the
       colour behind it". */
   selection_text: string | null;
@@ -138,7 +138,10 @@ function parsePackaged(id: string, source: string): Theme {
     background: read("background") ?? "#ffffff",
     accent: read("accent"),
     link: read("link"),
-    selection: read("selection"),
+    // `selection` is what this key used to be called, and a theme on somebody's
+    // disk may still say it — see the alias in `theme.rs`, which is the same
+    // decision on the side that owns the files.
+    selection_area: read("selection_area") ?? read("selection"),
     selection_text: read("selection_text"),
     recolor: !/^\s*recolor\s*=\s*false/m.test(source),
     built_in: true,

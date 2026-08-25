@@ -12,5 +12,5 @@ link = "#2aa198"
 # almost invisible, because Solarized means it for a highlighted line and not for
 # a highlighted sentence. Here it left a selection you had to hunt for, so this
 # is base03 carried towards the palette's blue instead, with base2 as the ink.
-selection = "#0d4d6d"
+selection_area = "#0d4d6d"
 selection_text = "#eee8d5"

@@ -13,5 +13,5 @@ link = "#2aa198"
 # base2, the palette's own highlight, is one shade down from base3 and just as
 # hard to see as base02 is on the dark half. The same answer, mirrored: the
 # paper carried towards the palette's blue, with base02 as the ink.
-selection = "#bfd9e4"
+selection_area = "#bfd9e4"
 selection_text = "#073642"

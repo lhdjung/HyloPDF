@@ -1,0 +1,260 @@
+# The switch. Run this from the Actions tab — "Release", "Run workflow", type
+# the version — and it does the whole of what a release is: it checks the tree,
+# writes the version into the five files that carry it, tags the commit, builds
+# an installer for each platform, hangs them off a draft release, and publishes
+# that release once every platform has actually produced something.
+#
+# Nothing about it happens on a push. `ci.yml` builds every push to main and
+# throws the results away; this is the only thing that names a version.
+#
+# Two properties are worth knowing before changing it:
+#
+# It is retryable. A macOS build that dies on the third of four platforms would
+# otherwise leave a tag behind that no second attempt could get past, at the
+# most annoying possible moment. So dispatching the same version again picks up
+# the existing tag and the existing draft, rebuilds, and re-uploads over what
+# is there. Once the release is published it refuses, because at that point the
+# version means something to somebody.
+#
+# It publishes last. The release stays a draft while the four bundles are
+# built, so a half-finished set is never visible on the releases page — the
+# thing a reader would download first and find broken.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, as major.minor.patch (e.g. 0.2.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as a pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The same types and tests CI runs, on the commit being released, before
+  # anything is written down. A release is the one time nobody is watching the
+  # output.
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  tag:
+    name: Version and tag
+    needs: checks
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: This releases main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Releases are cut from main; this ran on ${{ github.ref }}." >&2
+          exit 1
+
+      - name: Version, tag, and a draft to hang the bundles off
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          TAG="v$VERSION"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if [ "$PRERELEASE" = "true" ]; then PRE=--prerelease; else PRE=; fi
+          draft() {
+            gh release create "$TAG" \
+              --title "HyloPDF $VERSION" --draft --generate-notes $PRE
+          }
+
+          # A second attempt at a version that is already tagged. What to do
+          # depends on what became of its release, and "there isn't one" is a
+          # third answer rather than a failure: the tag may have been pushed by
+          # a run that died before `gh release create`.
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            state=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+            case "$state" in
+              true) echo "$TAG is tagged and still a draft; rebuilding into it." ;;
+              none) echo "$TAG is tagged with no release; drafting one."; draft ;;
+              *)
+                echo "$TAG is already published. Pick the next version." >&2
+                exit 1
+                ;;
+            esac
+            exit 0
+          fi
+
+          node scripts/set-version.mjs "$VERSION"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          # Dispatching the version the tree already carries is not an error;
+          # it just leaves nothing to commit.
+          git diff --cached --quiet || git commit -m "Release $VERSION"
+          git tag -a "$TAG" -m "HyloPDF $VERSION"
+          # A push made with GITHUB_TOKEN starts no further workflow, so this
+          # does not set CI off on its own commit.
+          git push origin HEAD:main
+          git push origin "$TAG"
+
+          draft
+
+  bundle:
+    name: ${{ matrix.name }}
+    needs: tag
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not take the other three down with it: the
+      # whole point of the retry above is that the ones that worked do not have
+      # to be built again.
+      fail-fast: false
+      matrix:
+        include:
+          # Two macOS builds rather than one universal binary. A universal
+          # build carries both architectures in every installer and roughly
+          # doubles what a reader downloads to run one of them; the brief asks
+          # for a small binary, and the two DMGs are named apart by
+          # architecture anyway.
+          #
+          # Both are built on Apple silicon, the Intel one cross-compiled,
+          # because the Intel runners were retired at the end of 2025. Apple's
+          # toolchain targets either architecture from either host, so this is
+          # a `--target` and nothing else; what it cannot do is run what it
+          # built, which bundling does not need.
+          - name: macOS (Apple silicon)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: dmg
+          - name: macOS (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: dmg
+          # 22.04 rather than the newest Ubuntu on purpose: a Linux binary runs
+          # on the glibc it was built against and anything newer, never
+          # anything older, so the runner's age is what decides whether the
+          # .deb installs on Debian stable. This image is deprecated from
+          # September 2026 and unsupported from April 2027 — and bumping the
+          # label is the wrong fix when it goes, because it silently narrows
+          # the set of machines the release runs on. Build in a container of
+          # the oldest glibc worth supporting instead.
+          - name: Linux
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commit the tag job made, not the one the run started from.
+          ref: ${{ needs.tag.outputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+      - name: System libraries
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libxdo-dev
+      - run: npm ci
+
+      # See the note in ci.yml: the bundler decides whether to sign by whether
+      # these are present, and a secret this repository does not have arrives
+      # as an empty string rather than as nothing at all. So they come in under
+      # names it does not read, and only the ones carrying something are
+      # promoted to the names it does.
+      - name: Signing certificates, if this repository has any
+        if: startsWith(matrix.os, 'macos')
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          ID: ${{ secrets.APPLE_ID }}
+          PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in CERTIFICATE CERTIFICATE_PASSWORD SIGNING_IDENTITY ID PASSWORD TEAM_ID; do
+            if [ -n "${!name}" ]; then
+              {
+                echo "APPLE_$name<<HYLOPDF_EOF"
+                echo "${!name}"
+                echo "HYLOPDF_EOF"
+              } >> "$GITHUB_ENV"
+            fi
+          done
+
+      - name: Build the installers
+        env:
+          # linuxdeploy is itself an AppImage, and a GitHub runner has no FUSE
+          # for it to mount itself with; unpacking it instead is the supported
+          # way round that. NO_STRIP because the runner's strip is newer than
+          # the libraries it is handed and errors rather than skipping them.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          NO_STRIP: true
+        run: npm run tauri build -- --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Hang them off the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+          DIR: src-tauri/target/${{ matrix.target }}/release/bundle
+        run: |
+          set -euo pipefail
+          found=0
+          # One at a time, and read through a loop rather than an array,
+          # because macOS runners answer `bash` with 3.2 — no mapfile, and no
+          # `xargs -d` either. `--clobber` is what makes a retry replace the
+          # asset rather than fail on the name.
+          while IFS= read -r file; do
+            echo "uploading $(basename "$file")"
+            gh release upload "$TAG" "$file" --clobber
+            found=1
+          done < <(find "$DIR" -type f \
+            \( -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' \
+               -o -name '*.AppImage' -o -name '*.msi' -o -name '*-setup.exe' \))
+          if [ "$found" = 0 ]; then
+            echo "The build produced no installers in $DIR." >&2
+            find "$DIR" -maxdepth 2 >&2 || true
+            exit 1
+          fi
+
+  publish:
+    name: Publish
+    needs: [tag, bundle]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Take the draft down
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          echo "Released: $(gh release view "$TAG" --json url --jq .url --repo "$GITHUB_REPOSITORY")"

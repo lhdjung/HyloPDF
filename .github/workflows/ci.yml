@@ -4,6 +4,9 @@
 # leans on — canvas blend modes, pinch gestures, text layout. Building on all
 # three on every push is the cheapest way to hear about it from a machine
 # rather than from a reader.
+#
+# This builds; it does not release. `release.yml` is the switch for that, and
+# it calls the same checks before it bundles anything.
 
 name: CI
 
@@ -16,61 +19,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  frontend:
-    name: Interface
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Types
-        run: npm run check
-      - name: Browsers for the interface tests
-        run: npx playwright install --with-deps webkit
-      - name: Tests
-        run: npm test
-      - name: Build
-        run: npm run build
-
-  rust:
-    name: Rust
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-      - name: System libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf libxdo-dev
-      - name: Formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
-      - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      # What these cover is concurrency and file-system timing — two settings
-      # written at once, and a document caught halfway through being written by
-      # a compiler. Both break quietly and neither reproduces on demand, so a
-      # machine has to be the one asking.
-      - name: Tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+  checks:
+    uses: ./.github/workflows/checks.yml
 
   bundle:
     name: Bundle (${{ matrix.os }})
     # Three full platform builds is the most expensive thing this workflow
     # does — compiling the Rust side and packaging it, times three OSes.
-    # Nothing here depended on `frontend` or `rust` passing first, so a broken
-    # type or a failing Rust test still got a full matrix build anyway, on
-    # every push. Waiting the few seconds those take costs far less than the
-    # minutes a bundle does.
-    needs: [frontend, rust]
+    # Nothing here depended on the checks passing first, so a broken type or a
+    # failing Rust test still got a full matrix build anyway, on every push.
+    # Waiting the few seconds those take costs far less than the minutes a
+    # bundle does.
+    needs: checks
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

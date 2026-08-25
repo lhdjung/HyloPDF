@@ -11,6 +11,7 @@
     "build": "node scripts/sync-pdfjs.mjs && npm run check && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "set-version": "node scripts/set-version.mjs",
     "test": "node tests/run.mjs"
   },
   "dependencies": {

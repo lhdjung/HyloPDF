@@ -4,6 +4,21 @@ A calm, spacious PDF reader: simple UI, easy dark mode, and ergonomic controls.
 
 This is the working implementation of the description in [AGENTS.md](AGENTS.md).
 
+## Installing
+
+Each release on the [releases page](../../releases) carries an installer for
+every platform:
+
+| | |
+|---|---|
+| macOS | `HyloPDF_<version>_aarch64.dmg` for Apple silicon, `_x64.dmg` for Intel |
+| Linux | a `.deb`, an `.rpm`, or an AppImage |
+| Windows | an `.msi`, or `-setup.exe` for the NSIS installer |
+
+Until the builds are signed, macOS will say the app cannot be checked for
+malicious software: open it once from the right-click menu, or allow it in
+System Settings → Privacy & Security.
+
 ## Running it
 
 ```sh
@@ -13,7 +28,7 @@ npm test               # the interface, headlessly — takes nobody's screen
 npm run tauri build    # a release build and an installer in src-tauri/target/release
 ```
 
-`hylopdf path/to/file.pdf` opens a document straight away, and the app
+`HyloPDF path/to/file.pdf` opens a document straight away, and the app
 registers itself for `.pdf` files, so "Open with" works too. Opening a second
 document hands it to the window that is already open rather than starting
 another copy.

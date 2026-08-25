@@ -1,0 +1,59 @@
+# The two cheap jobs — types and tests, on both sides of the bridge — as a
+# workflow of their own so that CI and a release run exactly the same ones. A
+# release that skips them is a release nobody checked, and a second copy of
+# them here would be a copy that drifts.
+
+name: Checks
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: Interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Types
+        run: npm run check
+      - name: Browsers for the interface tests
+        run: npx playwright install --with-deps webkit
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libxdo-dev
+      - name: Formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      # What these cover is concurrency and file-system timing — two settings
+      # written at once, and a document caught halfway through being written by
+      # a compiler. Both break quietly and neither reproduces on demand, so a
+      # machine has to be the one asking.
+      - name: Tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml

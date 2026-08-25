@@ -71,7 +71,7 @@ the fingers.
 
 ## Themes
 
-A theme is a small TOML file. The five that ship with HyloPDF are written into
+A theme is a small TOML file. The fourteen that ship with HyloPDF are written into
 your theme folder on every run, so they can be read and copied, and so a change
 to a shipped theme reaches a machine that already has the old one. The embedded
 copies are the authoritative ones: a built-in edited in place is overwritten,
@@ -92,9 +92,10 @@ name = "Hylo Dark"
 text = "#e9eaee"
 background = "#24272f"
 accent = "#8fb0d4"
-# link = "#8ec5e8"      # links in the document; the accent if left out
-# selection = "#44475a" # behind selected text; derived from the accent if left out
-# recolor = false       # leave the document exactly as printed, theme only the app
+# link = "#8ec5e8"           # links in the document; the accent if left out
+# selection_area = "#44475a" # behind selected text; from the accent if left out
+# selection_text = "#f8eeec" # the ink on it; from selection_area if left out
+# recolor = false            # leave the document as printed, theme only the app
 ```
 
 Two colours are enough because everything else — the toolbar, the borders, the
@@ -105,9 +106,6 @@ colour, white paper on the background, and a grey rule stays a grey rule.
 The theme editor in the app writes the same files; anything you save there can
 be edited by hand afterwards, and anything you write by hand shows up in the
 app.
-
-Preinstalled: **Hylo Light** (the default, which leaves documents untouched),
-**Hylo Dark**, **Glamour**, **Dracula** and **Gruvbox**.
 
 ## Settings
 

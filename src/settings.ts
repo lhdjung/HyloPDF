@@ -227,7 +227,7 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
     ),
     ui.field(
       "Space between pages",
-      ui.stepper(s.page_gap, { min: 0, max: 64, step: 4 }, (value) => host.setPageGap(value), (value) => `${value} px`),
+      ui.stepper(s.page_gap, { min: 0, max: 64, step: 4 }, (value) => host.setPageGap(value), "px"),
       "How much room to leave between one page and the next.",
     ),
     ui.field(
@@ -254,7 +254,7 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
       Math.round(s.zoom * 100),
       { min: 25, max: 600, step: 25 },
       (value) => host.setFit("actual", value / 100),
-      (value) => `${value}%`,
+      "%",
     ),
   );
   zoomField.hidden = s.fit_mode !== "actual";
@@ -319,7 +319,7 @@ function appearancePage(
 ): void {
   pane.append(
     ui.text("title", "Appearance"),
-    ui.text("lede", "Two colours make a theme: the ink and the paper. The accent, the links and the selection area follow from those two until you say otherwise."),
+    ui.text("lede", "Two colours make a theme: the ink and the paper. The accent, the links and the two selection colours are all worked out from those until you say otherwise."),
   );
 
   pane.append(
@@ -334,7 +334,7 @@ function appearancePage(
     ui.field(
       "Recolour pictures too",
       ui.toggle(host.settings.recolor_images, (on) => host.setRecolorImages(on)),
-      "Off leaves photographs exactly as they were printed, bright paper and all.",
+      "On, pictures take the theme along with the rest of the page. Off, they stay exactly as printed.",
     ),
   );
 
@@ -583,7 +583,7 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
         s.sidebar_width,
         { min: 160, max: 460, step: 8 },
         (value) => host.setSidebarWidth(value),
-        (value) => `${value} px`,
+        "px",
       ),
       "It can also be dragged by its edge.",
     ),
@@ -594,12 +594,6 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
     ),
   );
 
-  pane.append(
-    ui.text(
-      "note",
-      "The size and position of the window are remembered on their own; there is nothing to set here.",
-    ),
-  );
 }
 
 /* -------------------------------------------------------------- keyboard */

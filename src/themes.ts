@@ -1,7 +1,8 @@
 /* A theme needs two colours and may name three more.
  *
- * Ink and paper are the required pair. Accent, link and the selection area can
- * each be given outright, and each has a derivation here for when it is not —
+ * Ink and paper are the required pair. The accent, the link colour and the two
+ * selection colours can each be given outright, and each has a derivation here
+ * for when it is not —
  * as does every shade the chrome uses and never asks about: the toolbar, the
  * borders, the muted text, the shadow under a page. So a five-line TOML file
  * is genuinely enough to describe a whole look, and a longer one is only ever
@@ -247,8 +248,10 @@ export function applyTheme(theme: Theme): void {
   set("--text", toHex(text));
   set("--text-soft", toHex(mix(text, bg, 0.26)));
   // The small print beside a setting: quieter than the label, but still meant
-  // to be read.
-  set("--text-note", toHex(mix(text, bg, 0.38)));
+  // to be read, which is why it is only a little quieter. At 0.38 it fell
+  // under 4.5:1 against the paper on a light theme, and the sentence that
+  // explains a switch was harder to read than the switch.
+  set("--text-note", toHex(mix(text, bg, 0.28)));
   set("--text-faint", toHex(mix(text, bg, 0.52)));
   set("--accent", toHex(accent));
   // The colour links take. The document itself is tinted at render time; this

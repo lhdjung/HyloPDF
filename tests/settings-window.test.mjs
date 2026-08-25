@@ -34,6 +34,25 @@ const openSettings = async () => {
   await app.page.waitForSelector("#windows .window", { timeout: 10_000 });
 };
 
+/** `isEditingTheme`, asked of the module the app is actually running.
+ *
+ *  Importing "/src/settings.ts" by name is not the same module: a dev server
+ *  that has hot-reloaded the file serves it as "/src/settings.ts?t=<stamp>",
+ *  and a second URL is a second instance with its own module-scope state. The
+ *  flag then reads false for the perfectly good reason that nothing ever set
+ *  it — on a server started for this run it passes, and on one that has been
+ *  open while somebody edited the file it fails. So the URL is taken from what
+ *  the page already loaded. */
+const editingTheme = () =>
+  app.page.evaluate(async () => {
+    const loaded = performance
+      .getEntriesByType("resource")
+      .map((entry) => entry.name)
+      .filter((name) => /\/src\/settings\.ts(\?|$)/.test(name));
+    const settings = await import(loaded.at(-1) ?? "/src/settings.ts");
+    return settings.isEditingTheme();
+  });
+
 const closeSettings = async () => {
   await app.page.keyboard.press("Escape");
   await app.page.waitForFunction(
@@ -106,11 +125,7 @@ test("the editor says it is open, which is what protects the draft", async () =>
   // deleted": preview thrown away, replacement chosen, choice written to
   // settings, and a notice saying so. This flag is the whole of what stops it,
   // and it has to be true exactly while a draft is live.
-  const stillEditing = await app.page.evaluate(async () => {
-    const settings = await import("/src/settings.ts");
-    return settings.isEditingTheme();
-  });
-  assert.equal(stillEditing, true, "the editor does not admit to being open");
+  assert.equal(await editingTheme(), true, "the editor does not admit to being open");
 
   await closeSettings();
 });
@@ -136,9 +151,51 @@ test("backing out of the window puts the theme back too", async () => {
   await app.page.waitForTimeout(200);
   assert.equal(await background(), before, "the draft outlived the window");
 
-  const stillEditing = await app.page.evaluate(async () => {
-    const settings = await import("/src/settings.ts");
-    return settings.isEditingTheme();
-  });
-  assert.equal(stillEditing, false, "the editor is still open with no window");
+  assert.equal(await editingTheme(), false, "the editor is still open with no window");
+});
+
+/* A stepper's readout is a field, and the bug it was written to close is a
+ * click: with the unit inside the field the caret landed in the middle of
+ * "16 px" and typing 30 gave "3016 px", which clamps to the maximum. So what
+ * is checked is the whole gesture — click, type, Enter — rather than the value
+ * being settable at all, which it always was. */
+test("a stepper takes a typed number, by click and keyboard alone", async () => {
+  await openSettings();
+  await goToPane("Reading");
+
+  const field = app.page.locator("#windows .stepper-field input").first();
+  await field.click();
+  await app.page.keyboard.type("30");
+  await app.page.keyboard.press("Enter");
+
+  await app.page
+    .waitForFunction(
+      () => document.querySelector("#windows .stepper-field input")?.value === "30",
+      null,
+      { timeout: 10_000 },
+    )
+    .catch(() => {});
+  assert.equal(await field.inputValue(), "30", "typing over the number did not replace it");
+
+  // The unit is a label beside the number, not part of what can be typed.
+  assert.equal(
+    await app.page.locator("#windows .stepper-field .stepper-unit").first().textContent(),
+    "px",
+  );
+
+  // And it is clamped rather than snapped: 30 is not a multiple of the step,
+  // and 900 is past the end of the range.
+  await field.click();
+  await app.page.keyboard.type("900");
+  await app.page.keyboard.press("Enter");
+  await app.page
+    .waitForFunction(
+      () => document.querySelector("#windows .stepper-field input")?.value === "64",
+      null,
+      { timeout: 10_000 },
+    )
+    .catch(() => {});
+  assert.equal(await field.inputValue(), "64", "a number past the end was not clamped");
+
+  await closeSettings();
 });

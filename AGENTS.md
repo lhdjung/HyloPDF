@@ -515,7 +515,25 @@ closes the document) and to open the inspector.
 **Escape and menus.** A popover registers its own capturing key handler, and so
 does the modal window; the app-level shortcut handler bows out while either is
 open. Clicking the button that opened a menu closes it — `showPopover` tracks
-its anchor for exactly that.
+its anchor for exactly that. That handler captures at the document, so it sees
+every key before the thing that was typed into does: arrows, Home and End are
+handed back when the target is a field, or the caret in a stepper cannot move
+without walking the menu instead. Escape and Tab stay the menu's.
+
+**A stepper is a field, and the number in it can be typed.** `ui.stepper`'s
+readout is an `<input>`, because stepping alone is fine for nudging and
+hopeless for arriving: 150% is six presses from 25%, and a page gap of 30px is
+not on the ladder at all. A typed value is clamped to the range and never
+snapped to the step — the step is how far one press moves, not a list of the
+answers allowed. Two things about the field are load-bearing. *The unit is not
+in it*: it was, written in by a `format` callback and read back out with a
+regular expression, and that made the field a trap, because clicking "16 px"
+puts the caret wherever the pointer landed and typing 30 gives "3016 px" and a
+setting at its maximum. Everything about that is right — a click does place a
+caret — so the fix is that the field holds nothing but the number and the unit
+sits after it, unselectable. And *arriving selects*, which `focus` alone cannot
+do: the mouseup after the click puts the caret back and takes the selection
+away, so the first mouseup after focusing is the one the field keeps.
 
 **The find bar is not a popover and dismisses itself by hand.** It holds the
 keyboard and a query, so it cannot live in `#popovers`; `App.FIND_KEEPS_OPEN`
@@ -545,6 +563,14 @@ fixture if it is not there, and runs everything in `tests/`. Some of the files
 compile a module in memory to reach what it does not export — see
 `tests/helpers.mjs` — which is how the text folding and both recolouring paths
 get tested without widening a module's public surface to suit its tests.
+
+**A dev server left running is not the app the tests import.** Vite serves a
+hot-reloaded module as `/src/settings.ts?t=<stamp>`, and a second URL is a
+second instance with its own module-scope state — so a test importing the file
+by name gets a fresh copy whose flags nothing has ever set. It passes on a
+server started for the run and fails on one that was open while somebody edited
+the file, which is the worst way round. `settings-window.test.mjs` takes the
+URL off the page's own resource list instead.
 
 **`npm run check` is two type checks, not one.** `tsconfig.json` covers
 `src/**` with `types: []`, because the app runs in a webview and has no
@@ -912,6 +938,15 @@ An unsigned macOS build is quarantined anywhere but the machine that made it.
 `scripts/sync-pdfjs.mjs` copies pdf.js's cmaps, standard fonts, ICC profiles and
 wasm decoders into `public/pdfjs` before every dev run and build. Nothing is
 fetched at runtime, and the app works offline.
+
+`scripts/make-icon.mjs` is the icon's source, and it is a script because there
+was no source: `src-tauri/app-icon.png` was the only copy of the design, so the
+first change to it began by measuring the old bitmap back into numbers. It
+writes `src-tauri/app-icon.svg` beside the PNG and renders it through WebKit at
+4× — the engine the app draws in anyway, and it dithers a gradient, which costs
+more in PNG than it does in fidelity. `npm run tauri icon` expands the result
+into the thirty-odd files the three platforms want; nothing under
+`src-tauri/icons/` is edited by hand.
 
 ## What a critical read turned up
 

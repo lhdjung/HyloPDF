@@ -66,6 +66,13 @@ export function showPopover(
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
+    // A field inside a menu is still a field, and the keys that move a caret
+    // belong to it rather than to the list around it — a stepper you can type
+    // into is unusable if Home jumps to the top of the menu instead of to the
+    // front of the number. Escape and Tab stay the menu's either way: one is
+    // how you leave it, the other how you move about inside it.
+    const target = event.target;
+    const typing = target instanceof HTMLInputElement && target.type !== "checkbox";
     switch (event.key) {
       case "Escape":
         event.stopPropagation();
@@ -73,15 +80,19 @@ export function showPopover(
         close();
         return;
       case "ArrowDown":
+        if (typing) return;
         step(1);
         break;
       case "ArrowUp":
+        if (typing) return;
         step(-1);
         break;
       case "Home":
+        if (typing) return;
         items()[0]?.focus();
         break;
       case "End":
+        if (typing) return;
         items().at(-1)?.focus();
         break;
       case "Tab":
@@ -224,31 +235,117 @@ export function toggle(on: boolean, onChange: (value: boolean) => void): HTMLBut
   return button;
 }
 
+/** A number with a minus and a plus either side of it — and the number itself
+ *  is a field.
+ *
+ *  Stepping alone is fine for nudging and hopeless for arriving: 150% is six
+ *  presses from 25%, and a gap of 30px is not on the ladder at all. So the
+ *  readout is an input, and a typed value is clamped to the range but never
+ *  snapped to the step — the step is how far a press moves, not a list of the
+ *  answers allowed.
+ *
+ *  The unit is not in the field. It was, written in by a `format` callback and
+ *  read back out with a regular expression, and that made the field a trap:
+ *  clicking "16 px" puts the caret wherever the pointer landed, so typing 30
+ *  gives "3016 px" and the setting jumps to its maximum. Everything about that
+ *  is right — a click does place a caret — which is why the fix is that there
+ *  is nothing in the field but the number. The unit sits after it, unselectable,
+ *  and clicking it is clicking the number. */
 export function stepper(
   value: number,
   range: { min: number; max: number; step: number },
   onChange: (value: number) => void,
-  format: (value: number) => string = String,
+  unit = "",
 ): HTMLElement {
   const group = document.createElement("div");
   group.className = "zoom-group";
-  const readout = document.createElement("span");
-  readout.className = "btn zoom-level";
-  readout.textContent = format(value);
+
+  const field = document.createElement("span");
+  field.className = "stepper-field";
+
+  const readout = document.createElement("input");
+  readout.type = "text";
+  readout.inputMode = "numeric";
+  readout.spellcheck = false;
+  readout.value = String(value);
+  // Wide enough for the largest number the range allows and no wider, so the
+  // unit stays against the digits instead of drifting off to the right.
+  readout.style.width = `${String(range.max).length + 0.4}ch`;
+  field.append(readout);
+
+  if (unit) {
+    const suffix = document.createElement("span");
+    suffix.className = "stepper-unit";
+    suffix.textContent = unit;
+    // A unit made of letters is a word after the number; a sign is part of it.
+    // "16 px" and "150%", not "16px" and "150 %".
+    if (/^[a-z]/i.test(unit)) suffix.style.marginLeft = "4px";
+    field.append(suffix);
+  }
+
+  const commit = (next: number) => {
+    const clamped = Math.max(range.min, Math.min(range.max, Math.round(next)));
+    readout.value = String(clamped);
+    if (clamped === value) return;
+    value = clamped;
+    onChange(value);
+  };
+
+  const typed = (): number | null => {
+    const found = /-?\d+(?:\.\d+)?/.exec(readout.value);
+    return found ? Number(found[0]) : null;
+  };
+
+  // `change` is Enter and it is also leaving the field, which is the whole of
+  // what "I have finished typing" means here. Anything that is not a number
+  // puts the last good value back rather than arguing about it.
+  readout.addEventListener("change", () => {
+    const next = typed();
+    if (next === null) readout.value = String(value);
+    else commit(next);
+  });
+
+  // Arriving in the field means replacing what is in it: the number is short
+  // and the whole of it is what changes. `focus` alone does not survive a
+  // click — the mouseup that follows puts the caret where the pointer is and
+  // takes the selection away again — so the first mouseup after focusing is
+  // the one the field keeps to itself. Every one after that places a caret
+  // normally, because by then somebody is editing rather than arriving.
+  let arriving = false;
+  readout.addEventListener("focus", () => {
+    arriving = true;
+    readout.select();
+  });
+  readout.addEventListener("mouseup", (event) => {
+    if (!arriving) return;
+    arriving = false;
+    event.preventDefault();
+  });
+  readout.addEventListener("blur", () => {
+    arriving = false;
+  });
+  // Anywhere in the box is the number, including the unit beside it.
+  field.addEventListener("mousedown", (event) => {
+    if (event.target === readout) return;
+    event.preventDefault();
+    readout.focus();
+  });
+
+  readout.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    commit((typed() ?? value) + (event.key === "ArrowUp" ? range.step : -range.step));
+  });
 
   const make = (icon: string, delta: number) => {
     const button = document.createElement("button");
     button.className = "btn icon-only";
     button.dataset.icon = icon;
-    button.addEventListener("click", () => {
-      value = Math.max(range.min, Math.min(range.max, value + delta));
-      readout.textContent = format(value);
-      onChange(value);
-    });
+    button.addEventListener("click", () => commit(value + delta));
     return button;
   };
 
-  group.append(make("minus", -range.step), readout, make("plus", range.step));
+  group.append(make("minus", -range.step), field, make("plus", range.step));
   return group;
 }
 

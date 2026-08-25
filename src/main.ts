@@ -1104,6 +1104,21 @@ class App {
           );
         }
         menu.append(ui.divider(), ui.section("Zoom"));
+        // The presets below are the common answers; this is the rest of them.
+        // It starts from what is actually on screen rather than from the
+        // remembered zoom, because in a fit mode those are different numbers
+        // and the one being looked at is the one to start typing over.
+        menu.append(
+          ui.row(
+            "Zoom to",
+            ui.stepper(
+              Math.round(this.viewer.isEmpty ? this.settings.zoom * 100 : this.viewer.zoomPercent()),
+              { min: ZOOM_LADDER[0], max: ZOOM_LADDER[ZOOM_LADDER.length - 1], step: 25 },
+              (value) => this.setFit("actual", value / 100),
+              "%",
+            ),
+          ),
+        );
         for (const percent of [50, 75, 100, 125, 150, 200, 300]) {
           menu.append(
             ui.menuItem({
@@ -1178,14 +1193,17 @@ class App {
         menu.append(
           ui.row(
             "Space between pages",
-            ui.stepper(this.settings.page_gap, { min: 0, max: 64, step: 4 }, (value) =>
-              this.setPageGap(value),
+            ui.stepper(
+              this.settings.page_gap,
+              { min: 0, max: 64, step: 4 },
+              (value) => this.setPageGap(value),
+              "px",
             ),
           ),
           ui.row(
             "Recolour pictures too",
             ui.toggle(this.settings.recolor_images, (on) => this.setRecolorImages(on)),
-            "Off keeps photographs as they are",
+            "Off leaves them as printed.",
           ),
           ui.row(
             "Come back to where I stopped",

@@ -17,7 +17,7 @@
   --bar-accent: #e5ecef;
   --text: #2f3237;
   --text-soft: #6a6d73;
-  --text-note: #7c7f84;
+  --text-note: #6e7177;
   --text-faint: #9a9da2;
   --accent: #3f7d94;
   --accent-soft: #dfeaee;
@@ -244,6 +244,57 @@ body {
   min-width: 62px;
   justify-content: center;
   font-variant-numeric: tabular-nums;
+}
+
+/* The readout in a stepper is a field with a fixed unit beside it — see
+   `ui.stepper`. The pair wears the same quiet clothes as the buttons either
+   side of it until it is focused, and then it looks like somewhere to type.
+   The `[type]` in the selector is only there to outrank the general text-field
+   rules in the menu and the settings window, which are wider and bordered. */
+.stepper-field {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  min-width: 62px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--text-soft);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepper-field:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.stepper-field:focus-within {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.zoom-group .stepper-field input[type="text"] {
+  width: auto;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  outline: none;
+}
+
+/* The unit is a label, not a value: it cannot be typed over, and a drag that
+   starts on it is a click on the number rather than a selection of the word. */
+.stepper-unit {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .page-jump {
@@ -833,9 +884,12 @@ body {
   white-space: nowrap;
 }
 
+/* The small print beside a setting is there to be read, so it is the same
+   size as the label above it and only a shade quieter. Shrinking it as well as
+   fading it made a sentence that explains the switch harder to read than the
+   switch itself. */
 .popover-note {
   color: var(--text-note);
-  font-size: 13.5px;
 }
 
 .popover-divider {
@@ -864,12 +918,18 @@ body {
   color: var(--text-soft);
 }
 
+/* The label carries the weight and the note carries the explanation, and the
+   difference between them is weight rather than size: a menu item beside this
+   row is 500 too, so the label belongs to the list and the note sits under it.
+   Telling the two apart by fading the note is what made it unreadable. */
 .popover-row label {
   display: flex;
   flex-direction: column;
   gap: 1px;
   flex: 1 1 auto;
   min-width: 0;
+  color: var(--text);
+  font-weight: 500;
 }
 
 .popover-row input[type="text"],
@@ -1248,7 +1308,7 @@ body {
 
 .pane-lede {
   margin: 0 0 6px;
-  color: var(--text-faint);
+  color: var(--text-note);
 }
 
 .pane-group {
@@ -1259,7 +1319,7 @@ body {
 
 .pane-note {
   margin-top: 14px;
-  color: var(--text-faint);
+  color: var(--text-note);
   word-break: break-word;
 }
 
@@ -1285,11 +1345,12 @@ body {
 
 .field-label {
   color: var(--text);
+  font-weight: 500;
 }
 
 .field-note {
   color: var(--text-note);
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 .field-control {

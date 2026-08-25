@@ -570,7 +570,7 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
     ui.field(
       "Show toolbar",
       ui.toggle(s.show_toolbar, (on) => host.toggleToolbar(on)),
-      `The bar along the top. Hidden, the page number appears briefly as you scroll, and the top edge of the window brings the bar back. ${shortcut("⌘⇧T", "Ctrl+Shift+T")}`,
+      `The bar along the top. Hidden, the page number appears briefly as you scroll, and the top edge of the window brings the bar back. ${shortcut("⌘T", "Ctrl+T")}`,
     ),
     ui.field(
       "Show contents sidebar",
@@ -633,7 +633,7 @@ function keyboardPage(pane: HTMLElement): void {
         ["Fit the width of the window", shortcut("⌘0", "Ctrl+0")],
         ["Dark mode", shortcut("⌘D", "Ctrl+D")],
         ["Contents sidebar", shortcut("⌘B", "Ctrl+B")],
-        ["Toolbar", shortcut("⌘⇧T", "Ctrl+Shift+T")],
+        ["Toolbar", shortcut("⌘T", "Ctrl+T")],
         ["Full screen", shortcut("⌘⇧F, ⌃⌘F", "F11, Ctrl+Shift+F")],
         ["Leave full screen", "Escape"],
       ],

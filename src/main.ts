@@ -74,7 +74,7 @@ const ZOOM_LADDER = [25, 33, 50, 67, 75, 90, 100, 110, 125, 150, 175, 200, 250, 
 
 /** What to tell someone to press for full screen. The Mac also answers to
     ⌃⌘F, which is what every other app there uses, but ⌘⇧F is the one worth
-    naming: it sits beside ⌘⇧T for the toolbar. */
+    naming: ⌘F is taken by find, unlike ⌘T for the toolbar. */
 const FULLSCREEN_KEYS = isMac ? "⌘⇧F" : "F11";
 
 /** Preview's own "Go to Page…", which is the one people already know. */
@@ -542,7 +542,7 @@ class App {
     // has heard it, and this is the moment they are listening.
     if (!show) {
       ui.notice(
-        `Toolbar hidden. ${isMac ? "⌘⇧T" : "Ctrl+Shift+T"}, or the top edge of the window, brings it back.`,
+        `Toolbar hidden. ${isMac ? "⌘T" : "Ctrl+T"}, or the top edge of the window, brings it back.`,
       );
     }
   }
@@ -780,7 +780,7 @@ class App {
 
       There is nowhere to put the cursor when the toolbar is away, so the
       shortcut brings it into view itself rather than making the reader do
-      that first — but only for as long as the field is in use: unlike ⌘⇧T
+      that first — but only for as long as the field is in use: unlike ⌘T
       this does not change the setting, and the field's own `blur` handler
       puts the toolbar back into hiding once the jump is made or abandoned. */
   focusPageNumber(): void {
@@ -1159,7 +1159,7 @@ class App {
               this.toggleToolbar(on);
               if (!on) close();
             }),
-            isMac ? "⌘⇧T" : "Ctrl+Shift+T",
+            isMac ? "⌘T" : "Ctrl+T",
           ),
           ui.row(
             "Full screen",
@@ -1454,7 +1454,7 @@ class App {
         this.toggleSidebar();
         return;
       }
-      if (meta && event.shiftKey && event.key.toLowerCase() === "t") {
+      if (meta && !event.shiftKey && event.key.toLowerCase() === "t") {
         event.preventDefault();
         this.toggleToolbar();
         return;

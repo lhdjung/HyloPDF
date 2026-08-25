@@ -266,6 +266,11 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
       ui.toggle(s.remember_position, (on) => host.set("remember_position", on)),
       "Each document reopens on the page you left it on.",
     ),
+    ui.field(
+      "Show page count while scrolling",
+      ui.toggle(s.show_page_pill, (on) => host.set("show_page_pill", on)),
+      "A brief “page 23 of 197” while you scroll with the toolbar hidden.",
+    ),
   );
 }
 

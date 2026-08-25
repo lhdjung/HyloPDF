@@ -54,6 +54,9 @@ pub fn defaults() -> Settings {
     // harder to read rather than easier.
     s.insert("recolor_images".into(), json!(false));
     s.insert("remember_position".into(), json!(true));
+    // On by default: a page count shown briefly while scrolling is how a
+    // reader with the toolbar hidden still knows where they are.
+    s.insert("show_page_pill".into(), json!(true));
     // Search. Where a match is looked for is a way of reading, not a property
     // of a document, so these outlive the find bar they are set from and the
     // session they were set in.

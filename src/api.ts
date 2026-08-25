@@ -16,6 +16,7 @@ export type Settings = {
   page_gap: number;
   recolor_images: boolean;
   remember_position: boolean;
+  show_page_pill: boolean;
   search_highlight_all: boolean;
   search_match_case: boolean;
   search_whole_words: boolean;
@@ -87,6 +88,7 @@ const fallbackDefaults: Settings = {
   page_gap: 16,
   recolor_images: false,
   remember_position: true,
+  show_page_pill: true,
   search_highlight_all: true,
   search_match_case: false,
   search_whole_words: false,

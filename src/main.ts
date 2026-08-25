@@ -448,7 +448,7 @@ class App {
   }
 
   private onScroll(): void {
-    if (!this.toolbarShown) this.flashPill();
+    if (!this.toolbarShown && this.settings.show_page_pill) this.flashPill();
     window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => this.savePosition(), 700);
   }
@@ -1187,6 +1187,11 @@ class App {
             ui.toggle(this.settings.remember_position, (on) =>
               this.set("remember_position", on),
             ),
+          ),
+          ui.row(
+            "Show page count while scrolling",
+            ui.toggle(this.settings.show_page_pill, (on) => this.set("show_page_pill", on)),
+            "Only when the toolbar is hidden.",
           ),
         );
 

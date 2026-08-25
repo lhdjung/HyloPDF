@@ -770,7 +770,7 @@ body {
   z-index: 40;
   min-width: 232px;
   max-width: 340px;
-  max-height: min(70vh, 560px);
+  max-height: min(90vh, 780px);
   overflow: auto;
   padding: 6px;
   background: var(--surface);

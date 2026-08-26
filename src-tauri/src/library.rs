@@ -303,7 +303,10 @@ mod tests {
         set_open(&dir, Some(&missing)).expect("set open");
 
         let pruned = prune(&load(&dir));
-        assert_eq!(pruned.open, "", "a launch would have failed on it every time");
+        assert_eq!(
+            pruned.open, "",
+            "a launch would have failed on it every time"
+        );
         assert!(pruned.files.is_empty());
     }
 }

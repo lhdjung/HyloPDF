@@ -15,6 +15,8 @@ const LOCKED = "tests/fixtures/locked.pdf";
 /* A short book that numbers its own pages: four of roman front matter, then a
    body that starts again at 1. */
 const LABELLED = "tests/fixtures/labelled.pdf";
+/* Pages with a box on them and not one word: a scan that never met an OCR. */
+const NOTEXT = "tests/fixtures/notext.pdf";
 
 async function answering() {
   try {
@@ -37,6 +39,7 @@ async function make(script, ...args) {
 if (!existsSync(FIXTURE)) await make("tests/fixtures/make-pdf.mjs", FIXTURE, "400");
 if (!existsSync(LOCKED)) await make("tests/fixtures/make-encrypted-pdf.mjs", LOCKED);
 if (!existsSync(LABELLED)) await make("tests/fixtures/make-pdf.mjs", LABELLED, "12", "labels");
+if (!existsSync(NOTEXT)) await make("tests/fixtures/make-pdf.mjs", NOTEXT, "6", "notext");
 
 let vite = null;
 if (!(await answering())) {

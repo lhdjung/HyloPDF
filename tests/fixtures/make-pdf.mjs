@@ -12,6 +12,10 @@ const PAGES = Number(process.argv[3] ?? 400);
    it is the only shape worth generating a second fixture for. */
 const LABELLED = process.argv[4] === "labels";
 const FRONT = 4;
+/* "notext" draws a box on every page and writes no words at all, which is the
+   shape of a scan that never went through OCR: nothing to search, nothing to
+   select, and an empty table of contents. */
+const NOTEXT = process.argv[4] === "notext";
 const objects = [];   // 1-indexed body objects
 const add = (body) => { objects.push(body); return objects.length; };
 
@@ -20,7 +24,9 @@ const pageIds = [];
 const contentIds = [];
 for (let i = 1; i <= PAGES; i++) {
   const filler = `(Page ${i}. ${"The quick brown fox jumps over the lazy dog. ".repeat(12)}) Tj`;
-  const stream = `BT /F1 11 Tf 54 720 Td 14 TL ${filler} ET`;
+  const stream = NOTEXT
+    ? `0.2 0.2 0.2 rg 54 ${600 - (i % 5) * 20} 400 120 re f`
+    : `BT /F1 11 Tf 54 720 Td 14 TL ${filler} ET`;
   contentIds.push(add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`));
   pageIds.push(0); // placeholder, filled below
 }

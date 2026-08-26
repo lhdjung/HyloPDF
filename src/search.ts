@@ -61,6 +61,10 @@ export type SearchState = {
   scanning: boolean;
   /** True when the scan stopped at the limit, so the total is a floor. */
   capped: boolean;
+  /** True when the scan read the whole document and found no text in it at
+      all — a scan that was never put through OCR. Nothing is wrong; there is
+      simply nothing to search, and "None" is the wrong way to say that. */
+  textless: boolean;
 };
 
 export class Search {
@@ -78,6 +82,8 @@ export class Search {
       flight, and reporting `false` from there told the find bar the count was
       final when it was still climbing. */
   private scanning = false;
+  /** Whether every page read so far carried no text. See `SearchState`. */
+  private textless = false;
   private options: SearchOptions = { matchCase: false, wholeWords: false };
 
   constructor(
@@ -117,8 +123,9 @@ export class Search {
     this.index = -1;
     this.capped = false;
     this.scanning = false;
+    this.textless = false;
     this.viewer.setMatches([], -1);
-    this.onUpdate({ query: "", total: 0, index: -1, scanning: false, capped: false });
+    this.onUpdate({ query: "", total: 0, index: -1, scanning: false, capped: false, textless: false });
   }
 
   get total(): number {
@@ -133,10 +140,11 @@ export class Search {
     this.index = -1;
     this.capped = false;
     this.scanning = false;
+    this.textless = true;
 
     if (query.trim().length === 0) {
       this.viewer.setMatches([], -1);
-      this.onUpdate({ query, total: 0, index: -1, scanning: false, capped: false });
+      this.onUpdate({ query, total: 0, index: -1, scanning: false, capped: false, textless: false });
       return;
     }
 
@@ -145,7 +153,7 @@ export class Search {
       // A query of nothing but soft hyphens or combining marks folds away to
       // nothing, and an empty needle matches at every position.
       this.viewer.setMatches([], -1);
-      this.onUpdate({ query, total: 0, index: -1, scanning: false, capped: false });
+      this.onUpdate({ query, total: 0, index: -1, scanning: false, capped: false, textless: false });
       return;
     }
     // Start at the page being read, then outwards, so the first result is
@@ -165,12 +173,17 @@ export class Search {
     // search's count sitting there while this one works.
     this.viewer.setMatches([], -1);
     this.scanning = true;
-    this.onUpdate({ query, total: 0, index: -1, scanning: true, capped: false });
+    this.onUpdate({ query, total: 0, index: -1, scanning: true, capped: false, textless: false });
 
     for (const page of order) {
       if (token !== this.run) return;
       const text = await this.textFor(page, doc);
       if (token !== this.run) return;
+      // A document with nothing to search is a different answer from a
+      // document that does not contain what was asked for, and "None" says
+      // the second when it means the first. One page with a word on it is
+      // enough to settle it.
+      if (text.raw.trim().length > 0) this.textless = false;
 
       const hits = locate(text, needle, page, this.options.wholeWords);
       if (hits.length > 0) {
@@ -230,6 +243,7 @@ export class Search {
       index: this.index,
       scanning,
       capped: this.capped,
+      textless: this.textless && !scanning,
     });
   }
 
@@ -244,6 +258,7 @@ export class Search {
       index: this.index,
       scanning: this.scanning,
       capped: this.capped,
+      textless: this.textless && !this.scanning,
     });
   }
 

@@ -159,6 +159,8 @@ class App {
   private searchPending = false;
   /** Whether the open document numbers its own pages, as last shown. */
   private labelled = false;
+  /** Said once per document: there is no text in this one to search. */
+  private saidTextless = false;
 
   constructor() {
     this.viewer = new Viewer(el.viewer, el.pages, {
@@ -375,6 +377,7 @@ class App {
       void setWindowTitle(`${opened.name} — HyloPDF`);
       el.pageCount.textContent = `of ${doc.numPages}`;
       this.search.reset();
+      this.saidTextless = false;
       void this.sidebar.setDocument(doc, this.theme);
 
       const start = this.settings.remember_position ? opened : { page: 1, offset: 0 };
@@ -905,7 +908,25 @@ class App {
 
   private onSearchUpdate(state: SearchState): void {
     if (state.total === 0) {
-      el.findStatus.textContent = state.scanning ? "…" : el.findInput.value ? "None" : "";
+      // "None" is the answer to "is this word in the document". It is the
+      // wrong answer to "is there anything in this document to search", which
+      // is what a scan that was never put through OCR is really being asked —
+      // and three things go quiet at once on such a document: search finds
+      // nothing, selection selects nothing, and the contents are empty. Two
+      // of those look like the app is broken.
+      el.findStatus.textContent = state.scanning
+        ? "…"
+        : state.textless
+          ? "No text"
+          : el.findInput.value
+            ? "None"
+            : "";
+      if (state.textless && !this.saidTextless) {
+        this.saidTextless = true;
+        ui.notice(
+          "There is no text in this document — it is a scan. Nothing can be searched or selected until it has been through OCR.",
+        );
+      }
     } else {
       el.findStatus.textContent = `${state.index + 1} of ${state.total}${
         state.capped ? "+" : ""

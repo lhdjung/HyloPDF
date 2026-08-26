@@ -436,7 +436,19 @@ opens every document. `tests/seams.test.mjs` greps for it.
 complaint.** `hand_over` looks for a window with nothing in it — the one with
 the keyboard first — and makes one if there is none, claiming it in
 `OpenDocuments` as it goes so that two files double-clicked in the same instant
-do not both land in the same empty window. Nothing is ever displaced. ⌘N is an
+do not both land in the same empty window. Nothing is ever displaced.
+
+*"Nothing in it" is asked twice, and the second answer is the one to trust.*
+`OpenDocuments` is what the frontend says it is showing, reported by a call
+nothing waits for; `OpenFiles` is the handle the window is reading through,
+kept by the read path itself. A window reading a file is never idle, whatever
+the bookkeeping says — because if the bookkeeping were ever missed, a document
+would be handed to a window that already has one, and the reader would either
+lose their place or watch the app come to the front with no sign of the file
+they had just double-clicked. *And if no window can be made at all*, the
+document goes into the window that is there rather than nowhere: a file that
+vanishes on a double-click reads as a broken app and leaves nobody anything to
+do about it. ⌘N is an
 empty window; "Open in a new window…" under the document's title is the same
 thing with the picker attached, which is the one-step version of what anybody
 actually wants.
@@ -486,12 +498,41 @@ application had finished launching. Made once the launch window's interface has
 reported in, it is an ordinary window — which is what the handover path had
 been producing all along.
 
+**The Dock has a "New Window" item, and it is not Tauri's.** Neither Tauri nor
+muda reaches the Dock menu, so `dock::install` goes to AppKit the way
+`set_titlebar_buttons` does: `NSApplication` has a `dockMenu` property, and
+what is in it appears above the standard Options / Show All Windows / Quit.
+The only awkward part is that a menu item needs a *target*, and a target is an
+Objective-C object with a selector on it — so one class is built at runtime
+with `ClassBuilder`, one instance of it is made, and both are left alive for
+the life of the process. The method's receiver is `*mut AnyObject` rather than
+`&AnyObject`, because `MethodImplementation` cannot be satisfied by a function
+whose signature is higher-ranked over a lifetime. The window is made on a
+thread of its own, because the item is invoked on the main thread and
+`spawn_window` asks the windows where they are — questions the main thread is
+the one to answer.
+
+It is also the only place in this app that writes "New Window" in title case.
+The Dock menu is the system's furniture and is spelled the system's way; the
+app's own menus keep the sentence case they use everywhere else.
+
 **A second window needs the capability to say so.** `capabilities/default.json`
 names the windows it applies to, and it named `main` alone. A window outside
 that list gets no permissions at all, so every `invoke` from it is denied and
 the failure is a webview that never reports in and therefore never becomes
 visible. The list is `["main", "reader-*"]`, and new windows are named for the
 pattern.
+
+**Two things will waste an hour when checking this by hand.** The first is that
+a `cargo build` run straight from `src-tauri/` produces a binary that serves
+the *bundled* frontend — `tauri-build` runs `beforeBuildCommand` and embeds
+`dist/` — so a change to `src/` is invisible in it until `npm run build` and a
+rebuild that actually re-embeds. Use `npm run tauri dev`, which serves from
+vite. The second is worse and looks identical: if an installed
+`/Applications/HyloPDF.app` is running, the single-instance plugin routes the
+development binary's launch into *it* and the new one exits with status 0. The
+app on screen is then the installed one, and every change appears to have had
+no effect. `pgrep -fl HyloPDF` is the check.
 
 **None of this can be tested in the harness**, which has no Rust behind it and
 no windows. What is testable is on either side of the seam and is tested there:
@@ -500,7 +541,7 @@ be, `watch.rs` for two windows reading one folder, `seams.test.mjs` for the
 window-targeted listens and the keyed handle, and `keys.test.mjs` for ⌘N and
 for ⌘W and ⌘Q meaning two different things now. The rest was checked by running
 the real app: two documents handed over, three windows restored from a session,
-⌘N, and a window closed.
+⌘N, a window closed, and "New Window" chosen from the Dock.
 
 ## The keyboard
 

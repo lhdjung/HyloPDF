@@ -367,8 +367,14 @@ body {
 
 /* The other way out, and it belongs beside the one way in. With a document
    open this spot carries that document's own Close, and leaving the app is no
-   longer one of the two things the window is offering, so it stands down. */
-#shell:not([data-empty="true"]) #quit {
+   longer one of the two things the window is offering, so it stands down.
+
+   A second window goes the same way and for the same reason: on the start
+   screen it is one of the three things there are to do, and with a document
+   open it is in the menu under the title, next to the two ways of filling
+   that window. */
+#shell:not([data-empty="true"]) #quit,
+#shell:not([data-empty="true"]) #new-window {
   display: none;
 }
 

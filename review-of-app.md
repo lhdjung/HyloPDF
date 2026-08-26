@@ -143,8 +143,12 @@ file handle, the document watch, and "what was open last". All three are keyed
 by window now. `hand_over` gives a double-clicked document to a window with
 nothing in it and makes one if there is none, so the case this section is
 really about — losing your place in one document by opening another — cannot
-happen at all rather than being announced. ⌘N is an empty window; "Open in a
-new window…" under the document's title is the picker with a window attached.
+happen at all rather than being announced. An empty window is ⌘N, the "New
+window" button on the start screen, or "New Window" on the Dock icon — the last
+of those being the one route that does not need HyloPDF to be in front already.
+"Open a document in a new window…" under the document's title is the picker
+with a window attached, and the recents themselves offer "Open in a new window"
+on any entry.
 `library.open` became a list, so a launch puts back every window that was open
 rather than the last one.
 
@@ -342,7 +346,8 @@ either side of the door and are tested there — the open-documents list and its
 compatibility with the single path it used to be, two windows watching one
 folder, the window-targeted event listens, ⌘N. What is left is window
 behaviour, and that was checked by running the app: two documents handed over,
-three windows restored from a session, ⌘N, a window closed. Two macOS faults
+three windows restored from a session, ⌘N, a window closed, and "New Window"
+chosen from the Dock. Two macOS faults
 came out of doing that and neither would have come out of reading the code — a
 window built during `setup` is reported as visible and is not on screen, and a
 window's position does not survive `show()`. Both are in `AGENTS.md`.

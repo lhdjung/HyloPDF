@@ -148,6 +148,13 @@ impl OpenFiles {
         let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
         held.remove(window);
     }
+
+    /// Whether this window is reading a document. The one answer here that is
+    /// nobody's bookkeeping: it is true exactly while the handle is open.
+    fn holds(&self, window: &str) -> bool {
+        let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        held.contains_key(window)
+    }
 }
 
 /// What each window is showing, in the order the windows claimed a document.
@@ -794,6 +801,93 @@ fn set_titlebar_buttons(window: WebviewWindow, visible: bool) {
 const MIN_WIDTH: f64 = 520.0;
 const MIN_HEIGHT: f64 = 400.0;
 
+/// A "New Window" item on the icon in the Dock, above the standard ones.
+///
+/// The one route to a second window that does not need HyloPDF to be in front
+/// already, which is exactly the moment somebody wants one: they are looking
+/// at something else and want this document beside it. Firefox, Safari and
+/// Preview all have it.
+///
+/// It is also the one place in this app that writes "New Window" in title
+/// case. The Dock menu is the system's furniture and everything in it is
+/// spelled the system's way; the app's own menus keep the sentence case they
+/// use everywhere else.
+///
+/// Nothing in Tauri or in muda reaches the Dock menu, so this goes to AppKit
+/// directly — the same as the traffic lights above, and for the same reason. A
+/// menu item needs a *target*, and a target is an Objective-C object with a
+/// selector on it, so one class is built at runtime, one instance of it is
+/// made, and both are left alive for as long as the process is.
+#[cfg(target_os = "macos")]
+mod dock {
+    use std::ffi::CStr;
+    use std::sync::OnceLock;
+
+    use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, NSObject, Sel};
+    use objc2::{msg_send, sel, ClassType};
+    use tauri::AppHandle;
+
+    use super::spawn_window;
+
+    /// The app, for the one method below, which AppKit calls with no context
+    /// of its own.
+    static APP: OnceLock<AppHandle> = OnceLock::new();
+
+    unsafe fn string(text: &CStr) -> *mut AnyObject {
+        let class = AnyClass::get(c"NSString").expect("NSString");
+        unsafe { msg_send![class, stringWithUTF8String: text.as_ptr()] }
+    }
+
+    /// What the item does. Called on the main thread, which is why the window
+    /// is made on another one: `spawn_window` asks the windows where they are,
+    /// and every one of those questions is answered *by* the main thread.
+    extern "C" fn new_window(_this: *mut AnyObject, _cmd: Sel, _sender: *mut AnyObject) {
+        let Some(app) = APP.get().cloned() else {
+            return;
+        };
+        std::thread::spawn(move || {
+            let _ = spawn_window(&app, None);
+        });
+    }
+
+    pub(super) fn install(app: &AppHandle) {
+        if APP.set(app.clone()).is_err() {
+            return;
+        }
+        unsafe {
+            let Some(mut builder) = ClassBuilder::new(c"HyloPDFDock", NSObject::class()) else {
+                return;
+            };
+            builder.add_method(
+                sel!(hyloNewWindow:),
+                new_window as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject),
+            );
+            let class = builder.register();
+            // Never released: it is the target of a menu item that lives as
+            // long as the application does.
+            let target: *mut AnyObject = msg_send![class, new];
+
+            let menu: *mut AnyObject = msg_send![AnyClass::get(c"NSMenu").expect("NSMenu"), new];
+            let item: *mut AnyObject =
+                msg_send![AnyClass::get(c"NSMenuItem").expect("NSMenuItem"), alloc];
+            let item: *mut AnyObject = msg_send![
+                item,
+                initWithTitle: string(c"New Window"),
+                action: sel!(hyloNewWindow:),
+                keyEquivalent: string(c""),
+            ];
+            let _: () = msg_send![item, setTarget: target];
+            let _: () = msg_send![menu, addItem: item];
+
+            let shared: *mut AnyObject = msg_send![
+                AnyClass::get(c"NSApplication").expect("NSApplication"),
+                sharedApplication
+            ];
+            let _: () = msg_send![shared, setDockMenu: menu];
+        }
+    }
+}
+
 /// The window `tauri.conf.json` declares, and the one the app launches with.
 /// It is the only window with a name of its own: every other is made by
 /// `spawn_window` and named `reader-N`, which is also the pattern the
@@ -1095,9 +1189,29 @@ fn hand_over(app: &AppHandle, path: String) {
         return;
     };
     let Some(window) = idle_window(app) else {
-        let _ = spawn_window(app, Some(path));
+        match spawn_window(app, Some(path.clone())) {
+            Ok(()) => {}
+            // A window could not be made. Whatever the reason, the one thing
+            // that must not happen is the document going nowhere: somebody
+            // double-clicked a file and the app came to the front with no
+            // sign of it, which reads as the app being broken and gives them
+            // nothing to do about it. So it goes into the window that is
+            // there, which is what this did before there was more than one.
+            Err(problem) => {
+                eprintln!("could not make a window for {path}: {problem}");
+                if let Some(window) = any_window(app) {
+                    give(app, pending, &window, path);
+                }
+            }
+        }
         return;
     };
+    give(app, pending, &window, path);
+}
+
+/// Hand a document to a window: by event if its interface is up, and by
+/// leaving it where `ready` will collect it if it is not.
+fn give(app: &AppHandle, pending: State<'_, Pending>, window: &WebviewWindow, path: String) {
     let label = window.label().to_string();
     // Claimed before anything else can be told about it.
     if let Some(open) = app.try_state::<OpenDocuments>() {
@@ -1112,12 +1226,37 @@ fn hand_over(app: &AppHandle, path: String) {
     let _ = window.set_focus();
 }
 
+/// Any window at all, the one with the keyboard first. The last resort above.
+fn any_window(app: &AppHandle) -> Option<WebviewWindow> {
+    let windows = app.webview_windows();
+    windows
+        .values()
+        .find(|window| window.is_focused().unwrap_or(false))
+        .or_else(|| windows.get(MAIN))
+        .or_else(|| windows.values().next())
+        .cloned()
+}
+
 /// A window with nothing to show — no document open, and none on its way. The
 /// one that has the keyboard first.
+///
+/// Two questions rather than one, and the second is the safety net.
+/// `OpenDocuments` is the answer the *frontend* gives, and it is given by a
+/// call that nothing waits for; `OpenFiles` is the handle the window is
+/// actually reading through, kept by the read path itself. If the first were
+/// ever to be missed — a call that failed, a window that never finished
+/// starting — a document handed over would be given to a window that already
+/// has one, and the reader would either lose their place or, if that window
+/// ignored it, see nothing happen at all. A window reading a file is never
+/// idle, whatever the bookkeeping says.
 fn idle_window(app: &AppHandle) -> Option<WebviewWindow> {
     let open = app.try_state::<OpenDocuments>()?;
+    let reading = app.try_state::<OpenFiles>();
     let windows = app.webview_windows();
-    let free = |window: &&WebviewWindow| !open.taken(window.label());
+    let free = |window: &&WebviewWindow| {
+        let label = window.label();
+        !open.taken(label) && !reading.as_ref().is_some_and(|files| files.holds(label))
+    };
     windows
         .values()
         .find(|window| window.is_focused().unwrap_or(false) && free(window))
@@ -1202,6 +1341,8 @@ pub fn run() {
             app.manage(OpenFiles::default());
             app.manage(OpenDocuments::default());
             app.manage(Placements::default());
+            #[cfg(target_os = "macos")]
+            dock::install(app.handle());
             // The command line wins over a document that raced `setup` in as
             // an Apple Event, in the one case both are populated: a second
             // instance's arguments are routed through `hand_over` instead

@@ -122,6 +122,7 @@ const el = {
   pages: byId<HTMLDivElement>("pages"),
   welcome: byId<HTMLElement>("welcome"),
   welcomeOpen: byId<HTMLButtonElement>("welcome-open"),
+  newWindow: byId<HTMLButtonElement>("new-window"),
   quit: byId<HTMLButtonElement>("quit"),
   recents: byId<HTMLDivElement>("recents"),
   findBar: byId<HTMLDivElement>("find-bar"),
@@ -1514,17 +1515,6 @@ class App {
             void revealDocument(path).catch((error) => ui.notice(messageOf(error)));
           },
         }),
-        // A window of its own, so this document can be read beside whatever is
-        // in the window the menu was opened from — including, for a long book,
-        // another part of itself.
-        ui.menuItem({
-          label: "Open in a new window",
-          icon: "window",
-          onSelect: () => {
-            close();
-            void this.newWindow(path);
-          },
-        }),
         ui.menuItem({
           label: "Mark this page",
           icon: "mark",
@@ -1562,6 +1552,24 @@ class App {
         }),
       );
 
+      // A window of its own, and only where the menu is about a document that
+      // is not the one already on screen. In the title menu it is, and this
+      // would be offering to open what you are reading a second time — beside
+      // an item three lines down that reads almost the same and means
+      // something else.
+      if (!withLibrary) {
+        menu.append(
+          ui.menuItem({
+            label: "Open in a new window",
+            icon: "window",
+            onSelect: () => {
+              close();
+              void this.newWindow(path);
+            },
+          }),
+        );
+      }
+
       if (withLibrary) {
         menu.append(
           ui.divider(),
@@ -1587,14 +1595,24 @@ class App {
             },
           }),
           // The two-documents-at-once route, one step: pick the second one and
-          // it arrives beside the first rather than on top of it. An empty
-          // window is ⌘N, and the Keyboard page says so.
+          // it arrives beside the first rather than on top of it.
           ui.menuItem({
-            label: "Open in a new window…",
+            label: "Open a document in a new window…",
             icon: "window",
             onSelect: () => {
               close();
               void this.openInNewWindow();
+            },
+          }),
+          // And the empty one, for a reader who would rather start the second
+          // window from its own recents than from the picker.
+          ui.menuItem({
+            label: "New window",
+            icon: "window",
+            note: isMac ? "⌘N" : "Ctrl+N",
+            onSelect: () => {
+              close();
+              void this.newWindow();
             },
           }),
         );
@@ -1935,6 +1953,7 @@ class App {
     el.open.addEventListener("click", opens(() => void this.openDialog()));
     el.welcomeOpen.addEventListener("click", () => void this.openDialog());
     // The close handler runs on the way out, so this saves what a quit saves.
+    el.newWindow.addEventListener("click", opens(() => void this.newWindow()));
     el.quit.addEventListener("click", () => void closeWindow());
     el.contents.addEventListener("click", opens(() => this.toggleSidebar()));
     el.closeDoc.addEventListener("click", opens(() => this.closeDocument()));

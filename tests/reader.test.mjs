@@ -793,6 +793,52 @@ test("select all selects a page, and says so", async () => {
   await app.page.evaluate(() => window.getSelection()?.removeAllRanges());
 });
 
+test("the middle button drags the page around", async () => {
+  // Zoomed in past the window there is no way sideways but the scrollbar, and
+  // the left button belongs to selecting text.
+  await app.page.keyboard.press(`${MOD}+Digit1`);
+  await app.page.waitForTimeout(200);
+  for (let i = 0; i < 6; i++) await app.page.keyboard.press(`${MOD}+Equal`);
+  await app.page.waitForTimeout(600);
+
+  const room = await app.page.evaluate(() => {
+    const viewer = document.getElementById("viewer");
+    return viewer.scrollWidth - viewer.clientWidth;
+  });
+  assert.ok(room > 40, `nothing to pan: ${room}px of overflow`);
+
+  const before = await app.page.evaluate(() => {
+    const viewer = document.getElementById("viewer");
+    viewer.scrollLeft = Math.round((viewer.scrollWidth - viewer.clientWidth) / 2);
+    return { left: viewer.scrollLeft, top: viewer.scrollTop };
+  });
+
+  const box = await app.page.locator("#viewer").boundingBox();
+  await app.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await app.page.mouse.down({ button: "middle" });
+  await app.page.mouse.move(box.x + box.width / 2 - 120, box.y + box.height / 2 - 60);
+  await app.page.waitForTimeout(100);
+  const during = await app.page.evaluate(() => ({
+    left: document.getElementById("viewer").scrollLeft,
+    top: document.getElementById("viewer").scrollTop,
+    grabbing: document.getElementById("viewer").classList.contains("panning"),
+  }));
+  await app.page.mouse.up({ button: "middle" });
+
+  assert.ok(during.grabbing, "the pointer did not say it was dragging");
+  assert.ok(during.left > before.left + 60, `did not pan sideways: ${before.left} → ${during.left}`);
+  assert.ok(during.top > before.top + 20, `did not pan down: ${before.top} → ${during.top}`);
+
+  const after = await app.page.evaluate(() =>
+    document.getElementById("viewer").classList.contains("panning"),
+  );
+  assert.equal(after, false, "the drag never ended");
+
+  await app.page.keyboard.press(`${MOD}+Digit0`);
+  await app.page.waitForTimeout(400);
+  await app.press("Home");
+});
+
 test("presenting is one switch, and Escape is the way back", async () => {
   // Full screen is the window's, and once a browser is in it Escape belongs
   // to the browser — the key never reaches the page at all, which is why this

@@ -360,6 +360,7 @@ export class Viewer {
     private callbacks: ViewerCallbacks,
   ) {
     this.container.addEventListener("scroll", this.onScroll, { passive: true });
+    this.container.addEventListener("pointerdown", this.onPanStart);
     document.addEventListener("selectionchange", this.onSelectionChange);
     this.watchDensity();
   }
@@ -1748,6 +1749,59 @@ export class Viewer {
     return null;
   }
 
+  /* --------------------------------------------------------------- pan */
+
+  /**
+   * Drag the page around with the middle button.
+   *
+   * Zoomed in past the window there is no way sideways but the scrollbar, and
+   * the left button belongs to selecting text — which is what it should do on
+   * a page of words. The middle button is free, is what every map and every
+   * drawing program uses for this, and needs no mode to be entered first.
+   */
+  private panning: { id: number; x: number; y: number; left: number; top: number } | null = null;
+  /** Set by a drag that actually moved, and read by the link layer: a middle
+      click is how a link is opened in a browser, and the mouseup at the end of
+      a pan lands on whatever the pointer finished over. */
+  private panned = false;
+
+  private onPanStart = (event: PointerEvent): void => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    this.panning = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: this.container.scrollLeft,
+      top: this.container.scrollTop,
+    };
+    this.panned = false;
+    this.container.setPointerCapture(event.pointerId);
+    this.container.classList.add("panning");
+    this.container.addEventListener("pointermove", this.onPanMove);
+    this.container.addEventListener("pointerup", this.onPanEnd);
+    this.container.addEventListener("pointercancel", this.onPanEnd);
+  };
+
+  private onPanMove = (event: PointerEvent): void => {
+    const from = this.panning;
+    if (!from || event.pointerId !== from.id) return;
+    const dx = event.clientX - from.x;
+    const dy = event.clientY - from.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this.panned = true;
+    this.container.scrollTo({ left: from.left - dx, top: from.top - dy, behavior: "auto" });
+  };
+
+  private onPanEnd = (event: PointerEvent): void => {
+    if (!this.panning || event.pointerId !== this.panning.id) return;
+    this.container.releasePointerCapture(this.panning.id);
+    this.panning = null;
+    this.container.classList.remove("panning");
+    this.container.removeEventListener("pointermove", this.onPanMove);
+    this.container.removeEventListener("pointerup", this.onPanEnd);
+    this.container.removeEventListener("pointercancel", this.onPanEnd);
+  };
+
   /* ------------------------------------------------------------- history */
 
   /**
@@ -2268,7 +2322,9 @@ export class Viewer {
       // cross-reference navigated, and so did pressing "back" while the
       // pointer happened to be over a link.
       link.addEventListener("auxclick", (event) => {
-        if (event.button === 1) follow(event);
+        // Not the mouseup at the end of a drag across the page: the pointer
+        // has to finish somewhere, and a link is as likely a place as any.
+        if (event.button === 1 && !this.panned) follow(event);
       });
       link.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") follow(event);

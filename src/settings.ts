@@ -698,6 +698,7 @@ function keyboardPage(pane: HTMLElement): void {
         ["Bring the toolbar back when it is hidden", "The top edge of the window"],
         ["Open something else you have been reading", "The document's name in the bar"],
         ["Back, forward", "The side buttons on a mouse"],
+        ["Drag the page around when it is bigger than the window", "The middle button"],
       ],
     ],
   ];

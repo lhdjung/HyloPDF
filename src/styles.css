@@ -394,6 +394,15 @@ body {
   margin: 0 auto;
 }
 
+/* Dragging the page around with the middle button. The text layer would
+   otherwise take the pointer and show a caret over a page that is moving. */
+#viewer.panning,
+#viewer.panning * {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* --------------------------------------------------------------- sidebar */
 
 #sidebar {

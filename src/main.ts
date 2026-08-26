@@ -998,6 +998,34 @@ class App {
     );
   }
 
+  /**
+   * The selected words, with where they came from.
+   *
+   * Copying a sentence out of a paper and then going back to find the page it
+   * was on is the small, constant tax of reading for work, and it is the one
+   * thing "no annotations" does not have to mean. The page comes from the
+   * selection rather than from the toolbar, because a selection that runs
+   * across a page boundary began on the page it began on.
+   */
+  private async copyQuote(): Promise<void> {
+    const selection = window.getSelection();
+    const quoted = selection?.toString().trim() ?? "";
+    if (!quoted) {
+      ui.notice("Select something first, and this copies it with its page number.");
+      return;
+    }
+    const node = selection?.anchorNode ?? null;
+    const element = node instanceof Element ? node : node?.parentElement ?? null;
+    const page = Number(element?.closest<HTMLElement>("#pages .page")?.dataset.page ?? 0);
+    if (!page) {
+      await this.copyToClipboard(quoted, "Copied.");
+      return;
+    }
+    const name = el.title.textContent || "";
+    const where = `${name ? `${name}, ` : ""}p. ${this.viewer.label(page)}`;
+    await this.copyToClipboard(`“${quoted}” — ${where}`, `Copied, with ${where}.`);
+  }
+
   /** The words on the page being read, on the clipboard. What a selection
       cannot do — the page below is not in the document until it has been
       scrolled to — this can. */
@@ -1993,6 +2021,13 @@ class App {
         if (this.viewer.isEmpty) return;
         event.preventDefault();
         this.selectThisPage();
+        return;
+      }
+      // The one thing people do with a selection in a document they are
+      // reading for work: quote it, and say where it came from.
+      if (meta && event.shiftKey && event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        void this.copyQuote();
         return;
       }
       if (meta && event.shiftKey && event.key.toLowerCase() === "p") {

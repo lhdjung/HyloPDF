@@ -793,6 +793,29 @@ test("select all selects a page, and says so", async () => {
   await app.page.evaluate(() => window.getSelection()?.removeAllRanges());
 });
 
+test("a quote comes away with its page number", async () => {
+  await app.press("Home");
+  await app.page.waitForTimeout(300);
+  // Clipboard reads need a permission the harness cannot grant, so what is
+  // checked is the sentence the app says about what it put there — which
+  // names the page, and is the whole point.
+  await app.page.keyboard.press(`${MOD}+KeyA`);
+  await app.page.waitForTimeout(300);
+  await app.page.keyboard.press(`${MOD}+Shift+KeyC`);
+  await app.page
+    .waitForFunction(
+      () => /Copied/.test(document.getElementById("notice")?.textContent ?? ""),
+      null,
+      { timeout: 10_000, polling: 50 },
+    )
+    .catch(() => {});
+  const said = await app.page.evaluate(
+    () => document.getElementById("notice")?.textContent ?? "",
+  );
+  assert.match(said, /book\.pdf, p\. 1/);
+  await app.page.evaluate(() => window.getSelection()?.removeAllRanges());
+});
+
 test("the middle button drags the page around", async () => {
   // Zoomed in past the window there is no way sideways but the scrollbar, and
   // the left button belongs to selecting text.

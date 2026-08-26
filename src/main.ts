@@ -227,7 +227,7 @@ class App {
   /** Documents from the OS: "Open with", a file dropped on the icon, or one
       named on the command line. */
   private async listenForDocuments(): Promise<void> {
-    await onExternalDocument((path) => void this.open(path));
+    await onExternalDocument((path) => void this.openFromOutside(path));
     await onFileDrop({
       hover: () => {
         el.dropHint.hidden = false;
@@ -242,6 +242,27 @@ class App {
         else ui.notice("That is not a PDF.");
       },
     });
+  }
+
+  /** A document handed over by the system — "Open with", the dock, the command
+   *  line — while another one is already open.
+   *
+   * One window, one document: the second instance stands down and hands its
+   * path to the first, which puts down what it was holding. That is the right
+   * behaviour for `settings.toml`, and it is a surprise to whoever
+   * double-clicked, because nothing about double-clicking a file says "and
+   * close the thing you were reading". Their place in it is kept — every
+   * handover writes the position down first — and the way back is the list
+   * under the title, so all this has to do is say what happened and where the
+   * document went. The reader's own Open and a file dropped on the window are
+   * left silent: there the answer is already in front of them.
+   */
+  private async openFromOutside(path: string): Promise<void> {
+    const leaving = this.path && this.path !== path ? el.title.textContent : null;
+    await this.open(path);
+    if (leaving && this.path === path) {
+      ui.notice(`Closed ${leaving} — it is in the list under the title, where you left it.`);
+    }
   }
 
   /** Files this app reads but does not own: the themes, and the document.

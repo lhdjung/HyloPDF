@@ -113,6 +113,22 @@ pub fn forget(dir: &Path, file: &str) -> Result<Library, String> {
     Ok(library)
 }
 
+/// Give a document the name it calls itself, once the frontend has read it out
+/// of the file. A file named `2310.06825v3.pdf` says nothing on a shelf.
+pub fn retitle(dir: &Path, file: &str, title: &str) -> Result<Library, String> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut library = load(dir);
+    let Some(entry) = library.files.iter_mut().find(|e| e.path == file) else {
+        return Ok(library);
+    };
+    if entry.title == title {
+        return Ok(library);
+    }
+    entry.title = title.to_string();
+    save(dir, &library)?;
+    Ok(library)
+}
+
 /// Note what is open now, so the next launch can pick it up. `None` means
 /// nothing is: the reader closed it, and that is a decision to respect.
 pub fn set_open(dir: &Path, file: Option<&str>) -> Result<(), String> {

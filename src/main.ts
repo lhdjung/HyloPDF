@@ -35,6 +35,7 @@ import {
   quitApp,
   registerBrowserFile,
   rememberPosition,
+  setDocumentTitle,
   setOpenDocument,
   revealDocument,
   saveWindowState,
@@ -419,6 +420,7 @@ class App {
       this.saidTextless = false;
       void this.sidebar.setDocument(doc, this.theme);
       void this.reportFormFields(doc);
+      void this.adoptDocumentTitle(path, opened.name);
 
       const start = this.settings.remember_position ? opened : { page: 1, offset: 0 };
       this.viewer.scrollTo(start.page, start.offset);
@@ -446,6 +448,35 @@ class App {
       this.clearDocument();
       ui.notice(messageOf(error));
     }
+  }
+
+  /**
+   * Call the document what it calls itself.
+   *
+   * `2310.06825v3.pdf` is not a name, and a shelf of them is unreadable — but
+   * the file usually knows better, because whatever produced it wrote the
+   * title in. So the toolbar, the window and the recently-read list take the
+   * document's own title where there is one worth having.
+   *
+   * "Worth having" is doing real work. A great many PDFs carry a title field
+   * filled in by the program that made them and not by anybody: the file name
+   * again, the file name of the *source* — "Microsoft Word - report.doc" — or
+   * the word "untitled". Each of those is worse than the file name, because
+   * it looks deliberate. Anything that fails the test leaves the file name
+   * alone, which is what it was before.
+   */
+  private async adoptDocumentTitle(path: string, fileName: string): Promise<void> {
+    const { info } = await this.viewer.details();
+    const raw = typeof info.Title === "string" ? info.Title.trim() : "";
+    if (this.path !== path || !worthCalling(raw, fileName)) return;
+
+    el.title.textContent = raw;
+    el.title.title = fileName;
+    void setWindowTitle(`${raw} — HyloPDF`);
+    const entry = this.library.find((item) => item.path === path);
+    if (entry) entry.title = raw;
+    this.renderRecents();
+    void setDocumentTitle(path, raw).catch(() => []);
   }
 
   /** A form that cannot be filled in should say so.
@@ -1262,6 +1293,18 @@ class App {
       );
 
       if (withLibrary) {
+        menu.append(
+          ui.divider(),
+          ui.menuItem({
+            label: "What this document says about itself…",
+            icon: "info",
+            onSelect: () => {
+              close();
+              void this.showDocumentDetails(name);
+            },
+          }),
+        );
+
         menu.append(ui.divider());
         menu.append(
           ui.menuItem({
@@ -1297,6 +1340,44 @@ class App {
         }
       }
       return menu;
+    });
+  }
+
+  /** Title, author, how many pages, how big a page is, what made it — the
+   *  answer to "get info", which every reader has and this one did not. Only
+   *  the fields the document actually fills in: a window of eleven rows, nine
+   *  of them empty, tells the reader nothing except that the app has a list.
+   */
+  private async showDocumentDetails(name: string): Promise<void> {
+    if (this.viewer.isEmpty) return;
+    const { info, pages, size } = await this.viewer.details();
+    const text = (key: string): string => {
+      const value = info[key];
+      return typeof value === "string" ? value.trim() : "";
+    };
+
+    ui.showWindow("Document", () => {
+      const pane = document.createElement("div");
+      pane.className = "pane";
+      pane.append(ui.text("title", text("Title") || name));
+
+      const rows: [string, string][] = [
+        ["Author", text("Author")],
+        ["Subject", text("Subject")],
+        ["Keywords", text("Keywords")],
+        ["Pages", String(pages)],
+        ["Page size", size],
+        ["Made with", text("Creator")],
+        ["Written by", text("Producer")],
+        ["PDF version", text("PDFFormatVersion")],
+        ["Created", readableDate(text("CreationDate"))],
+        ["Changed", readableDate(text("ModDate"))],
+      ];
+      for (const [label, value] of rows) {
+        if (value) pane.append(ui.field(label, selectable(value)));
+      }
+      if (this.path) pane.append(ui.field("File", selectable(this.path)));
+      return pane;
     });
   }
 
@@ -2068,6 +2149,52 @@ class App {
 }
 
 /** The part of a web address worth reading back to someone. */
+/** A value in the document window: text the reader can select and copy, since
+    half the reason to open that window is to take something out of it. */
+function selectable(value: string): HTMLElement {
+  const element = document.createElement("span");
+  element.className = "field-note";
+  element.style.userSelect = "text";
+  element.style.textAlign = "right";
+  element.style.maxWidth = "440px";
+  element.style.wordBreak = "break-word";
+  element.textContent = value;
+  return element;
+}
+
+/** A PDF date — `D:20240131120000+01'00'` — as something a person reads.
+    Anything that is not that shape is handed back as it came: a date this
+    cannot parse is still a date somebody wrote down. */
+function readableDate(value: string): string {
+  const match = /^D:(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2}))?/.exec(value);
+  if (!match) return value;
+  const [, year, month, day, hour, minute] = match;
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour ?? 0),
+    Number(minute ?? 0),
+  );
+  if (Number.isNaN(date.getTime())) return value;
+  return hour
+    ? date.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" })
+    : date.toLocaleDateString(undefined, { dateStyle: "long" });
+}
+
+/** Whether a document's own title is better than the name of its file.
+    See `adoptDocumentTitle` for why so much of this is refusal. */
+function worthCalling(title: string, fileName: string): boolean {
+  if (title.length < 4 || title.length > 200) return false;
+  const stem = fileName.replace(/\.pdf$/i, "").toLowerCase();
+  const folded = title.toLowerCase();
+  if (folded === stem || folded === fileName.toLowerCase()) return false;
+  if (/^untitled\b|^document\d*$|^microsoft word\s*-/i.test(title)) return false;
+  // A title that is a file name is a file name, whatever file it names.
+  if (/\.(pdf|docx?|tex|indd|pptx?|odt|rtf|ps|dvi)$/i.test(title)) return false;
+  return true;
+}
+
 function hostOf(url: string): string {
   try {
     return new URL(url).host || url;

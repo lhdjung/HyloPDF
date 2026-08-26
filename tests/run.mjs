@@ -17,6 +17,8 @@ const LOCKED = "tests/fixtures/locked.pdf";
 const LABELLED = "tests/fixtures/labelled.pdf";
 /* Pages with a box on them and not one word: a scan that never met an OCR. */
 const NOTEXT = "tests/fixtures/notext.pdf";
+/* A document that knows what it is called. */
+const TITLED = "tests/fixtures/titled.pdf";
 
 async function answering() {
   try {
@@ -40,6 +42,7 @@ if (!existsSync(FIXTURE)) await make("tests/fixtures/make-pdf.mjs", FIXTURE, "40
 if (!existsSync(LOCKED)) await make("tests/fixtures/make-encrypted-pdf.mjs", LOCKED);
 if (!existsSync(LABELLED)) await make("tests/fixtures/make-pdf.mjs", LABELLED, "12", "labels");
 if (!existsSync(NOTEXT)) await make("tests/fixtures/make-pdf.mjs", NOTEXT, "6", "notext");
+if (!existsSync(TITLED)) await make("tests/fixtures/make-pdf.mjs", TITLED, "3", "titled");
 
 let vite = null;
 if (!(await answering())) {

@@ -16,6 +16,9 @@ const FRONT = 4;
    shape of a scan that never went through OCR: nothing to search, nothing to
    select, and an empty table of contents. */
 const NOTEXT = process.argv[4] === "notext";
+/* "titled" gives the document a name of its own, which is what the toolbar
+   and the recently-read list would rather show than `book.pdf`. */
+const TITLED = process.argv[4] === "titled";
 const objects = [];   // 1-indexed body objects
 const add = (body) => { objects.push(body); return objects.length; };
 
@@ -42,6 +45,12 @@ const labels = LABELLED
   ? ` /PageLabels << /Nums [0 << /S /r >> ${FRONT} << /S /D /St 1 >>] >>`
   : "";
 const catalogId = add(`<< /Type /Catalog /Pages ${realPagesId} 0 R${labels} >>`);
+const infoId = TITLED
+  ? add(
+      "<< /Title (On the Quiet Reading of Documents) /Author (A. Reader) " +
+        "/Creator (HyloPDF test fixtures) /CreationDate (D:20240131120000Z) >>",
+    )
+  : null;
 
 let out = "%PDF-1.4\n";
 const offsets = [0];
@@ -52,6 +61,7 @@ objects.forEach((body, i) => {
 const xref = out.length;
 out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
 for (let i = 1; i <= objects.length; i++) out += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
-out += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+const info = infoId ? ` /Info ${infoId} 0 R` : "";
+out += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R${info} >>\nstartxref\n${xref}\n%%EOF\n`;
 writeFileSync(process.argv[2], out, "latin1");
 console.log("wrote", process.argv[2], out.length, "bytes,", PAGES, "pages");

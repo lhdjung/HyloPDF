@@ -1228,6 +1228,37 @@ export class Viewer {
     return page.getViewport({ scale, rotation: page.rotate + this.rotation });
   }
 
+  /* ------------------------------------------------------------ metadata */
+
+  /**
+   * What the document says about itself: the fields somebody typing "get info"
+   * is asking for, plus the ones only the file knows.
+   *
+   * Read on demand rather than at open time. It is one trip into the worker
+   * and nothing needs it until it is asked for.
+   */
+  async details(): Promise<{ info: Record<string, unknown>; pages: number; size: string }> {
+    const doc = this.doc;
+    if (!doc) return { info: {}, pages: 0, size: "" };
+    let info: Record<string, unknown> = {};
+    try {
+      const meta = await doc.getMetadata();
+      info = (meta?.info ?? {}) as Record<string, unknown>;
+    } catch {
+      // A document whose metadata will not parse still has a page count.
+    }
+    const page = await this.page(0);
+    const view = page.getViewport({ scale: 1 });
+    // In millimetres and in inches, because a reader knows their paper in one
+    // or the other and never in points.
+    const mm = (points: number) => Math.round((points * 25.4) / 72);
+    const inches = (points: number) => (points / 72).toFixed(2);
+    const size = `${mm(view.width)} × ${mm(view.height)} mm (${inches(view.width)} × ${inches(
+      view.height,
+    )} in)`;
+    return { info, pages: doc.numPages, size };
+  }
+
   /* -------------------------------------------------------------- labels */
 
   /**

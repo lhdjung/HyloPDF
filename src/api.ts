@@ -287,6 +287,12 @@ export async function forgetDocument(path: string): Promise<LibraryEntry[]> {
   return invoke<LibraryEntry[]>("forget_document", { path });
 }
 
+/** The name a document gives itself, kept for the recently-read list. */
+export async function setDocumentTitle(path: string, title: string): Promise<LibraryEntry[]> {
+  if (!hasBackend) return [];
+  return invoke<LibraryEntry[]>("set_document_title", { path, title });
+}
+
 /** Note what is open, for the next launch. `null` means nothing is. */
 export async function setOpenDocument(path: string | null): Promise<void> {
   if (!hasBackend) return;

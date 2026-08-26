@@ -342,6 +342,17 @@ async fn set_open_document(paths: State<'_, Paths>, path: Option<String>) -> Res
     library::set_open(&paths.config, path.as_deref())
 }
 
+/// The title the document gives itself, which the frontend reads out of the
+/// file and this remembers for the recently-read list.
+#[tauri::command]
+async fn set_document_title(
+    paths: State<'_, Paths>,
+    path: String,
+    title: String,
+) -> Result<Vec<library::Entry>, String> {
+    library::retitle(&paths.config, &path, &title).map(|library| library.files)
+}
+
 #[tauri::command]
 async fn forget_document(
     paths: State<'_, Paths>,
@@ -680,6 +691,7 @@ pub fn run() {
             close_document,
             remember_position,
             set_open_document,
+            set_document_title,
             forget_document,
             open_link,
             reveal_document,

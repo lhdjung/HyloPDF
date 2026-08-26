@@ -80,6 +80,12 @@ export type Match = {
   offsetStart: number;
   itemEnd: number;
   offsetEnd: number;
+  /** Where the match sits in the page's own text, which is what a line of
+      context either side of it is cut from. Two numbers rather than the
+      context itself: a hundred thousand matches carrying a hundred characters
+      each is ten megabytes of strings nobody will read. */
+  rawStart: number;
+  rawEnd: number;
 };
 
 const PAD_X = 20;

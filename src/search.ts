@@ -260,6 +260,52 @@ export class Search {
     });
   }
 
+  /** The matches, in page order, with a line of the document either side of
+   *  each — for a list somebody reads rather than steps through.
+   *
+   *  Cut on demand from the text already indexed rather than kept beside every
+   *  match, and bounded, because a list of ten thousand results is not a list.
+   */
+  results(limit: number): { at: number; page: number; before: string; hit: string; after: string }[] {
+    const out = [];
+    for (let at = 0; at < this.matches.length && out.length < limit; at++) {
+      const match = this.matches[at];
+      const text = this.pages.get(match.page);
+      if (!text) continue;
+      // Whitespace collapsed, because a PDF's own line breaks fall wherever
+      // the printer put them and a result should read as a sentence.
+      const tidy = (value: string) => value.replace(/\s+/g, " ");
+      out.push({
+        at,
+        page: match.page,
+        // Short before, long after. The line is one row of a narrow panel and
+        // is cut off at the end, so a match with as much in front of it as
+        // behind is a match nobody can see: what is wanted is enough to place
+        // it and then the sentence it is in.
+        before: tidy(text.raw.slice(Math.max(0, match.rawStart - 18), match.rawStart)),
+        hit: tidy(text.raw.slice(match.rawStart, match.rawEnd)),
+        after: tidy(text.raw.slice(match.rawEnd, match.rawEnd + 70)),
+      });
+    }
+    return out;
+  }
+
+  /** Go to one result by its place in the list. */
+  goTo(at: number): void {
+    if (at < 0 || at >= this.matches.length) return;
+    this.index = at;
+    this.viewer.setMatches(this.matches, this.index);
+    this.viewer.revealMatch(this.index);
+    this.onUpdate({
+      query: this.query,
+      total: this.matches.length,
+      index: this.index,
+      scanning: this.scanning,
+      capped: this.capped,
+      textless: this.textless && !this.scanning,
+    });
+  }
+
   step(direction: 1 | -1): void {
     if (this.matches.length === 0) return;
     this.index = (this.index + direction + this.matches.length) % this.matches.length;
@@ -437,14 +483,18 @@ function locate(
     // a match ending inside a ligature would otherwise start and end on the
     // same character and highlight nothing.
     const last = at + needle.length - 1;
-    const start = position(page, page.origin[at]);
-    const end = position(page, Math.max(page.origin[at + needle.length], page.origin[last] + 1));
+    const rawStart = page.origin[at];
+    const rawEnd = Math.max(page.origin[at + needle.length], page.origin[last] + 1);
+    const start = position(page, rawStart);
+    const end = position(page, rawEnd);
     found.push({
       page: number,
       itemStart: start.item,
       offsetStart: start.offset,
       itemEnd: end.item,
       offsetEnd: end.offset,
+      rawStart,
+      rawEnd,
     });
     at = page.text.indexOf(needle, at + Math.max(needle.length, 1));
   }

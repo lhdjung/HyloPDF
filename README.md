@@ -50,6 +50,7 @@ The shortcuts below use ⌘ on macOS and Ctrl elsewhere.
 | ⌘F | Search this document |
 | Enter / ⇧Enter | Next / previous match, from the search field |
 | ⌘G / ⌘⇧G | Next / previous match, from anywhere |
+| The count in the find bar | Every match, listed with the line it is on |
 | ⌘D | Dark mode on or off |
 | ⌘B | Show or hide the contents panel |
 | ⌘T | Show or hide the toolbar |

@@ -496,6 +496,60 @@ test("search", async (t) => {
     assert.equal((await app.state()).page, "400");
   });
 
+  await t.test("every match is listed, with the line it is on", async () => {
+    await app.page.fill("#find-input", "");
+    await app.page
+      .waitForFunction(() => document.getElementById("find-status")?.textContent === "", null, {
+        timeout: 10_000,
+        polling: 50,
+      })
+      .catch(() => {});
+    await app.page.fill("#find-input", "lazy dog");
+    await app.page
+      .waitForFunction(
+        () => {
+          const status = document.getElementById("find-status")?.textContent ?? "";
+          return status.length > 0 && !status.endsWith("…");
+        },
+        null,
+        { timeout: 30_000, polling: 100 },
+      )
+      .catch(() => {});
+
+    // The count is the door to the list: "3 of 128" answers "is it in here"
+    // and not "which one did I mean".
+    await app.page.click("#find-status");
+    await app.page.waitForTimeout(300);
+
+    const listed = await app.page.evaluate(() => {
+      const results = [...document.querySelectorAll("#results-panel .result")];
+      const first = results[0];
+      return {
+        count: results.length,
+        shown: !document.getElementById("results-panel")?.hidden,
+        page: first?.querySelector(".result-page")?.textContent,
+        hit: first?.querySelector("mark")?.textContent,
+        line: first?.querySelector(".result-line")?.textContent,
+      };
+    });
+    assert.ok(listed.shown, "the panel did not come forward");
+    assert.ok(listed.count > 1, `only ${listed.count} results listed`);
+    assert.equal(listed.hit, "lazy dog");
+    assert.equal(listed.page, "1");
+    // A line of the document either side of it, which is the whole point.
+    assert.match(listed.line, /quick brown fox/);
+
+    // And picking one goes there.
+    await app.page.click("#results-panel .result:last-of-type");
+    await app.page.waitForTimeout(400);
+    const at = Number((await app.state()).page);
+    assert.ok(at > 1, `picking a result stayed on page ${at}`);
+    // ⌘B rather than the Contents button: that button closes the find bar on
+    // purpose, and the subtest after this one is about what closes it.
+    await app.page.keyboard.press(`${MOD}+KeyB`);
+    await app.page.waitForTimeout(200);
+  });
+
   await t.test("clicking the document puts it away", async () => {
     assert.equal((await app.state()).findOpen, true);
     await app.page.mouse.click(640, 600);

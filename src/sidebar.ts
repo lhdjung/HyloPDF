@@ -12,6 +12,10 @@ import type { Theme } from "./api";
 import { recolor } from "./themes";
 import { isRenderCancelled, type Viewer } from "./viewer";
 
+/** The three things the panel can be showing. Results only exists while there
+    is a search to show, and its tab is hidden the rest of the time. */
+type Tab = "outline" | "pages" | "results";
+
 type OutlineNode = {
   title: string;
   items: OutlineNode[];
@@ -45,7 +49,7 @@ const THUMB_CACHE = 40;
 export class Sidebar {
   private doc: PDFDocumentProxy | null = null;
   private theme: Theme | null = null;
-  private tab: "outline" | "pages" = "outline";
+  private tab: Tab = "outline";
   private thumbs = new Map<number, HTMLButtonElement>();
   /** The thumbnails that carry a picture, oldest first — which is the order
       they were scrolled past in, and so the order to give them back in. */
@@ -68,23 +72,95 @@ export class Sidebar {
   constructor(
     private outlinePanel: HTMLElement,
     private pagesPanel: HTMLElement,
+    private resultsPanel: HTMLElement,
     private tabs: HTMLButtonElement[],
     private viewer: Viewer,
   ) {
     for (const tab of this.tabs) {
-      tab.addEventListener("click", () => this.showTab(tab.dataset.tab as "outline" | "pages"));
+      tab.addEventListener("click", () => this.showTab(tab.dataset.tab as Tab));
     }
     this.showTab("outline");
   }
 
-  showTab(name: "outline" | "pages"): void {
+  showTab(name: Tab): void {
     this.tab = name;
     for (const tab of this.tabs) {
       tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
     }
     this.outlinePanel.hidden = name !== "outline";
     this.pagesPanel.hidden = name !== "pages";
+    this.resultsPanel.hidden = name !== "results";
     if (name === "pages") this.revealCurrentThumb();
+  }
+
+  /**
+   * The results of a search, as a list to read rather than a count to step
+   * through.
+   *
+   * "3 of 128" is the answer to "is it in here" and no answer at all to "which
+   * one did I mean" — which is what somebody searching a long document is
+   * usually asking. Every other reader shows the hits with a line of context;
+   * this one showed a number.
+   *
+   * The tab appears with the first result and goes when the search does. It
+   * does not steal the panel from the contents unless the reader was not
+   * looking at anything else — a search is a thing you run while reading, and
+   * having the chapter list vanish under you is not what was asked for.
+   */
+  showResults(
+    results: { at: number; page: number; before: string; hit: string; after: string }[],
+    total: number,
+    current: number,
+    onPick: (at: number) => void,
+  ): void {
+    const tab = this.tabs.find((button) => button.dataset.tab === "results");
+    if (tab) tab.hidden = results.length === 0;
+    if (results.length === 0) {
+      this.resultsPanel.replaceChildren();
+      if (this.tab === "results") this.showTab(this.hasOutline ? "outline" : "pages");
+      return;
+    }
+
+    const list = document.createDocumentFragment();
+    for (const result of results) {
+      const button = document.createElement("button");
+      button.className = result.at === current ? "result current" : "result";
+
+      const where = document.createElement("span");
+      where.className = "result-page";
+      where.textContent = this.viewer.label(result.page);
+
+      const line = document.createElement("span");
+      line.className = "result-line";
+      const hit = document.createElement("mark");
+      hit.textContent = result.hit;
+      line.append(
+        result.before ? `…${result.before}` : "",
+        hit,
+        result.after ? `${result.after}…` : "",
+      );
+
+      button.append(where, line);
+      button.addEventListener("click", () => onPick(result.at));
+      list.append(button);
+    }
+
+    if (total > results.length) {
+      const more = document.createElement("p");
+      more.className = "sidebar-empty";
+      more.textContent = `…and ${total - results.length} more. Ask for something narrower.`;
+      list.append(more);
+    }
+
+    this.resultsPanel.replaceChildren(list);
+    const showing = this.resultsPanel.querySelector(".result.current");
+    showing?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** Bring the results forward, which is what opening the panel from the find
+      bar means. */
+  showResultsTab(): void {
+    if (this.resultsPanel.childElementCount > 0) this.showTab("results");
   }
 
   /** True when the document has a table of contents worth showing. */
@@ -222,6 +298,7 @@ export class Sidebar {
   }
 
   private reset(): void {
+    this.showResults([], 0, -1, () => {});
     this.observer?.disconnect();
     this.observer = null;
     // Everything, released rather than merely dropped: a column of thumbnails

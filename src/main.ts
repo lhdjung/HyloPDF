@@ -111,6 +111,7 @@ const el = {
   sidebarGrip: byId<HTMLDivElement>("sidebar-grip"),
   outlinePanel: byId<HTMLDivElement>("outline-panel"),
   pagesPanel: byId<HTMLDivElement>("pages-panel"),
+  resultsPanel: byId<HTMLDivElement>("results-panel"),
   viewer: byId<HTMLDivElement>("viewer"),
   pages: byId<HTMLDivElement>("pages"),
   welcome: byId<HTMLElement>("welcome"),
@@ -119,7 +120,7 @@ const el = {
   recents: byId<HTMLDivElement>("recents"),
   findBar: byId<HTMLDivElement>("find-bar"),
   findInput: byId<HTMLInputElement>("find-input"),
-  findStatus: byId<HTMLSpanElement>("find-status"),
+  findStatus: byId<HTMLButtonElement>("find-status"),
   findPrev: byId<HTMLButtonElement>("find-prev"),
   findNext: byId<HTMLButtonElement>("find-next"),
   findClose: byId<HTMLButtonElement>("find-close"),
@@ -183,6 +184,7 @@ class App {
     this.sidebar = new Sidebar(
       el.outlinePanel,
       el.pagesPanel,
+      el.resultsPanel,
       [...el.sidebar.querySelectorAll<HTMLButtonElement>(".tab")],
       this.viewer,
     );
@@ -1074,10 +1076,15 @@ class App {
   /** Everything the find bar is allowed to lose the pointer to and stay open.
       The bar itself, obviously; the top strip, because the buttons up there
       that close it do so themselves and the ones that do not are the reader
-      changing the view around a search they are still in the middle of; and
-      the two layers that only ever open from up there anyway. */
+      changing the view around a search they are still in the middle of; the
+      two layers that only ever open from up there anyway; and the list of
+      results, which is this search rather than somewhere else. */
   private static readonly FIND_KEEPS_OPEN =
-    "#find-bar, #toolbar, #title-drag, #toolbar-peek, #popovers, #windows";
+    "#find-bar, #toolbar, #title-drag, #toolbar-peek, #popovers, #windows," +
+    // The list of results is the same search seen larger, so reaching into it
+    // is not reaching past the bar — picking a result there would otherwise
+    // close the thing that found it.
+    " #results-panel, #tab-results";
 
   /** Reaching past the bar puts it away, the way the Theme and Settings menus
       do. Anything below the toolbar is somewhere else — the document, the
@@ -1103,7 +1110,18 @@ class App {
     el.findWords.setAttribute("aria-pressed", String(this.settings.search_whole_words));
   }
 
+  /** How many results to list. Long enough to be a list of everything for a
+      real query, short enough that it is a list rather than a second copy of
+      the document. */
+  private static readonly RESULTS_SHOWN = 200;
+
   private onSearchUpdate(state: SearchState): void {
+    this.sidebar.showResults(
+      this.search.results(App.RESULTS_SHOWN),
+      state.total,
+      state.index,
+      (at) => this.search.goTo(at),
+    );
     if (state.total === 0) {
       // "None" is the answer to "is this word in the document". It is the
       // wrong answer to "is there anything in this document to search", which
@@ -1778,6 +1796,14 @@ class App {
     el.findNext.addEventListener("click", () => this.search.step(1));
     el.findPrev.addEventListener("click", () => this.search.step(-1));
     el.findClose.addEventListener("click", () => this.closeFind());
+    // The count is the way to the list behind it. "3 of 128" answers "is it in
+    // here" and not "which one did I mean", and the second question is the one
+    // somebody searching a long document is usually asking.
+    el.findStatus.addEventListener("click", () => {
+      if (this.search.total === 0) return;
+      if (!this.settings.show_sidebar) this.toggleSidebar(true);
+      this.sidebar.showResultsTab();
+    });
 
     // Two of the three change what counts as a match, so the query has to be
     // asked again; "Highlight all" only changes what is painted, and the

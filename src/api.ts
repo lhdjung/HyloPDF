@@ -103,7 +103,7 @@ const fallbackDefaults: Settings = {
   search_whole_words: false,
   show_toolbar: true,
   show_sidebar: false,
-  sidebar_width: 232,
+  sidebar_width: 252,
   fullscreen: false,
   window_width: 1280,
   window_height: 860,

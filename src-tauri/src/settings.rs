@@ -86,7 +86,9 @@ pub fn defaults() -> Settings {
     // Chrome
     s.insert("show_toolbar".into(), json!(true));
     s.insert("show_sidebar".into(), json!(false));
-    s.insert("sidebar_width".into(), json!(232));
+    // Wide enough for the three tabs the panel can carry — Contents, Pages
+    // and, while a search is up, Results — without a word being shortened.
+    s.insert("sidebar_width".into(), json!(252));
     s.insert("fullscreen".into(), json!(false));
     // Window
     s.insert("window_width".into(), json!(1280.0));

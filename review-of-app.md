@@ -7,11 +7,11 @@
 > | | |
 > |---|---|
 > | §1.1 back from a link | done — ⌘[ / ⌥←, and the mouse's side buttons |
-> | §1.2 printing | done as a hand-over: ⌘P gives the document to a program that prints, and says so |
+> | §1.2 printing | done as a hand-over: ⌘P gives the document to a program that prints, and says so — though the notice lands after focus has already left for that program, so it is easy to miss; see the note in place |
 > | §1.3 page labels | done — toolbar, pill, thumbnails and the go-to field |
 > | §1.4 recents while reading | done — the document's name in the bar carries the list |
 > | §1.5 two documents at once | **not done**; see the note in place |
-> | §1.6 selection past the mounted band | done — ⌘A means a page, and a page's text can be copied outright |
+> | §1.6 selection past the mounted band | done, in part — ⌘A still means a page; the "Copy this page's text" button was removed rather than kept, see the note in place |
 > | §2.1 rotate | done — ⌘R / ⌘L |
 > | §2.2 two pages side by side | done, with the cover on its own |
 > | §2.3 trim the margins | done — measured over a sample, off by default |
@@ -88,6 +88,14 @@ dialog for free.
 If it stays out for 0.1, say so somewhere the reader will look, rather than
 letting ⌘P do nothing.
 
+**Update.** Built as the hand-over: `print_document` opens the file in the
+platform's own viewer and `App.print` says so. What the review did not weigh
+is that the notice fires at the exact moment the reader loses it — focus has
+already left for the other program by the time it appears, so the one
+sentence explaining the hand-over is easy to never see. A label that says what
+is about to happen ("Print in Preview…" rather than "Print…") would carry the
+weight the notice currently cannot; not yet done.
+
 ### 1.3 The page number is the wrong number
 
 There is no `getPageLabels` anywhere in `src/`. The toolbar and the go-to field
@@ -147,6 +155,19 @@ keeping text layers (not canvases — they are cheap by comparison) for a much
 wider band than the canvases, so a selection has something to anchor to.
 Whatever is chosen, the current silent truncation is the bad case: text
 disappears from the clipboard without anything saying so.
+
+**Update.** The cheap mitigation was built and then taken back out. `⌘A`
+(`selectThisPage`) is real and stays: it selects a mounted page's own text
+layer by DOM range, says how far a selection goes and why, and a reader can
+copy that selection normally. What did not survive is the separate one-click
+"Copy this page's text" menu item, which went through pdf.js's own
+`getTextContent` on a page proxy rather than the rendered text layer — and
+wrapped any failure of that call, `catch { return "" }`, in the same message
+as a page that genuinely has no text. On at least one real document it
+reported exactly that for a page with several kilobytes of extractable text.
+A button whose failure mode is indistinguishable from its correct answer is
+worse than not having it, so it is gone rather than fixed; a real fix, if
+it happens, is still one of the two mitigations above, done properly.
 
 ---
 

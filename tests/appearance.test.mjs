@@ -6,7 +6,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { openApp } from "../scripts/ui-harness.mjs";
+import { MOD, openApp } from "../scripts/ui-harness.mjs";
 
 /** The theme in force, read the way a reader would read it: the ticked entry
     in the Theme menu. Reading the setting instead would say nothing on the
@@ -77,7 +77,10 @@ test("choosing a theme that disagrees with the machine stops the following", asy
   try {
     // ⌘D in the daytime: the reader has overruled the system, and leaving the
     // switch on would let the next thing the system did take it back off them.
-    await app.press(process.platform === "darwin" ? "Meta+KeyD" : "Control+KeyD");
+    // `MOD`, never a hard-coded Meta: the app takes its whole scheme from the
+    // platform, so a test that names one passes here and does nothing at all
+    // under `HYLOPDF_PLATFORM=other` or on CI.
+    await app.press(`${MOD}+KeyD`);
     await app.page.waitForTimeout(300);
     assert.equal(await themeOf(app), "Hylo Dark");
     const following = await app.page.evaluate(

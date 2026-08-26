@@ -616,7 +616,10 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
 function keyboardPage(pane: HTMLElement): void {
   pane.append(
     ui.text("title", "Keyboard"),
-    ui.text("lede", "Everything the app listens for, in one place."),
+    ui.text(
+      "lede",
+      `Everything the app listens for, in one place. ${shortcut("F1 or ⌘/", "F1 or Ctrl+/")} brings you back here.`,
+    ),
   );
 
   const groups: [string, [string, string][]][] = [
@@ -628,6 +631,7 @@ function keyboardPage(pane: HTMLElement): void {
         ["Next match, previous match", shortcut("⌘G, ⌘⇧G", "Ctrl+G, Ctrl+Shift+G")],
         ["Close search", "Escape"],
         ["Settings", shortcut("⌘,", "Ctrl+,")],
+        ["This list", shortcut("F1, or ⌘/", "F1, or Ctrl+/")],
       ],
     ],
     [
@@ -655,6 +659,15 @@ function keyboardPage(pane: HTMLElement): void {
         ["Toolbar", shortcut("⌘T", "Ctrl+T")],
         ["Full screen", shortcut("⌘⇧F, ⌃⌘F", "F11, Ctrl+Shift+F")],
         ["Leave full screen", "Escape"],
+      ],
+    ],
+    [
+      "Without the keyboard",
+      [
+        ["Zoom", "Pinch, or " + shortcut("⌘ and scroll", "Ctrl and scroll")],
+        ["Bring the toolbar back when it is hidden", "The top edge of the window"],
+        ["Open something else you have been reading", "The document's name in the bar"],
+        ["Back, forward", "The side buttons on a mouse"],
       ],
     ],
   ];

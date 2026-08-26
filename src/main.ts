@@ -1711,6 +1711,15 @@ class App {
         showSettingsWindow(this);
         return;
       }
+      // The list of everything the app listens for was three clicks behind a
+      // cog, which is a strange place to keep the answer to "what can this
+      // thing do". F1 is where every application puts it, and ⌘/ is where the
+      // ones without an F1 key put it.
+      if (event.key === "F1" || (meta && event.key === "/")) {
+        event.preventDefault();
+        showSettingsWindow(this, { page: "keyboard" });
+        return;
+      }
       if (meta && event.key.toLowerCase() === "o") {
         event.preventDefault();
         void this.openDialog();

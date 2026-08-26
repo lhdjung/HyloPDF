@@ -199,3 +199,13 @@ test("a stepper takes a typed number, by click and keyboard alone", async () => 
 
   await closeSettings();
 });
+
+test("F1 opens the list of what the app listens for", async () => {
+  await app.page.keyboard.press("F1");
+  await app.page.waitForSelector("#windows .window", { timeout: 10_000 });
+  const title = await app.page.evaluate(
+    () => document.querySelector("#windows .pane-title")?.textContent ?? null,
+  );
+  assert.equal(title, "Keyboard");
+  await closeSettings();
+});

@@ -46,6 +46,7 @@ The shortcuts below use ⌘ on macOS and Ctrl elsewhere.
 | ⌘, | Settings |
 | F1, or ⌘/ | Every shortcut, in one list |
 | ⌘P | Hand the document to a program that prints |
+| ⌘A | Select the text of the page you are on |
 | ⌘F | Search this document |
 | Enter / ⇧Enter | Next / previous match, from the search field |
 | ⌘G / ⌘⇧G | Next / previous match, from anywhere |

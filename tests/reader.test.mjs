@@ -712,6 +712,33 @@ test("a colour changed in the editor reaches the page it recolours", async () =>
   }
 });
 
+test("select all selects a page, and says so", async () => {
+  await app.press("Home");
+  await app.page.waitForTimeout(400);
+  await app.page.keyboard.press(`${MOD}+KeyA`);
+  await app.page.waitForTimeout(300);
+
+  const selection = await app.page.evaluate(() => {
+    const range = window.getSelection();
+    const text = range?.toString() ?? "";
+    const node = range?.anchorNode;
+    const element = node instanceof Element ? node : node?.parentElement;
+    return { text, inPage: Boolean(element?.closest("#pages .page")) };
+  });
+  assert.ok(selection.text.includes("Page 1."), `selected ${JSON.stringify(selection.text.slice(0, 40))}`);
+  // And nothing outside the document: the whole complaint about the browser's
+  // own select-all here is that it takes the contents panel with it.
+  assert.ok(!selection.text.includes("Contents"), "the interface came with it");
+  assert.ok(selection.inPage);
+
+  const said = await app.page.evaluate(
+    () => document.getElementById("notice")?.textContent ?? "",
+  );
+  assert.match(said, /one page at a time/);
+
+  await app.page.evaluate(() => window.getSelection()?.removeAllRanges());
+});
+
 test("printing says what it can and cannot do", async () => {
   // ⌘P did nothing at all, which reads as a broken app rather than as a
   // missing feature. In the browser fallback the hand-over is the browser's

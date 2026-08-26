@@ -975,6 +975,32 @@ class App {
     if (reopening && el.findInput.value.trim().length > 0) void this.runSearch();
   }
 
+  /** Select the page being read, and say what was selected — the reader asked
+      for everything, and this is not everything. */
+  private selectThisPage(): void {
+    const page = this.viewer.pageNumber;
+    if (!this.viewer.selectPage(page)) {
+      ui.notice("There is no text on this page to select.");
+      return;
+    }
+    ui.notice(
+      `Selected page ${this.viewer.label(page)}. HyloPDF holds one page at a time, so that is as far as a selection goes.`,
+    );
+  }
+
+  /** The words on the page being read, on the clipboard. What a selection
+      cannot do — the page below is not in the document until it has been
+      scrolled to — this can. */
+  private async copyPageText(): Promise<void> {
+    const page = this.viewer.pageNumber;
+    const text = await this.viewer.textOf(page);
+    if (!text.trim()) {
+      ui.notice("There is no text on this page to copy.");
+      return;
+    }
+    await this.copyToClipboard(text, `Copied the text of page ${this.viewer.label(page)}.`);
+  }
+
   /** Take the margins off the page, or put them back. */
   setTrimMargins(on: boolean): void {
     this.set("trim_margins", on);
@@ -1301,6 +1327,14 @@ class App {
           onSelect: () => {
             close();
             void revealDocument(path).catch((error) => ui.notice(messageOf(error)));
+          },
+        }),
+        ui.menuItem({
+          label: "Copy this page's text",
+          icon: "copy",
+          onSelect: () => {
+            close();
+            void this.copyPageText();
           },
         }),
         ui.menuItem({
@@ -1853,6 +1887,17 @@ class App {
       // missing feature — and printing is not a power tool, it is what people
       // do with a boarding pass. `print` says what this app can and cannot do
       // and hands the document to something that can.
+      // ⌘A had nothing good to select: only the pages near the window are in
+      // the DOM, so "everything" was a page and a half of document plus the
+      // contents panel and whatever else was on screen. A page is a unit
+      // somebody means, and it is the largest one this app can honestly
+      // offer.
+      if (meta && event.key.toLowerCase() === "a") {
+        if (this.viewer.isEmpty) return;
+        event.preventDefault();
+        this.selectThisPage();
+        return;
+      }
       if (meta && event.key.toLowerCase() === "p") {
         event.preventDefault();
         void this.print();

@@ -1505,6 +1505,56 @@ export class Viewer {
     });
   }
 
+  /* ----------------------------------------------------------- the text */
+
+  /**
+   * Select everything on one page.
+   *
+   * ⌘A in a document like this one has nothing good to select. Only the pages
+   * near the window are in the DOM, so "everything" is a page and a half of
+   * document plus whatever else is on screen — the contents panel, the names
+   * in a menu — and the reader who presses it and then ⌘C gets a fragment
+   * they did not ask for and cannot see the edges of.
+   *
+   * A page is a unit somebody means. It is also the largest one this app can
+   * honestly offer, for the same reason: the text of the page below is not
+   * there to be selected until it has been mounted.
+   */
+  selectPage(page: number): boolean {
+    const slot = this.slots.get(page - 1);
+    if (!slot?.textEl || slot.textEl.childElementCount === 0) return false;
+    const range = document.createRange();
+    range.selectNodeContents(slot.textEl);
+    const selection = window.getSelection();
+    if (!selection) return false;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  }
+
+  /** The words on a page, in reading order, as the document has them. Line
+      breaks where the document says there is one. */
+  async textOf(page: number): Promise<string> {
+    const doc = this.doc;
+    if (!doc || page < 1 || page > this.pageCount) return "";
+    let proxy: PDFPageProxy | null = null;
+    try {
+      proxy = await this.page(page - 1);
+      const content = await proxy.getTextContent();
+      let out = "";
+      for (const item of content.items) {
+        if (!("str" in item)) continue;
+        out += item.str;
+        if (item.hasEOL) out += "\n";
+      }
+      return out;
+    } catch {
+      return "";
+    } finally {
+      if (proxy && !this.isMounted(page)) proxy.cleanup();
+    }
+  }
+
   /* ------------------------------------------------------------ metadata */
 
   /**

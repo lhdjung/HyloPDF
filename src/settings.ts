@@ -32,6 +32,8 @@ export interface SettingsHost {
   toggleToolbar(show: boolean): void;
   toggleSidebar(show: boolean): void;
   toggleFullscreen(on: boolean): Promise<void>;
+  readonly presenting: boolean;
+  togglePresentation(on: boolean): void;
   setFit(mode: FitMode, zoom?: number): void;
   setScrollMode(mode: Settings["scroll_mode"]): void;
   setSpread(spread: SpreadMode): void;
@@ -625,7 +627,12 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
     ui.field(
       "Full screen",
       ui.toggle(s.fullscreen, (on) => void host.toggleFullscreen(on)),
-      `The window fills the screen. ${shortcut("⌘⇧F", "F11")} — and Escape leaves again. For the document and nothing else, turn the toolbar off as well.`,
+      `The window fills the screen. ${shortcut("⌘⇧F", "F11")} — and Escape leaves again.`,
+    ),
+    ui.field(
+      "Presenting",
+      ui.toggle(host.presenting, (on) => host.togglePresentation(on)),
+      `Full screen with nothing else on it: the two switches above, thrown together, and Escape puts both back. ${shortcut("⌘⇧P", "Ctrl+Shift+P")}`,
     ),
   );
 
@@ -680,7 +687,8 @@ function keyboardPage(pane: HTMLElement): void {
         ["Contents sidebar", shortcut("⌘B", "Ctrl+B")],
         ["Toolbar", shortcut("⌘T", "Ctrl+T")],
         ["Full screen", shortcut("⌘⇧F, ⌃⌘F", "F11, Ctrl+Shift+F")],
-        ["Leave full screen", "Escape"],
+        ["Presenting — full screen, nothing else on it", shortcut("⌘⇧P", "Ctrl+Shift+P")],
+        ["Leave full screen, or stop presenting", "Escape"],
       ],
     ],
     [

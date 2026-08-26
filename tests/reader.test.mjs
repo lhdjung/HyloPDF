@@ -793,6 +793,36 @@ test("select all selects a page, and says so", async () => {
   await app.page.evaluate(() => window.getSelection()?.removeAllRanges());
 });
 
+test("presenting is one switch, and Escape is the way back", async () => {
+  // Full screen is the window's, and once a browser is in it Escape belongs
+  // to the browser — the key never reaches the page at all, which is why this
+  // presses the switch again instead. The half of presenting that does live
+  // in the page is the toolbar, and the point of it is that one gesture moves
+  // both and one gesture puts both back.
+  const chrome = () =>
+    app.page.evaluate(() => ({
+      toolbar: document.getElementById("shell").dataset.toolbar,
+      full: document.getElementById("shell").dataset.fullscreen,
+      said: document.getElementById("notice").textContent,
+    }));
+  assert.equal((await chrome()).toolbar, "shown");
+
+  await app.page.keyboard.press(`${MOD}+Shift+KeyP`);
+  await app.page.waitForTimeout(500);
+  const presenting = await chrome();
+  assert.equal(presenting.toolbar, "hidden");
+  assert.equal(presenting.full, "true");
+  // One gesture, one sentence: the two switches underneath say nothing of
+  // their own while this is on.
+  assert.match(presenting.said, /^Presenting\./);
+
+  await app.page.keyboard.press(`${MOD}+Shift+KeyP`);
+  await app.page.waitForTimeout(500);
+  const back = await chrome();
+  assert.equal(back.toolbar, "shown", "the toolbar did not come back");
+  assert.equal(back.full, "false");
+});
+
 test("printing says what it can and cannot do", async () => {
   // ⌘P did nothing at all, which reads as a broken app rather than as a
   // missing feature. In the browser fallback the hand-over is the browser's

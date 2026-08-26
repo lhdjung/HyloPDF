@@ -170,6 +170,10 @@ class App {
   private searchPending = false;
   /** Whether the open document numbers its own pages, as last shown. */
   private labelled = false;
+  /** Whether the reader is presenting, and what the toolbar was doing before
+      they were. See `togglePresentation`. */
+  presenting = false;
+  private toolbarBeforePresenting = true;
   /** Said once per document: there is no text in this one to search. */
   private saidTextless = false;
 
@@ -669,7 +673,7 @@ class App {
     this.viewer.relayout();
     // Say once how to undo it. The shortcut is only any use to someone who
     // has heard it, and this is the moment they are listening.
-    if (!show) {
+    if (!show && !this.presenting) {
       ui.notice(
         `Toolbar hidden. ${isMac ? "⌘T" : "Ctrl+T"}, or the top edge of the window, brings it back.`,
       );
@@ -735,7 +739,10 @@ class App {
     this.set("fullscreen", on);
     this.applyChrome();
     await setFullscreen(on);
-    if (on && !this.settings.show_toolbar) {
+    // Presenting says its own sentence, and says it about both switches at
+    // once. Two notices for one gesture, the second overwriting the first, is
+    // how the reader learns nothing.
+    if (on && !this.settings.show_toolbar && !this.presenting) {
       ui.notice(`Full screen. Escape or ${FULLSCREEN_KEYS} comes back.`);
     }
   }
@@ -1002,6 +1009,35 @@ class App {
       return;
     }
     await this.copyToClipboard(text, `Copied the text of page ${this.viewer.label(page)}.`);
+  }
+
+  /**
+   * The document and nothing else.
+   *
+   * Full screen and a hidden toolbar are two switches that this app has had
+   * all along, and nobody assembles two switches to give a talk. This is the
+   * one item that does both, and the Escape that undoes both.
+   *
+   * It deliberately leaves the page progression alone. Continuous scrolling
+   * is a strong default in this app and a mode nothing may change by
+   * accident — a reader who wants one page at a time while presenting has
+   * already said so, and one who has not did not mean to.
+   */
+  togglePresentation(on = !this.presenting): void {
+    if (on === this.presenting) return;
+    if (on) {
+      this.presenting = true;
+      this.toolbarBeforePresenting = this.settings.show_toolbar;
+      void this.toggleFullscreen(true);
+      this.toggleToolbar(false);
+      ui.notice(
+        `Presenting. Escape gives the app back, or ${isMac ? "⌘⇧P" : "Ctrl+Shift+P"}.`,
+      );
+      return;
+    }
+    this.presenting = false;
+    void this.toggleFullscreen(false);
+    if (this.toolbarBeforePresenting) this.toggleToolbar(true);
   }
 
   /** One page across, or two. */
@@ -1613,6 +1649,14 @@ class App {
             ui.toggle(this.settings.fullscreen, (on) => void this.toggleFullscreen(on)),
             FULLSCREEN_KEYS,
           ),
+          ui.row(
+            "Presenting",
+            ui.toggle(this.presenting, (on) => {
+              this.togglePresentation(on);
+              if (on) close();
+            }),
+            "The document and nothing else.",
+          ),
         );
 
         menu.append(ui.divider(), ui.section("Reading"));
@@ -1951,7 +1995,12 @@ class App {
         this.selectThisPage();
         return;
       }
-      if (meta && event.key.toLowerCase() === "p") {
+      if (meta && event.shiftKey && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        this.togglePresentation();
+        return;
+      }
+      if (meta && !event.shiftKey && event.key.toLowerCase() === "p") {
         event.preventDefault();
         void this.print();
         return;
@@ -2069,6 +2118,7 @@ class App {
         // AppKit, which drops the window out of full screen behind our back.
         event.preventDefault();
         if (!el.findBar.hidden) this.closeFind();
+        else if (this.presenting) this.togglePresentation(false);
         else if (this.settings.fullscreen) void this.toggleFullscreen(false);
         return;
       }

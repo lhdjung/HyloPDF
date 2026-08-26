@@ -58,6 +58,7 @@ The shortcuts below use ⌘ on macOS and Ctrl elsewhere.
 | ⌘1 / ⌘2 | Actual size, fit the whole page |
 | ⌘R / ⌘L | Turn the page right, turn it left |
 | ⌘⇧F, or ⌃⌘F on macOS, or F11 | Full screen |
+| ⌘⇧P | Presenting: full screen with nothing else on it |
 | Escape | Close the search bar, or leave full screen |
 
 Moving around a document:

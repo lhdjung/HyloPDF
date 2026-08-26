@@ -61,7 +61,7 @@ src-tauri/          Rust: settings, themes, reading history, the window
   src/lib.rs        every #[tauri::command], window restore, file associations
   src/settings.rs   settings.toml — one flat table, one key written at a time
   src/theme.rs      one TOML file per theme, built-ins installed on first run
-  src/library.rs    library.toml — where you were in each document
+  src/library.rs    library.toml — where you were, what was open, what you marked
   src/watch.rs      the themes directory and the open document, watched
   build.rs          the shipped theme table, generated from themes/ and checked
   themes/*.toml     the fourteen packaged themes, embedded with include_str!
@@ -76,6 +76,14 @@ tests/              node --test; `npm test` starts a dev server for them
   password.test.mjs an encrypted document: asking, refusing, and giving up
   seams.test.mjs    the two seams the architecture rests on, by grep
   settings.test.mjs the settings table, against its two other copies
+  labels.test.mjs   a book that numbers its own pages i, ii, iii, then 1
+  appearance.test.mjs  following the machine's light and dark
+  trim.test.mjs     margins measured off a sample and taken away
+  spread.test.mjs   two pages side by side, and the cover on its own
+  marks.test.mjs    a pin in a page, and the same pin taken out
+  notes.test.mjs    the notes a document already carries, made readable
+  document.test.mjs what a document says about itself
+  notext.test.mjs   a scan with nothing in it to search
   helpers.mjs       compiling a .ts module to reach what it does not export
   fixtures/         PDFs are generated, not committed
 
@@ -84,7 +92,7 @@ src/                TypeScript: the interface
   viewer.ts         layout, rendering, scrolling, links   ← the heart of it
   themes.ts         theme → CSS variables, and the page recolouring itself
   search.ts         the full-document index, the fold, and match stepping
-  sidebar.ts        contents and thumbnails
+  sidebar.ts        contents, marks, thumbnails, search results
   settings.ts       the settings window
   ui.ts             menus, switches, the modal window, the notice line
   api.ts            the only file that talks to Rust
@@ -213,13 +221,20 @@ viewport. Charging it for the margin left forty pixels of ground either side
 of a page that had supposedly reached both edges. `PAD_Y` is not conditional,
 because there is always something above a page.
 
+*The layout is rows, and most documents are rows of one.* `rows()` groups the
+pages: one each, or two side by side, or two with the first page alone — which
+is how a book falls open. Everything downstream works in rows, so single pages
+are the same code rather than a special case. The gap between two pages of a
+spread comes off the room *before* the scale is worked out, because it is a
+distance on the screen and not part of the paper; scaled along with the page it
+left the pair off centre.
+
 *Landing on a page means landing on the space above it.* `scrollTo` with an
-offset of zero backs off by the distance from the bottom of the page before to
-the top of this one — read off the boxes rather than taken from a constant,
-because that distance is the gap between pages in the middle of a document and
-`PAD_Y` at the start of it, and they are not the same number. Using one for
-the other left a strip of the previous page showing above a page just turned
-to.
+offset of zero backs off by the empty space directly above the page — the gap
+from the row before, or `PAD_Y` at the start of the document, and they are not
+the same number. That distance is recorded on the box at layout time. It used
+to be read back off the page before, which is right until two pages stand side
+by side and the box before this one is its neighbour, sharing its top exactly.
 
 *The first page is measured; the rest are estimated and then corrected.* Page
 one's size stands in for every page, the layout is built from it, and the app
@@ -245,8 +260,8 @@ the same for the canvas, by resizing it to nothing: dropping the reference
 makes it collectable, not collected.
 
 *A rendered page is identified by `keyFor()` — its scale, the screen's density,
-and its theme.* If the key still matches, the canvas is reused; change any of
-them and the page repaints. The density is in there because it is half of how
+its rotation, its crop and its theme.* If the key still matches, the canvas is
+reused; change any of them and the page repaints. The density is in there because it is half of how
 many pixels the canvas gets, and `watchDensity` re-arms a `matchMedia` query so
 a window dragged between screens of different densities actually hears about
 it. This is the whole invalidation story.
@@ -359,6 +374,27 @@ that is where a fourth leak would hide next.
 
 If and only if you need to know more about app memory, see changes in:
 645032673fcc51947c4164a360177a666d6b5fa9
+
+*Only the part of the page being shown is drawn.* With the margins trimmed,
+`offsetX`/`offsetY` slide the page under a canvas that is the size of the crop
+— so a trimmed document costs less to draw than an untrimmed one, and nothing
+is rendered that will be clipped. What cannot follow the canvas is anything
+measured in whole pages: pdf.js lays its spans out as percentages of the page,
+and a link rectangle is a fraction of one, so the text layer and the link
+layer stay a whole page wide and hang out past the box, which `.page` was
+already clipping. `placeOverlay` is that, in one place — and it puts the
+styles back rather than computing zeros when there is no crop, so an untrimmed
+page keeps pdf.js's own device-pixel rounding.
+
+*Where the ink is, is measured over a sample and not per page.* A per-page
+crop changes the scale from page to page, and in continuous scrolling that is
+a document that breathes as you read it. `measureCrop` draws eight pages small
+— first, last, and evenly spaced, because the shapes that vary are the front
+matter, the plates and the index — reads them for anything that is not paper,
+takes the union, pads it, and refuses to remove more than a third of any one
+side. The probe is drawn on white rather than on the theme's paper: this is a
+question about the document, and the answer must not move when the reader
+changes theme.
 
 ## Things that will bite
 
@@ -512,6 +548,17 @@ that actually happens.
 fields and live text selections, because it offers to reload the app (which
 closes the document) and to open the inspector.
 
+**`library.toml` has plain keys and tables, and TOML puts the plain keys
+first.** `Library.open` is serialised before `file`, and `Entry.marks` after
+every other field of an entry, for the same reason in both directions: a plain
+key written after an array of tables lands *inside* the last table of it and
+comes back empty. Two tests say so, because nothing else would.
+
+**A page's number is not its position in the file.** `getPageLabels` is what a
+book's front matter is numbered by, and the toolbar, the pill, the thumbnails
+and the go-to field all speak in labels where a document has them. The library
+still records positions — a label is a name, and names repeat.
+
 **Escape and menus.** A popover registers its own capturing key handler, and so
 does the modal window; the app-level shortcut handler bows out while either is
 open. Clicking the button that opened a menu closes it — `showPopover` tracks
@@ -619,6 +666,19 @@ back for the next four. The harness exports `MOD` for this, and
 to `navigator.platform` too, so the app and the test agree about which machine
 they are on. `HYLOPDF_PLATFORM=other npm test` is the cheap way to find out
 what Linux will say, and it is worth running before touching a shortcut.
+
+**The harness can pretend the machine is dark.** `openApp({ appearance:
+"dark" })` sets the context's colour scheme and `app.setAppearance("light")`
+changes it mid-run, which is what the app follows unless the reader has said
+otherwise. It defaults to light, so a test that wants a dark theme regardless
+has to say `follow_system_theme: false` — one already did not, and took the
+theme editor's test down with it.
+
+**Two things about full screen cannot be tested here at all.** It is the
+window's, not the page's; and once a browser is in it, Escape belongs to the
+browser — the key never reaches the page. So "Escape leaves full screen" and
+everything hanging off it is a real-app check, and the tests that touch
+presenting press the switch again instead.
 
 **`HYLOPDF_NO_BLEND=1` reads the whole app down the pixel fallback.** It refuses
 the non-separable blend modes the way an engine without them does — silently,
@@ -901,10 +961,15 @@ recompiled by LaTeX under the reader's feet.
 *Keybindings as a file.* Parsed and validated in Rust the way themes are,
 dispatched in TypeScript. Config in, no traffic afterwards.
 
-*Whatever comes next that has to be remembered* — annotations, bookmarks, a
-thumbnail cache, per-document settings, printing, export. These belong beside
-`library.rs` for the same reason it does, and each is a new door rather than a
-moved one.
+*Whatever comes next that has to be remembered* — annotations, a thumbnail
+cache, per-document settings, export. These belong beside `library.rs` for the
+same reason it does, and each is a new door rather than a moved one. Four have
+been built since this was written and all four went that way: what was open
+last (`set_open_document`), the name a document gives itself
+(`set_document_title`), the pages the reader has marked (`toggle_mark`), and
+handing a document to a program that prints (`print_document`). Every one of
+them is a filename or a page number crossing the bridge, which is the rule
+above doing its job.
 
 More Rust is not itself the goal; the brief asks for small, fast and calm, and
 the seam that serves those is the one the app already has — Rust owns what is

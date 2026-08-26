@@ -1652,29 +1652,6 @@ export class Viewer {
     return true;
   }
 
-  /** The words on a page, in reading order, as the document has them. Line
-      breaks where the document says there is one. */
-  async textOf(page: number): Promise<string> {
-    const doc = this.doc;
-    if (!doc || page < 1 || page > this.pageCount) return "";
-    let proxy: PDFPageProxy | null = null;
-    try {
-      proxy = await this.page(page - 1);
-      const content = await proxy.getTextContent();
-      let out = "";
-      for (const item of content.items) {
-        if (!("str" in item)) continue;
-        out += item.str;
-        if (item.hasEOL) out += "\n";
-      }
-      return out;
-    } catch {
-      return "";
-    } finally {
-      if (proxy && !this.isMounted(page)) proxy.cleanup();
-    }
-  }
-
   /* ------------------------------------------------------------ metadata */
 
   /**

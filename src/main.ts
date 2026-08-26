@@ -1104,19 +1104,6 @@ class App {
     await this.copyToClipboard(`“${quoted}” — ${where}`, `Copied, with ${where}.`);
   }
 
-  /** The words on the page being read, on the clipboard. What a selection
-      cannot do — the page below is not in the document until it has been
-      scrolled to — this can. */
-  private async copyPageText(): Promise<void> {
-    const page = this.viewer.pageNumber;
-    const text = await this.viewer.textOf(page);
-    if (!text.trim()) {
-      ui.notice("There is no text on this page to copy.");
-      return;
-    }
-    await this.copyToClipboard(text, `Copied the text of page ${this.viewer.label(page)}.`);
-  }
-
   /**
    * The document and nothing else.
    *
@@ -1504,14 +1491,6 @@ class App {
           onSelect: () => {
             close();
             void this.toggleMark();
-          },
-        }),
-        ui.menuItem({
-          label: "Copy this page's text",
-          icon: "copy",
-          onSelect: () => {
-            close();
-            void this.copyPageText();
           },
         }),
         ui.menuItem({

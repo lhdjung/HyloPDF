@@ -5,6 +5,8 @@
  * the interface can never disagree. Settings are written one key at a time;
  * nothing here ever saves the whole blob. */
 
+import type { PDFDocumentProxy } from "pdfjs-dist/types/src/display/api";
+
 import {
   type Bootstrap,
   type LibraryEntry,
@@ -379,6 +381,7 @@ class App {
       this.search.reset();
       this.saidTextless = false;
       void this.sidebar.setDocument(doc, this.theme);
+      void this.reportFormFields(doc);
 
       const start = this.settings.remember_position ? opened : { page: 1, offset: 0 };
       this.viewer.scrollTo(start.page, start.offset);
@@ -404,6 +407,28 @@ class App {
       // would be page one of nothing.
       this.clearDocument();
       ui.notice(messageOf(error));
+    }
+  }
+
+  /** A form that cannot be filled in should say so.
+   *
+   * pdf.js paints a widget's appearance stream into the page, so a form
+   * arrives looking exactly as it does everywhere else — the boxes are there,
+   * and so is anything already typed into them. What is not there is any way
+   * to type: that needs an interactive annotation layer, which this app does
+   * not have. So the fields look live, click like nothing, and leave the
+   * reader wondering which half is broken. Said once, when the document
+   * opens, rather than on the click — by then they have already tried. */
+  private async reportFormFields(doc: PDFDocumentProxy): Promise<void> {
+    try {
+      const fields = await doc.getFieldObjects();
+      if (this.viewer.document !== doc) return;
+      if (!fields || Object.keys(fields).length === 0) return;
+      ui.notice(
+        "This document has form fields. HyloPDF shows what is in them but cannot fill them in.",
+      );
+    } catch {
+      // A document that cannot say whether it has fields is not worth a word.
     }
   }
 

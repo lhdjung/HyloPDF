@@ -48,7 +48,11 @@ test("viewer.ts is the only file that imports pdf.js for rendering", () => {
   const offenders = sources
     .filter(({ name }) => name !== "viewer.ts")
     .filter(({ body }) =>
-      [...body.matchAll(/^\s*import\s+(?!type\b)([\s\S]*?)from\s+["'](pdfjs-dist[^"']*)["']/gm)]
+      // `[^;]` rather than `[\s\S]`: a statement ends at its semicolon, and a
+      // pattern allowed past one starts at some earlier import and swallows
+      // everything up to the pdf.js line — so a file whose type import is not
+      // its first import was reported as importing pdf.js itself.
+      [...body.matchAll(/^\s*import\s+(?!type\b)([^;]*?)from\s+["'](pdfjs-dist[^"']*)["']/gm)]
         .some(([, names]) => !names.trim().startsWith("type")),
     )
     .map(({ name }) => name);

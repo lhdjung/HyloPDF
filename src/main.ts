@@ -32,6 +32,7 @@ import {
   openDocument,
   openExternal,
   pickPdf,
+  printDocument,
   quitApp,
   registerBrowserFile,
   rememberPosition,
@@ -44,6 +45,7 @@ import {
   setSettings,
   setTitlebarButtons,
   setWindowTitle,
+  systemViewerName,
   signalReady,
   log,
 } from "./api";
@@ -979,6 +981,26 @@ class App {
     this.sidebar.rotated();
   }
 
+  /**
+   * Print, by handing the document to something that prints.
+   *
+   * HyloPDF does not print, and the honest thing is to say so rather than to
+   * leave ⌘P inert — `print_document` in lib.rs has the reasoning, which
+   * comes down to a print dialog this app does not have and the fact that
+   * every way of skipping one ends with four hundred pages coming out of a
+   * printer nobody chose.
+   */
+  async print(): Promise<void> {
+    if (!this.path) return;
+    const where = systemViewerName;
+    try {
+      await printDocument(this.path);
+      ui.notice(`HyloPDF does not print. Opened in ${where} — print it from there.`);
+    } catch (error) {
+      ui.notice(messageOf(error));
+    }
+  }
+
   /* ------------------------------------------------------------- history */
 
   /** Back to where the last jump started.
@@ -1272,6 +1294,15 @@ class App {
           onSelect: () => {
             close();
             void revealDocument(path).catch((error) => ui.notice(messageOf(error)));
+          },
+        }),
+        ui.menuItem({
+          label: "Print…",
+          icon: "print",
+          note: isMac ? "⌘P" : "Ctrl+P",
+          onSelect: () => {
+            close();
+            void this.print();
           },
         }),
         ui.menuItem({
@@ -1804,6 +1835,15 @@ class App {
       if (meta && event.key.toLowerCase() === "o") {
         event.preventDefault();
         void this.openDialog();
+        return;
+      }
+      // ⌘P did nothing at all, which reads as a broken app rather than as a
+      // missing feature — and printing is not a power tool, it is what people
+      // do with a boarding pass. `print` says what this app can and cannot do
+      // and hands the document to something that can.
+      if (meta && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        void this.print();
         return;
       }
       // Full screen is settled before search, because both are on F: ⌘⇧F here

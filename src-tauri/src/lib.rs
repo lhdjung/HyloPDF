@@ -342,6 +342,57 @@ async fn set_open_document(paths: State<'_, Paths>, path: Option<String>) -> Res
     library::set_open(&paths.config, path.as_deref())
 }
 
+/// Hand a document to whatever this system prints PDFs with.
+///
+/// HyloPDF does not print. Everything it would take to print well — a page
+/// range, a paper size, a preview, a printer — is a dialog this app does not
+/// have, and the routes that avoid writing one are all worse than they sound:
+/// the webview on macOS answers `window.print()` by doing nothing at all, and
+/// `lpr` and its cousins print immediately, to the default printer, with no
+/// dialog and no way back. Sending four hundred pages to a printer nobody
+/// chose is the one failure here that costs paper.
+///
+/// So this hands the file to a program that does print, and says so. On macOS
+/// that is Preview by name rather than "the default application", because
+/// once HyloPDF is installed the default application for a PDF may well be
+/// HyloPDF, and handing it to ourselves is a loop.
+#[tauri::command]
+async fn print_document(path: String) -> Result<(), String> {
+    let file = PathBuf::from(&path);
+    if !file.exists() {
+        return Err(format!("{} is no longer there.", file_name(&path)));
+    }
+
+    #[cfg(target_os = "macos")]
+    let command = {
+        let mut c = std::process::Command::new("open");
+        c.arg("-a").arg("Preview").arg(&file);
+        c
+    };
+
+    #[cfg(target_os = "windows")]
+    let command = {
+        // The default handler's own print verb, and the path as one argument
+        // rather than through a shell.
+        let mut c = std::process::Command::new("rundll32.exe");
+        c.arg("shell32.dll,ShellExec_RunDLL").arg(&file);
+        c
+    };
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&file);
+        c
+    };
+
+    match wait_for(command).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Nothing here knows how to print that.".into()),
+        Err(e) => Err(format!("Could not hand it over: {e}")),
+    }
+}
+
 /// The title the document gives itself, which the frontend reads out of the
 /// file and this remembers for the recently-read list.
 #[tauri::command]
@@ -695,6 +746,7 @@ pub fn run() {
             forget_document,
             open_link,
             reveal_document,
+            print_document,
             ready,
             set_titlebar_buttons,
             log,

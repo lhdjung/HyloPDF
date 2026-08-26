@@ -632,6 +632,7 @@ function keyboardPage(pane: HTMLElement): void {
         ["Close search", "Escape"],
         ["Settings", shortcut("⌘,", "Ctrl+,")],
         ["This list", shortcut("F1, or ⌘/", "F1, or Ctrl+/")],
+        ["Print — handed to a program that prints", shortcut("⌘P", "Ctrl+P")],
       ],
     ],
     [

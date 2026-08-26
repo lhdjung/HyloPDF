@@ -712,6 +712,29 @@ test("a colour changed in the editor reaches the page it recolours", async () =>
   }
 });
 
+test("printing says what it can and cannot do", async () => {
+  // ⌘P did nothing at all, which reads as a broken app rather than as a
+  // missing feature. In the browser fallback the hand-over is the browser's
+  // own print, so what is checked here is that the key is answered and that
+  // the sentence says where the document went.
+  await app.page.evaluate(() => {
+    window.print = () => {};
+  });
+  await app.page.keyboard.press(`${MOD}+KeyP`);
+  await app.page
+    .waitForFunction(
+      () => !document.getElementById("notice")?.hidden,
+      null,
+      { timeout: 10_000, polling: 50 },
+    )
+    .catch(() => {});
+  const said = await app.page.evaluate(
+    () => document.getElementById("notice")?.textContent ?? "",
+  );
+  assert.match(said, /HyloPDF does not print/);
+  assert.match(said, /print it from there/);
+});
+
 test("the way out is on the start screen and nowhere else", async () => {
   const seen = () =>
     app.page.evaluate(() => {

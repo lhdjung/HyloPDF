@@ -317,6 +317,19 @@ export async function revealDocument(path: string): Promise<void> {
 
 /** The name of whatever shows files here, for a menu item that has to say
     where it is about to take you. */
+/** What this system prints PDFs with, by name, for the sentence that says so. */
+export const systemViewerName = isMac ? "Preview" : "your PDF viewer";
+
+/** Hand a document to a program that prints. HyloPDF does not — see
+    `print_document` in lib.rs for why not. */
+export async function printDocument(path: string): Promise<void> {
+  if (!hasBackend) {
+    window.print();
+    return;
+  }
+  await invoke("print_document", { path });
+}
+
 export const fileManagerName = isMac
   ? "Finder"
   : /win/i.test(navigator.platform || navigator.userAgent)

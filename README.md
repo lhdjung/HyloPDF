@@ -45,6 +45,7 @@ The shortcuts below use ⌘ on macOS and Ctrl elsewhere.
 | ⌘O | Open a document |
 | ⌘, | Settings |
 | F1, or ⌘/ | Every shortcut, in one list |
+| ⌘P | Hand the document to a program that prints |
 | ⌘F | Search this document |
 | Enter / ⇧Enter | Next / previous match, from the search field |
 | ⌘G / ⌘⇧G | Next / previous match, from anywhere |
@@ -72,6 +73,15 @@ Moving around a document:
 There is deliberately no shortcut for the page layout. Continuous scrolling is
 the default and switching away from it should take a decision, not a slip of
 the fingers.
+
+## What it does not do
+
+HyloPDF reads. It does not annotate, fill in forms, or print — and of those,
+printing is the one that answers back rather than doing nothing: ⌘P hands the
+document to Preview, or to whatever this system opens PDFs with, and says so.
+Printing well needs a print dialog — a page range, a paper size, a printer, a
+preview — and every shortcut around writing one ends with four hundred pages
+coming out of a printer nobody chose.
 
 ## Themes
 

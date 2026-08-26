@@ -281,6 +281,10 @@ export class Viewer {
       position in the file. See `readLabels`. */
   private labels: string[] | null = null;
 
+  /** Quarter turns clockwise on top of whatever the page says its own
+      rotation is. See `rotate`. */
+  private rotation = 0;
+
   constructor(
     private container: HTMLElement,
     private pagesEl: HTMLElement,
@@ -649,6 +653,7 @@ export class Viewer {
     this.past = [];
     this.future = [];
     this.labels = null;
+    this.rotation = 0;
   }
 
   /** A page proxy, kept only while it is worth keeping.
@@ -887,7 +892,7 @@ export class Viewer {
     const boxes: Box[] = new Array(this.sizes.length);
     let width = 0;
     for (const index of visible) {
-      const size = this.sizes[index];
+      const size = this.sizeOf(index);
       const scale = scaleFor(size);
       width = Math.max(width, Math.round(size.width * scale));
     }
@@ -895,7 +900,7 @@ export class Viewer {
 
     let top = PAD_Y;
     for (const index of visible) {
-      const size = this.sizes[index];
+      const size = this.sizeOf(index);
       const scale = scaleFor(size);
       const pageWidth = Math.round(size.width * scale);
       const pageHeight = Math.round(size.height * scale);
@@ -1170,6 +1175,52 @@ export class Viewer {
     this.jumpTo(page, 0);
   }
 
+  /* ------------------------------------------------------------ rotation */
+
+  /**
+   * Turn the document a quarter at a time.
+   *
+   * A sideways scan and a landscape table are ordinary things to meet in a
+   * document somebody else made, and every reader answers them with one
+   * keystroke. It is a way of looking rather than a property of the file, so
+   * it is not written down and does not survive the document being closed —
+   * which is also what Preview, Acrobat and Sumatra do.
+   *
+   * The rotation is added to the page's own, because a page that says it is
+   * printed sideways has already been turned once and the reader is asking
+   * for one more.
+   */
+  rotate(quarterTurns: number): void {
+    const before = this.rotation;
+    this.rotation = (((before + quarterTurns * 90) % 360) + 360) % 360;
+    if (this.rotation === before) return;
+    // Where a link is on the page is a fraction of a page that has just
+    // changed shape.
+    this.linkCache.clear();
+    this.relayout();
+  }
+
+  /** Quarter turns clockwise the reader has asked for, in degrees. */
+  get turned(): number {
+    return this.rotation;
+  }
+
+  /** How big a page is once it has been turned: the same numbers, and on a
+      quarter turn the other way round. */
+  private sizeOf(index: number): { width: number; height: number } {
+    const size = this.sizes[index];
+    if (!size) return { width: 1, height: 1 };
+    return this.rotation % 180 === 0
+      ? size
+      : { width: size.height, height: size.width };
+  }
+
+  /** The viewport a page is drawn, measured and laid out through — the one
+      place the reader's rotation is added to the page's own. */
+  private viewportFor(page: PDFPageProxy, scale: number) {
+    return page.getViewport({ scale, rotation: page.rotate + this.rotation });
+  }
+
   /* -------------------------------------------------------------- labels */
 
   /**
@@ -1345,7 +1396,7 @@ export class Viewer {
         }`
       : `plain|${theme ? linkColor(theme) : ""}`;
     const density = window.devicePixelRatio || 1;
-    return `${box ? box.scale.toFixed(3) : "0"}@${density}|${themeKey}`;
+    return `${box ? box.scale.toFixed(3) : "0"}@${density}|${this.rotation}|${themeKey}`;
   }
 
   private createSlot(index: number): Slot {
@@ -1444,7 +1495,7 @@ export class Viewer {
     const ratio = window.devicePixelRatio || 1;
     const area = box.width * box.height * ratio * ratio;
     const density = area > MAX_CANVAS_PIXELS ? ratio * Math.sqrt(MAX_CANVAS_PIXELS / area) : ratio;
-    const viewport = page.getViewport({ scale: box.scale * density });
+    const viewport = this.viewportFor(page, box.scale * density);
 
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.floor(viewport.width));
@@ -1572,7 +1623,7 @@ export class Viewer {
    * positioned spans, per visible page, per step of a zoom — and it threw away
    * whatever the reader had selected while doing it. */
   private async renderText(slot: Slot, page: PDFPageProxy, scale: number): Promise<void> {
-    const viewport = page.getViewport({ scale });
+    const viewport = this.viewportFor(page, scale);
 
     if (slot.textLayer && slot.textEl) {
       slot.textLayer.update({ viewport });
@@ -1623,7 +1674,7 @@ export class Viewer {
       annotations = []; // A document with unreadable annotations still reads fine.
     }
 
-    const view = page.getViewport({ scale: 1 });
+    const view = this.viewportFor(page, 1);
     const links: Link[] = [];
     for (const annotation of annotations) {
       if (annotation.subtype !== "Link" || !annotation.rect) continue;
@@ -1765,7 +1816,7 @@ export class Viewer {
     if (typeof top !== "number") return 0;
     try {
       const page = await this.page(index);
-      const view = page.getViewport({ scale: 1 });
+      const view = this.viewportFor(page, 1);
       const left = typeof dest[2] === "number" && kind === "XYZ" ? dest[2] : 0;
       const [, y] = view.convertToViewportPoint(left, top);
       return Math.max(0, Math.min(0.95, y / view.height));

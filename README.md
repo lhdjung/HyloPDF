@@ -51,6 +51,7 @@ The shortcuts below use ⌘ on macOS and Ctrl elsewhere.
 | ⌘B | Show or hide the contents panel |
 | ⌘T | Show or hide the toolbar |
 | ⌘+ / ⌘− / ⌘0 | Zoom in, zoom out, back to fit width |
+| ⌘R / ⌘L | Turn the page right, turn it left |
 | ⌘⇧F, or ⌃⌘F on macOS, or F11 | Full screen |
 | Escape | Close the search bar, or leave full screen |
 

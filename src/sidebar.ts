@@ -193,6 +193,11 @@ export class Sidebar {
     return Math.max(120, Math.min(THUMB_MAX, room || THUMB_PLACEHOLDER));
   }
 
+  /** The reader turned the document; the column follows. */
+  rotated(): void {
+    this.redrawVisible();
+  }
+
   /** The document turned out to number its own pages. Said once, when the
       labels arrive — which is usually a moment after the column is built. */
   relabel(): void {
@@ -286,11 +291,15 @@ export class Sidebar {
     try {
       proxy = await doc.getPage(page);
       if (this.doc !== doc || this.flights.get(page) !== flight) return;
-      const base = proxy.getViewport({ scale: 1 });
+      // Turned the way the page is turned: a thumbnail column that stays
+      // sideways under a document the reader has straightened is a column of
+      // pictures of something else.
+      const rotation = proxy.rotate + this.viewer.turned;
+      const base = proxy.getViewport({ scale: 1, rotation });
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       const width = this.thumbWidth();
       this.drawnAt = width;
-      const viewport = proxy.getViewport({ scale: (width * ratio) / base.width });
+      const viewport = proxy.getViewport({ scale: (width * ratio) / base.width, rotation });
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
       const ctx = canvas.getContext("2d", { alpha: false });

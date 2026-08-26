@@ -213,6 +213,58 @@ test("stepping back out of a jump", async (t) => {
   });
 });
 
+test("turning the document", async (t) => {
+  const shape = () =>
+    app.page.evaluate(() => {
+      const canvas = document.querySelector("#pages canvas");
+      const page = document.querySelector("#pages .page");
+      return canvas && page
+        ? { canvas: canvas.width / canvas.height, page: page.offsetWidth / page.offsetHeight }
+        : null;
+    });
+
+  // The box turns on the next layout and the bitmap on the next render, and
+  // the second is the one that takes the machine's time — so the wait is for
+  // the canvas, or the first assertion below passes on a page that is still a
+  // picture of the old orientation.
+  const settles = async (want, message) => {
+    await app.page
+      .waitForFunction(
+        (portrait) => {
+          const canvas = document.querySelector("#pages canvas");
+          const page = document.querySelector("#pages .page");
+          if (!canvas || !page) return false;
+          return (
+            portrait === canvas.width < canvas.height &&
+            portrait === page.offsetWidth < page.offsetHeight
+          );
+        },
+        want,
+        { timeout: 15_000, polling: 50 },
+      )
+      .catch(() => {});
+    const now = await shape();
+    assert.equal(now.page < 1, want, `${message} — page ratio was ${now.page.toFixed(2)}`);
+    // The bitmap has to turn with the box it is drawn into, or the page is
+    // a picture of something else stretched to fit.
+    assert.equal(now.canvas < 1, want, `${message} — canvas ratio was ${now.canvas.toFixed(2)}`);
+  };
+
+  await t.test("a page starts up the right way", async () => {
+    await settles(true, "a fresh document was not portrait");
+  });
+
+  await t.test("a quarter turn lays it on its side", async () => {
+    await app.page.keyboard.press(`${MOD}+KeyR`);
+    await settles(false, "the page did not turn");
+  });
+
+  await t.test("and turning back straightens it", async () => {
+    await app.page.keyboard.press(`${MOD}+KeyL`);
+    await settles(true, "the page did not come back");
+  });
+});
+
 test("fit width fits the width", async (t) => {
   const strips = () =>
     app.page.evaluate(() => {

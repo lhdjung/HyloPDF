@@ -941,6 +941,13 @@ class App {
     if (reopening && el.findInput.value.trim().length > 0) void this.runSearch();
   }
 
+  /** Turn the document a quarter, and turn the thumbnails with it. */
+  rotate(quarterTurns: number): void {
+    if (this.viewer.isEmpty) return;
+    this.viewer.rotate(quarterTurns);
+    this.sidebar.rotated();
+  }
+
   /* ------------------------------------------------------------- history */
 
   /** Back to where the last jump started.
@@ -1324,6 +1331,28 @@ class App {
             }),
           );
         }
+        menu.append(
+          ui.divider(),
+          ui.menuItem({
+            label: "Rotate right",
+            icon: "rotateRight",
+            note: isMac ? "⌘R" : "Ctrl+R",
+            onSelect: () => {
+              this.rotate(1);
+              close();
+            },
+          }),
+          ui.menuItem({
+            label: "Rotate left",
+            icon: "rotateLeft",
+            note: isMac ? "⌘L" : "Ctrl+L",
+            onSelect: () => {
+              this.rotate(-1);
+              close();
+            },
+          }),
+        );
+
         menu.append(ui.divider(), ui.section("Zoom"));
         // The presets below are the common answers; this is the rest of them.
         // It starts from what is actually on screen rather than from the
@@ -1725,6 +1754,19 @@ class App {
       if (meta && !event.altKey && event.key.toLowerCase() === "g") {
         event.preventDefault();
         this.search.step(event.shiftKey ? -1 : 1);
+        return;
+      }
+      // Preview's own pair, and free everywhere else. A rotation is a way of
+      // looking at a document rather than a change to it, so nothing is
+      // written down and closing the document straightens it again.
+      if (meta && !event.shiftKey && event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        this.rotate(1);
+        return;
+      }
+      if (meta && !event.shiftKey && event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        this.rotate(-1);
         return;
       }
       // Back and forward through the jumps. Two bindings, because two

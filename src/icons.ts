@@ -26,6 +26,13 @@ const paths: Record<string, string> = {
     '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5.5A1.5 1.5 0 0 0 13.5 4H5.5A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15"/>',
   fitWidth: '<path d="M4 6.5v11M20 6.5v11M8 12h8M8 12l2.5-2.5M8 12l2.5 2.5M16 12l-2.5-2.5M16 12l2.5 2.5"/>',
   fitPage: '<rect x="6" y="4" width="12" height="16" rx="1.6"/><path d="M12 8.5v7M12 8.5l-2 2M12 8.5l2 2M12 15.5l-2-2M12 15.5l2-2"/>',
+  // A page with an arrow curling over the top of it, one each way. Drawn as a
+  // three-quarter arc rather than a full circle so the arrowhead has somewhere
+  // to sit and the direction is legible at 16px.
+  rotateRight:
+    '<path d="M7 9.5A6 6 0 0 1 18 8"/><path d="M18 4.5V8h-3.5"/><rect x="5" y="12" width="14" height="8" rx="1.6"/>',
+  rotateLeft:
+    '<path d="M17 9.5A6 6 0 0 0 6 8"/><path d="M6 4.5V8h3.5"/><rect x="5" y="12" width="14" height="8" rx="1.6"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/>',
   moon: '<path d="M20 13.4A8.2 8.2 0 0 1 10.6 4a8.2 8.2 0 1 0 9.4 9.4z"/>',
   // A cog, not a second sun: the old one was a circle with eight rays around

@@ -64,6 +64,11 @@ pub fn defaults() -> Settings {
     // half in lines the agreement between its halves.
     s.insert("recolor_images".into(), json!(true));
     s.insert("remember_position".into(), json!(true));
+    // The other half of remembering where you stopped: come back to *what* you
+    // were reading, not just to where in it. Only what was open when the app
+    // went down — a document the reader closed themselves is one they have
+    // finished with, and reopening it would be the app arguing.
+    s.insert("reopen_last_document".into(), json!(true));
     // On by default: a page count shown briefly while scrolling is how a
     // reader with the toolbar hidden still knows where they are.
     s.insert("show_page_pill".into(), json!(true));

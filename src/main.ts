@@ -35,6 +35,7 @@ import {
   quitApp,
   registerBrowserFile,
   rememberPosition,
+  setOpenDocument,
   revealDocument,
   saveWindowState,
   focusWindow,
@@ -224,7 +225,13 @@ class App {
     await this.listenForDocuments();
     await this.listenForFileChanges();
     const startWith = await signalReady();
+    // A document named on the command line, or double-clicked to start the
+    // app, beats the one that happened to be open last: it is what this
+    // launch was *for*.
     if (startWith) await this.open(startWith);
+    else if (this.settings.reopen_last_document && data.open_document) {
+      await this.open(data.open_document);
+    }
 
     // Starting up in full screen with the toolbar away means starting up with
     // nothing on screen to press, so say once how to get back out.
@@ -420,6 +427,7 @@ class App {
         ...this.library.filter((entry) => entry.path !== path),
       ];
       this.renderRecents();
+      void setOpenDocument(path);
       el.viewer.focus();
     } catch (error) {
       // Choosing not to give a password is not a failure and has nothing to
@@ -475,6 +483,10 @@ class App {
       that was open has already been written down by the time this runs. */
   private clearDocument(): void {
     this.path = null;
+    // Nothing is open now, and the next launch should agree. A document that
+    // failed to open is cleared for the same reason: coming back to it every
+    // launch, and failing every launch, is the worst version of this feature.
+    void setOpenDocument(null);
 
     this.viewer.close();
     // The handle on the file goes here rather than in `viewer.close()`: this

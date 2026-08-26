@@ -17,6 +17,7 @@ export type Settings = {
   page_gap: number;
   recolor_images: boolean;
   remember_position: boolean;
+  reopen_last_document: boolean;
   show_page_pill: boolean;
   search_highlight_all: boolean;
   search_match_case: boolean;
@@ -60,6 +61,9 @@ export type Bootstrap = {
   settings: Settings;
   themes: Theme[];
   library: LibraryEntry[];
+  /** What was open when the app was last put down, if it is still there.
+      Empty when the reader closed it themselves. */
+  open_document: string;
   config_dir: string;
   themes_dir: string;
 };
@@ -90,6 +94,7 @@ const fallbackDefaults: Settings = {
   page_gap: 16,
   recolor_images: true,
   remember_position: true,
+  reopen_last_document: true,
   show_page_pill: true,
   search_highlight_all: true,
   search_match_case: false,
@@ -179,6 +184,7 @@ export async function bootstrap(): Promise<Bootstrap> {
       settings: fallbackSettings(),
       themes: fallbackThemes,
       library: [],
+      open_document: "",
       config_dir: "(browser)",
       themes_dir: "(browser)",
     };
@@ -279,6 +285,12 @@ export async function rememberPosition(
 export async function forgetDocument(path: string): Promise<LibraryEntry[]> {
   if (!hasBackend) return [];
   return invoke<LibraryEntry[]>("forget_document", { path });
+}
+
+/** Note what is open, for the next launch. `null` means nothing is. */
+export async function setOpenDocument(path: string | null): Promise<void> {
+  if (!hasBackend) return;
+  await invoke("set_open_document", { path });
 }
 
 /** Hand a link from a document to whatever opens web pages here. */

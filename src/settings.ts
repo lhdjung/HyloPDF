@@ -268,6 +268,11 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
       "Each document reopens on the page you left it on.",
     ),
     ui.field(
+      "Open what I was reading",
+      ui.toggle(s.reopen_last_document, (on) => host.set("reopen_last_document", on)),
+      "Start on the document that was open when you last quit. Closing a document yourself means you are done with it, and it is not reopened.",
+    ),
+    ui.field(
       "Show page count while scrolling",
       ui.toggle(s.show_page_pill, (on) => host.set("show_page_pill", on)),
       "A brief “page 23 of 197” while you scroll with the toolbar hidden.",

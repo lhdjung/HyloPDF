@@ -116,6 +116,10 @@ app.
 
 ## Settings
 
+HyloPDF starts on the document that was open when you last quit. Closing a
+document yourself means you have finished with it, and it is not reopened;
+`reopen_last_document = false` turns the whole thing off.
+
 Settings live next to the themes in `settings.toml`, one flat table of plain
 values, and the file is yours to edit. Every setting is written on its own:
 changing one never rewrites another, and a key HyloPDF does not recognise is

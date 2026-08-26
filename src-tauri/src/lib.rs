@@ -129,6 +129,9 @@ struct Bootstrap {
     settings: settings::Settings,
     themes: Vec<theme::Theme>,
     library: Vec<library::Entry>,
+    /// What was open when the app was last put down, if it is still there.
+    /// Empty when the reader closed it themselves.
+    open_document: String,
     config_dir: String,
     themes_dir: String,
 }
@@ -170,11 +173,12 @@ fn file_name(path: &str) -> String {
 /// `settings` and `library` hold a lock across read-modify-write.
 #[tauri::command]
 async fn bootstrap(paths: State<'_, Paths>) -> Result<Bootstrap, String> {
-    let stored = library::load(&paths.config);
+    let stored = library::prune(&library::load(&paths.config));
     Ok(Bootstrap {
         settings: settings::load(&paths.config),
         themes: theme::load_all(&paths.themes),
-        library: library::prune(&stored).files,
+        library: stored.files,
+        open_document: stored.open,
         config_dir: paths.config.to_string_lossy().to_string(),
         themes_dir: paths.themes.to_string_lossy().to_string(),
     })
@@ -328,6 +332,14 @@ async fn remember_position(
     offset: f64,
 ) -> Result<(), String> {
     library::remember(&paths.config, &path, page, offset)
+}
+
+/// Note which document is open, so the next launch can pick it up where this
+/// one left off. `None` when the reader has closed it, which is them saying
+/// they are done with it.
+#[tauri::command]
+async fn set_open_document(paths: State<'_, Paths>, path: Option<String>) -> Result<(), String> {
+    library::set_open(&paths.config, path.as_deref())
 }
 
 #[tauri::command]
@@ -667,6 +679,7 @@ pub fn run() {
             read_range,
             close_document,
             remember_position,
+            set_open_document,
             forget_document,
             open_link,
             reveal_document,

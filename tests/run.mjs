@@ -19,6 +19,8 @@ const LABELLED = "tests/fixtures/labelled.pdf";
 const NOTEXT = "tests/fixtures/notext.pdf";
 /* A document that knows what it is called. */
 const TITLED = "tests/fixtures/titled.pdf";
+/* A document somebody else has commented on. */
+const NOTES = "tests/fixtures/notes.pdf";
 
 async function answering() {
   try {
@@ -43,6 +45,7 @@ if (!existsSync(LOCKED)) await make("tests/fixtures/make-encrypted-pdf.mjs", LOC
 if (!existsSync(LABELLED)) await make("tests/fixtures/make-pdf.mjs", LABELLED, "12", "labels");
 if (!existsSync(NOTEXT)) await make("tests/fixtures/make-pdf.mjs", NOTEXT, "6", "notext");
 if (!existsSync(TITLED)) await make("tests/fixtures/make-pdf.mjs", TITLED, "3", "titled");
+if (!existsSync(NOTES)) await make("tests/fixtures/make-pdf.mjs", NOTES, "3", "notes");
 
 let vite = null;
 if (!(await answering())) {

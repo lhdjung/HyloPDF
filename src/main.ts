@@ -185,6 +185,7 @@ class App {
       onScroll: () => this.onScroll(),
       onError: (message) => ui.notice(message),
       onExternalLink: (url) => void this.openLink(url),
+      onNote: (note) => this.showNote(note),
       onPassword: (wrong) => ui.askForPassword(wrong),
     });
     this.sidebar = new Sidebar(
@@ -986,6 +987,33 @@ class App {
     // Enter — which steps through matches that are no longer there — does
     // nothing at all until the query is edited.
     if (reopening && el.findInput.value.trim().length > 0) void this.runSearch();
+  }
+
+  /** A note somebody left in the document, made readable.
+   *
+   * pdf.js paints the icon and the highlight into the page, so the note has
+   * always been visible; what has not been is what it says. Reading one is
+   * not annotating, and this window neither writes nor offers to. */
+  private showNote(note: { by: string; text: string; page: number }): void {
+    ui.showWindow(note.by || "Note", () => {
+      const pane = document.createElement("div");
+      pane.className = "pane";
+      pane.append(
+        ui.text("title", note.by || "Note"),
+        ui.text("lede", `On page ${this.viewer.label(note.page)}.`),
+      );
+      const body = document.createElement("p");
+      body.className = "note-text";
+      body.textContent = note.text;
+      pane.append(body);
+      pane.append(
+        ui.text(
+          "note",
+          "HyloPDF shows the notes a document already carries. It does not write them.",
+        ),
+      );
+      return pane;
+    });
   }
 
   /* ---------------------------------------------------------------- marks */

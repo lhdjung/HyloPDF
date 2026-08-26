@@ -96,6 +96,10 @@ above the document's own contents, and a mark is named for the section it
 falls in when the document says. Nothing is written into the PDF — a mark is a
 page number in `library.toml`, beside the page each document was left on.
 
+Notes somebody else left in a document can be read: pdf.js draws the sticky
+note and the highlight into the page, and pressing either shows what it says.
+Writing one is a different matter — see below.
+
 ## What it does not do
 
 HyloPDF reads. It does not annotate, fill in forms, or print — and of those,

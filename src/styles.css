@@ -593,6 +593,46 @@ body {
   border-radius: 2px;
 }
 
+/* The notes a document already carries: a hit area over the icon the page was
+   drawn with, or — where the note is a comment on a passage rather than an
+   icon — a narrow strip at the passage's right edge, so the words underneath
+   stay in reach of a pointer that wants to select them. Nothing is painted
+   here; the icon and the highlight are already in the page. */
+.note-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.note-layer button {
+  position: absolute;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 3px;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.note-layer button:hover,
+.note-layer button:focus-visible {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+}
+
+.note-edge {
+  width: 10px;
+  margin-left: 2px;
+}
+
+.note-text {
+  margin: 0 0 14px;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* The reader's own marks, above the document's contents. */
 .marks {
   padding: 4px 6px 10px;

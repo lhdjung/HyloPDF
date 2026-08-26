@@ -192,6 +192,7 @@ type Slot = {
       from, so a drag redraws only what moved. */
   selectionRuns: Map<string, HTMLCanvasElement>;
   linkEl: HTMLDivElement | null;
+  noteEl: HTMLDivElement | null;
   task: RenderTask | null;
   renderedKey: string;
 };
@@ -230,12 +231,28 @@ type Link = {
   dest?: unknown;
 };
 
+/** A note somebody else left in the document: a sticky note, or a comment on
+    a highlight. Its rectangle is a fraction of the page, like a link's. */
+type Note = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Small enough to be an icon rather than a passage of text. See
+      `renderNotes` for why the difference matters. */
+  icon: boolean;
+  by: string;
+  text: string;
+};
+
 export type ViewerCallbacks = {
   onPageChange(page: number, count: number): void;
   onScroll(): void;
   onError(message: string): void;
   /** A link in the document that points somewhere outside it. */
   onExternalLink(url: string): void;
+  /** A note in the document, opened by the reader. */
+  onNote(note: { by: string; text: string; page: number }): void;
   /** The document is encrypted. Ask for the password, or return null to give
       up; `wrong` is true when the last answer was refused. */
   onPassword(wrong: boolean): Promise<string | null>;
@@ -293,6 +310,7 @@ export class Viewer {
   /** Pages whose render reported pictures on them. See `IMAGE_PAGE_CACHE`. */
   private pictorial = new Set<number>();
   private linkCache = new Map<number, Link[]>();
+  private noteCache = new Map<number, Note[]>();
   /** A match asked for but not yet shown, because its page had no text layer
       when it was asked for. Index into `matches`; -1 when there is none. */
   private pendingReveal = -1;
@@ -705,6 +723,7 @@ export class Viewer {
     this.queue = [];
     this.releasePages();
     this.linkCache.clear();
+    this.noteCache.clear();
     this.pendingReveal = -1;
     this.matches = [];
     this.matchPages.clear();
@@ -1117,6 +1136,7 @@ export class Viewer {
     slot.el.style.setProperty("--total-scale-factor", String(box.scale));
     if (slot.textEl) this.placeOverlay(slot.textEl, slot.index, box.scale);
     if (slot.linkEl) this.placeOverlay(slot.linkEl, slot.index, box.scale);
+    if (slot.noteEl) this.placeOverlay(slot.noteEl, slot.index, box.scale);
   }
 
   /**
@@ -1559,9 +1579,10 @@ export class Viewer {
       const { x, y, width, height } = this.crop;
       this.crop = { x: 1 - y - height, y: x, width: height, height: width };
     }
-    // Where a link is on the page is a fraction of a page that has just
-    // changed shape.
+    // Where a link or a note is on the page is a fraction of a page that has
+    // just changed shape.
     this.linkCache.clear();
+    this.noteCache.clear();
     this.relayout();
   }
 
@@ -1941,6 +1962,7 @@ export class Viewer {
       selectionEl: null,
       selectionRuns: new Map(),
       linkEl: null,
+      noteEl: null,
       task: null,
       renderedKey: "",
     };
@@ -2214,7 +2236,15 @@ export class Viewer {
     const known = this.linkCache.get(index);
     if (known) return known;
 
-    let annotations: { subtype?: string; rect?: number[]; dest?: unknown; url?: string }[];
+    type Annotation = {
+      subtype?: string;
+      rect?: number[];
+      dest?: unknown;
+      url?: string;
+      contentsObj?: { str?: string };
+      titleObj?: { str?: string };
+    };
+    let annotations: Annotation[];
     try {
       annotations = await page.getAnnotations({ intent: "display" });
     } catch {
@@ -2222,6 +2252,9 @@ export class Viewer {
     }
 
     const view = this.viewportFor(page, 1);
+    // Notes come out of the same fetch, because they are the same annotations:
+    // asking twice would be two trips into the worker for one answer.
+    this.noteCache.set(index, notesIn(annotations, view));
     const links: Link[] = [];
     for (const annotation of annotations) {
       if (annotation.subtype !== "Link" || !annotation.rect) continue;
@@ -2245,6 +2278,54 @@ export class Viewer {
     }
     this.linkCache.set(index, links);
     return links;
+  }
+
+  /**
+   * The notes somebody else left on this page, made readable.
+   *
+   * pdf.js paints an annotation's own appearance into the page, so a sticky
+   * note arrives as the little icon it was drawn as and a highlight arrives
+   * highlighted. What does not arrive is the text behind either of them:
+   * that lives in a popup annotation this app does not build, so the icon sat
+   * there looking like a button and was not one.
+   *
+   * A note that is icon-sized gets a hit area over the whole of it. A note
+   * that is a passage of text — a comment on a highlight — gets a narrow strip
+   * at its right edge instead, because covering the passage would take the
+   * words underneath out of reach of the pointer that wants to select them.
+   */
+  private renderNotes(slot: Slot): void {
+    if (slot.noteEl) return;
+    const notes = this.noteCache.get(slot.index) ?? [];
+    if (notes.length === 0) return;
+
+    const layer = document.createElement("div");
+    layer.className = "note-layer";
+    for (const note of notes) {
+      const spot = document.createElement("button");
+      spot.className = note.icon ? "note-spot" : "note-edge";
+      spot.style.left = `${(note.icon ? note.x : note.x + note.width) * 100}%`;
+      spot.style.top = `${note.y * 100}%`;
+      if (note.icon) {
+        spot.style.width = `${note.width * 100}%`;
+        spot.style.height = `${note.height * 100}%`;
+      } else {
+        spot.style.height = `${note.height * 100}%`;
+      }
+      const by = note.by ? `${note.by}: ` : "";
+      spot.title = `${by}${note.text}`;
+      spot.setAttribute("aria-label", `Note. ${by}${note.text}`);
+      spot.addEventListener("click", (event) => {
+        event.preventDefault();
+        this.callbacks.onNote({ by: note.by, text: note.text, page: slot.index + 1 });
+      });
+      layer.append(spot);
+    }
+
+    const box = this.boxes[slot.index];
+    if (box) this.placeOverlay(layer, slot.index, box.scale);
+    slot.el.append(layer);
+    slot.noteEl = layer;
   }
 
   /** Fetch a page's proxy for its links alone, off the render queue. */
@@ -2274,6 +2355,9 @@ export class Viewer {
     const doc = this.doc;
     const links = await this.linksFor(slot.index, page);
     if (this.doc !== doc || this.slots.get(slot.index) !== slot) return;
+    // Before the return below: a page can carry notes and no links, and that
+    // page still has notes.
+    this.renderNotes(slot);
     // Mounting and rendering both ask for the links; whichever gets here first
     // builds them, and the other finds them already up.
     if (slot.linkEl || links.length === 0) return;
@@ -2565,6 +2649,48 @@ function joinRuns(rects: DOMRect[], page: DOMRect): Rect[] {
  * than the text colour. The paper maps to the same background either way, so
  * only the letters change, and the edges of the rectangle leave no seam.
  */
+/**
+ * The annotations on a page that carry something to read.
+ *
+ * Every kind of annotation can have text on it, so this goes by whether there
+ * *is* any rather than by subtype — a comment on a highlight and a sticky
+ * note are the same thing to a reader. Links are the exception: their text is
+ * where they go, and that is already on the link itself.
+ */
+function notesIn(
+  annotations: {
+    subtype?: string;
+    rect?: number[];
+    contentsObj?: { str?: string };
+    titleObj?: { str?: string };
+  }[],
+  view: { width: number; height: number; convertToViewportRectangle(rect: number[]): number[] },
+): Note[] {
+  const notes: Note[] = [];
+  for (const annotation of annotations) {
+    if (annotation.subtype === "Link" || annotation.subtype === "Popup") continue;
+    const text = annotation.contentsObj?.str?.trim() ?? "";
+    if (!text || !annotation.rect) continue;
+
+    const [x1, y1, x2, y2] = view.convertToViewportRectangle(annotation.rect);
+    const width = Math.abs(x2 - x1) / view.width;
+    const height = Math.abs(y2 - y1) / view.height;
+    if (width <= 0 || height <= 0) continue;
+    notes.push({
+      x: Math.min(x1, x2) / view.width,
+      y: Math.min(y1, y2) / view.height,
+      width,
+      height,
+      // An icon is small in both directions. A comment on a highlighted
+      // sentence is not, and covering the sentence would put it out of reach.
+      icon: width < 0.06 && height < 0.06,
+      by: annotation.titleObj?.str?.trim() ?? "",
+      text,
+    });
+  }
+  return notes;
+}
+
 /** Link rectangles, restated as fractions of the part of the page on screen. */
 function inCrop(links: Link[], crop: Crop | null): Link[] {
   if (!crop) return links;

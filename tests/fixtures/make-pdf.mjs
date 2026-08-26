@@ -19,6 +19,11 @@ const NOTEXT = process.argv[4] === "notext";
 /* "titled" gives the document a name of its own, which is what the toolbar
    and the recently-read list would rather show than `book.pdf`. */
 const TITLED = process.argv[4] === "titled";
+/* "notes" leaves two annotations on the first page: a sticky note, which is an
+   icon, and a comment on a highlighted line, which is not. pdf.js paints both
+   into the page and leaves their text unreachable, which is what the note
+   layer is for. */
+const NOTES = process.argv[4] === "notes";
 const objects = [];   // 1-indexed body objects
 const add = (body) => { objects.push(body); return objects.length; };
 
@@ -37,11 +42,26 @@ for (let i = 1; i <= PAGES; i++) {
   contentIds.push(add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`));
   pageIds.push(0); // placeholder, filled below
 }
+const noteIds = [];
+if (NOTES) {
+  noteIds.push(
+    add(
+      "<< /Type /Annot /Subtype /Text /Rect [520 700 540 720] /Name /Comment " +
+        "/T (A. Reviewer) /Contents (Check this figure against the appendix.) >>",
+    ),
+    add(
+      "<< /Type /Annot /Subtype /Highlight /Rect [54 700 460 726] " +
+        "/QuadPoints [54 726 460 726 54 700 460 700] /C [1 1 0] " +
+        "/T (A. Reviewer) /Contents (This sentence needs a citation.) >>",
+    ),
+  );
+}
 const pagesId = objects.length + PAGES + 1;
 for (let i = 0; i < PAGES; i++) {
+  const annots = NOTES && i === 0 ? ` /Annots [${noteIds.map((id) => `${id} 0 R`).join(" ")}]` : "";
   pageIds[i] = add(
     `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 612 792] ` +
-    `/Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentIds[i]} 0 R >>`
+    `/Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentIds[i]} 0 R${annots} >>`
   );
 }
 const realPagesId = add(`<< /Type /Pages /Count ${PAGES} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);

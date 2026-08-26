@@ -56,7 +56,7 @@ import { isEditingTheme, refreshSettingsWindow, showSettingsWindow } from "./set
 import { Sidebar } from "./sidebar";
 import { applyTheme, isDarkTheme, unreadableColors } from "./themes";
 import * as ui from "./ui";
-import { Cancelled, type FitMode, Viewer } from "./viewer";
+import { Cancelled, type FitMode, type SpreadMode, Viewer } from "./viewer";
 
 if (import.meta.env.DEV && hasBackend) {
   // The webview has no terminal of its own; send what it says to the one
@@ -221,6 +221,7 @@ class App {
     this.viewer.setGap(this.settings.page_gap);
     this.viewer.setTrimMargins(this.settings.trim_margins);
     this.viewer.setScrollMode(this.settings.scroll_mode);
+    this.viewer.setSpread(this.settings.spread_mode);
     this.viewer.setFit(this.settings.fit_mode, this.settings.zoom);
     this.applySearchOptions();
     this.renderRecents();
@@ -1003,6 +1004,12 @@ class App {
     await this.copyToClipboard(text, `Copied the text of page ${this.viewer.label(page)}.`);
   }
 
+  /** One page across, or two. */
+  setSpread(spread: SpreadMode): void {
+    this.set("spread_mode", spread);
+    this.viewer.setSpread(spread);
+  }
+
   /** Take the margins off the page, or put them back. */
   setTrimMargins(on: boolean): void {
     this.set("trim_margins", on);
@@ -1628,6 +1635,26 @@ class App {
             },
           }),
         );
+
+        menu.append(ui.divider(), ui.section("Pages side by side"));
+        const spreads: [SpreadMode, string, string][] = [
+          ["single", "One page across", ""],
+          ["two", "Two side by side", ""],
+          ["cover", "Two, first page alone", "As a book falls open"],
+        ];
+        for (const [value, label, note] of spreads) {
+          menu.append(
+            ui.menuItem({
+              label,
+              note,
+              checked: this.settings.spread_mode === value,
+              onSelect: () => {
+                this.setSpread(value);
+                close();
+              },
+            }),
+          );
+        }
 
         menu.append(ui.divider());
         menu.append(

@@ -52,6 +52,10 @@ pub fn defaults() -> Settings {
     // changes this when the reader picks another mode by hand, and no keyboard
     // shortcut is bound to it.
     s.insert("scroll_mode".into(), json!("continuous"));
+    // One page across by default. Two side by side is worth a great deal on a
+    // wide screen and is wrong on a narrow one, and only the reader knows
+    // which they have.
+    s.insert("spread_mode".into(), json!("single"));
     s.insert("fit_mode".into(), json!("width"));
     s.insert("zoom".into(), json!(1.0));
     s.insert("page_gap".into(), json!(16));

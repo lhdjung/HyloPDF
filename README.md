@@ -72,6 +72,11 @@ Moving around a document:
 | g | Jump to a page number — or to a page label, like `xii` |
 | ⌘[ / ⌘], or ⌥← / ⌥→ | Back to where you jumped from, and forward again |
 
+Two pages can stand side by side — Settings → Reading, or the Settings menu in
+the bar. "Two, cover alone" leaves page one on its own, which is how a book
+falls open: page one is a right-hand page, so pairing it with page two puts
+every spread after it out by one.
+
 There is deliberately no shortcut for the page layout. Continuous scrolling is
 the default and switching away from it should take a decision, not a slip of
 the fingers.

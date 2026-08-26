@@ -12,6 +12,7 @@ export type Settings = {
   dark_theme: string;
   follow_system_theme: boolean;
   scroll_mode: "continuous" | "paged";
+  spread_mode: "single" | "two" | "cover";
   fit_mode: "width" | "page" | "actual";
   zoom: number;
   page_gap: number;
@@ -90,6 +91,7 @@ const fallbackDefaults: Settings = {
   dark_theme: "hylo-dark",
   follow_system_theme: true,
   scroll_mode: "continuous",
+  spread_mode: "single",
   fit_mode: "width",
   zoom: 1,
   page_gap: 16,

@@ -73,6 +73,10 @@ export class Cancelled extends Error {
 
 export type FitMode = "width" | "page" | "actual";
 export type ScrollMode = "continuous" | "paged";
+/** How many pages stand side by side. `cover` is two side by side with the
+    first page on its own, which is how a book falls open: page one is a right
+    hand page, and pairing it with page two puts every spread out by one. */
+export type SpreadMode = "single" | "two" | "cover";
 
 export type Match = {
   page: number;
@@ -192,7 +196,19 @@ type Slot = {
   renderedKey: string;
 };
 
-type Box = { top: number; left: number; width: number; height: number; scale: number };
+type Box = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  scale: number;
+  /** The empty space directly above this page — the gap from the row before,
+      or the margin at the top of the document. Recorded at layout time
+      because it cannot be read back off the boxes once pages sit side by
+      side: the box before this one may be its neighbour rather than the row
+      above, and share its top exactly. */
+  above: number;
+};
 
 /** A place in the document and where on the screen it was, so a zoom can put
     it back under the same finger. */
@@ -296,6 +312,7 @@ export class Viewer {
   private zoomFactor = 1;
   private gap = 16;
   private mode: ScrollMode = "continuous";
+  private spread: SpreadMode = "single";
 
   private current = 1;
   private matches: Match[] = [];
@@ -883,6 +900,48 @@ export class Viewer {
    * for the main thread before it will scroll at all. Left permanently
    * attached, continuous scrolling paid for a page-turning gesture it does not
    * have. */
+  /** One page across, or two. */
+  setSpread(spread: SpreadMode): void {
+    if (spread === this.spread) return;
+    this.spread = spread;
+    this.relayout();
+  }
+
+  /**
+   * The pages that stand together, in order.
+   *
+   * One each in single mode. In `cover`, page one is alone and every pair
+   * after it is (even, odd) — which is how a book falls open, page one being a
+   * right-hand page. In `two` the pairs start from the first page, which is
+   * what a document of slides or a scan of two-up photocopies wants.
+   */
+  private rows(): number[][] {
+    const count = this.sizes.length;
+    if (this.spread === "single") return this.sizes.map((_, index) => [index]);
+    const rows: number[][] = [];
+    let index = 0;
+    if (this.spread === "cover" && count > 0) {
+      rows.push([0]);
+      index = 1;
+    }
+    for (; index < count; index += 2) {
+      rows.push(index + 1 < count ? [index, index + 1] : [index]);
+    }
+    return rows;
+  }
+
+  /** The row a page is standing in, and the pages standing with it. */
+  private rowOf(index: number): number[] {
+    if (this.spread === "single") return [index];
+    if (this.spread === "cover") {
+      if (index === 0) return [0];
+      const first = index % 2 === 1 ? index : index - 1;
+      return first + 1 < this.sizes.length ? [first, first + 1] : [first];
+    }
+    const first = index - (index % 2);
+    return first + 1 < this.sizes.length ? [first, first + 1] : [first];
+  }
+
   setScrollMode(mode: ScrollMode): void {
     if (mode === this.mode && this.wheelBound === (mode === "paged")) {
       this.relayout();
@@ -937,41 +996,67 @@ export class Viewer {
     const availableWidth = Math.max(this.container.clientWidth - padX * 2, 120);
     const availableHeight = Math.max(this.container.clientHeight - PAD_Y * 2, 120);
 
-    const scaleFor = (size: { width: number; height: number }): number => {
+    const scaleFor = (
+      size: { width: number; height: number },
+      room = availableWidth,
+    ): number => {
       switch (this.fit) {
         case "width":
-          return availableWidth / size.width;
+          return room / size.width;
         case "page":
-          return Math.min(availableWidth / size.width, availableHeight / size.height);
+          return Math.min(room / size.width, availableHeight / size.height);
         default:
           return PixelsPerInch.PDF_TO_CSS_UNITS * this.zoomFactor;
       }
     };
 
-    const visible = this.mode === "paged" ? [this.current - 1] : this.sizes.map((_, i) => i);
+    // A row is what has to fit: one page, or two side by side with the gap
+    // between them. Everything below works in rows, and a document without
+    // spreads is a document of rows of one.
+    const rows = this.mode === "paged" ? [this.rowOf(this.current - 1)] : this.rows();
     const boxes: Box[] = new Array(this.sizes.length);
+
+    // The gap between two pages of a spread is a distance on the screen, like
+    // the gap between rows — it is not part of the page and does not grow
+    // with the zoom. So it comes off the room available before the scale is
+    // worked out, rather than being scaled along with the paper.
+    const gapsIn = (row: number[]) => (row.length - 1) * this.gap;
+    const paperWidth = (row: number[]) =>
+      row.reduce((sum, index) => sum + this.sizeOf(index).width, 0);
+    const rowHeight = (row: number[]) =>
+      row.reduce((tallest, index) => Math.max(tallest, this.sizeOf(index).height), 0);
+    const scaleForRow = (row: number[]) =>
+      scaleFor(
+        { width: paperWidth(row), height: rowHeight(row) },
+        Math.max(availableWidth - gapsIn(row), 120),
+      );
+    const rowSpan = (row: number[], scale: number) =>
+      row.reduce((sum, index) => sum + Math.round(this.sizeOf(index).width * scale), 0) +
+      gapsIn(row);
+
     let width = 0;
-    for (const index of visible) {
-      const size = this.sizeOf(index);
-      const scale = scaleFor(size);
-      width = Math.max(width, Math.round(size.width * scale));
+    for (const row of rows) {
+      width = Math.max(width, rowSpan(row, scaleForRow(row)));
     }
     this.contentWidth = Math.max(width, availableWidth) + padX * 2;
 
     let top = PAD_Y;
-    for (const index of visible) {
-      const size = this.sizeOf(index);
-      const scale = scaleFor(size);
-      const pageWidth = Math.round(size.width * scale);
-      const pageHeight = Math.round(size.height * scale);
-      boxes[index] = {
-        top,
-        left: Math.round((this.contentWidth - pageWidth) / 2),
-        width: pageWidth,
-        height: pageHeight,
-        scale,
-      };
-      top += pageHeight + this.gap;
+    let above = PAD_Y;
+    for (const row of rows) {
+      const scale = scaleForRow(row);
+      const across = rowSpan(row, scale);
+      let left = Math.round((this.contentWidth - across) / 2);
+      let tallest = 0;
+      for (const index of row) {
+        const size = this.sizeOf(index);
+        const pageWidth = Math.round(size.width * scale);
+        const pageHeight = Math.round(size.height * scale);
+        boxes[index] = { top, left, width: pageWidth, height: pageHeight, scale, above };
+        left += pageWidth + this.gap;
+        tallest = Math.max(tallest, pageHeight);
+      }
+      top += tallest + this.gap;
+      above = this.gap;
     }
     this.boxes = boxes;
 
@@ -993,8 +1078,14 @@ export class Viewer {
     const view = this.container.getBoundingClientRect();
     const docY = this.container.scrollTop + (focus.y - view.top);
     const docX = this.container.scrollLeft + (focus.x - view.left);
-    const index =
-      this.mode === "paged" ? this.current - 1 : this.lastBoxStartingAbove(docY);
+    let index = this.mode === "paged" ? this.current - 1 : this.lastBoxStartingAbove(docY);
+    // Which of a spread's two pages the pointer is actually over. The search
+    // above is by row, and a zoom that keeps the wrong page under the fingers
+    // is worse than one that keeps none.
+    const beside = this.boxes[index - 1];
+    if (beside && this.boxes[index] && beside.top === this.boxes[index].top && docX < this.boxes[index].left) {
+      index -= 1;
+    }
     const box = this.boxes[index];
     if (!box) return null;
     return {
@@ -1188,7 +1279,10 @@ export class Viewer {
   private trackCurrentPage(): void {
     if (this.boxes.length === 0 || this.mode === "paged") return;
     const probe = this.container.scrollTop + this.container.clientHeight * 0.35;
-    const page = this.lastBoxStartingAbove(probe) + 1;
+    // The row, and then the left-hand page of it: two pages standing side by
+    // side share a top, so the search finds the right-hand one, and a reader
+    // looking at a spread is on the page it opens at.
+    const page = this.rowOf(this.lastBoxStartingAbove(probe))[0] + 1;
     if (page !== this.current) {
       this.current = page;
       this.callbacks.onPageChange(page, this.pageCount);
@@ -1250,14 +1344,12 @@ export class Viewer {
     const box = this.boxes[index];
     if (!box) return;
     // Landing on a page means the space above it starts at the top of the
-    // window and the page follows: the gap between two pages, or the margin
-    // above the first. Taken from where the page before this one actually
-    // ends rather than from a constant — those are two different distances,
-    // and using the margin between pages left a strip of the previous page
-    // showing above a page the reader had just turned to.
-    const previous = this.boxes[index - 1];
-    const above = previous ? box.top - (previous.top + previous.height) : PAD_Y;
-    const target = box.top + offset * box.height - (offset === 0 ? above : 0);
+    // window and the page follows: the gap between two rows, or the margin
+    // above the first. That distance is recorded on the box at layout time —
+    // it used to be read back off the page before, which is right until two
+    // pages stand side by side and the box before this one is its neighbour
+    // rather than the row above.
+    const target = box.top + offset * box.height - (offset === 0 ? box.above : 0);
     this.container.scrollTo({ top: Math.max(0, target), behavior: smooth ? "smooth" : "auto" });
     this.current = index + 1;
     this.callbacks.onPageChange(this.current, this.pageCount);
@@ -1717,12 +1809,17 @@ export class Viewer {
     return true;
   }
 
+  /** The next page, or the next pair of them: turning one page of a spread
+      and leaving the other where it is turns nothing. */
   nextPage(): void {
-    this.scrollTo(Math.min(this.current + 1, this.pageCount), 0);
+    const row = this.rowOf(this.current - 1);
+    this.scrollTo(Math.min(row[row.length - 1] + 2, this.pageCount), 0);
   }
 
   previousPage(): void {
-    this.scrollTo(Math.max(this.current - 1, 1), 0);
+    const row = this.rowOf(this.current - 1);
+    const before = this.rowOf(Math.max(row[0] - 1, 0));
+    this.scrollTo(before[0] + 1, 0);
   }
 
   /** A nudge: the same distance whichever way it goes, and a proportion of the

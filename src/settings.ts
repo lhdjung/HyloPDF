@@ -14,7 +14,7 @@ import { type Settings, type Theme, deleteTheme, isMac, saveTheme } from "./api"
 import { hydrateIcons } from "./icons";
 import * as ui from "./ui";
 import { isDarkTheme, parseColor, selectionArea, selectionInk, toHex } from "./themes";
-import type { FitMode } from "./viewer";
+import type { FitMode, SpreadMode } from "./viewer";
 
 export interface SettingsHost {
   settings: Settings;
@@ -34,6 +34,7 @@ export interface SettingsHost {
   toggleFullscreen(on: boolean): Promise<void>;
   setFit(mode: FitMode, zoom?: number): void;
   setScrollMode(mode: Settings["scroll_mode"]): void;
+  setSpread(spread: SpreadMode): void;
   setPageGap(value: number): void;
   setTrimMargins(on: boolean): void;
   setSidebarWidth(value: number): void;
@@ -226,6 +227,19 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
         (mode) => host.setScrollMode(mode),
       ),
       "Continuous scrolling is the default, and no shortcut can change it by accident.",
+    ),
+    ui.field(
+      "Pages side by side",
+      ui.segmented(
+        [
+          { value: "single" as const, label: "One" },
+          { value: "two" as const, label: "Two" },
+          { value: "cover" as const, label: "Two, cover alone" },
+        ],
+        s.spread_mode,
+        (spread) => host.setSpread(spread),
+      ),
+      "Two pages across uses a wide window the way a book does. “Cover alone” leaves page one on its own, so that every spread after it falls the way it was printed.",
     ),
     ui.field(
       "Space between pages",

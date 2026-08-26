@@ -812,6 +812,23 @@ class App {
     if (reopening && el.findInput.value.trim().length > 0) void this.runSearch();
   }
 
+  /* ------------------------------------------------------------- history */
+
+  /** Back to where the last jump started.
+   *
+   * Silence would be the wrong answer at the end of the history: the reader
+   * pressed something and nothing moved, and there is no way to tell that from
+   * a shortcut that is not bound. So the end of the road says so once. */
+  goBack(): void {
+    if (this.viewer.isEmpty) return;
+    if (!this.viewer.goBack()) ui.notice("Nowhere further back.");
+  }
+
+  goForward(): void {
+    if (this.viewer.isEmpty) return;
+    if (!this.viewer.goForward()) ui.notice("Nowhere further forward.");
+  }
+
   /** The Search button is a switch, not a door: pressing it again puts the bar
       away, the same as Escape or the × does. */
   toggleFind(): void {
@@ -1283,6 +1300,18 @@ class App {
       if (!editable && !selected) event.preventDefault();
     });
 
+    // The two side buttons on a mouse. They are `auxclick`, like the middle
+    // one, and they are what a hand reaches for before it reaches for ⌘[.
+    el.viewer.addEventListener("auxclick", (event) => {
+      if (event.button === 3) {
+        event.preventDefault();
+        this.goBack();
+      } else if (event.button === 4) {
+        event.preventDefault();
+        this.goForward();
+      }
+    });
+
     el.pageNumber.title = `Go to a page — ${JUMP_KEYS}, or g`;
     el.pageNumber.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -1484,6 +1513,26 @@ class App {
       if (meta && !event.altKey && event.key.toLowerCase() === "g") {
         event.preventDefault();
         this.search.step(event.shiftKey ? -1 : 1);
+        return;
+      }
+      // Back and forward through the jumps. Two bindings, because two
+      // traditions: ⌘[ and ⌘] are what Preview answers to, ⌥← and ⌥→ what
+      // Acrobat, Sumatra and Okular answer to, and neither camp thinks to try
+      // the other's. Both are free here.
+      if (
+        (meta && event.key === "[") ||
+        (event.altKey && !meta && event.key === "ArrowLeft")
+      ) {
+        event.preventDefault();
+        this.goBack();
+        return;
+      }
+      if (
+        (meta && event.key === "]") ||
+        (event.altKey && !meta && event.key === "ArrowRight")
+      ) {
+        event.preventDefault();
+        this.goForward();
         return;
       }
       if (event.key === "Escape") {

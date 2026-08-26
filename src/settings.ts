@@ -624,6 +624,8 @@ function keyboardPage(pane: HTMLElement): void {
         ["Down a screen, up a screen", "Page Down, Page Up"],
         ["First page, last page", "Home, End"],
         ["Go to a page: type the number, press Enter", shortcut("⌥⌘G, or g", "Ctrl+Alt+G, or g")],
+        ["Back to where you jumped from", shortcut("⌘[, or ⌥←", "Ctrl+[, or Alt+←")],
+        ["Forward again", shortcut("⌘], or ⌥→", "Ctrl+], or Alt+→")],
       ],
     ],
     [

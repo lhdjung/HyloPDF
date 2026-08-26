@@ -130,6 +130,14 @@ const WHEEL_TURN = 60;
     beyond roughly this many pixels, and nothing is gained past it anyway. */
 const MAX_CANVAS_PIXELS = 12_000_000;
 
+/** How many places back a reader can step. Deep enough to walk out of a chain
+    of cross-references, shallow enough that it is a history rather than a log. */
+const HISTORY_LIMIT = 50;
+
+/** A place in the document: a page and how far down it the window sat. The
+    same pair `position()` reports and `scrollTo` takes. */
+type Place = { page: number; offset: number };
+
 type Slot = {
   index: number;
   el: HTMLDivElement;
@@ -263,6 +271,11 @@ export class Viewer {
       of it drawn, which is the only reason mounting has to know. */
   private selected = false;
   private selectionFrame = 0;
+
+  /** Where the reader was before each jump, most recent last, and the places a
+      `back` has stepped out of. See `jumpTo`. */
+  private past: Place[] = [];
+  private future: Place[] = [];
 
   constructor(
     private container: HTMLElement,
@@ -627,6 +640,8 @@ export class Viewer {
     // the document down for good goes through `clearDocument`, which is the
     // only place that means it.
     this.current = 1;
+    this.past = [];
+    this.future = [];
   }
 
   /** A page proxy, kept only while it is worth keeping.
@@ -1145,7 +1160,68 @@ export class Viewer {
   }
 
   goToPage(page: number): void {
-    this.scrollTo(page, 0);
+    this.jumpTo(page, 0);
+  }
+
+  /* ------------------------------------------------------------- history */
+
+  /**
+   * Go somewhere the reader asked to go, remembering where they were.
+   *
+   * The distinction this draws is between moving *through* a document and
+   * jumping *across* it. Scrolling, turning a page and stepping through search
+   * results are the first kind and leave no trace: a history that recorded
+   * them would be a history of the last twenty keystrokes, which is no use to
+   * anybody. Following a cross-reference, picking a chapter out of the
+   * contents and typing a page number are the second kind, and they are
+   * exactly the moves that leave a reader stranded — the citation on page 12
+   * that lands on page 190 is the reason this exists.
+   *
+   * A jump made after stepping back throws away what was ahead, which is what
+   * every back button does and what nobody is ever surprised by.
+   */
+  jumpTo(page: number, offset = 0): void {
+    const from = this.position();
+    const to = Math.max(1, Math.min(page, this.pageCount));
+    // A jump that lands where we already are is not a jump. Without this,
+    // pressing Home twice files the first page away as somewhere worth
+    // returning to, and Escape from the page field — which re-runs the jump
+    // with the number that was already there — fills the history with copies
+    // of one place.
+    if (to === from.page && Math.abs(offset - from.offset) < 0.01) {
+      this.scrollTo(to, offset);
+      return;
+    }
+    this.past.push(from);
+    if (this.past.length > HISTORY_LIMIT) this.past.shift();
+    this.future = [];
+    this.scrollTo(to, offset);
+  }
+
+  get canGoBack(): boolean {
+    return this.past.length > 0;
+  }
+
+  get canGoForward(): boolean {
+    return this.future.length > 0;
+  }
+
+  /** Back to where the last jump started. Returns false when there is nowhere
+      to go, so the caller can say so rather than doing nothing visible. */
+  goBack(): boolean {
+    const place = this.past.pop();
+    if (!place) return false;
+    this.future.push(this.position());
+    this.scrollTo(place.page, place.offset);
+    return true;
+  }
+
+  goForward(): boolean {
+    const place = this.future.pop();
+    if (!place) return false;
+    this.past.push(this.position());
+    this.scrollTo(place.page, place.offset);
+    return true;
   }
 
   nextPage(): void {
@@ -1571,8 +1647,14 @@ export class Viewer {
       };
       if (url) link.title = url;
       link.addEventListener("click", follow);
-      // Middle click and the rest of the buttons, which never fire `click`.
-      link.addEventListener("auxclick", follow);
+      // The middle button, which never fires `click`. Only the middle one:
+      // `auxclick` is also how the right button and a mouse's back and forward
+      // buttons arrive, so following on any of them meant a right-click on a
+      // cross-reference navigated, and so did pressing "back" while the
+      // pointer happened to be over a link.
+      link.addEventListener("auxclick", (event) => {
+        if (event.button === 1) follow(event);
+      });
       link.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") follow(event);
       });
@@ -1596,7 +1678,7 @@ export class Viewer {
       const index =
         typeof target === "number" ? target : await doc.getPageIndex(target as never);
       if (this.doc !== doc || index < 0 || index >= this.pageCount) return;
-      this.scrollTo(index + 1, await this.offsetWithin(index, explicit));
+      this.jumpTo(index + 1, await this.offsetWithin(index, explicit));
     } catch {
       this.callbacks.onError("That link does not lead anywhere in this document.");
     }

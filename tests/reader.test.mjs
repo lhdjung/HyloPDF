@@ -168,6 +168,51 @@ test("moving around", async (t) => {
   });
 });
 
+test("stepping back out of a jump", async (t) => {
+  const reaches = async (want) => {
+    await app.page
+      .waitForFunction((n) => document.getElementById("page-number")?.value === String(n), want, {
+        timeout: 15_000,
+        polling: 50,
+      })
+      .catch(() => {});
+    assert.equal((await app.state()).page, String(want));
+  };
+
+  await t.test("back returns to where the jump started", async () => {
+    await app.press("Home");
+    await reaches(1);
+    await app.press("End");
+    await reaches(PAGES);
+    await app.page.keyboard.press(`${MOD}+BracketLeft`);
+    await reaches(1);
+  });
+
+  await t.test("and forward goes there again", async () => {
+    await app.page.keyboard.press(`${MOD}+BracketRight`);
+    await reaches(PAGES);
+  });
+
+  await t.test("Alt+arrow does the same", async () => {
+    await app.page.keyboard.press("Alt+ArrowLeft");
+    await reaches(1);
+    await app.page.keyboard.press("Alt+ArrowRight");
+    await reaches(PAGES);
+  });
+
+  await t.test("turning a page is movement, not a jump", async () => {
+    // Two page turns and a scroll, none of which may leave a trace: a history
+    // of the last twenty keystrokes is no use to anybody.
+    await app.press("ArrowLeft");
+    await reaches(PAGES - 1);
+    await app.press("ArrowLeft");
+    await reaches(PAGES - 2);
+    await app.page.keyboard.press("Alt+ArrowLeft");
+    await reaches(1);
+    await app.press("Home");
+  });
+});
+
 test("fit width fits the width", async (t) => {
   const strips = () =>
     app.page.evaluate(() => {

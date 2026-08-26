@@ -415,6 +415,24 @@ test("menus answer the keyboard", async (t) => {
   });
 });
 
+test("the document's name is the way to another document", async () => {
+  // The recently-read list used to live on the start screen and nowhere else,
+  // which is the one screen a reader who is reading something cannot see.
+  await app.page.click("#doc-title");
+  await app.page.waitForTimeout(200);
+  const items = await app.page.evaluate(() =>
+    [...document.querySelectorAll("#popovers .popover-item")].map((el) => el.textContent),
+  );
+  assert.ok(
+    items.some((label) => label?.includes("Open a document")),
+    `the title menu offered ${JSON.stringify(items)}`,
+  );
+  assert.ok(items.some((label) => label?.includes("Copy path")));
+  await app.press("Escape");
+  await app.page.waitForTimeout(150);
+  assert.equal((await app.state()).menuOpen, false);
+});
+
 test("hiding the toolbar takes the menu hanging off it away too", async () => {
   await app.page.click("#settings");
   await app.page.waitForTimeout(200);

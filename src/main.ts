@@ -86,7 +86,7 @@ const el = {
   open: byId<HTMLButtonElement>("open"),
   contents: byId<HTMLButtonElement>("contents"),
   closeDoc: byId<HTMLButtonElement>("close-doc"),
-  title: byId<HTMLDivElement>("doc-title"),
+  title: byId<HTMLButtonElement>("doc-title"),
   prevPage: byId<HTMLButtonElement>("prev-page"),
   nextPage: byId<HTMLButtonElement>("next-page"),
   pageNumber: byId<HTMLInputElement>("page-number"),
@@ -1076,9 +1076,21 @@ class App {
     );
   }
 
-  /** What can be done with a document from outside the app. Offered wherever a
-      document is named: the title in the toolbar, and the recently-read list. */
-  showDocumentMenu(anchor: HTMLElement, path: string, name: string): void {
+  /** What can be done with a document, and what else there is to read.
+   *
+   * Offered wherever a document is named: the title in the toolbar, which is a
+   * button for this reason, and the recently-read list on the start screen.
+   * Only the toolbar's copy carries the list — a menu hanging off an entry in
+   * the recents does not need the recents in it — and the toolbar's copy is
+   * the only route to the list at all once a document is open. It lived on the
+   * start screen alone, which is the one screen a reader who is reading
+   * something cannot see. */
+  showDocumentMenu(
+    anchor: HTMLElement,
+    path: string,
+    name: string,
+    withLibrary = false,
+  ): void {
     ui.showPopover(anchor, (close) => {
       const menu = document.createElement("div");
       menu.append(
@@ -1107,6 +1119,42 @@ class App {
           },
         }),
       );
+
+      if (withLibrary) {
+        menu.append(ui.divider());
+        menu.append(
+          ui.menuItem({
+            label: "Open a document…",
+            icon: "folder",
+            note: isMac ? "⌘O" : "Ctrl+O",
+            onSelect: () => {
+              close();
+              void this.openDialog();
+            },
+          }),
+        );
+
+        // Everything but the one already open, which is the line above the
+        // menu rather than an entry in it.
+        const others = this.library.filter((entry) => entry.path !== path).slice(0, 8);
+        if (others.length > 0) {
+          menu.append(ui.divider(), ui.section("Recently read"));
+          for (const entry of others) {
+            const title = entry.title || entry.path.split(/[\\/]/).pop() || entry.path;
+            menu.append(
+              ui.menuItem({
+                label: title,
+                icon: "document",
+                note: `p. ${entry.page}`,
+                onSelect: () => {
+                  close();
+                  void this.open(entry.path);
+                },
+              }),
+            );
+          }
+        }
+      }
       return menu;
     });
   }
@@ -1306,11 +1354,14 @@ class App {
 
     el.settings.addEventListener("click", opens(() => this.showSettingsMenu(el.settings)));
 
-    el.title.addEventListener("contextmenu", (event) => {
+    const titleMenu = (event: Event) => {
       if (!this.path) return;
       event.preventDefault();
-      this.showDocumentMenu(el.title, this.path, el.title.textContent || this.path);
-    });
+      this.closeFind();
+      this.showDocumentMenu(el.title, this.path, el.title.textContent || this.path, true);
+    };
+    el.title.addEventListener("click", titleMenu);
+    el.title.addEventListener("contextmenu", titleMenu);
 
     // The webview's own menu is for web pages: it offers to reload the app and
     // to open the inspector, neither of which belongs to a reader. Text that

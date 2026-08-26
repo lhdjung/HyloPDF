@@ -126,13 +126,40 @@ body {
   justify-content: flex-end;
 }
 
+/* The name of what is open, and the way to something else. A button rather
+   than a label because it carries a menu: the recently-read list used to live
+   on the start screen alone, which is the one place a reader with a document
+   open cannot get to. */
 .doc-title {
   margin-left: 6px;
   min-width: 0;
+  max-width: 34ch;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-faint);
+  font: inherit;
+  font-size: 13px;
+  cursor: default;
+}
+
+.doc-title:hover {
+  background: var(--bar-hover);
+  color: var(--text-soft);
+}
+
+.doc-title[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+#shell[data-empty="true"] .doc-title {
+  display: none;
 }
 
 .btn {

@@ -591,10 +591,23 @@ fn document_among(args: &[String]) -> Option<String> {
         .cloned()
 }
 
+/// Caught by `hand_over` when the OS hands over a document before `setup` has
+/// run — before `Pending` exists to hold it — and drained by `setup` once it
+/// does. On macOS, `RunEvent::Opened` for a cold launch onto a document can
+/// arrive that early: AppKit delivers the Apple Event as the app is still
+/// coming up, ahead of the `setup` hook that creates `Pending`, so without
+/// this the document a reader just double-clicked was silently dropped on the
+/// floor and they landed on the start screen instead.
+static EARLY_OPEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 /// A document handed to us by the OS: sent straight through if the interface
-/// is up, stashed for it to collect at boot if it is not.
+/// is up, stashed for it to collect at boot if it is not, and queued in
+/// `EARLY_OPEN` if `Pending` itself does not exist yet.
 fn hand_over(app: &AppHandle, path: String) {
     let Some(pending) = app.try_state::<Pending>() else {
+        if let Ok(mut queue) = EARLY_OPEN.lock() {
+            queue.push(path);
+        }
         return;
     };
     if pending.listening.load(Ordering::SeqCst) {
@@ -673,8 +686,16 @@ pub fn run() {
             app.manage(watch::start(app.handle().clone(), themes.clone()));
             app.manage(Paths { config, themes });
             app.manage(OpenFile::default());
+            // The command line wins over a document that raced `setup` in as
+            // an Apple Event, in the one case both are populated: a second
+            // instance's arguments are routed through `hand_over` instead
+            // (see the single-instance plugin below), so it is only a cold
+            // launch that can have both, and the launch itself named the
+            // document that started it.
+            let initial = first_document_argument()
+                .or_else(|| EARLY_OPEN.lock().ok().and_then(|mut queue| queue.pop()));
             app.manage(Pending {
-                file: Mutex::new(first_document_argument()),
+                file: Mutex::new(initial),
                 listening: AtomicBool::new(false),
             });
 

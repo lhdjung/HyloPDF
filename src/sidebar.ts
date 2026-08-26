@@ -8,7 +8,8 @@ import type {
   RenderTask,
 } from "pdfjs-dist/types/src/display/api";
 
-import type { Theme } from "./api";
+import type { Mark, Theme } from "./api";
+import { hydrateIcons } from "./icons";
 import { recolor } from "./themes";
 import { isRenderCancelled, type Viewer } from "./viewer";
 
@@ -67,6 +68,8 @@ export class Sidebar {
   private drawnAt = 0;
   private observer: IntersectionObserver | null = null;
   private outlineButtons: { el: HTMLButtonElement; page: number }[] = [];
+  /** The reader's own marks, above the document's contents. See `showMarks`. */
+  private marksEl: HTMLElement | null = null;
   private page = 1;
 
   constructor(
@@ -161,6 +164,17 @@ export class Sidebar {
       bar means. */
   showResultsTab(): void {
     if (this.resultsPanel.childElementCount > 0) this.showTab("results");
+  }
+
+  /** The chapter a page falls in, if the document says. A mark named for the
+      section it sits in is worth a great deal more than one named "Page 214",
+      and the outline has already been walked. */
+  sectionFor(page: number): string {
+    let best: { el: HTMLButtonElement; page: number } | null = null;
+    for (const entry of this.outlineButtons) {
+      if (entry.page <= page && (!best || entry.page >= best.page)) best = entry;
+    }
+    return best?.el.textContent?.trim() ?? "";
   }
 
   /** True when the document has a table of contents worth showing. */
@@ -269,6 +283,55 @@ export class Sidebar {
     return Math.max(120, Math.min(THUMB_MAX, room || THUMB_PLACEHOLDER));
   }
 
+  /**
+   * The places the reader has put a pin in, above the document's own contents.
+   *
+   * Above rather than beside: a mark is the reader's own note of where they
+   * were going back to, and there are never many — a section of four entries
+   * over a chapter list of two hundred is the right way round. The panel is
+   * still Contents, because that is what both halves of it are.
+   */
+  showMarks(marks: Mark[], onPick: (mark: Mark) => void, onDrop: (mark: Mark) => void): void {
+    this.marksEl?.remove();
+    this.marksEl = null;
+    if (marks.length === 0) return;
+
+    const box = document.createElement("div");
+    box.className = "marks";
+    const heading = document.createElement("p");
+    heading.className = "marks-title";
+    heading.textContent = "Marked";
+    box.append(heading);
+
+    for (const mark of marks) {
+      const row = document.createElement("div");
+      row.className = "mark";
+
+      const go = document.createElement("button");
+      go.className = "mark-go";
+      go.textContent = mark.title || `Page ${this.viewer.label(mark.page)}`;
+      go.title = `Page ${this.viewer.label(mark.page)}`;
+      go.addEventListener("click", () => onPick(mark));
+
+      const drop = document.createElement("button");
+      drop.className = "mark-drop";
+      drop.setAttribute("aria-label", `Remove the mark on page ${this.viewer.label(mark.page)}`);
+      drop.title = "Remove this mark";
+      drop.dataset.icon = "close";
+      drop.addEventListener("click", () => onDrop(mark));
+
+      row.append(go, drop);
+      box.append(row);
+    }
+
+    hydrateIcons(box);
+    this.marksEl = box;
+    this.outlinePanel.prepend(box);
+    // The panel opens on the contents when a document has none; a document
+    // with marks in it has something to show there after all.
+    if (this.tab === "pages" && !this.hasOutline) this.showTab("outline");
+  }
+
   /** The reader turned the document; the column follows. */
   rotated(): void {
     this.redrawVisible();
@@ -298,6 +361,8 @@ export class Sidebar {
   }
 
   private reset(): void {
+    this.marksEl?.remove();
+    this.marksEl = null;
     this.showResults([], 0, -1, () => {});
     this.observer?.disconnect();
     this.observer = null;

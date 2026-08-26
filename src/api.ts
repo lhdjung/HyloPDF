@@ -51,12 +51,21 @@ export type Theme = {
   built_in: boolean;
 };
 
+/** A place the reader put a pin in. One per page — see `library.rs`. */
+export type Mark = {
+  page: number;
+  offset: number;
+  title: string;
+  at: number;
+};
+
 export type LibraryEntry = {
   path: string;
   title: string;
   page: number;
   offset: number;
   opened_at: number;
+  marks?: Mark[];
 };
 
 export type Bootstrap = {
@@ -296,6 +305,35 @@ export async function setDocumentTitle(path: string, title: string): Promise<Lib
   if (!hasBackend) return [];
   return invoke<LibraryEntry[]>("set_document_title", { path, title });
 }
+
+/** Put a pin in a page, or take the same pin out. */
+export async function toggleMark(
+  path: string,
+  page: number,
+  offset: number,
+  title: string,
+): Promise<{ marked: boolean; marks: Mark[] }> {
+  if (!hasBackend) {
+    // The browser path keeps them for as long as the page is open, which is
+    // as long as anything else lives there.
+    const held = browserMarks.get(path) ?? [];
+    const at = held.findIndex((mark) => mark.page === page);
+    if (at >= 0) held.splice(at, 1);
+    else held.push({ page, offset, title, at: Date.now() });
+    held.sort((one, other) => one.page - other.page);
+    browserMarks.set(path, held);
+    return { marked: at < 0, marks: [...held] };
+  }
+  return invoke<{ marked: boolean; marks: Mark[] }>("toggle_mark", {
+    path,
+    page,
+    offset,
+    title,
+  });
+}
+
+/** Marks, for the browser path. Rust keeps the real ones in `library.toml`. */
+const browserMarks = new Map<string, Mark[]>();
 
 /** Note what is open, for the next launch. `null` means nothing is. */
 export async function setOpenDocument(path: string | null): Promise<void> {

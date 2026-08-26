@@ -48,6 +48,7 @@ The shortcuts below use ⌘ on macOS and Ctrl elsewhere.
 | ⌘P | Hand the document to a program that prints |
 | ⌘A | Select the text of the page you are on |
 | ⌘⇧C | Copy what is selected, with its page number |
+| ⌘⇧B | Mark this page, or take the mark off |
 | ⌘F | Search this document |
 | Enter / ⇧Enter | Next / previous match, from the search field |
 | ⌘G / ⌘⇧G | Next / previous match, from anywhere |
@@ -87,6 +88,13 @@ Scanned books and anything typeset with an inch of white down each side spend
 a quarter of the window on paper. **Trim the margins** measures where the ink
 starts — over a sample of the pages, so every page keeps the same scale — and
 gives that room back to the words. It is off until you ask for it.
+
+## Marks
+
+⌘⇧B puts a pin in the page you are on; the Contents panel lists your marks
+above the document's own contents, and a mark is named for the section it
+falls in when the document says. Nothing is written into the PDF — a mark is a
+page number in `library.toml`, beside the page each document was left on.
 
 ## What it does not do
 

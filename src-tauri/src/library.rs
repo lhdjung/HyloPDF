@@ -19,6 +19,23 @@ const LIMIT: usize = 24;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// A place the reader put a pin in.
+///
+/// One per page, deliberately: a mark is "come back here", and a page is the
+/// unit somebody means by "here". Keying them by page is what lets the whole
+/// feature work without ids — marking a page that is already marked takes the
+/// mark off again, which is the same gesture doing the same thing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Mark {
+    pub page: u32,
+    #[serde(default)]
+    pub offset: f64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub at: i64,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Entry {
     pub path: String,
@@ -32,6 +49,11 @@ pub struct Entry {
     pub offset: f64,
     #[serde(default)]
     pub opened_at: i64,
+    /// Last, and it has to be: these serialise as an array of tables, and TOML
+    /// puts every plain key of a parent before its tables. Above `opened_at`,
+    /// the entry's own keys would land inside the last mark.
+    #[serde(default)]
+    pub marks: Vec<Mark>,
 }
 
 fn one() -> u32 {
@@ -111,6 +133,45 @@ pub fn forget(dir: &Path, file: &str) -> Result<Library, String> {
     take(&mut library, file);
     save(dir, &library)?;
     Ok(library)
+}
+
+/// Put a pin in a page, or take one out. The same call does both: a page that
+/// is already marked is unmarked, which is what pressing the same key twice
+/// means everywhere else.
+///
+/// Returns whether the page ended up marked, and the marks as they now stand.
+pub fn toggle_mark(
+    dir: &Path,
+    file: &str,
+    page: u32,
+    offset: f64,
+    title: &str,
+    now: i64,
+) -> Result<(bool, Vec<Mark>), String> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut library = load(dir);
+    let Some(entry) = library.files.iter_mut().find(|e| e.path == file) else {
+        return Err("That document is not in the library.".into());
+    };
+    let marked = match entry.marks.iter().position(|mark| mark.page == page) {
+        Some(at) => {
+            entry.marks.remove(at);
+            false
+        }
+        None => {
+            entry.marks.push(Mark {
+                page,
+                offset,
+                title: title.to_string(),
+                at: now,
+            });
+            entry.marks.sort_by_key(|mark| mark.page);
+            true
+        }
+    };
+    let marks = entry.marks.clone();
+    save(dir, &library)?;
+    Ok((marked, marks))
 }
 
 /// Give a document the name it calls itself, once the frontend has read it out
@@ -200,6 +261,38 @@ mod tests {
         set_open(&dir, None).expect("clear open");
         assert_eq!(load(&dir).open, "");
         assert_eq!(load(&dir).files.len(), 1, "clearing it kept the history");
+    }
+
+    #[test]
+    fn a_mark_is_a_toggle_and_survives_the_file() {
+        let dir = scratch("marks");
+        let doc = dir.join("book.pdf");
+        fs::write(&doc, b"%PDF-1.4\n%%EOF\n").expect("document");
+        let doc = doc.to_string_lossy().to_string();
+        touch(&dir, &doc, "book.pdf", 100).expect("touch");
+
+        let (marked, marks) = toggle_mark(&dir, &doc, 12, 0.25, "Chapter 2", 100).expect("mark");
+        assert!(marked);
+        assert_eq!(marks.len(), 1);
+
+        // Out of order in, in order out.
+        toggle_mark(&dir, &doc, 4, 0.0, "Chapter 1", 101).expect("mark");
+        let pages: Vec<u32> = load(&dir).files[0].marks.iter().map(|m| m.page).collect();
+        assert_eq!(pages, vec![4, 12]);
+
+        // The same page again takes the pin out rather than adding a second.
+        let (marked, marks) = toggle_mark(&dir, &doc, 12, 0.25, "Chapter 2", 102).expect("unmark");
+        assert!(!marked);
+        assert_eq!(marks.len(), 1);
+
+        // And the entry's own keys still read back: `marks` is an array of
+        // tables, and TOML puts every plain key of a parent before its tables,
+        // so anything below it in the struct would land inside the last mark.
+        let back = load(&dir);
+        assert_eq!(back.files[0].page, 1);
+        assert_eq!(back.files[0].title, "book.pdf");
+        assert_eq!(back.files[0].opened_at, 100);
+        assert_eq!(back.files[0].marks[0].title, "Chapter 1");
     }
 
     #[test]

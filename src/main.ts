@@ -10,6 +10,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist/types/src/display/api";
 import {
   type Bootstrap,
   type LibraryEntry,
+  type Mark,
   type Settings,
   type Theme,
   bootstrap,
@@ -36,6 +37,7 @@ import {
   quitApp,
   registerBrowserFile,
   rememberPosition,
+  toggleMark,
   setDocumentTitle,
   setOpenDocument,
   revealDocument,
@@ -429,6 +431,7 @@ class App {
       this.search.reset();
       this.saidTextless = false;
       void this.sidebar.setDocument(doc, this.theme);
+      this.showMarks();
       void this.reportFormFields(doc);
       void this.adoptDocumentTitle(path, opened.name);
 
@@ -985,6 +988,53 @@ class App {
     if (reopening && el.findInput.value.trim().length > 0) void this.runSearch();
   }
 
+  /* ---------------------------------------------------------------- marks */
+
+  /** The pins in the document that is open. */
+  private marks(): Mark[] {
+    if (!this.path) return [];
+    return this.library.find((entry) => entry.path === this.path)?.marks ?? [];
+  }
+
+  /**
+   * Put a pin in this page, or take the same pin out.
+   *
+   * Marks are not annotations — nothing is written into the document, and
+   * nothing appears on it. They are the reader's own note of where they were
+   * going back to, which is the half of what people ask annotations for that
+   * a reader can honestly answer, and they live in `library.toml` beside the
+   * page each document was left on.
+   */
+  private async toggleMark(page = this.viewer.pageNumber): Promise<void> {
+    if (!this.path || this.viewer.isEmpty) return;
+    const at = this.viewer.position();
+    const offset = at.page === page ? at.offset : 0;
+    const title = this.sidebar.sectionFor(page) || `Page ${this.viewer.label(page)}`;
+    try {
+      const { marked, marks } = await toggleMark(this.path, page, offset, title);
+      const entry = this.library.find((item) => item.path === this.path);
+      if (entry) entry.marks = marks;
+      this.showMarks();
+      ui.notice(
+        marked
+          ? `Marked page ${this.viewer.label(page)}. The Contents panel lists your marks.`
+          : `Took the mark off page ${this.viewer.label(page)}.`,
+        marked ? "done" : undefined,
+      );
+    } catch (error) {
+      ui.notice(messageOf(error));
+    }
+  }
+
+  /** Hand the marks to the panel that lists them. */
+  private showMarks(): void {
+    this.sidebar.showMarks(
+      this.marks(),
+      (mark) => this.viewer.jumpTo(mark.page, mark.offset),
+      (mark) => void this.toggleMark(mark.page),
+    );
+  }
+
   /** Select the page being read, and say what was selected — the reader asked
       for everything, and this is not everything. */
   private selectThisPage(): void {
@@ -1416,6 +1466,16 @@ class App {
           onSelect: () => {
             close();
             void revealDocument(path).catch((error) => ui.notice(messageOf(error)));
+          },
+        }),
+        ui.menuItem({
+          label: "Mark this page",
+          icon: "mark",
+          note: isMac ? "⌘⇧B" : "Ctrl+Shift+B",
+          checked: this.marks().some((mark) => mark.page === this.viewer.pageNumber),
+          onSelect: () => {
+            close();
+            void this.toggleMark();
           },
         }),
         ui.menuItem({
@@ -2021,6 +2081,11 @@ class App {
         if (this.viewer.isEmpty) return;
         event.preventDefault();
         this.selectThisPage();
+        return;
+      }
+      if (meta && event.shiftKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        void this.toggleMark();
         return;
       }
       // The one thing people do with a selection in a document they are

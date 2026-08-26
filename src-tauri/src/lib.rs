@@ -393,6 +393,25 @@ async fn print_document(path: String) -> Result<(), String> {
     }
 }
 
+/// A pin in a page, or the same pin taken out. See `library::toggle_mark`.
+#[derive(Serialize)]
+struct Marked {
+    marked: bool,
+    marks: Vec<library::Mark>,
+}
+
+#[tauri::command]
+async fn toggle_mark(
+    paths: State<'_, Paths>,
+    path: String,
+    page: u32,
+    offset: f64,
+    title: String,
+) -> Result<Marked, String> {
+    let (marked, marks) = library::toggle_mark(&paths.config, &path, page, offset, &title, now())?;
+    Ok(Marked { marked, marks })
+}
+
 /// The title the document gives itself, which the frontend reads out of the
 /// file and this remembers for the recently-read list.
 #[tauri::command]
@@ -743,6 +762,7 @@ pub fn run() {
             remember_position,
             set_open_document,
             set_document_title,
+            toggle_mark,
             forget_document,
             open_link,
             reveal_document,

@@ -593,6 +593,73 @@ body {
   border-radius: 2px;
 }
 
+/* The reader's own marks, above the document's contents. */
+.marks {
+  padding: 4px 6px 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+
+.marks-title {
+  margin: 2px 4px 4px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.mark-go {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.mark-drop {
+  flex: 0 0 auto;
+  display: flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: default;
+  opacity: 0;
+}
+
+.mark:hover .mark-drop,
+.mark-drop:focus-visible {
+  opacity: 1;
+}
+
+.mark-go:hover,
+.mark-drop:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.mark-drop svg {
+  width: 13px;
+  height: 13px;
+}
+
 .sidebar-empty {
   padding: 16px 10px;
   color: var(--text-faint);

@@ -336,8 +336,10 @@ something_a_later_version_added = "kept"
         // Wrong kind: the default stands.
         assert_eq!(loaded.get("zoom"), Some(&json!(1.0)));
         assert_eq!(loaded.get("scroll_mode"), Some(&json!("continuous")));
-        // A distance in pixels is a whole number of them.
-        assert_eq!(loaded.get("sidebar_width"), Some(&json!(232)));
+        // A distance in pixels is a whole number of them, so the default
+        // stands — taken from the table rather than written out again here,
+        // which is a number that has moved once already.
+        assert_eq!(loaded.get("sidebar_width"), defaults().get("sidebar_width"));
         // Right kind: taken.
         assert_eq!(loaded.get("page_gap"), Some(&json!(20)));
         // Not ours to judge, and dropping it is how a downgrade eats settings.

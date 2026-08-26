@@ -662,6 +662,7 @@ function keyboardPage(pane: HTMLElement): void {
         ["Print — handed to a program that prints", shortcut("⌘P", "Ctrl+P")],
         ["Select the text of this page", shortcut("⌘A", "Ctrl+A")],
         ["Copy what is selected, with its page number", shortcut("⌘⇧C", "Ctrl+Shift+C")],
+        ["Mark this page, or take the mark off", shortcut("⌘⇧B", "Ctrl+Shift+B")],
       ],
     ],
     [

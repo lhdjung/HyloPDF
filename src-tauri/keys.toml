@@ -37,11 +37,16 @@
 # ─── documents ───────────────────────────────────────────────────────────
 
 # open = ["mod+o"]
+# Two documents at once means two windows. A window is a whole second reader,
+# and the settings, themes and reading history stay shared between them.
+# new-window = ["mod+n"]
 # print = ["mod+p"]
 # settings = ["mod+,"]
 # help = ["f1", "mod+/"]
-# On a Mac this is empty and the menu bar answers ⌘W and ⌘Q; on Windows and
-# Linux there is no menu bar, so HyloPDF listens for them itself.
+# On a Mac both are empty and the menu bar answers ⌘W and ⌘Q; on Windows and
+# Linux there is no menu bar, so HyloPDF listens for them itself. Two of them,
+# because there is more than one window: ⌘W closes this one, ⌘Q closes them all.
+# close-window = []
 # quit = []
 # find = ["mod+f"]
 # find-next = ["mod+g"]

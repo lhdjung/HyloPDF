@@ -58,11 +58,12 @@ is built with `document.createElement`, and one `App` object holds the state.
 
 ```
 src-tauri/          Rust: settings, themes, reading history, the window
-  src/lib.rs        every #[tauri::command], window restore, file associations
+  src/lib.rs        every #[tauri::command], the windows, file associations
   src/settings.rs   settings.toml — one flat table, one key written at a time
   src/theme.rs      one TOML file per theme, built-ins installed on first run
   src/keys.rs       keys.toml — the reader's keyboard, read but not interpreted
-  src/library.rs    library.toml — where you were, what was open, what you marked
+  src/library.rs    library.toml — where you were, what was open in each window,
+                    what you marked
   src/watch.rs      the themes directory and the open document, watched
   build.rs          the shipped theme table, generated from themes/ and checked
   themes/*.toml     the fourteen packaged themes, embedded with include_str!
@@ -113,7 +114,7 @@ flashes white on the way in.
 
 **A document is read in pieces, never whole.** `open_for_reading` opens the
 file and reports its length without reading any of it; `read_range` serves
-slices of whichever document is currently open, raw rather than base64'd
+slices of the document the asking window has open, raw rather than base64'd
 through the JSON bridge. `FileRange` in `viewer.ts` is a pdf.js
 `PDFDataRangeTransport` over those two, with `disableAutoFetch` and
 `disableStream` so nothing is fetched speculatively. Handing pdf.js the whole
@@ -205,11 +206,12 @@ instead of taking the list apart.
 **Two of the files the app reads can change without the app changing them, and
 Rust says when they do.** A theme is TOML so that somebody can open it in an
 editor, and a document is often a paper being recompiled underneath the reader;
-`watch.rs` follows the themes directory always and the open document while
-there is one, and emits `themes-changed` (with the whole set — fourteen themes
-of five colours is cheaper to send than to ask for) or `document-changed` (with
-the path). The frontend reapplies the theme in use without remembering it, or
-reopens the document and puts the reader back where they were. This is the
+`watch.rs` follows the themes directory always and each window's open document
+while there is one, and emits `themes-changed` to everybody (with the whole set
+— fourteen themes of five colours is cheaper to send than to ask for) or
+`document-changed` to the one window it concerns (with the path). The frontend
+reapplies the theme in use without remembering it, or reopens the document and
+puts the reader back where they were. This is the
 shape of work that belongs on the Rust side: it lives on the disk, and what
 crosses the bridge is a filename.
 
@@ -400,6 +402,106 @@ side. The probe is drawn on white rather than on the theme's paper: this is a
 question about the document, and the answer must not move when the reader
 changes theme.
 
+## Two documents at once
+
+A window is a whole second reader. The interface is one `App` object inside one
+webview, so a second window is a second viewer, a second search index and a
+second sidebar, and none of them needed a line of code: they came with the
+webview. What did not come with it was on the Rust side, where three things
+were global because there had only ever been one of anything.
+
+*The file handle is keyed by window.* `OpenFiles` is a map from window label to
+the document that window has open, and `open_for_reading`, `read_range` and
+`close_document` all take the asking window. One slot was the reason two
+documents could not work at once: the second window's `open_for_reading`
+replaced the first window's handle, and every `read_range` after that came back
+"That is not the document that is open", in the middle of a scroll. A window
+gives its handle back when it is destroyed, which is `tidy_after`.
+
+*So is the document watch.* `watch.rs` follows one document per window and
+tells that window, by name, when it has been rewritten — `emit_to`, not `emit`.
+The watch itself is on the *directory*, which is shared, so `follow` counts
+what wants a directory rather than unwatching it along with the document that
+named it: two papers being recompiled in the same folder is the ordinary case,
+not a corner.
+
+*And the frontend listens on its window, not on the app.* A plain `listen` from
+`@tauri-apps/api/event` registers for **any** target and hears everything,
+including an `emit_to` naming somebody else — so `open-document` and
+`document-changed` go through `getCurrentWindow().listen`. Get this wrong and
+there is nothing to see until two windows are open, at which point every window
+opens every document. `tests/seams.test.mjs` greps for it.
+
+**Opening a second document no longer closes the first, which was the whole
+complaint.** `hand_over` looks for a window with nothing in it — the one with
+the keyboard first — and makes one if there is none, claiming it in
+`OpenDocuments` as it goes so that two files double-clicked in the same instant
+do not both land in the same empty window. Nothing is ever displaced. ⌘N is an
+empty window; "Open in a new window…" under the document's title is the same
+thing with the picker attached, which is the one-step version of what anybody
+actually wants.
+
+**What is shared is what belongs to the app.** Settings, themes and the library
+are one process's, which is exactly what the single-instance plugin has always
+been protecting. The consequence to know is that a setting changed in one
+window is not seen by the other until it is opened again — the file is right,
+and the copy in the other window's memory is stale. Themes are the exception,
+because the watcher already broadcasts them.
+
+**Geometry belongs to the launch window.** There is one remembered size and
+place and there are several windows, so somebody has to own it.
+`save_window_state` records only from `main`; every other window cascades off
+the window in front of it, stepping on while the spot is taken. Letting
+whichever window last moved own the setting was tried and it drifts: the number
+creeps down and across every session, because what it reads back are windows
+that were themselves cascaded off it. Full screen is the one window fact that
+is still a setting, so a new window asks the window itself at startup and
+adopts the answer without remembering it — otherwise a window made beside a
+full-screen one spends its life wearing the chrome of a window it is not.
+
+**A window's position does not survive being shown, on macOS.** Give the
+builder a position and the window comes up where it was told to; then `show()`
+moves it onto the launch window's frame, so every window lands exactly on top
+of every other — which looks precisely like the app still only having one, and
+took a while to see for that reason. Setting it again right after `build` does
+not help, and neither does setting it just before `show`. `Placements` holds
+where each window is meant to go and `place` puts it there immediately after
+`show`, in the same turn of the main thread, so nothing is seen in between.
+
+**`library.open` is a list, one path per window.** A launch puts back every
+window that was open, the first through `bootstrap` and the rest through
+`ready`. It is read from `OpenDocuments`, which is what each window says it is
+showing — and a window *closing* deliberately does not take its entry out. The
+list means "what the app was holding when it went down", and on Windows and
+Linux quitting **is** closing the last window, with no signal that separates
+the two; forgetting on close would empty the list on the way out and undo the
+feature. The cost is the right way round: a window the reader closed comes back
+next launch, rather than one they wanted disappearing. Putting a *document*
+down — the reader's own Close — is remembered as the decision it is.
+
+**The restore windows are made from `ready`, not from `setup`.** A window built
+during `setup` comes out wrong on macOS: Tauri reports it as visible, and it is
+not on screen and not in the accessibility tree, because it was made before the
+application had finished launching. Made once the launch window's interface has
+reported in, it is an ordinary window — which is what the handover path had
+been producing all along.
+
+**A second window needs the capability to say so.** `capabilities/default.json`
+names the windows it applies to, and it named `main` alone. A window outside
+that list gets no permissions at all, so every `invoke` from it is denied and
+the failure is a webview that never reports in and therefore never becomes
+visible. The list is `["main", "reader-*"]`, and new windows are named for the
+pattern.
+
+**None of this can be tested in the harness**, which has no Rust behind it and
+no windows. What is testable is on either side of the seam and is tested there:
+`library.rs` for the list and its compatibility with the single path it used to
+be, `watch.rs` for two windows reading one folder, `seams.test.mjs` for the
+window-targeted listens and the keyed handle, and `keys.test.mjs` for ⌘N and
+for ⌘W and ⌘Q meaning two different things now. The rest was checked by running
+the real app: two documents handed over, three windows restored from a session,
+⌘N, and a window closed.
+
 ## The keyboard
 
 Every key the app answers to is an **action** with a name, and a chord is only
@@ -541,6 +643,11 @@ one of them can help with. The variant does not merely go unused off Apple
 platforms, it does not exist there, so matching on it has to be `#[cfg]`-gated
 or Linux and Windows will not compile — which is invisible from a Mac and is
 the whole of what CI caught.
+
+**One instance is not one window.** See "Two documents at once" below: three
+double-clicked documents are one process and three windows, which is the point
+of routing them through `hand_over` rather than through three copies of the
+app.
 
 **Declining a password is not an empty password.** pdf.js reads any string
 handed to `onPassword` as another attempt, so answering `""` when the reader
@@ -1045,7 +1152,7 @@ Validating in Rust as well would have meant the same parser written twice.
 cache, per-document settings, export. These belong beside `library.rs` for the
 same reason it does, and each is a new door rather than a moved one. Four have
 been built since this was written and all four went that way: what was open
-last (`set_open_document`), the name a document gives itself
+last, in each window (`set_open_document`), the name a document gives itself
 (`set_document_title`), the pages the reader has marked (`toggle_mark`), and
 handing a document to a program that prints (`print_document`). Every one of
 them is a filename or a page number crossing the bridge, which is the rule

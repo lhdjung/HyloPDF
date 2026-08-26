@@ -193,6 +193,28 @@ test("a chord reads the way the platform writes it", () => {
   assert.equal(mac.describeBinding("g g"), "g g");
 });
 
+/** Two windows, and the three keys that came with them.
+ *
+ * ⌘N is the one shortcut this app added that every other application already
+ * has, so it is worth knowing it is not quietly colliding with something. The
+ * other two are the split: ⌘W used to close the app because closing the window
+ * *was* closing the app, and with more than one window that is no longer true
+ * — so Quit needed a key that is not "whichever window has the keyboard". Both
+ * are empty on a Mac, where AppKit answers them before the page does. */
+test("a second window has a key, and closing one is not quitting", () => {
+  const shipped = mac.buildKeymap();
+  assert.deepEqual(shipped.problems, [], "one of these took a key something else wanted");
+  assert.equal(shipped.byBinding.get("mod+n"), "new-window");
+
+  assert.deepEqual(mac.defaultKeys(mac.ACTIONS.find((a) => a.id === "close-window")), []);
+  assert.deepEqual(mac.defaultKeys(mac.ACTIONS.find((a) => a.id === "quit")), []);
+
+  const elsewhere = pc.buildKeymap();
+  assert.equal(elsewhere.byBinding.get("mod+w"), "close-window");
+  assert.equal(elsewhere.byBinding.get("mod+q"), "quit");
+  assert.equal(elsewhere.byBinding.get("mod+n"), "new-window");
+});
+
 /* ------------------------------------------------------------- the file */
 
 test("the shipped keys.toml shows the keys the app actually ships with", () => {

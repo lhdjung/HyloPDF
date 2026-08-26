@@ -4,16 +4,17 @@ mod settings;
 mod theme;
 mod watch;
 
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
 /// Replace a file's contents without ever leaving a half-written one behind:
@@ -59,43 +60,67 @@ struct Paths {
     themes: PathBuf,
 }
 
-/// A file waiting to be opened — from the command line, or from the OS asking
-/// us to open it while we were still starting up. Once the interface is up it
-/// takes documents by event instead, so `ready` decides which route applies.
+/// Files waiting to be opened — from the command line, from the OS asking us
+/// to open one while we were still starting up, or seeded into a window this
+/// process has just made. Once a window's interface is up it takes documents
+/// by event instead, so `ready` decides which route applies.
+///
+/// Both maps are keyed by window label. A window that is still painting cannot
+/// be sent an event, and with more than one window there is no longer a single
+/// "the interface" to ask about.
 #[derive(Default)]
 struct Pending {
-    file: Mutex<Option<String>>,
-    listening: AtomicBool,
+    file: Mutex<HashMap<String, String>>,
+    listening: Mutex<HashSet<String>>,
 }
 
-/// The document currently open, held open.
+impl Pending {
+    fn hold(&self, window: &str, path: String) {
+        let mut files = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        files.insert(window.to_string(), path);
+    }
+
+    fn is_listening(&self, window: &str) -> bool {
+        let listening = self.listening.lock().unwrap_or_else(|e| e.into_inner());
+        listening.contains(window)
+    }
+}
+
+/// The document each window has open, held open.
 ///
 /// pdf.js reads a document in pieces — it asks for the cross-reference table,
 /// then the pages it actually needs — so the file is opened once and kept,
-/// rather than opened and closed for every range. Only the path recorded here
-/// can be read, which keeps `read_range` a way of reading the open document
-/// rather than a way of reading any file on the disk.
+/// rather than opened and closed for every range. Only a path recorded here
+/// can be read, which keeps `read_range` a way of reading the document the
+/// asking window is showing rather than a way of reading any file on the disk.
+///
+/// Keyed by window label, and that keying is the whole of what a second window
+/// costs on this side. There was one slot, and it was the reason two documents
+/// at once could not work: the second window's `open_for_reading` replaced the
+/// first window's handle, and every `read_range` from the first window after
+/// that came back "That is not the document that is open" — in the middle of a
+/// scroll, with no way to recover short of reopening.
 #[derive(Default)]
-struct OpenFile(Mutex<Option<(String, File)>>);
+struct OpenFiles(Mutex<HashMap<String, (String, File)>>);
 
-impl OpenFile {
-    /// Open a document for reading and report its size.
-    fn begin(&self, path: &str) -> Result<u64, String> {
+impl OpenFiles {
+    /// Open a document for reading, on behalf of a window, and report its size.
+    fn begin(&self, window: &str, path: &str) -> Result<u64, String> {
         let file =
             File::open(path).map_err(|e| format!("Could not read {}: {e}", file_name(path)))?;
         let length = file
             .metadata()
             .map_err(|e| format!("Could not measure {}: {e}", file_name(path)))?
             .len();
-        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        *slot = Some((path.to_string(), file));
+        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        held.insert(window.to_string(), (path.to_string(), file));
         Ok(length)
     }
 
-    /// Bytes `[start, start + length)` of the open document.
-    fn range(&self, path: &str, start: u64, length: u64) -> Result<Vec<u8>, String> {
-        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        let Some((open, file)) = slot.as_mut() else {
+    /// Bytes `[start, start + length)` of the document that window has open.
+    fn range(&self, window: &str, path: &str, start: u64, length: u64) -> Result<Vec<u8>, String> {
+        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((open, file)) = held.get_mut(window) else {
             return Err("No document is open.".into());
         };
         if open != path {
@@ -119,9 +144,51 @@ impl OpenFile {
         Ok(buffer)
     }
 
-    fn close(&self) {
-        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        *slot = None;
+    fn close(&self, window: &str) {
+        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        held.remove(window);
+    }
+}
+
+/// What each window is showing, in the order the windows claimed a document.
+///
+/// This is the only source of two answers. The first is what `library.open` is
+/// written from, so that a launch can put back every window that was open
+/// rather than only the last one. The second is which window a document handed
+/// over by the system should go to: a window not named here has nothing in it,
+/// and `hand_over` claims it here the moment it picks it, so two files
+/// double-clicked at once do not both land in the same empty window.
+///
+/// A window closing does *not* take its entry out, and that is deliberate. The
+/// list is "what the app was holding when it went down", and quitting is a
+/// window closing — on Windows and Linux quitting *is* closing the last
+/// window, and there is no signal that separates the two. Forgetting on close
+/// would therefore empty the list on the way out on those platforms and undo
+/// the feature entirely. The cost of not forgetting is small and the right way
+/// round: a window the reader closed comes back next launch. Putting a
+/// *document* down — the reader's own Close, which says `None` here — is
+/// remembered as the decision it is.
+#[derive(Default)]
+struct OpenDocuments(Mutex<Vec<(String, String)>>);
+
+impl OpenDocuments {
+    /// Record what a window is showing, and report the list as it now stands.
+    fn set(&self, window: &str, path: Option<&str>) -> Vec<String> {
+        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        match path {
+            Some(path) => match held.iter_mut().find(|(label, _)| label == window) {
+                Some(slot) => slot.1 = path.to_string(),
+                None => held.push((window.to_string(), path.to_string())),
+            },
+            None => held.retain(|(label, _)| label != window),
+        }
+        held.iter().map(|(_, path)| path.clone()).collect()
+    }
+
+    /// Whether this window already has something to show, or is about to.
+    fn taken(&self, window: &str) -> bool {
+        let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        held.iter().any(|(label, _)| label == window)
     }
 }
 
@@ -130,8 +197,11 @@ struct Bootstrap {
     settings: settings::Settings,
     themes: Vec<theme::Theme>,
     library: Vec<library::Entry>,
-    /// What was open when the app was last put down, if it is still there.
-    /// Empty when the reader closed it themselves.
+    /// What this window should reopen, if anything. Only the window the app
+    /// launched with is ever given one: every other window is either new, and
+    /// so has nothing to come back to, or was made to hold one of the *other*
+    /// documents that were open last, which reaches it through `ready` the
+    /// same way a double-clicked file does.
     open_document: String,
     config_dir: String,
     themes_dir: String,
@@ -173,13 +243,18 @@ fn file_name(path: &str) -> String {
 /// The price is that two of them can now genuinely run at once, which is why
 /// `settings` and `library` hold a lock across read-modify-write.
 #[tauri::command]
-async fn bootstrap(paths: State<'_, Paths>) -> Result<Bootstrap, String> {
+async fn bootstrap(window: WebviewWindow, paths: State<'_, Paths>) -> Result<Bootstrap, String> {
     let stored = library::prune(&library::load(&paths.config));
+    let reopen = if window.label() == MAIN {
+        stored.open.first().cloned().unwrap_or_default()
+    } else {
+        String::new()
+    };
     Ok(Bootstrap {
         settings: settings::load(&paths.config),
         themes: theme::load_all(&paths.themes),
         library: stored.files,
-        open_document: stored.open,
+        open_document: reopen,
         config_dir: paths.config.to_string_lossy().to_string(),
         themes_dir: paths.themes.to_string_lossy().to_string(),
     })
@@ -202,6 +277,14 @@ async fn set_settings(
 
 /// The window's geometry is one observation of one window, so it is written in
 /// one go, like everything else.
+///
+/// And only ever of the launch window. There is one remembered geometry and
+/// there are several windows, so somebody has to own it; letting whichever
+/// window last moved own it meant the number crept down and across a little
+/// every session, because the windows it was reading back were themselves
+/// cascaded off it. The rule is simple to say and it holds still: the window
+/// HyloPDF opens with is the one whose size and place are remembered, and the
+/// rest cascade off that one each time.
 // Async for a second reason as well as the one above: the window getters below
 // hand their work to the main thread and wait for it, which would deadlock a
 // command already running there. The same goes for `ready`.
@@ -210,6 +293,9 @@ async fn save_window_state(
     window: WebviewWindow,
     paths: State<'_, Paths>,
 ) -> Result<settings::Settings, String> {
+    if window.label() != MAIN {
+        return Ok(settings::load(&paths.config));
+    }
     let mut entries: Vec<(String, Value)> = Vec::new();
     let maximized = window.is_maximized().unwrap_or(false);
     let fullscreen = window.is_fullscreen().unwrap_or(false);
@@ -303,14 +389,16 @@ async fn open_document(paths: State<'_, Paths>, path: String) -> Result<Opened, 
 /// first one was shown.
 #[tauri::command]
 async fn open_for_reading(
-    open: State<'_, OpenFile>,
+    window: WebviewWindow,
+    open: State<'_, OpenFiles>,
     watching: State<'_, watch::Watching>,
     path: String,
 ) -> Result<u64, String> {
-    let length = open.begin(&path)?;
+    let length = open.begin(window.label(), &path)?;
     // Only a document that opened is worth following, and this is also where
-    // a second document displaces the first: nothing closes in between.
-    watching.document(Some(&path));
+    // a second document displaces the first *in this window*: nothing closes
+    // in between, and no other window is touched.
+    watching.document(window.label(), Some(&path));
     Ok(length)
 }
 
@@ -318,23 +406,25 @@ async fn open_for_reading(
 /// bytes do not get base64'd through the IPC bridge.
 #[tauri::command]
 async fn read_range(
-    open: State<'_, OpenFile>,
+    window: WebviewWindow,
+    open: State<'_, OpenFiles>,
     path: String,
     start: u64,
     length: u64,
 ) -> Result<tauri::ipc::Response, String> {
-    open.range(&path, start, length)
+    open.range(window.label(), &path, start, length)
         .map(tauri::ipc::Response::new)
 }
 
 /// Let go of the open document, so the handle does not outlive the reading.
 #[tauri::command]
 async fn close_document(
-    open: State<'_, OpenFile>,
+    window: WebviewWindow,
+    open: State<'_, OpenFiles>,
     watching: State<'_, watch::Watching>,
 ) -> Result<(), String> {
-    open.close();
-    watching.document(None);
+    open.close(window.label());
+    watching.document(window.label(), None);
     Ok(())
 }
 
@@ -348,12 +438,54 @@ async fn remember_position(
     library::remember(&paths.config, &path, page, offset)
 }
 
-/// Note which document is open, so the next launch can pick it up where this
-/// one left off. `None` when the reader has closed it, which is them saying
-/// they are done with it.
+/// Note which document this window is showing, so the next launch can put the
+/// windows back where they were. `None` when the reader has closed it, which
+/// is them saying they are done with it.
+///
+/// The window says only what *it* is holding; the list written to
+/// `library.toml` is every window's answer together. See `OpenDocuments`.
 #[tauri::command]
-async fn set_open_document(paths: State<'_, Paths>, path: Option<String>) -> Result<(), String> {
-    library::set_open(&paths.config, path.as_deref())
+async fn set_open_document(
+    window: WebviewWindow,
+    paths: State<'_, Paths>,
+    open: State<'_, OpenDocuments>,
+    path: Option<String>,
+) -> Result<(), String> {
+    let all = open.set(window.label(), path.as_deref());
+    library::set_open(&paths.config, &all)
+}
+
+/// A second window, reading a second document.
+///
+/// Everything an open document needs is per-window already: the whole
+/// interface is one `App` object inside one webview, so a window is a reader
+/// with its own viewer, its own search index and its own sidebar for nothing
+/// more than the cost of the webview. What was not per-window was on this
+/// side — the file handle and the document watch — and both are keyed by
+/// window label now.
+///
+/// What stays shared is what belongs to the app rather than to a window: the
+/// settings, the themes and the library. That is also the reason this is a
+/// second *window* and not a second process — one process is what keeps two
+/// windows from writing over each other's `settings.toml`, which is what the
+/// single-instance plugin has always been for.
+#[tauri::command]
+async fn new_window(app: AppHandle, path: Option<String>) -> Result<(), String> {
+    spawn_window(&app, path)
+}
+
+/// Leave, off a Mac, where there is no menu bar to put Quit in.
+///
+/// Every window is closed rather than the process exited: a window's close
+/// handler is where its position, its pending settings and its geometry are
+/// written down, and `app.exit` would take the process out from under all
+/// three. Closing the last window is what ends the app on those platforms
+/// anyway.
+#[tauri::command]
+async fn quit_app(app: AppHandle) {
+    for window in app.webview_windows().values() {
+        let _ = window.close();
+    }
 }
 
 /// Hand a document to whatever this system prints PDFs with.
@@ -565,17 +697,54 @@ fn log(message: String) {
     eprintln!("[webview] {message}");
 }
 
+/// The documents that were open in windows other than the launch window when
+/// the app was last put down, waiting for a window each. Drained by the first
+/// `ready`; see there for why it is not done in `setup`.
+struct Restore(Mutex<Vec<String>>);
+
 /// Called once the interface is listening and ready to paint. Showing the
 /// window only then means no white flash before a dark theme arrives.
 ///
-/// Returns the document the app was started with, if there was one: by now the
-/// frontend is listening, so anything arriving later comes through as an event.
+/// Returns the document that window was started with, if there was one: by now
+/// its frontend is listening, so anything arriving later comes through as an
+/// event.
 #[tauri::command]
-async fn ready(window: WebviewWindow, pending: State<'_, Pending>) -> Result<Option<String>, ()> {
+async fn ready(
+    app: AppHandle,
+    window: WebviewWindow,
+    pending: State<'_, Pending>,
+) -> Result<Option<String>, ()> {
     let _ = window.show();
     let _ = window.set_focus();
-    pending.listening.store(true, Ordering::SeqCst);
-    Ok(pending.file.lock().ok().and_then(|mut file| file.take()))
+    place(&app, &window);
+    let label = window.label().to_string();
+    if let Ok(mut listening) = pending.listening.lock() {
+        listening.insert(label.clone());
+    }
+
+    // The other windows the last session had open, made here rather than in
+    // `setup`. A window built during `setup` comes out wrong on macOS: Tauri
+    // reports it as visible and it is not on screen and not in the
+    // accessibility tree, because it was made before the application had
+    // finished launching. Made from here it is an ordinary window, which is
+    // what the handover path has always produced. The first window to report
+    // in drains the list, so it happens once.
+    if let Some(restore) = app.try_state::<Restore>() {
+        let waiting: Vec<String> = restore
+            .0
+            .lock()
+            .map(|mut held| std::mem::take(&mut *held))
+            .unwrap_or_default();
+        for path in waiting {
+            let _ = spawn_window(&app, Some(path));
+        }
+    }
+
+    Ok(pending
+        .file
+        .lock()
+        .ok()
+        .and_then(|mut files| files.remove(&label)))
 }
 
 /// Show or hide the close, minimise and zoom buttons.
@@ -624,6 +793,205 @@ fn set_titlebar_buttons(window: WebviewWindow, visible: bool) {
 /// them agree and say where the other copy is.
 const MIN_WIDTH: f64 = 520.0;
 const MIN_HEIGHT: f64 = 400.0;
+
+/// The window `tauri.conf.json` declares, and the one the app launches with.
+/// It is the only window with a name of its own: every other is made by
+/// `spawn_window` and named `reader-N`, which is also the pattern the
+/// capability has to allow.
+const MAIN: &str = "main";
+
+/// How far a new window is stepped down and across from the one in front of
+/// it, so that two windows are two windows rather than one with a stack
+/// behind it.
+const CASCADE: f64 = 28.0;
+
+/// Where a window has been told to go, until it is up and can be put there.
+///
+/// The position handed to the builder does not survive on macOS. A window made
+/// with one comes up where it was told to, and then *showing* it moves the
+/// window onto the launch window's frame — so every window ends up exactly on
+/// top of every other, which looks precisely like the app still only having
+/// one. Setting it again right after `build` does not help, and neither does
+/// setting it just before `show`, because `show` is the thing that does it. So
+/// the place is worked out when the window is made, kept here, and applied by
+/// `place` immediately after the window is shown, which is the first moment
+/// that is the last word. Nothing is seen in between: the two happen in one
+/// turn of the main thread.
+#[derive(Default)]
+struct Placements(Mutex<HashMap<String, (f64, f64)>>);
+
+/// Where the window's top-left corner is, in the units settings are written in.
+fn corner(window: &WebviewWindow) -> Option<(f64, f64)> {
+    let scale = window.scale_factor().ok()?;
+    let at = window.outer_position().ok()?.to_logical::<f64>(scale);
+    Some((at.x, at.y))
+}
+
+/// Where to put a new window: one step down and across from the window in
+/// front of it, and on again while that spot is taken.
+///
+/// Off the *front* window rather than off the remembered position, which is
+/// what this did first and is worth saying why it did not work. Restoring
+/// three windows makes them in one burst, so all three cascaded from the same
+/// number and landed within a few pixels of each other — a stack that looks
+/// exactly like one window, which is the failure this whole feature exists to
+/// avoid. Stepping past what is already there is also what makes ⌘N four times
+/// give four windows rather than four windows in one place.
+///
+/// `None` means there is nothing to cascade from, and the window is centred.
+fn placement(app: &AppHandle, stored: &settings::Settings) -> Option<(f64, f64)> {
+    let windows = app.webview_windows();
+    // Where the windows are, and where the ones still coming up are going. A
+    // window made a moment ago has not been put in its place yet, and two
+    // windows made in the same breath — which is what restoring a session is —
+    // would otherwise choose the same spot.
+    let mut taken: Vec<(f64, f64)> = windows.values().filter_map(corner).collect();
+    if let Some(placements) = app.try_state::<Placements>() {
+        if let Ok(held) = placements.0.lock() {
+            taken.extend(held.values().copied());
+        }
+    }
+    let number = |key: &str| stored.get(key).and_then(|value| value.as_f64());
+    let base = windows
+        .values()
+        .find(|window| window.is_focused().unwrap_or(false))
+        .and_then(corner)
+        .or_else(|| windows.get(MAIN).and_then(corner))
+        .or_else(|| Some((number("window_x")?, number("window_y")?)))?;
+
+    let mut spot = (base.0 + CASCADE, base.1 + CASCADE);
+    // Bounded: a screen this far down and across is a screen nobody has, and
+    // an unbounded walk here would be an unbounded walk off the display.
+    for _ in 0..16 {
+        let clash = taken
+            .iter()
+            .any(|(x, y)| (x - spot.0).abs() < 2.0 && (y - spot.1).abs() < 2.0);
+        if !clash {
+            break;
+        }
+        spot = (spot.0 + CASCADE, spot.1 + CASCADE);
+    }
+    Some(spot)
+}
+
+static NEXT_WINDOW: AtomicU64 = AtomicU64::new(1);
+
+/// Make a window and, if there is a document for it, leave it where `ready`
+/// will collect it.
+///
+/// The document is claimed in `OpenDocuments` before the window exists, which
+/// is what stops a second file arriving in the same instant from being handed
+/// to a window that is already spoken for.
+fn spawn_window(app: &AppHandle, path: Option<String>) -> Result<(), String> {
+    let label = format!("reader-{}", NEXT_WINDOW.fetch_add(1, Ordering::Relaxed));
+    if let Some(path) = path.as_deref() {
+        if let Some(pending) = app.try_state::<Pending>() {
+            pending.hold(&label, path.to_string());
+        }
+        if let Some(open) = app.try_state::<OpenDocuments>() {
+            open.set(&label, Some(path));
+        }
+    }
+
+    let stored = app
+        .try_state::<Paths>()
+        .map(|paths| settings::load(&paths.config))
+        .unwrap_or_default();
+    let number = |key: &str| stored.get(key).and_then(|v| v.as_f64());
+    let spot = placement(app, &stored);
+
+    let mut builder = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::default())
+        .title("HyloPDF")
+        .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
+        .inner_size(
+            number("window_width").unwrap_or(1280.0).max(MIN_WIDTH),
+            number("window_height").unwrap_or(860.0).max(MIN_HEIGHT),
+        )
+        // Shown by `ready`, for the same reason the first window is: a
+        // window that appears before the theme has been applied appears
+        // white, whatever theme is about to arrive.
+        .visible(false)
+        .background_color(tauri::window::Color(0xf2, 0xf1, 0xed, 0xff));
+
+    builder = match spot {
+        Some((x, y)) => builder.position(x, y),
+        None => builder.center(),
+    };
+
+    // The document runs up under the title bar here as well; without this a
+    // second window would have a native strip the first one does not.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
+
+    if let (Some(spot), Some(placements)) = (spot, app.try_state::<Placements>()) {
+        if let Ok(mut held) = placements.0.lock() {
+            held.insert(label.clone(), spot);
+        }
+    }
+
+    let window = builder.build().map_err(|e| e.to_string())?;
+    tidy_after(&window);
+    // The same safety net the launch window has: a frontend that never reports
+    // in would otherwise leave a window that exists, holds a document, and
+    // cannot be seen.
+    let handle = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        if !handle.is_visible().unwrap_or(false) {
+            let _ = handle.show();
+        }
+    });
+    Ok(())
+}
+
+/// Put a window where `spawn_window` decided it should go, now that it has
+/// been shown. See `Placements` — showing it is what moves it, so this has to
+/// come after, and nothing is on screen in between.
+fn place(app: &AppHandle, window: &WebviewWindow) {
+    let label = window.label();
+    let spot = app.try_state::<Placements>().and_then(|placements| {
+        placements
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut held| held.remove(label))
+    });
+    // The launch window has no placement: its geometry is `restore_window`'s,
+    // and it must not be centred out of a maximised state here.
+    let Some((x, y)) = spot else { return };
+    let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+    // The cascade walks; a window stepped off the end of the screen is a
+    // window the reader has to go and find.
+    if let Ok(false) = is_on_screen(window) {
+        let _ = window.center();
+    }
+}
+
+/// What a window has to give back when it goes: its file handle, and its place
+/// in the document watch. Neither is the reader's business and neither can be
+/// asked for from the frontend, which by then is gone.
+///
+/// What it deliberately does *not* give back is its entry in `OpenDocuments` —
+/// see the note there.
+fn tidy_after(window: &WebviewWindow) {
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    window.on_window_event(move |event| {
+        if !matches!(event, WindowEvent::Destroyed) {
+            return;
+        }
+        if let Some(open) = app.try_state::<OpenFiles>() {
+            open.close(&label);
+        }
+        if let Some(watching) = app.try_state::<watch::Watching>() {
+            watching.document(&label, None);
+        }
+    });
+}
 
 fn restore_window(window: &WebviewWindow, stored: &settings::Settings) {
     let number = |key: &str| stored.get(key).and_then(|v| v.as_f64());
@@ -707,9 +1075,18 @@ fn document_among(args: &[String]) -> Option<String> {
 /// floor and they landed on the start screen instead.
 static EARLY_OPEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// A document handed to us by the OS: sent straight through if the interface
-/// is up, stashed for it to collect at boot if it is not, and queued in
-/// `EARLY_OPEN` if `Pending` itself does not exist yet.
+/// A document handed to us by the OS — "Open with", the dock, a second launch
+/// — sent to a window with nothing in it, or to a window made for it.
+///
+/// It used to displace whatever was on screen, because there was only ever one
+/// window to displace, and that was the single worst thing this app did to
+/// somebody: double-clicking a file closed the document they were reading, and
+/// nothing about double-clicking a file says that. Now nothing is closed. A
+/// window is idle if it is not named in `OpenDocuments`, and the one with the
+/// keyboard is preferred, because that is the window the reader is looking at.
+///
+/// Queued in `EARLY_OPEN` if `Pending` itself does not exist yet — on macOS an
+/// Apple Event for a cold launch can arrive before `setup` has run.
 fn hand_over(app: &AppHandle, path: String) {
     let Some(pending) = app.try_state::<Pending>() else {
         if let Ok(mut queue) = EARLY_OPEN.lock() {
@@ -717,17 +1094,35 @@ fn hand_over(app: &AppHandle, path: String) {
         }
         return;
     };
-    if pending.listening.load(Ordering::SeqCst) {
-        let _ = app.emit("open-document", &path);
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.set_focus();
-        }
-        return;
-    }
-    let Ok(mut slot) = pending.file.lock() else {
+    let Some(window) = idle_window(app) else {
+        let _ = spawn_window(app, Some(path));
         return;
     };
-    *slot = Some(path);
+    let label = window.label().to_string();
+    // Claimed before anything else can be told about it.
+    if let Some(open) = app.try_state::<OpenDocuments>() {
+        open.set(&label, Some(&path));
+    }
+    if pending.is_listening(&label) {
+        let _ = app.emit_to(label.as_str(), "open-document", &path);
+    } else {
+        pending.hold(&label, path);
+    }
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
+/// A window with nothing to show — no document open, and none on its way. The
+/// one that has the keyboard first.
+fn idle_window(app: &AppHandle) -> Option<WebviewWindow> {
+    let open = app.try_state::<OpenDocuments>()?;
+    let windows = app.webview_windows();
+    let free = |window: &&WebviewWindow| !open.taken(window.label());
+    windows
+        .values()
+        .find(|window| window.is_focused().unwrap_or(false) && free(window))
+        .or_else(|| windows.values().find(free))
+        .cloned()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -749,9 +1144,12 @@ pub fn run() {
             |app: &AppHandle, args: Vec<String>, _cwd: String| {
                 if let Some(path) = document_among(&args) {
                     hand_over(app, path);
-                } else if let Some(window) = app.get_webview_window("main") {
+                } else if let Some(window) = app
+                    .get_webview_window(MAIN)
+                    .or_else(|| app.webview_windows().values().next().cloned())
+                {
                     // Started again with nothing to open: the reader is looking
-                    // for the window they already have.
+                    // for a window they already have.
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
@@ -776,6 +1174,8 @@ pub fn run() {
             close_document,
             remember_position,
             set_open_document,
+            new_window,
+            quit_app,
             set_document_title,
             toggle_mark,
             forget_document,
@@ -797,8 +1197,11 @@ pub fn run() {
             // Started after the shipped themes are written, so that writing
             // them is not itself the first thing it reports.
             app.manage(watch::start(app.handle().clone(), themes.clone()));
+            let reopen = library::prune(&library::load(&config)).open;
             app.manage(Paths { config, themes });
-            app.manage(OpenFile::default());
+            app.manage(OpenFiles::default());
+            app.manage(OpenDocuments::default());
+            app.manage(Placements::default());
             // The command line wins over a document that raced `setup` in as
             // an Apple Event, in the one case both are populated: a second
             // instance's arguments are routed through `hand_over` instead
@@ -807,22 +1210,56 @@ pub fn run() {
             // document that started it.
             let initial = first_document_argument()
                 .or_else(|| EARLY_OPEN.lock().ok().and_then(|mut queue| queue.pop()));
-            app.manage(Pending {
-                file: Mutex::new(initial),
-                listening: AtomicBool::new(false),
-            });
+            let pending = Pending::default();
+            if let Some(path) = initial.clone() {
+                pending.hold(MAIN, path);
+            }
+            app.manage(pending);
 
-            if let Some(window) = app.get_webview_window("main") {
+            // The launch window's own document is claimed here rather than
+            // waiting for its frontend to report it: until it is, that window
+            // reads as idle, and a second file double-clicked in the same
+            // moment would be handed to it — over the top of the document the
+            // launch was for.
+            let opening = initial.clone().or_else(|| reopen.first().cloned());
+            if let (Some(path), Some(open)) = (opening, app.try_state::<OpenDocuments>()) {
+                open.set(MAIN, Some(&path));
+            }
+
+            if let Some(window) = app.get_webview_window(MAIN) {
                 restore_window(&window, &stored);
+                tidy_after(&window);
 
                 // If the frontend never reports in, show the window anyway
-                // rather than leaving the reader with nothing.
+                // rather than leaving the reader with nothing. Only if it is
+                // still not up: `show` on a window that is already on screen
+                // orders it to the front, and by three seconds in the session's
+                // other windows have been restored — so this took the front off
+                // whichever of them the reader had just been handed.
                 let handle = window.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(3));
-                    let _ = handle.show();
+                    if !handle.is_visible().unwrap_or(false) {
+                        let _ = handle.show();
+                    }
                 });
             }
+
+            // Every window that was open when the app went down, put back —
+            // the first one is the launch window's, through `bootstrap`, and
+            // the rest get a window each, made once that window is up. Skipped
+            // when this launch was *for* a document: opening a file is not a
+            // request to reopen everything else as well.
+            let reopening = stored
+                .get("reopen_last_document")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true);
+            let more = if reopening && initial.is_none() {
+                reopen.into_iter().skip(1).collect()
+            } else {
+                Vec::new()
+            };
+            app.manage(Restore(Mutex::new(more)));
             Ok(())
         })
         .build(tauri::generate_context!())

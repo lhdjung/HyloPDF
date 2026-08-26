@@ -31,6 +31,7 @@
 //! has to end the way a PDF ends, and hold still, before anyone hears about
 //! it.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -54,15 +55,20 @@ const STEADY: Duration = Duration::from_millis(150);
 /// the marker is the last line, but nothing forbids whitespace after it.
 const TAIL: u64 = 1024;
 
-/// The handle the rest of the app holds. Its only verb is "follow this
-/// document instead", which `open_for_reading` and `close_document` say
-/// between them.
+/// The handle the rest of the app holds. Its only verb is "this window is
+/// reading that document now", which `open_for_reading` and `close_document`
+/// say between them — and a window on its way out.
 pub struct Watching(Mutex<Sender<Signal>>);
 
 impl Watching {
-    /// Follow this document, or stop following one.
-    pub fn document(&self, path: Option<&str>) {
-        let signal = Signal::Follow(path.map(PathBuf::from));
+    /// Follow this document on behalf of a window, or stop following one.
+    ///
+    /// Per window because there is more than one, and each has a document of
+    /// its own: a single subject meant the second window to open a document
+    /// took the first window's watch away, so the paper being recompiled in
+    /// the window nobody had touched last simply never reloaded.
+    pub fn document(&self, window: &str, path: Option<&str>) {
+        let signal = Signal::Follow(window.to_string(), path.map(PathBuf::from));
         if let Ok(sender) = self.0.lock() {
             let _ = sender.send(signal);
         }
@@ -71,7 +77,7 @@ impl Watching {
 
 enum Signal {
     Touched(Vec<PathBuf>),
-    Follow(Option<PathBuf>),
+    Follow(String, Option<PathBuf>),
 }
 
 /// What a whole document looked like: its length, when it was last written,
@@ -87,8 +93,9 @@ enum Signal {
 /// has already read those bytes to look for `%%EOF`.
 type Mark = (u64, SystemTime, u64);
 
-/// The document being followed, the directory the watch is actually on, and
-/// what the file looked like when it was last whole.
+/// A document being followed, the directory the watch is actually on, and
+/// what the file looked like when it was last whole. One per window that has
+/// something open.
 struct Followed {
     path: PathBuf,
     dir: PathBuf,
@@ -127,7 +134,10 @@ pub fn start(app: AppHandle, themes: PathBuf) -> Watching {
 fn run(app: AppHandle, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mut dyn Watcher) {
     // What the frontend already has. Compared against, never emitted blindly.
     let mut known = theme::load_all(&themes);
-    let mut document: Option<Followed> = None;
+    // Keyed by window label. Two windows may well be reading two documents in
+    // the same folder, which is why `follow` counts the folder rather than
+    // taking the watch off with the document that named it.
+    let mut documents: HashMap<String, Followed> = HashMap::new();
 
     while let Ok(first) = receiver.recv() {
         let mut touched: Vec<PathBuf> = Vec::new();
@@ -139,7 +149,9 @@ fn run(app: AppHandle, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mu
         loop {
             match pending.take() {
                 Some(Signal::Touched(paths)) => touched.extend(paths),
-                Some(Signal::Follow(next)) => follow(watcher, &themes, &mut document, next),
+                Some(Signal::Follow(window, next)) => {
+                    follow(watcher, &themes, &mut documents, window, next)
+                }
                 None => {}
             }
             match receiver.recv_timeout(SETTLE) {
@@ -160,14 +172,18 @@ fn run(app: AppHandle, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mu
             }
         }
 
-        if let Some(followed) = document.as_mut() {
-            if touched.iter().any(|path| path == &followed.path) {
-                if let Some(mark) = whole(&followed.path) {
-                    if Some(mark) != followed.mark {
-                        followed.mark = Some(mark);
-                        let path = followed.path.to_string_lossy().to_string();
-                        let _ = app.emit("document-changed", path);
-                    }
+        for (window, followed) in documents.iter_mut() {
+            if !touched.iter().any(|path| path == &followed.path) {
+                continue;
+            }
+            if let Some(mark) = whole(&followed.path) {
+                if Some(mark) != followed.mark {
+                    followed.mark = Some(mark);
+                    let path = followed.path.to_string_lossy().to_string();
+                    // To that window and no other. A broadcast would tell every
+                    // window that *its* document had been rewritten, and each
+                    // would reopen the one it is holding for no reason.
+                    let _ = app.emit_to(window.as_str(), "document-changed", path);
                 }
             }
         }
@@ -184,7 +200,8 @@ fn run(app: AppHandle, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mu
 fn follow(
     watcher: &mut dyn Watcher,
     themes: &Path,
-    held: &mut Option<Followed>,
+    held: &mut HashMap<String, Followed>,
+    window: String,
     next: Option<PathBuf>,
 ) {
     // Being pointed at the document already being followed is not a change of
@@ -195,16 +212,20 @@ fn follow(
     // the baseline would be retaken from what is on the disk *now* rather than
     // from the version just handed over, so a draft that arrived during the
     // reload would match its own mark and never be reported at all.
-    if let (Some(current), Some(next)) = (held.as_ref(), next.as_ref()) {
+    if let (Some(current), Some(next)) = (held.get(&window), next.as_ref()) {
         if &current.path == next {
             return;
         }
     }
 
-    if let Some(old) = held.take() {
+    if let Some(old) = held.remove(&window) {
         // The themes directory is watched for its own sake, and must not be
-        // dropped along with a document that happened to be sitting in it.
-        if old.dir != themes {
+        // dropped along with a document that happened to be sitting in it —
+        // and nor must a folder another window is still reading a document
+        // out of. A watch is on a directory, so it is shared, and `unwatch`
+        // takes it away from everybody.
+        let wanted = old.dir == themes || held.values().any(|other| other.dir == old.dir);
+        if !wanted {
             let _ = watcher.unwatch(&old.dir);
         }
     }
@@ -212,16 +233,20 @@ fn follow(
     let Some(dir) = path.parent().map(Path::to_path_buf) else {
         return;
     };
-    if dir != themes && watcher.watch(&dir, RecursiveMode::NonRecursive).is_err() {
+    let already = dir == themes || held.values().any(|other| other.dir == dir);
+    if !already && watcher.watch(&dir, RecursiveMode::NonRecursive).is_err() {
         return;
     }
     // What it looks like now is the baseline: opening a document is not a
     // reason to reload it.
-    *held = Some(Followed {
-        mark: whole(&path),
-        path,
-        dir,
-    });
+    held.insert(
+        window,
+        Followed {
+            mark: whole(&path),
+            path,
+            dir,
+        },
+    );
 }
 
 /// A document's size and time, if what is on the disk is a whole PDF.
@@ -397,23 +422,27 @@ mod tests {
         let dir = path.parent().expect("a parent").to_path_buf();
         let themes = dir.join("themes");
         let mut watcher = Recorded::default();
-        let mut held = None;
+        let mut held = HashMap::new();
 
-        follow(&mut watcher, &themes, &mut held, Some(path.clone()));
-        let first = held.as_ref().expect("followed").mark;
+        follow(&mut watcher, &themes, &mut held, one(), Some(path.clone()));
+        let first = held.get("main").expect("followed").mark;
         assert_eq!(watcher.watched, vec![dir.clone()]);
 
         // A new draft lands, and the reload it causes comes back through here.
         std::fs::write(&path, b"%PDF-1.7\nrather longer than it was\n%%EOF\n").expect("rewrite");
-        follow(&mut watcher, &themes, &mut held, Some(path.clone()));
+        follow(&mut watcher, &themes, &mut held, one(), Some(path.clone()));
 
         assert!(watcher.unwatched.is_empty(), "the watch was remade");
         assert_eq!(watcher.watched, vec![dir]);
         assert_eq!(
-            held.expect("still followed").mark,
+            held.get("main").expect("still followed").mark,
             first,
             "the baseline moved"
         );
+    }
+
+    fn one() -> String {
+        "main".to_string()
     }
 
     /// A different document, though, is a different subject.
@@ -428,13 +457,64 @@ mod tests {
 
         let themes = dir.join("themes");
         let mut watcher = Recorded::default();
-        let mut held = None;
+        let mut held = HashMap::new();
 
-        follow(&mut watcher, &themes, &mut held, Some(first));
-        follow(&mut watcher, &themes, &mut held, Some(second.clone()));
+        follow(&mut watcher, &themes, &mut held, one(), Some(first));
+        follow(
+            &mut watcher,
+            &themes,
+            &mut held,
+            one(),
+            Some(second.clone()),
+        );
 
         assert_eq!(watcher.unwatched, vec![dir.clone()]);
         assert_eq!(watcher.watched, vec![dir, elsewhere]);
-        assert_eq!(held.expect("followed").path, second);
+        assert_eq!(held.get("main").expect("followed").path, second);
+    }
+
+    /// Two windows, two documents, one folder. The watch is on the folder, so
+    /// it is shared — and the second window putting its document down must not
+    /// take the first window's watch with it.
+    #[test]
+    fn a_second_window_reading_the_same_folder_keeps_the_watch() {
+        let first = scratch("shared-one.pdf", b"%PDF-1.7\n%%EOF\n");
+        let dir = first.parent().expect("a parent").to_path_buf();
+        let second = dir.join("shared-two.pdf");
+        std::fs::write(&second, b"%PDF-1.7\n%%EOF\n").expect("second document");
+        let themes = dir.join("themes");
+
+        let mut watcher = Recorded::default();
+        let mut held = HashMap::new();
+
+        follow(&mut watcher, &themes, &mut held, one(), Some(first.clone()));
+        follow(
+            &mut watcher,
+            &themes,
+            &mut held,
+            "reader-1".to_string(),
+            Some(second),
+        );
+        // Watched once, by the window that got there first.
+        assert_eq!(watcher.watched, vec![dir.clone()]);
+
+        // The second window closes its document.
+        follow(
+            &mut watcher,
+            &themes,
+            &mut held,
+            "reader-1".to_string(),
+            None,
+        );
+        assert!(
+            watcher.unwatched.is_empty(),
+            "the first window's document stopped being watched"
+        );
+        assert_eq!(held.get("main").expect("still followed").path, first);
+
+        // And when the last of them lets go, the folder does come off.
+        follow(&mut watcher, &themes, &mut held, one(), None);
+        assert_eq!(watcher.unwatched, vec![dir]);
+        assert!(held.is_empty());
     }
 }

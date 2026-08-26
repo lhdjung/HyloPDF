@@ -35,6 +35,8 @@ import {
   pickPdf,
   printDocument,
   quitApp,
+  closeWindow,
+  newWindow,
   registerBrowserFile,
   rememberPosition,
   toggleMark,
@@ -224,6 +226,13 @@ class App {
     this.library = data.library;
     this.paths = { config: data.config_dir, themes: data.themes_dir };
     this.theme = this.themeById(this.settings.theme);
+    // Whether *this* window is full screen is the window's answer, not the
+    // setting's. The setting is what the last window to change it left behind,
+    // and it is Rust that puts the launch window back into full screen — a
+    // second window made while the first one is full screen is not full screen
+    // itself, and would otherwise spend its life with the chrome of a window
+    // it is not. Adopted rather than remembered: nobody chose anything here.
+    this.settings.fullscreen = await isFullscreen().catch(() => this.settings.fullscreen);
 
     // Before anything is painted: the theme this reader is owed may not be the
     // one that was written down, if the machine has changed its mind since.
@@ -286,24 +295,29 @@ class App {
   }
 
   /** A document handed over by the system — "Open with", the dock, the command
-   *  line — while another one is already open.
+   *  line.
    *
-   * One window, one document: the second instance stands down and hands its
-   * path to the first, which puts down what it was holding. That is the right
-   * behaviour for `settings.toml`, and it is a surprise to whoever
-   * double-clicked, because nothing about double-clicking a file says "and
-   * close the thing you were reading". Their place in it is kept — every
-   * handover writes the position down first — and the way back is the list
-   * under the title, so all this has to do is say what happened and where the
-   * document went. The reader's own Open and a file dropped on the window are
-   * left silent: there the answer is already in front of them.
+   * It used to arrive on top of whatever was already open, because there was
+   * one window and it had to give way: double-clicking a file closed the
+   * document being read, which is nothing anybody asked for by double-clicking
+   * a file. Rust now picks a window with nothing in it, or makes one, and
+   * names the window it picked — so by the time this runs, the window it is
+   * running in has nothing to lose and there is nothing to say about it. See
+   * `hand_over` in lib.rs.
    */
   private async openFromOutside(path: string): Promise<void> {
-    const leaving = this.path && this.path !== path ? el.title.textContent : null;
     await this.open(path);
-    if (leaving && this.path === path) {
-      ui.notice(`Closed ${leaving} — it is in the list under the title, where you left it.`);
-    }
+  }
+
+  /** Another window, with a document in it or with nothing.
+   *
+   * Nothing here goes with it: a window is a fresh `App` in a fresh webview,
+   * and everything it needs — the settings, the themes, the library — is on
+   * the Rust side already, shared by the one process. */
+  private async newWindow(path: string | null = null): Promise<void> {
+    ui.closeMenus();
+    this.closeFind();
+    await newWindow(path).catch((error) => ui.notice(messageOf(error)));
   }
 
   /** Files this app reads but does not own: the themes, and the document.
@@ -565,6 +579,12 @@ class App {
   async openDialog(): Promise<void> {
     const path = await pickPdf();
     if (path) await this.open(path);
+  }
+
+  /** Pick a document and give it a window of its own, leaving this one alone. */
+  private async openInNewWindow(): Promise<void> {
+    const path = await pickPdf();
+    if (path) await this.newWindow(path);
   }
 
   /** The toolbar, told where the reader is.
@@ -1494,6 +1514,17 @@ class App {
             void revealDocument(path).catch((error) => ui.notice(messageOf(error)));
           },
         }),
+        // A window of its own, so this document can be read beside whatever is
+        // in the window the menu was opened from — including, for a long book,
+        // another part of itself.
+        ui.menuItem({
+          label: "Open in a new window",
+          icon: "window",
+          onSelect: () => {
+            close();
+            void this.newWindow(path);
+          },
+        }),
         ui.menuItem({
           label: "Mark this page",
           icon: "mark",
@@ -1553,6 +1584,17 @@ class App {
             onSelect: () => {
               close();
               void this.openDialog();
+            },
+          }),
+          // The two-documents-at-once route, one step: pick the second one and
+          // it arrives beside the first rather than on top of it. An empty
+          // window is ⌘N, and the Keyboard page says so.
+          ui.menuItem({
+            label: "Open in a new window…",
+            icon: "window",
+            onSelect: () => {
+              close();
+              void this.openInNewWindow();
             },
           }),
         );
@@ -1893,7 +1935,7 @@ class App {
     el.open.addEventListener("click", opens(() => void this.openDialog()));
     el.welcomeOpen.addEventListener("click", () => void this.openDialog());
     // The close handler runs on the way out, so this saves what a quit saves.
-    el.quit.addEventListener("click", () => void quitApp());
+    el.quit.addEventListener("click", () => void closeWindow());
     el.contents.addEventListener("click", opens(() => this.toggleSidebar()));
     el.closeDoc.addEventListener("click", opens(() => this.closeDocument()));
     el.theme.addEventListener("click", opens(() => this.showThemeMenu()));
@@ -2095,6 +2137,8 @@ class App {
       // thing do". F1 is where every application puts it, and ⌘/ is where the
       // ones without an F1 key put it.
       help: () => showSettingsWindow(this, { page: "keyboard" }),
+      "new-window": () => void this.newWindow(),
+      "close-window": () => void closeWindow(),
       quit: () => void quitApp(),
       find: () => this.openFind(),
       "find-next": () => this.search.step(1),

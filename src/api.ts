@@ -364,10 +364,28 @@ export async function toggleMark(
 /** Marks, for the browser path. Rust keeps the real ones in `library.toml`. */
 const browserMarks = new Map<string, Mark[]>();
 
-/** Note what is open, for the next launch. `null` means nothing is. */
+/** Note what this window is showing, for the next launch. `null` means it is
+    showing nothing. Rust keeps one answer per window and writes them together
+    — see `OpenDocuments` in lib.rs. */
 export async function setOpenDocument(path: string | null): Promise<void> {
   if (!hasBackend) return;
   await invoke("set_open_document", { path });
+}
+
+/** A second window, with a document in it or with nothing.
+ *
+ * The whole interface is one `App` in one webview, so a window is a complete
+ * second reader — its own viewer, search index and sidebar — and everything
+ * that is the app's rather than a window's (settings, themes, the library)
+ * stays where it is, shared by one process. In a plain browser the analogue is
+ * a second tab: it can be opened, and it cannot be handed a path, because the
+ * browser path has no file names to hand it. */
+export async function newWindow(path: string | null = null): Promise<void> {
+  if (!hasBackend) {
+    window.open(location.href, "_blank");
+    return;
+  }
+  await invoke("new_window", { path });
 }
 
 /** Hand a link from a document to whatever opens web pages here. */
@@ -494,12 +512,19 @@ export async function setWindowTitle(title: string): Promise<void> {
   if (hasBackend) await getCurrentWindow().setTitle(title);
 }
 
-/** Files dropped on the window, and documents the OS asks us to open. */
+/** Documents the OS asks us to open: "Open with", the dock, a second launch.
+ *
+ * Listened for on this window rather than on the app, and that matters: a
+ * plain `listen` registers for *any* target and hears everything, so a
+ * document meant for the empty window over there would be opened by every
+ * window at once. Rust picks the window and says so by name. */
 export async function onExternalDocument(
   handler: (path: string) => void,
 ): Promise<void> {
   if (!hasBackend) return;
-  await listen<string>("open-document", (event) => handler(event.payload));
+  await getCurrentWindow().listen<string>("open-document", (event) =>
+    handler(event.payload),
+  );
 }
 
 /** Theme files rewritten on the disk, by an editor or by the app itself.
@@ -518,7 +543,10 @@ export async function onDocumentChanged(
   handler: (path: string) => void,
 ): Promise<void> {
   if (!hasBackend) return;
-  await listen<string>("document-changed", (event) => handler(event.payload));
+  // This window's document, and no other's — see `onExternalDocument`.
+  await getCurrentWindow().listen<string>("document-changed", (event) =>
+    handler(event.payload),
+  );
 }
 
 export async function onFileDrop(handlers: {
@@ -547,9 +575,23 @@ export async function onWindowGeometryChange(handler: () => void): Promise<void>
     handler below runs first, so the place in the document and anything not
     yet written are saved on the way out. In a browser there is no window of
     ours to close, so this does nothing. */
-export async function quitApp(): Promise<void> {
+/** Close this window. It was the whole app when there was only ever one; with
+    more than one it is the window, and the app goes when the last one does. */
+export async function closeWindow(): Promise<void> {
   if (!hasBackend) return;
   await getCurrentWindow().close();
+}
+
+/** Close every window, which off a Mac is what quitting is.
+ *
+ * Closing them rather than exiting outright, because each window's close
+ * handler is where its position, its settings and its geometry are written
+ * down — `app.exit` would take the process out from under all three, and
+ * "come back to where I stopped" is the one promise this app makes about what
+ * survives a quit. */
+export async function quitApp(): Promise<void> {
+  if (!hasBackend) return;
+  await invoke("quit_app");
 }
 
 export async function onCloseRequested(handler: () => Promise<void>): Promise<void> {

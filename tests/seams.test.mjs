@@ -123,3 +123,47 @@ test("no shipped theme still spells it `selection`", () => {
     );
   }
 });
+
+/* --------------------------------------------------- one window's events */
+
+/** The two events that belong to one window and not to the app.
+ *
+ * A plain `listen` from `@tauri-apps/api/event` registers for *any* target and
+ * hears everything — including an `emit_to` naming a different window. So the
+ * moment there was more than one window, a bare `listen` for either of these
+ * meant every window opening a document meant for the empty one, and every
+ * window reopening its own document because somebody else's had been
+ * recompiled. There is nothing to see when this is wrong until two windows are
+ * open, and a grep is the only cheap way to hold the line.
+ */
+test("a document meant for one window is listened for on that window", () => {
+  const api = sources.find(({ name }) => name === "api.ts").body;
+  for (const event of ["open-document", "document-changed"]) {
+    const line = api
+      .split("\n")
+      .find((each) => each.includes(`"${event}"`) && each.includes("listen"));
+    assert.ok(line, `nothing listens for ${event}`);
+    assert.match(
+      line,
+      /getCurrentWindow\(\)\.listen/,
+      `${event} is listened for app-wide; every window would answer it`,
+    );
+  }
+});
+
+/** The other half of the same claim, on the Rust side: a document is followed
+ *  per window, and told to the window that asked. */
+test("Rust keeps a file handle and a watch per window", () => {
+  const lib = readFileSync("src-tauri/src/lib.rs", "utf8");
+  const watch = readFileSync("src-tauri/src/watch.rs", "utf8");
+  assert.match(
+    lib,
+    /struct OpenFiles\(Mutex<HashMap<String, \(String, File\)>>\)/,
+    "the open file went back to being one slot; a second window would take the first's handle",
+  );
+  assert.match(
+    watch,
+    /emit_to\(window\.as_str\(\), "document-changed"/,
+    "a recompiled document is announced app-wide; every window would reload",
+  );
+});

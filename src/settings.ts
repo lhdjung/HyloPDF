@@ -298,7 +298,7 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
     ui.field(
       "Open what I was reading",
       ui.toggle(s.reopen_last_document, (on) => host.set("reopen_last_document", on)),
-      "Start on the document that was open when you last quit. Closing a document yourself means you are done with it, and it is not reopened.",
+      "Start on the documents that were open when you last quit — a window each, where there was more than one. Closing a document yourself means you are done with it, and it is not reopened.",
     ),
     ui.field(
       "Show page count while scrolling",
@@ -715,7 +715,9 @@ function keyboardPage(host: SettingsHost, pane: HTMLElement, refresh: () => void
         "note",
         `Not bound to a key: ${unbound.join(", ")}.` +
           // Not guessable from a row that is simply missing.
-          (isMac && unbound.includes("quit") ? " Use ⌘W or ⌘Q." : ""),
+          (isMac && (unbound.includes("quit") || unbound.includes("close-window"))
+            ? " Use ⌘W or ⌘Q."
+            : ""),
       ),
     );
   }

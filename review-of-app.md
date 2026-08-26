@@ -1,7 +1,7 @@
 # A critical read of HyloPDF, from the outside
 
-> **Status.** Everything below has been acted on except the three items marked
-> **not done** here, which are named again in place. The commits are one per
+> **Status.** Everything below has been acted on except the one item marked
+> **not done** here, which is named again in place. The commits are one per
 > point, in the order §6 sets out.
 >
 > | | |
@@ -10,14 +10,14 @@
 > | §1.2 printing | done as a hand-over: ⌘P gives the document to a program that prints, and says so — though the notice lands after focus has already left for that program, so it is easy to miss; see the note in place |
 > | §1.3 page labels | done — toolbar, pill, thumbnails and the go-to field |
 > | §1.4 recents while reading | done — the document's name in the bar carries the list |
-> | §1.5 two documents at once | **not done**; see the note in place |
+> | §1.5 two documents at once | done — a window each, and nothing is closed to make room |
 > | §1.6 selection past the mounted band | done, in part — ⌘A still means a page; the "Copy this page's text" button was removed rather than kept, see the note in place |
 > | §2.1 rotate | done — ⌘R / ⌘L |
 > | §2.2 two pages side by side | done, with the cover on its own |
 > | §2.3 trim the margins | done — measured over a sample, off by default |
 > | §2.4 search results list | done — a third tab, reached from the count |
 > | §2.5 follow the system's light and dark | done, and on by default |
-> | §2.6 reopen the last document | done, and on by default |
+> | §2.6 reopen the last document | done, and on by default — every window that was open, since §1.5 |
 > | §2.7 document properties | done, and the document's own title is used where it is worth using |
 > | §2.8 zoom shortcuts | done — ⌘1 actual size, ⌘2 fit page |
 > | §2.9 hand tool | done — the middle button drags |
@@ -133,13 +133,29 @@ about windows. But comparing two papers, or reading a paper beside its
 appendix, is ordinary work, and every one of the comparison apps does it —
 Preview by windows, Acrobat and Edge by tabs, Sumatra by both.
 
-**Not done.** This is the largest item on the list by cost, because the app's
-state is one `App` object and one window. Two viable shapes: a second Tauri window sharing
-the Rust side (settings and library are already lock-serialised, so the hard
-part is done), or accept the constraint deliberately and document it. What is
-not viable is the current middle: a reader who double-clicks a second PDF
-loses their place in the first with no warning. At minimum, that should not be
-silent.
+**Update.** Done as the second window, which is the shape the review's own
+list put first. The app's state being one `App` object turned out to be the
+argument *for* it rather than against: a Tauri window is its own webview, so a
+second window is a second `App` — a second viewer, search index and sidebar —
+without a line of new interface code. The cost was all on the Rust side, where
+three things were global because there had only ever been one of anything: the
+file handle, the document watch, and "what was open last". All three are keyed
+by window now. `hand_over` gives a double-clicked document to a window with
+nothing in it and makes one if there is none, so the case this section is
+really about — losing your place in one document by opening another — cannot
+happen at all rather than being announced. ⌘N is an empty window; "Open in a
+new window…" under the document's title is the picker with a window attached.
+`library.open` became a list, so a launch puts back every window that was open
+rather than the last one.
+
+What was left as it was, deliberately, is the shared half. Settings, themes and
+the library belong to the app rather than to a window, which is exactly what
+one process buys and what the single-instance plugin has always been for — so a
+setting changed in one window is not seen by another until it is opened again,
+and the window geometry that is remembered is the launch window's. Both are
+written down in `AGENTS.md` under "Two documents at once", along with the two
+macOS traps this ran into: a window built during `setup` is not a real window,
+and a window's position does not survive being shown.
 
 ### 1.6 A selection cannot be longer than about a screen and a half
 
@@ -247,7 +263,9 @@ password decline, the reload notice). Three cases are not yet covered:
    A person opening a tax form will click a box and get nothing, with no
    explanation. Detecting a form is one call; saying "this document has fields
    HyloPDF cannot fill" costs a notice.
-2. **Opening a second document** closes the first without a word (§1.5).
+2. **Opening a second document** closed the first without a word (§1.5). It no
+   longer closes it: it opens beside it, which is the answer that needed no
+   words.
 3. **A truncated selection** copies less than was highlighted (§1.6).
 
 ---
@@ -300,25 +318,36 @@ will arrive for highlighting first, and the honest answer for a long time is
 
 Everything in §2 past that point is worth doing and none of it is urgent.
 
+(The eighth is now done as well; §1.5 and §7 say how.)
+
 ---
 
-## 7. Why the two left undone were left undone
+## 7. Why these were left for a pass of their own
 
-**Two documents at once (§1.5)** is not a feature, it is a change to two
-things this app is built on. `open_for_reading` and `read_range` serve
-"whichever document is currently open" — one file handle, global — and every
-chrome setting, including the window's own geometry, is global too, so a
-second window would spend its life overwriting the first one's. Doing it
-properly means keying the file handle, and deciding which settings belong to
-the app and which to a window. Nothing about it can be exercised in the
-harness either: a second window is a Tauri path, and the harness has no Rust
-behind it. It deserves the decision the review asked for, taken deliberately,
-rather than a change made at the end of a long day. What has changed in the
-meantime is the sting: the position in the outgoing document was always kept,
-the way back to it is now one click in the bar, and the app says what it
-closed and why.
+**Two documents at once (§1.5)** was left here for a pass of its own, and got
+one. The diagnosis in this section was right about where the work was and
+wrong about how much of it there was. `open_for_reading` and `read_range` did
+serve "whichever document is currently open" — one file handle, global — and
+that was indeed the thing standing in the way; it is a map keyed by window
+label now, and so is the document watch, and so is what each window has open.
+What the diagnosis over-weighted was the settings: only the window geometry is
+really a window's, and the answer to who owns it is that the launch window
+does, which is one line in `save_window_state` and a cascade for everything
+else. The rest — themes, zoom, the reading history — are the app's, and one
+process holding them is what the single-instance plugin was always for.
 
-**Remappable keys (§2.11)** was left for a pass of its own, and got one.
+It is also true that nothing about it can be exercised in the harness, and that
+turned out to matter less than expected: the parts with logic in them are on
+either side of the door and are tested there — the open-documents list and its
+compatibility with the single path it used to be, two windows watching one
+folder, the window-targeted event listens, ⌘N. What is left is window
+behaviour, and that was checked by running the app: two documents handed over,
+three windows restored from a session, ⌘N, a window closed. Two macOS faults
+came out of doing that and neither would have come out of reading the code — a
+window built during `setup` is reported as visible and is not on screen, and a
+window's position does not survive `show()`. Both are in `AGENTS.md`.
+
+**Remappable keys (§2.11)** was also left for a pass of its own, and got one.
 `keys.toml` names an action and the keys it should answer to; `keys.ts` holds
 every action, what it is called, and the chords it ships with; `main.ts` holds
 one handler per action and thirty lines of dispatch. The twenty-five ordered

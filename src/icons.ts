@@ -49,6 +49,8 @@ const paths: Record<string, string> = {
     '<path d="M9.4 3.4h5.2l.2 2.3 1.3.7 2-1 2.7 4.6-1.9 1.3v1.4l1.9 1.3-2.7 4.6-2-1-1.3.7-.2 2.3H9.4l-.2-2.3-1.3-.7-2 1L3.2 14l1.9-1.3v-1.4L3.2 10l2.7-4.6 2 1 1.3-.7zM15.1 12a3.1 3.1 0 1 0-6.2 0 3.1 3.1 0 0 0 6.2 0z" fill="currentColor" fill-rule="evenodd"/><circle cx="12" cy="12" r="3.1"/>',
   edit: '<path d="M4.5 19.5h4l10-10a2.1 2.1 0 0 0-3-3l-10 10z"/><path d="M14.5 6.5l3 3"/>',
   trash: '<path d="M5.5 7h13M9.5 7V5.5h5V7M7 7l.8 12a1.6 1.6 0 0 0 1.6 1.5h5.2a1.6 1.6 0 0 0 1.6-1.5L17 7"/>',
+  window:
+    '<rect x="3.5" y="7.5" width="12" height="12" rx="2"/><path d="M8.5 7.5V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-1.5"/>',
   sidebar: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.2"/><path d="M10 4.5v15"/>',
   plusCircle: '<circle cx="12" cy="12" r="8.2"/><path d="M12 8.5v7M8.5 12h7"/>',
   reset: '<path d="M4.5 12a7.5 7.5 0 1 0 2.4-5.5L4 9"/><path d="M4 4.5V9h4.5"/>',

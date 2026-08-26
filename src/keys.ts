@@ -37,9 +37,11 @@ import { isMac } from "./api";
 export type Action =
   // Documents
   | "open"
+  | "new-window"
   | "print"
   | "settings"
   | "help"
+  | "close-window"
   | "quit"
   | "find"
   | "find-next"
@@ -102,6 +104,10 @@ export type ActionSpec = {
 export const ACTIONS: readonly ActionSpec[] = [
   /* ------------------------------------------------------------ documents */
   { id: "open", label: "Open a document", group: "Documents", keys: ["mod+o"] },
+  // Two documents at once means two windows: the whole interface is one object
+  // in one webview, so a window is a complete second reader and nothing about
+  // the first one changes.
+  { id: "new-window", label: "New window", group: "Documents", keys: ["mod+n"] },
   {
     id: "print",
     label: "Print — handed to a program that prints",
@@ -113,12 +119,23 @@ export const ACTIONS: readonly ActionSpec[] = [
   // Closing the window, and quitting, on the platforms that have no menu to
   // put them in. macOS gets a menu bar from Tauri whether this app asks for
   // one or not, and AppKit answers ⌘W and ⌘Q before the page ever sees them.
+  //
+  // Two of them rather than one, because there is more than one window now and
+  // Ctrl+Q closing whichever of them happened to have the keyboard would be a
+  // strange thing for Quit to do.
+  {
+    id: "close-window",
+    label: "Close this window",
+    group: "Documents",
+    keys: [],
+    otherKeys: ["mod+w"],
+  },
   {
     id: "quit",
     label: "Close HyloPDF",
     group: "Documents",
     keys: [],
-    otherKeys: ["mod+w", "mod+q"],
+    otherKeys: ["mod+q"],
   },
   { id: "find", label: "Search this document", group: "Documents", keys: ["mod+f"] },
   { id: "find-next", label: "Next match", group: "Documents", keys: ["mod+g"] },

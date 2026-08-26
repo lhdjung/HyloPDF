@@ -49,7 +49,7 @@ The shortcuts below use ⌘ on macOS and Ctrl elsewhere.
 | ⌘G / ⌘⇧G | Next / previous match, from anywhere |
 | ⌘D | Dark mode on or off |
 | ⌘B | Show or hide the contents panel |
-| ⌘⇧T | Show or hide the toolbar |
+| ⌘T | Show or hide the toolbar |
 | ⌘+ / ⌘− / ⌘0 | Zoom in, zoom out, back to fit width |
 | ⌘⇧F, or ⌃⌘F on macOS, or F11 | Full screen |
 | Escape | Close the search bar, or leave full screen |

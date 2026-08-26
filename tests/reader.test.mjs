@@ -385,7 +385,7 @@ test("hiding the toolbar takes the menu hanging off it away too", async () => {
   // Left open, it would be anchored to a button that is no longer there.
   assert.equal(state.menuOpen, false, "the menu outlived the bar it hung off");
 
-  await app.press(`${MOD}+Shift+KeyT`);
+  await app.press(`${MOD}+KeyT`);
   await app.page.waitForTimeout(300);
   assert.equal(
     await app.page.evaluate(() => document.getElementById("shell").dataset.toolbar),

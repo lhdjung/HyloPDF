@@ -1285,7 +1285,7 @@ function with the explanation had none and the one without had two.
 ### Accessibility, which nothing had addressed
 
 `#notice` was not a live region, so every message the app makes was inaudible —
-including "Toolbar hidden, ⌘⇧T brings it back", whose entire job is to name the
+including "Toolbar hidden, ⌘T brings it back", whose entire job is to name the
 only way back to a toolbar that is now invisible. `notice()` unhides before
 filling, because a hidden live region is out of the accessibility tree and a
 message written first is one nothing announces.

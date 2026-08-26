@@ -115,7 +115,7 @@ test("moving around", async (t) => {
   });
 
   await t.test("a shortcut hands over the page number, ready to type into", async () => {
-    for (const keys of ["g", `${MOD}+Alt+g`]) {
+    for (const keys of ["p", `${MOD}+Alt+g`]) {
       await app.press("End");
       await app.page.keyboard.press(keys);
       await app.page.waitForTimeout(120);

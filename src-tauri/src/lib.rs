@@ -1,3 +1,4 @@
+mod keys;
 mod library;
 mod settings;
 mod theme;
@@ -231,6 +232,19 @@ async fn save_window_state(
         }
     }
     settings::set_many(&paths.config, entries)
+}
+
+/// The keys, read from `keys.toml`.
+///
+/// A door of its own rather than a field on `Bootstrap`, because it is asked
+/// twice: once before the first keystroke, and again whenever the reader has
+/// edited the file and pressed Reload. The themes directory is watched and
+/// this file is not — a watch on the config directory would fire on every
+/// `settings.toml` write the app makes itself, which is several a minute
+/// while somebody is scrolling.
+#[tauri::command]
+async fn load_keys(paths: State<'_, Paths>) -> Result<keys::Keys, String> {
+    Ok(keys::load(&paths.config))
 }
 
 #[tauri::command]
@@ -751,6 +765,7 @@ pub fn run() {
             bootstrap,
             set_settings,
             save_window_state,
+            load_keys,
             list_themes,
             save_theme,
             delete_theme,
@@ -776,6 +791,7 @@ pub fn run() {
             let themes = config.join("themes");
             std::fs::create_dir_all(&config).ok();
             theme::install_built_ins(&themes);
+            keys::install(&config);
 
             let stored = settings::load(&config);
             // Started after the shipped themes are written, so that writing

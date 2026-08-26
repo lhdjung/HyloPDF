@@ -1,0 +1,90 @@
+# HyloPDF keys
+#
+# Every action HyloPDF listens for is in here, with the keys it ships with.
+# The lines are commented out, which means "keep the keys you shipped with".
+# Uncomment one, put the keys you want in it, and that action answers to
+# those instead. An empty list takes the action off the keyboard entirely.
+#
+# Leave alone anything you are happy with, rather than uncommenting the lot:
+# a line you have not touched still picks up a key a later version of HyloPDF
+# adds, and a line you have frozen never will.
+#
+# This file is read when HyloPDF starts, and again when you press Reload on
+# the Keyboard page in Settings — which is also where you can see what is in
+# force right now, including anything below that could not be read.
+#
+# ─── how a key is written ────────────────────────────────────────────────
+#
+#   mod      ⌘ on a Mac, Ctrl on Windows and Linux
+#   ctrl     the Control key itself — which on Windows and Linux is `mod`
+#   alt      ⌥ / Alt
+#   shift
+#
+# Modifiers come first, joined with +, then the key itself: a letter, a
+# digit, a punctuation mark, or one of
+#
+#   escape  space  enter  tab  backspace  delete
+#   left  right  up  down  pageup  pagedown  home  end  f1 … f12
+#
+# So: "mod+f", "mod+shift+g", "alt+left", "escape", "j", "f11", "mod++".
+# Two keys with a space between them are pressed one after the other: "g g".
+#
+# A key does one thing. Give the same one to two actions and HyloPDF keeps the
+# one you wrote, drops the one it shipped with, then says so on the Keyboard
+# page. Same for a key that would have to wait to find out what it means: bind
+# "g" to something and "g g" stops working.
+
+# ─── documents ───────────────────────────────────────────────────────────
+
+# open = ["mod+o"]
+# print = ["mod+p"]
+# settings = ["mod+,"]
+# help = ["f1", "mod+/"]
+# On a Mac this is empty and the menu bar answers ⌘W and ⌘Q; on Windows and
+# Linux there is no menu bar, so HyloPDF listens for them itself.
+# quit = []
+# find = ["mod+f"]
+# find-next = ["mod+g"]
+# find-previous = ["mod+shift+g"]
+# select-page = ["mod+a"]
+# copy-quote = ["mod+shift+c"]
+# mark = ["mod+shift+b"]
+# dismiss = ["escape"]
+
+# ─── moving around ───────────────────────────────────────────────────────
+
+# next-page = ["right", "l"]
+# previous-page = ["left", "h"]
+# scroll-down = ["down", "j"]
+# scroll-up = ["up", "k"]
+# Vim spells these ⌃D and ⌃U. That spelling cannot ship, because on Windows
+# and Linux Ctrl is `mod` and ⌃D is already dark mode there. On a Mac it is
+# free: half-screen-down = ["d", "ctrl+d"]
+# half-screen-down = ["d"]
+# half-screen-up = ["u"]
+# screen-down = ["space", "pagedown"]
+# screen-up = ["shift+space", "pageup"]
+# first-page = ["home", "g g"]
+# last-page = ["end", "shift+g"]
+# The page field is on p, because g belongs to gg and G. Putting it back on g
+# would leave gg unreachable: a key cannot both act at once and wait to see
+# what follows it.
+# go-to-page = ["mod+alt+g", "p"]
+# back = ["mod+[", "alt+left"]
+# forward = ["mod+]", "alt+right"]
+
+# ─── looking at it ───────────────────────────────────────────────────────
+
+# zoom-in = ["mod++", "mod+="]
+# zoom-out = ["mod+-"]
+# fit-width = ["mod+0"]
+# actual-size = ["mod+1"]
+# fit-page = ["mod+2"]
+# rotate-right = ["mod+r"]
+# rotate-left = ["mod+l"]
+# dark = ["mod+d"]
+# sidebar = ["mod+b"]
+# toolbar = ["mod+t"]
+# A Mac answers ⌃⌘F as well, because that is what the system itself binds.
+# fullscreen = ["f11", "mod+shift+f"]
+# present = ["mod+shift+p"]

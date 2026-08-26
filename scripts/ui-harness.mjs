@@ -59,6 +59,8 @@ export const MOD = onMac ? "Meta" : "Control";
  *        one, which never reaches a page count.
  * @param {"light"|"dark"} [options.appearance]  what the machine outside the
  *        app is set to, which the app follows unless told not to.
+ * @param {Record<string, string[]>} [options.keys]  bindings, as `keys.toml`
+ *        would give them: `{ "next-page": ["n"] }`.
  */
 export async function openApp(options = {}) {
   const engine = options.engine === "chromium" ? chromium : webkit;
@@ -117,6 +119,15 @@ export async function openApp(options = {}) {
       const held = JSON.parse(localStorage.getItem(key) || "{}");
       localStorage.setItem(key, JSON.stringify({ ...held, ...seed }));
     }, options.settings);
+  }
+
+  // The keys, the same way: `keys.toml` is a file and there is no disk here,
+  // so the browser twin of `loadKeys` reads this instead. Action name against
+  // the keys it should answer to — exactly what a line of `keys.toml` says.
+  if (options.keys) {
+    await page.addInitScript((seed) => {
+      localStorage.setItem("hylopdf.keys", JSON.stringify(seed));
+    }, options.keys);
   }
 
   await page.goto(URL_BASE, { waitUntil: "domcontentloaded" });

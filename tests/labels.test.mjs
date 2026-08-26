@@ -60,14 +60,14 @@ test("the pill says both, because only it can", async () => {
 
 test("a page label is what the go-to field takes", async (t) => {
   await t.test("a roman numeral finds the front matter", async () => {
-    await app.press("g");
+    await app.press("p");
     await app.page.keyboard.type("iii");
     await app.page.keyboard.press("Enter");
     await reaches("iii");
   });
 
   await t.test("an arabic number finds the body, not the file's own count", async () => {
-    await app.press("g");
+    await app.press("p");
     await app.page.keyboard.type("2");
     await app.page.keyboard.press("Enter");
     await reaches("2");
@@ -79,7 +79,7 @@ test("a page label is what the go-to field takes", async (t) => {
   });
 
   await t.test("something that names no page leaves the reader where they are", async () => {
-    await app.press("g");
+    await app.press("p");
     await app.page.keyboard.type("qqq");
     await app.page.keyboard.press("Enter");
     await reaches("2");

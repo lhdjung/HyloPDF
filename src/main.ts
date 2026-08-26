@@ -49,10 +49,12 @@ import {
   setWindowTitle,
   systemViewerName,
   signalReady,
+  loadKeys,
   log,
 } from "./api";
 
 import { hydrateIcons, iconMarkup } from "./icons";
+import { type Action, type Keymap, buildKeymap, chordsOf, needsDocument } from "./keys";
 import { type SearchState, Search } from "./search";
 import { isEditingTheme, refreshSettingsWindow, showSettingsWindow } from "./settings";
 import { Sidebar } from "./sidebar";
@@ -178,6 +180,13 @@ class App {
   private toolbarBeforePresenting = true;
   /** Said once per document: there is no text in this one to search. */
   private saidTextless = false;
+  /** What the keyboard is bound to, and what of `keys.toml` could not be
+      read. Rebuilt when the reader edits the file and presses Reload. */
+  keymap: Keymap = buildKeymap();
+  /** The first half of a sequence — `g`, waiting to find out whether it is
+      `g g` — and the timer that gives up on it. */
+  private pendingChord = "";
+  private pendingTimer = 0;
 
   constructor() {
     this.viewer = new Viewer(el.viewer, el.pages, {
@@ -232,6 +241,8 @@ class App {
     this.viewer.setFit(this.settings.fit_mode, this.settings.zoom);
     this.applySearchOptions();
     this.renderRecents();
+    // Before the first keystroke can arrive, and before `wire` reads the map.
+    await this.reloadKeys();
     this.wire();
 
     // Listen before reporting in: the answer to `ready` may itself be a
@@ -2056,6 +2067,103 @@ class App {
     });
   }
 
+  /** Everything the app listens for, as a table of named actions.
+   *
+   * The keys themselves are in `keys.ts`, with whatever the reader's
+   * `keys.toml` has to say over the top; this is only what each name does. A
+   * handler takes no arguments on purpose — an action that needed to know
+   * which key summoned it would be two actions, and the two would be
+   * separately bindable. That is why "next match" and "previous match" are
+   * two entries here where they were one branch and a `shiftKey` test
+   * before. */
+  private handlers?: Record<Action, () => void>;
+
+  private actions(): Record<Action, () => void> {
+    // Built once. Nothing in here reads the event, so there is nothing to
+    // rebuild per keystroke.
+    if (this.handlers) return this.handlers;
+    return (this.handlers = {
+      open: () => void this.openDialog(),
+      // ⌘P did nothing at all, which reads as a broken app rather than as a
+      // missing feature — and printing is not a power tool, it is what people
+      // do with a boarding pass. `print` says what this app can and cannot do
+      // and hands the document to something that can.
+      print: () => void this.print(),
+      settings: () => showSettingsWindow(this),
+      // The list of everything the app listens for was three clicks behind a
+      // cog, which is a strange place to keep the answer to "what can this
+      // thing do". F1 is where every application puts it, and ⌘/ is where the
+      // ones without an F1 key put it.
+      help: () => showSettingsWindow(this, { page: "keyboard" }),
+      quit: () => void quitApp(),
+      find: () => this.openFind(),
+      "find-next": () => this.search.step(1),
+      "find-previous": () => this.search.step(-1),
+      // ⌘A had nothing good to select: only the pages near the window are in
+      // the DOM, so "everything" was a page and a half of document plus the
+      // contents panel and whatever else was on screen. A page is a unit
+      // somebody means, and it is the largest one this app can honestly
+      // offer.
+      "select-page": () => this.selectThisPage(),
+      // The one thing people do with a selection in a document they are
+      // reading for work: quote it, and say where it came from.
+      "copy-quote": () => void this.copyQuote(),
+      mark: () => void this.toggleMark(),
+      dismiss: () => {
+        // One thing per press, closest layer first.
+        if (!el.findBar.hidden) this.closeFind();
+        else if (this.presenting) this.togglePresentation(false);
+        else if (this.settings.fullscreen) void this.toggleFullscreen(false);
+      },
+
+      "next-page": () => this.viewer.nextPage(),
+      "previous-page": () => this.viewer.previousPage(),
+      "scroll-down": () => this.viewer.scrollByStep(1),
+      "scroll-up": () => this.viewer.scrollByStep(-1),
+      "half-screen-down": () => this.viewer.scrollByViewport(1, 0.5),
+      "half-screen-up": () => this.viewer.scrollByViewport(-1, 0.5),
+      "screen-down": () => this.viewer.scrollByViewport(1),
+      "screen-up": () => this.viewer.scrollByViewport(-1),
+      "first-page": () => this.viewer.goToPage(1),
+      "last-page": () => this.viewer.goToPage(this.viewer.pageCount),
+      "go-to-page": () => this.focusPageNumber(),
+      back: () => this.goBack(),
+      forward: () => this.goForward(),
+
+      "zoom-in": () => this.stepZoom(1),
+      "zoom-out": () => this.stepZoom(-1),
+      "fit-width": () => this.setFit("width"),
+      "actual-size": () => this.setFit("actual", 1),
+      "fit-page": () => this.setFit("page"),
+      "rotate-right": () => this.rotate(1),
+      "rotate-left": () => this.rotate(-1),
+      dark: () => this.toggleDark(),
+      sidebar: () => this.toggleSidebar(),
+      toolbar: () => this.toggleToolbar(),
+      fullscreen: () => void this.toggleFullscreen(),
+      present: () => this.togglePresentation(),
+    });
+  }
+
+  /** Read `keys.toml`, work out what is bound, and say what could not be.
+   *
+   * Called at startup and again from the Keyboard page's Reload button. The
+   * problems are shown there, in full, beside the keys they are about; the
+   * notice here is for the reader who is not in Settings and would otherwise
+   * find out by pressing a key that does nothing. */
+  async reloadKeys(announce = true): Promise<void> {
+    const { bindings, problems } = await loadKeys();
+    this.keymap = buildKeymap(bindings);
+    const all = [...problems, ...this.keymap.problems];
+    this.keymap.problems = all;
+    if (!announce || all.length === 0) return;
+    ui.notice(
+      all.length === 1
+        ? `keys.toml: ${all[0]}`
+        : `keys.toml: ${all[0]} And ${all.length - 1} more — see Settings → Keyboard.`,
+    );
+  }
+
   private wireKeyboard(): void {
     document.addEventListener("keydown", (event) => {
       const target = event.target as HTMLElement | null;
@@ -2071,266 +2179,43 @@ class App {
         return;
       }
       if (ui.isWindowOpen()) return;
-      const meta = isMac ? event.metaKey : event.ctrlKey;
 
-      if (meta && event.key === ",") {
-        event.preventDefault();
-        showSettingsWindow(this);
-        return;
-      }
-      // The list of everything the app listens for was three clicks behind a
-      // cog, which is a strange place to keep the answer to "what can this
-      // thing do". F1 is where every application puts it, and ⌘/ is where the
-      // ones without an F1 key put it.
-      if (event.key === "F1" || (meta && event.key === "/")) {
-        event.preventDefault();
-        showSettingsWindow(this, { page: "keyboard" });
-        return;
-      }
-      // Closing the window, and quitting, on the platforms that have no menu
-      // to put them in.
-      //
-      // macOS gets a menu bar from Tauri whether this app asks for one or not,
-      // and ⌘W and ⌘Q are in it — AppKit answers them before the page ever
-      // sees the key. Windows and Linux get no menu at all, so the same two
-      // gestures did nothing there, and nothing in the window said otherwise.
-      // A menu bar of our own is the wrong fix: it would put a strip of
-      // system chrome across the top of a window whose whole top is the app's.
-      if (!isMac && event.ctrlKey && (event.key === "w" || event.key === "q")) {
-        event.preventDefault();
-        void quitApp();
-        return;
-      }
-      if (meta && event.key.toLowerCase() === "o") {
-        event.preventDefault();
-        void this.openDialog();
-        return;
-      }
-      // ⌘P did nothing at all, which reads as a broken app rather than as a
-      // missing feature — and printing is not a power tool, it is what people
-      // do with a boarding pass. `print` says what this app can and cannot do
-      // and hands the document to something that can.
-      // ⌘A had nothing good to select: only the pages near the window are in
-      // the DOM, so "everything" was a page and a half of document plus the
-      // contents panel and whatever else was on screen. A page is a unit
-      // somebody means, and it is the largest one this app can honestly
-      // offer.
-      if (meta && event.key.toLowerCase() === "a") {
-        if (this.viewer.isEmpty) return;
-        event.preventDefault();
-        this.selectThisPage();
-        return;
-      }
-      if (meta && event.shiftKey && event.key.toLowerCase() === "b") {
-        event.preventDefault();
-        void this.toggleMark();
-        return;
-      }
-      // The one thing people do with a selection in a document they are
-      // reading for work: quote it, and say where it came from.
-      if (meta && event.shiftKey && event.key.toLowerCase() === "c") {
-        event.preventDefault();
-        void this.copyQuote();
-        return;
-      }
-      if (meta && event.shiftKey && event.key.toLowerCase() === "p") {
-        event.preventDefault();
-        this.togglePresentation();
-        return;
-      }
-      if (meta && !event.shiftKey && event.key.toLowerCase() === "p") {
-        event.preventDefault();
-        void this.print();
-        return;
-      }
-      // Full screen is settled before search, because both are on F: ⌘⇧F here
-      // and, on a Mac, the system's own ⌃⌘F. Neither may be read as a plain
-      // ⌘F and drop the reader into the search bar.
-      if (
-        event.key === "F11" ||
-        (meta && event.shiftKey && event.key.toLowerCase() === "f") ||
-        (isMac && event.metaKey && event.ctrlKey && event.key.toLowerCase() === "f")
-      ) {
-        event.preventDefault();
-        void this.toggleFullscreen();
-        return;
-      }
-      if (meta && !event.shiftKey && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        this.openFind();
-        return;
-      }
-      if (meta && event.key.toLowerCase() === "d") {
-        event.preventDefault();
-        this.toggleDark();
-        return;
-      }
-      if (meta && event.key.toLowerCase() === "b") {
-        event.preventDefault();
-        this.toggleSidebar();
-        return;
-      }
-      if (meta && !event.shiftKey && event.key.toLowerCase() === "t") {
-        event.preventDefault();
-        this.toggleToolbar();
-        return;
-      }
-      if (meta && (event.key === "+" || event.key === "=")) {
-        event.preventDefault();
-        this.stepZoom(1);
-        return;
-      }
-      if (meta && event.key === "-") {
-        event.preventDefault();
-        this.stepZoom(-1);
-        return;
-      }
-      // ⌘0 stays fit width: it is this app's default and its best mode, and
-      // it is what the button says. ⌘1 is actual size, which is Acrobat's,
-      // and ⌘2 is fit page — neither had a key at all, and "100%" was
-      // reachable only by opening a menu and finding it among the presets.
-      if (meta && event.key === "0") {
-        event.preventDefault();
-        this.setFit("width");
-        return;
-      }
-      if (meta && event.key === "1") {
-        event.preventDefault();
-        this.setFit("actual", 1);
-        return;
-      }
-      if (meta && event.key === "2") {
-        event.preventDefault();
-        this.setFit("page");
-        return;
-      }
-      // ⌥⌘G before ⌘G, and by `code` rather than by `key`: Option turns a G
-      // into a © on a Mac, so the letter is not there to test any more.
-      if (meta && event.altKey && event.code === "KeyG") {
-        event.preventDefault();
-        this.focusPageNumber();
-        return;
-      }
-      if (meta && !event.altKey && event.key.toLowerCase() === "g") {
-        event.preventDefault();
-        this.search.step(event.shiftKey ? -1 : 1);
-        return;
-      }
-      // Preview's own pair, and free everywhere else. A rotation is a way of
-      // looking at a document rather than a change to it, so nothing is
-      // written down and closing the document straightens it again.
-      if (meta && !event.shiftKey && event.key.toLowerCase() === "r") {
-        event.preventDefault();
-        this.rotate(1);
-        return;
-      }
-      if (meta && !event.shiftKey && event.key.toLowerCase() === "l") {
-        event.preventDefault();
-        this.rotate(-1);
-        return;
-      }
-      // Back and forward through the jumps. Two bindings, because two
-      // traditions: ⌘[ and ⌘] are what Preview answers to, ⌥← and ⌥→ what
-      // Acrobat, Sumatra and Okular answer to, and neither camp thinks to try
-      // the other's. Both are free here.
-      if (
-        (meta && event.key === "[") ||
-        (event.altKey && !meta && event.key === "ArrowLeft")
-      ) {
-        event.preventDefault();
-        this.goBack();
-        return;
-      }
-      if (
-        (meta && event.key === "]") ||
-        (event.altKey && !meta && event.key === "ArrowRight")
-      ) {
-        event.preventDefault();
-        this.goForward();
-        return;
-      }
-      if (event.key === "Escape") {
-        if (ui.isMenuOpen()) return;
-        // Escape does one thing per press, closest layer first, and always
-        // claims the key: an Escape the webview leaves unhandled reaches
-        // AppKit, which drops the window out of full screen behind our back.
-        event.preventDefault();
-        if (!el.findBar.hidden) this.closeFind();
-        else if (this.presenting) this.togglePresentation(false);
-        else if (this.settings.fullscreen) void this.toggleFullscreen(false);
-        return;
-      }
-      if (this.viewer.isEmpty) return;
+      const chords = chordsOf(event);
+      if (chords.length === 0) return;
 
-      // Everything below is a bare key, and only a bare key. Anything still
-      // holding a modifier at this point was not caught above and belongs to
-      // the system: ⌘↓ and ⌘← mean "end of document" and "start of line"
-      // everywhere else on a Mac and were turning pages here, and ⌥j was
-      // scrolling. A shortcut this app does want is added above, where the
-      // modifier is part of the test.
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-
-      switch (event.key) {
-        // Left and right turn pages, in every scroll mode. Continuous
-        // scrolling makes a page boundary easy to lose, and landing on the top
-        // of one is the whole reason to reach for these keys rather than the
-        // ones that move by a screen.
-        case "ArrowRight":
+      for (const chord of chords) {
+        // Half way through a sequence: `g` has been pressed and this is what
+        // came next. A chord that does not continue it is not a mistake —
+        // `g` then ⌘F is a reader changing their mind — so the pending
+        // prefix is dropped and the chord is tried on its own below.
+        const continued = this.pendingChord ? `${this.pendingChord} ${chord}` : "";
+        const binding = continued && this.keymap.byBinding.has(continued) ? continued : chord;
+        const action = this.keymap.byBinding.get(binding);
+        if (action) {
+          // An open menu has its own capturing key handler and Escape is its
+          // way out. Whatever key `dismiss` is on, it is the menu's first —
+          // and an Escape the webview leaves unhandled reaches AppKit, which
+          // drops the window out of full screen behind our back.
+          if (action === "dismiss" && ui.isMenuOpen()) return;
+          if (needsDocument(action) && this.viewer.isEmpty) break;
+          this.pendingChord = "";
           event.preventDefault();
-          this.viewer.nextPage();
-          break;
-        case "ArrowLeft":
+          this.actions()[action]();
+          return;
+        }
+        const prefix = continued && this.keymap.prefixes.has(continued) ? continued : chord;
+        if (this.keymap.prefixes.has(prefix)) {
+          this.pendingChord = prefix;
           event.preventDefault();
-          this.viewer.previousPage();
-          break;
-        // Up and down are the small move, and they were the browser's own
-        // until now, which is why one of them travelled further than the
-        // other. One stride, two directions.
-        case "ArrowDown":
-          event.preventDefault();
-          this.viewer.scrollByStep(1);
-          break;
-        case "ArrowUp":
-          event.preventDefault();
-          this.viewer.scrollByStep(-1);
-          break;
-        case "PageDown":
-          event.preventDefault();
-          this.viewer.scrollByViewport(1);
-          break;
-        case "PageUp":
-          event.preventDefault();
-          this.viewer.scrollByViewport(-1);
-          break;
-        case "Home":
-          event.preventDefault();
-          this.viewer.goToPage(1);
-          break;
-        case "End":
-          event.preventDefault();
-          this.viewer.goToPage(this.viewer.pageCount);
-          break;
-        case " ":
-          event.preventDefault();
-          this.viewer.scrollByViewport(event.shiftKey ? -1 : 1);
-          break;
-        // j and k claim the key like every other movement key here: an
-        // unhandled one carries on to whatever else is listening.
-        case "j":
-          event.preventDefault();
-          this.viewer.scrollByStep(1);
-          break;
-        case "k":
-          event.preventDefault();
-          this.viewer.scrollByStep(-1);
-          break;
-        case "g":
-          event.preventDefault();
-          this.focusPageNumber();
-          break;
-        default:
-          break;
+          // A sequence half pressed and then abandoned must not lie in wait:
+          // `g`, a minute of reading, and then `g` again is two presses, not
+          // one gesture.
+          window.clearTimeout(this.pendingTimer);
+          this.pendingTimer = window.setTimeout(() => (this.pendingChord = ""), 1200);
+          return;
+        }
       }
+      this.pendingChord = "";
     });
 
     // Pinch and ctrl+wheel are zoom everywhere else; they should be here too.

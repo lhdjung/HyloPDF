@@ -1881,7 +1881,11 @@ export class Viewer {
     this.container.scrollBy({ top: direction * step, behavior: "auto" });
   }
 
-  scrollByViewport(direction: 1 | -1): void {
+  /** A screen, or a fraction of one. The 60px is the overlap that keeps a
+      line of what was just read on screen after the jump, and it comes off
+      the screen before the fraction does: half a screen means half of what a
+      whole one would have moved, not half a screen plus the whole overlap. */
+  scrollByViewport(direction: 1 | -1, fraction = 1): void {
     if (this.mode === "paged") {
       const room = this.container.scrollHeight - this.container.clientHeight;
       const at = this.container.scrollTop;
@@ -1891,7 +1895,7 @@ export class Viewer {
       }
     }
     this.container.scrollBy({
-      top: direction * (this.container.clientHeight - 60),
+      top: direction * (this.container.clientHeight - 60) * fraction,
       behavior: "auto",
     });
   }

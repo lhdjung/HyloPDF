@@ -22,7 +22,7 @@
 > | §2.8 zoom shortcuts | done — ⌘1 actual size, ⌘2 fit page |
 > | §2.9 hand tool | done — the middle button drags |
 > | §2.10 presentation mode | done — ⌘⇧P |
-> | §2.11 remappable keys | **not done**; see the note in place |
+> | §2.11 remappable keys | done — every key is an action in `keys.toml`; the Vim-shaped reader gets h/l, d/u, gg and G |
 > | §3 no-text scans, the search cap, the missing help key, the menu-bar gap | done |
 > | §3 soft at very high zoom | **not done**; see the note in place |
 > | §4 the three silent failures | done |
@@ -187,7 +187,7 @@ Things people will notice in the first week rather than the first hour.
 | 2.8 | **Zoom shortcuts that match the neighbours** | ⌘0 is fit width (`src/main.ts:1472`); in Preview ⌘0 is actual size and fit-width is elsewhere. There is no shortcut at all for fit page or 100% | Trivial, but pick deliberately — this is muscle memory and there is no right answer, only a documented one |
 | 2.9 | **A hand tool / drag to pan** | Zoomed into a map or a large figure, the only way sideways is the scrollbar or shift-wheel. Preview and Acrobat let you drag the page | Small — a modifier-drag or a mode |
 | 2.10 | **Presentation mode as a named thing** | Full screen + hide toolbar + one page at a time is already presentation mode; nobody will find it by assembling three switches. One item that sets all three, and Escape out | Trivial |
-| 2.11 | **Remappable keys** — *not done* | Only j/k are offered to the Vim-shaped reader — no h/l, no gg/G, no ctrl-d/u, and nothing is remappable. `AGENTS.md` already names a keybindings file as future work; the audience that cares about this is exactly the audience that would otherwise use Zathura or Sioyek | Medium |
+| 2.11 | **Remappable keys** — *done* | Only j/k are offered to the Vim-shaped reader — no h/l, no gg/G, no ctrl-d/u, and nothing is remappable. `AGENTS.md` already names a keybindings file as future work; the audience that cares about this is exactly the audience that would otherwise use Zathura or Sioyek | Medium |
 
 ---
 
@@ -302,7 +302,7 @@ Everything in §2 past that point is worth doing and none of it is urgent.
 
 ---
 
-## 7. Why the three left undone were left undone
+## 7. Why the two left undone were left undone
 
 **Two documents at once (§1.5)** is not a feature, it is a change to two
 things this app is built on. `open_for_reading` and `read_range` serve
@@ -318,14 +318,42 @@ meantime is the sting: the position in the outgoing document was always kept,
 the way back to it is now one click in the bar, and the app says what it
 closed and why.
 
-**Remappable keys (§2.11)** wants a file parsed and validated in Rust and a
-dispatch table in TypeScript, and the table is the problem: `wireKeyboard` is
-twenty-five branches whose order is load-bearing — ⌘⇧F before ⌘F, ⌥⌘G matched
-on `event.code` because Option turns a G into a ©, plain keys only when
-nothing is held — and this pass added ten more of them. Rewriting the app's
-most delicate input path immediately after widening it is the way to introduce
-the kind of bug the tests do not catch. It is a good next piece of work and it
-should be its own.
+**Remappable keys (§2.11)** was left for a pass of its own, and got one.
+`keys.toml` names an action and the keys it should answer to; `keys.ts` holds
+every action, what it is called, and the chords it ships with; `main.ts` holds
+one handler per action and thirty lines of dispatch. The twenty-five ordered
+branches are gone, and with them the whole class of bug that made this look
+dangerous — ⌘⇧F no longer has to be tested before ⌘F, because they are two
+different chords, and ⌥⌘G no longer needs its own `event.code` case, because
+every event offers both spellings. A key claimed twice is now a collision the
+reader is told about on the Keyboard page rather than whichever branch happened
+to be written first.
+
+Three things about how it landed are worth keeping.
+
+*Rust reads the file and does not interpret it.* `keys.rs` rejects only the
+shapes TOML can describe and the frontend cannot use — `find = 3`, an entry
+that is a table — and carries everything else across as written. The action
+names and the grammar of a chord live in `keys.ts`, because that is the side
+that turns a keystroke into a chord and would need the whole grammar anyway;
+validating in Rust as well would be the same parser written twice, and the
+disagreement between the two copies would arrive as a bug report. `AGENTS.md`
+had predicted "parsed and validated in Rust", and that line is now corrected in
+place.
+
+*The Vim keys are the ones that fit.* h and l turn pages, the same as ← and →,
+rather than panning the way Zathura uses them: this app has one pair of keys
+per direction and they should not disagree. G goes to the last page. ⌃D and ⌃U
+do not ship — on Windows and Linux Ctrl is the modifier this app already uses,
+so ⌃D is dark mode there, and a default that works on one platform out of three
+is worse than none; half-screen scrolling is on d and u, which are free
+everywhere, and the template says how to put ⌃D back on a Mac.
+
+*`gg` and `G` are defaults, which cost the page field its lone `g`.* A key
+cannot both act at once and wait to see what follows it, so `g` on the page
+field would have made `gg` unreachable. The page field moved to `p`, which
+nothing else wanted, and `g` went back to meaning what it means everywhere
+else. That is the one shipped binding this pass changed.
 
 **Sharpness past 300% (§3)** is the same machinery the margin trimming now
 uses — draw a sub-rectangle of the page at full density — pointed at the

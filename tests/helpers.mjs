@@ -13,15 +13,22 @@ import { transform } from "esbuild";
  * Compile one of the app's modules and hand back the names asked for,
  * exported or not.
  *
+ * `extra` is appended to the source, which is how a test stands in for
+ * something the stripped imports took away — `isMac` in `keys.ts`, which
+ * decides what `mod` means and is a different answer on each platform. It
+ * lands after the declarations it replaces are gone, and every use of it is
+ * inside a function called later, so the ordering is not a problem.
+ *
  * @param {string} file    path to the .ts file, from the repo root
  * @param {string[]} names what to pull out of it
+ * @param {string} [extra] source appended before compiling
  */
-export async function load(file, names) {
+export async function load(file, names, extra = "") {
   const ts = readFileSync(file, "utf8")
     .replace(/^import type \{[\s\S]*?\} from [^;]*;$/gm, "")
     .replace(/^import[^;]*;$/gm, "")
     .replace(/^export /gm, "")
-    + `\nexport { ${names.join(", ")} };`;
+    + `\n${extra}\nexport { ${names.join(", ")} };`;
   const { code } = await transform(ts, { loader: "ts", format: "esm" });
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }

@@ -79,6 +79,13 @@ export type Bootstrap = {
   themes_dir: string;
 };
 
+/** The keyboard as the reader has it: action name → the keys that ask for it,
+    and whatever HyloPDF could not make sense of on the way in. */
+export type Keys = {
+  bindings: Record<string, string[]>;
+  problems: string[];
+};
+
 export type OpenedDocument = {
   path: string;
   name: string;
@@ -93,6 +100,10 @@ export const isMac = /mac/i.test(navigator.platform || navigator.userAgent);
 /* ------------------------------------------------------------- fallbacks */
 
 const FALLBACK_KEY = "hylopdf.settings";
+/* The keys, for the browser path. `keys.toml` is a file and there is no disk
+ * here, so the same table arrives as JSON — which is what lets the harness
+ * open the app with a key rebound and press it. */
+const KEYS_FALLBACK_KEY = "hylopdf.keys";
 
 const fallbackDefaults: Settings = {
   theme: "hylo-light",
@@ -223,6 +234,24 @@ export async function setSettings(
     return;
   }
   await invoke("set_settings", { entries });
+}
+
+/** What `keys.toml` says, as it is written.
+ *
+ * Nothing is interpreted on the way through: the action names and the grammar
+ * of a chord both live in `keys.ts`, which is the side that has to turn a
+ * keystroke into one. Rust reports only what TOML itself can describe and the
+ * frontend cannot use — a key bound to a number, an entry that is a table. */
+export async function loadKeys(): Promise<Keys> {
+  if (!hasBackend) {
+    try {
+      const stored = JSON.parse(localStorage.getItem(KEYS_FALLBACK_KEY) || "{}");
+      return { bindings: stored, problems: [] };
+    } catch {
+      return { bindings: {}, problems: ["Your keys could not be read."] };
+    }
+  }
+  return invoke<Keys>("load_keys");
 }
 
 export async function listThemes(): Promise<Theme[]> {

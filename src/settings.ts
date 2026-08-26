@@ -12,6 +12,7 @@
 
 import { type Settings, type Theme, deleteTheme, isMac, saveTheme } from "./api";
 import { hydrateIcons } from "./icons";
+import { ACTIONS, GROUPS, type Keymap, describeBinding } from "./keys";
 import * as ui from "./ui";
 import { isDarkTheme, parseColor, selectionArea, selectionInk, toHex } from "./themes";
 import type { FitMode, SpreadMode } from "./viewer";
@@ -21,6 +22,11 @@ export interface SettingsHost {
   themes: Theme[];
   theme: Theme;
   paths: { config: string; themes: string };
+  /** What the keyboard is bound to, and what of `keys.toml` could not be
+      read. The Keyboard page is drawn from this rather than from a list of
+      its own, so it cannot describe a key the app does not answer to. */
+  readonly keymap: Keymap;
+  reloadKeys(announce?: boolean): Promise<void>;
 
   set<K extends keyof Settings>(key: K, value: Settings[K]): void;
   themeById(id: string): Theme;
@@ -181,7 +187,7 @@ export function showSettingsWindow(
           windowPage(host, pane);
           break;
         case "keyboard":
-          keyboardPage(pane);
+          keyboardPage(host, pane, render);
           break;
         case "about":
           aboutPage(host, pane);
@@ -640,7 +646,15 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
 
 /* -------------------------------------------------------------- keyboard */
 
-function keyboardPage(pane: HTMLElement): void {
+/** What the app listens for — read off what it listens for.
+ *
+ * This page used to be a hand-written table, and a hand-written table of
+ * shortcuts drifts the moment a key moves: it named ⌘T twice, it did not
+ * mention the pinch, and it could not have known about a key the reader had
+ * rebound. Now every row is an action out of `keys.ts` with whatever
+ * `keys.toml` has given it, so the page is a view of the keymap and cannot
+ * disagree with it. */
+function keyboardPage(host: SettingsHost, pane: HTMLElement, refresh: () => void): void {
   pane.append(
     ui.text("title", "Keyboard"),
     ui.text(
@@ -649,77 +663,98 @@ function keyboardPage(pane: HTMLElement): void {
     ),
   );
 
-  const groups: [string, [string, string][]][] = [
-    [
-      "Documents",
-      [
-        ["Open a document", shortcut("⌘O", "Ctrl+O")],
-        ["Search this document", shortcut("⌘F", "Ctrl+F")],
-        ["Next match, previous match", shortcut("⌘G, ⌘⇧G", "Ctrl+G, Ctrl+Shift+G")],
-        ["Close search", "Escape"],
-        ["Settings", shortcut("⌘,", "Ctrl+,")],
-        ["This list", shortcut("F1, or ⌘/", "F1, or Ctrl+/")],
-        ["Close HyloPDF", shortcut("⌘W, ⌘Q", "Ctrl+W, Ctrl+Q")],
-        ["Print — handed to a program that prints", shortcut("⌘P", "Ctrl+P")],
-        ["Select the text of this page", shortcut("⌘A", "Ctrl+A")],
-        ["Copy what is selected, with its page number", shortcut("⌘⇧C", "Ctrl+Shift+C")],
-        ["Mark this page, or take the mark off", shortcut("⌘⇧B", "Ctrl+Shift+B")],
-      ],
-    ],
-    [
-      "Moving around",
-      [
-        ["Next page, previous page", "→, ←"],
-        ["A little down, a little up", "↓, ↑ — or j, k"],
-        ["Down a screen, up a screen", "Space, ⇧Space"],
-        ["Down a screen, up a screen", "Page Down, Page Up"],
-        ["First page, last page", "Home, End"],
-        ["Go to a page: type the number, press Enter", shortcut("⌥⌘G, or g", "Ctrl+Alt+G, or g")],
-        ["Back to where you jumped from", shortcut("⌘[, or ⌥←", "Ctrl+[, or Alt+←")],
-        ["Forward again", shortcut("⌘], or ⌥→", "Ctrl+], or Alt+→")],
-      ],
-    ],
-    [
-      "Looking at it",
-      [
-        ["Zoom in, zoom out", shortcut("⌘+, ⌘−", "Ctrl++, Ctrl+−")],
-        ["Fit the width of the window", shortcut("⌘0", "Ctrl+0")],
-        ["Actual size, fit the whole page", shortcut("⌘1, ⌘2", "Ctrl+1, Ctrl+2")],
-        ["Turn the page right, turn it left", shortcut("⌘R, ⌘L", "Ctrl+R, Ctrl+L")],
-        ["Dark mode", shortcut("⌘D", "Ctrl+D")],
-        ["Contents sidebar", shortcut("⌘B", "Ctrl+B")],
-        ["Toolbar", shortcut("⌘T", "Ctrl+T")],
-        ["Full screen", shortcut("⌘⇧F, ⌃⌘F", "F11, Ctrl+Shift+F")],
-        ["Presenting — full screen, nothing else on it", shortcut("⌘⇧P", "Ctrl+Shift+P")],
-        ["Leave full screen, or stop presenting", "Escape"],
-      ],
-    ],
-    [
-      "Without the keyboard",
-      [
-        ["Zoom", "Pinch, or " + shortcut("⌘ and scroll", "Ctrl and scroll")],
-        ["Bring the toolbar back when it is hidden", "The top edge of the window"],
-        ["Open something else you have been reading", "The document's name in the bar"],
-        ["Back, forward", "The side buttons on a mouse"],
-        ["Drag the page around when it is bigger than the window", "The middle button"],
-      ],
-    ],
-  ];
-
-  for (const [title, rows] of groups) {
-    pane.append(ui.text("group", title));
-    const table = document.createElement("div");
-    table.className = "keys";
-    for (const [what, keys] of rows) {
-      const label = document.createElement("span");
-      label.textContent = what;
-      const key = document.createElement("span");
-      key.className = "key";
-      key.textContent = keys;
-      table.append(label, key);
-    }
-    pane.append(table);
+  // What could not be read comes first: a key that does nothing is otherwise
+  // found out about by pressing it.
+  if (host.keymap.problems.length > 0) {
+    pane.append(ui.text("group", "In your keys.toml"));
+    for (const problem of host.keymap.problems) pane.append(ui.text("note", problem));
   }
+
+  const unbound: string[] = [];
+  for (const group of GROUPS) {
+    const rows: [string, string][] = [];
+    for (const spec of ACTIONS) {
+      if (spec.group !== group) continue;
+      const keys = host.keymap.byAction.get(spec.id) ?? [];
+      if (keys.length === 0) {
+        unbound.push(spec.id);
+        continue;
+      }
+      rows.push([spec.label, keys.map(describeBinding).join("  or  ")]);
+    }
+    if (rows.length === 0) continue;
+    pane.append(ui.text("group", group));
+    pane.append(keyTable(rows));
+  }
+
+  pane.append(ui.text("group", "Without the keyboard"));
+  pane.append(
+    keyTable([
+      ["Zoom", "Pinch, or " + shortcut("⌘ and scroll", "Ctrl and scroll")],
+      ["Bring the toolbar back when it is hidden", "The top edge of the window"],
+      ["Open something else you have been reading", "The document's name in the bar"],
+      ["Back, forward", "The side buttons on a mouse"],
+      ["Drag the page around when it is bigger than the window", "The middle button"],
+    ]),
+  );
+
+  pane.append(ui.text("group", "Changing keybinds"));
+  // The path on its own row, with nothing beside it. As a field's note it had
+  // to share the width with the path, which on a Mac runs to seventy
+  // characters, so the sentence explaining the file was three words wide.
+  pane.append(
+    ui.text(
+      "note",
+      "Every keybind is in the keys file, commented out. Uncomment a line to change its keys.",
+    ),
+    ui.field("Keys file", pathValue(join(host.paths.config, "keys.toml"))),
+  );
+  if (unbound.length > 0) {
+    pane.append(
+      ui.text(
+        "note",
+        `Not bound to a key: ${unbound.join(", ")}.` +
+          // Not guessable from a row that is simply missing.
+          (isMac && unbound.includes("quit") ? " Use ⌘W or ⌘Q." : ""),
+      ),
+    );
+  }
+  const buttons = document.createElement("div");
+  buttons.className = "pane-actions";
+  buttons.append(
+    // The themes directory is watched and this file is not: a watch on the
+    // config directory would fire on every `settings.toml` write the app makes
+    // itself, which is several a minute while somebody is scrolling. So there
+    // is a button, rather than a restart.
+    ui.button("Reload", () => {
+      void host.reloadKeys(false).then(() => {
+        refresh();
+        // The page redraws either way, so the line is what says it happened —
+        // a file with nothing wrong in it redraws to exactly what was there.
+        ui.notice(
+          host.keymap.problems.length === 0
+            ? "Keys reloaded."
+            : `Keys reloaded. ${host.keymap.problems.length} could not be used — below.`,
+          host.keymap.problems.length === 0 ? "done" : "plain",
+        );
+      });
+    }),
+  );
+  pane.append(buttons);
+}
+
+function keyTable(rows: [string, string][]): HTMLElement {
+  const table = document.createElement("div");
+  table.className = "keys";
+  for (const [what, keys] of rows) {
+    const label = document.createElement("span");
+    label.textContent = what;
+    const key = document.createElement("span");
+    key.className = "key";
+    key.textContent = keys;
+    table.append(label, key);
+  }
+  return table;
 }
 
 /* ----------------------------------------------------------------- about */

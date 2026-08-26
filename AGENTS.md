@@ -61,10 +61,12 @@ src-tauri/          Rust: settings, themes, reading history, the window
   src/lib.rs        every #[tauri::command], window restore, file associations
   src/settings.rs   settings.toml — one flat table, one key written at a time
   src/theme.rs      one TOML file per theme, built-ins installed on first run
+  src/keys.rs       keys.toml — the reader's keyboard, read but not interpreted
   src/library.rs    library.toml — where you were, what was open, what you marked
   src/watch.rs      the themes directory and the open document, watched
   build.rs          the shipped theme table, generated from themes/ and checked
   themes/*.toml     the fourteen packaged themes, embedded with include_str!
+  keys.toml         the commented template a new install gets, include_str!
 
 tests/              node --test; `npm test` starts a dev server for them
   search.test.mjs   text folding and where a match lands
@@ -84,11 +86,13 @@ tests/              node --test; `npm test` starts a dev server for them
   notes.test.mjs    the notes a document already carries, made readable
   document.test.mjs what a document says about itself
   notext.test.mjs   a scan with nothing in it to search
+  keys.test.mjs     chords, the keymap, the shipped template, and a rebound key
   helpers.mjs       compiling a .ts module to reach what it does not export
   fixtures/         PDFs are generated, not committed
 
 src/                TypeScript: the interface
   main.ts           the App object: state, menus, keyboard, wiring
+  keys.ts           every action, its default chords, and event → chord
   viewer.ts         layout, rendering, scrolling, links   ← the heart of it
   themes.ts         theme → CSS variables, and the page recolouring itself
   search.ts         the full-document index, the fold, and match stepping
@@ -396,6 +400,64 @@ side. The probe is drawn on white rather than on the theme's paper: this is a
 question about the document, and the answer must not move when the reader
 changes theme.
 
+## The keyboard
+
+Every key the app answers to is an **action** with a name, and a chord is only
+ever a way of asking for one. `keys.ts` holds the whole table — the actions,
+what each is called on the Keyboard page, and the chords it ships with — and
+`main.ts` holds one handler per action and a dispatch of about thirty lines.
+
+*This is not only for the sake of the file.* What decided which shortcut had
+been pressed was twenty-five `if` branches whose **order** was load-bearing:
+⌘⇧F had to be tested before ⌘F or full screen dropped the reader into the find
+bar, ⌘G had to say `!event.altKey` or it took ⌥⌘G's keystroke, and the plain
+keys sat under a blanket `if (metaKey || ctrlKey || altKey) return`. Adding a
+shortcut meant finding the one place in that order where it did not break
+something else. A chord is now computed from the event and looked up, so two
+actions cannot both answer to ⌘F — that is one key in one map, and it is a
+collision the reader is *told* about rather than a bug that depends on which
+branch ran first.
+
+*An event offers several spellings, best first.* `chordsOf` returns what the
+key says (`event.key`) and what key was hit (`event.code`), and for anything
+that is not a letter it offers the chord with Shift and again without. That is
+what makes ⌥⌘G work with no special case — Option turns the G into a © and the
+physical key is still `KeyG` — and what lets ⇧Space mean "up a screen" while
+Space still means "down a screen". Shift is never dropped for a letter: G and
+g are two keys to a reader.
+
+*`mod` is the only thing that changes meaning between platforms* — ⌘ on a Mac,
+Ctrl elsewhere — and a literal `ctrl` is normalised to `mod` off the Mac,
+because there it *is* Ctrl. That is why Vim's ⌃D and ⌃U do not ship: they would
+collide with dark mode on two platforms out of three. Half-screen scrolling is
+on `d` and `u`, which are free everywhere, and the template says how to add ⌃D
+on a Mac.
+
+*The file replaces, it does not add.* `keys.toml` names an action and the keys
+it should answer to; anything it does not name keeps what it shipped with, so a
+file that rebinds one key stays one line long and a key added in a later
+version still arrives. An empty list unbinds. Nothing in the path throws — a
+file somebody wrote by hand is a file this app does not own, so an unreadable
+chord, an action that does not exist and a key claimed twice are all *reported*
+and the rest of the file still lands. The reports appear on the Keyboard page,
+where the keys they are about are, and one line of notice points at it.
+
+*Sequences, which exist for `g g`.* Two chords with a space between them, and
+the reason the page field is on `p`: a chord that both does something and
+begins something longer is a conflict, and the shorter one keeps the key,
+because a key that waits to find out what it means is a key that feels broken.
+So a lone `g` on the page field would have made Vim's `gg` unreachable, and `p`
+costs nothing — nothing else wanted it. `G` is the other end.
+
+*The Keyboard page is drawn from the keymap*, not from a list of its own, so it
+cannot describe a key the app does not answer to and it shows a rebound one.
+The hand-written table it replaced had already drifted.
+
+*`keys.toml` is not watched, and that is deliberate.* It lives in the config
+directory, which the app writes to itself several times a minute while somebody
+is scrolling — `remember_position` alone — so a watch there would be answering
+its own writes. There is a Reload button on the Keyboard page instead.
+
 ## Things that will bite
 
 **pdf.js runtime data must be given absolute URLs.** `cMapUrl`,
@@ -560,8 +622,11 @@ and the go-to field all speak in labels where a document has them. The library
 still records positions — a label is a name, and names repeat.
 
 **Escape and menus.** A popover registers its own capturing key handler, and so
-does the modal window; the app-level shortcut handler bows out while either is
-open. Clicking the button that opened a menu closes it — `showPopover` tracks
+does the modal window. The app-level handler stands down entirely while a
+window is up, and while a *menu* is open it stands down for one action —
+`dismiss`, whatever key that is on — because Escape is the menu's way out and
+an Escape the webview leaves unhandled reaches AppKit, which drops the window
+out of full screen behind our back. Clicking the button that opened a menu closes it — `showPopover` tracks
 its anchor for exactly that. That handler captures at the document, so it sees
 every key before the thing that was typed into does: arrows, Home and End are
 handed back when the target is a field, or the caret in a stepper cannot move
@@ -598,9 +663,12 @@ page already extracted is refolded rather than re-extracted when the case
 setting moves: the trip into the worker is the expensive half.
 
 **Option is not a letter on a Mac.** ⌥⌘G — go to a page, which is what Preview
-binds it to — has to be matched on `event.code`, because Option turns a G into
-a © and `event.key` has nothing left to compare. ⌘G, which steps through
-matches, is guarded with `!event.altKey` or it takes the keystroke first.
+binds it to — arrives as a ©, and `event.key` has nothing left to compare. That
+used to be one branch matching on `event.code` by hand, with ⌘G guarded by
+`!event.altKey` beneath it or it took the keystroke first. Now every event
+offers *both* spellings, `event.key` first and `event.code` second, and a chord
+matches if either does — so ⌥⌘G and ⌘G are two different chords and neither
+needs to know the other exists. See "The keyboard" above.
 
 ## Testing the interface without taking the screen
 
@@ -666,6 +734,14 @@ back for the next four. The harness exports `MOD` for this, and
 to `navigator.platform` too, so the app and the test agree about which machine
 they are on. `HYLOPDF_PLATFORM=other npm test` is the cheap way to find out
 what Linux will say, and it is worth running before touching a shortcut.
+
+**The harness can seed the keyboard as well as the settings.** `openApp({ keys:
+{ "next-page": ["n"] } })` writes the same table `keys.toml` would give,
+through the browser twin of `loadKeys` — so a rebound key can be pressed in a
+running app without a disk or a Rust side. `keys.test.mjs` does the rest
+against `keys.ts` directly, loading it twice with `isMac` true and false,
+because `mod` is the one thing in a chord that means something different on
+each platform.
 
 **The harness can pretend the machine is dark.** `openApp({ appearance:
 "dark" })` sets the context's colour scheme and `app.setAppearance("light")`
@@ -958,8 +1034,12 @@ filename and the effect is that a theme can be written with the app open beside
 it. The clearest win on this list, and the same watcher answers the document
 recompiled by LaTeX under the reader's feet.
 
-*Keybindings as a file.* Parsed and validated in Rust the way themes are,
-dispatched in TypeScript. Config in, no traffic afterwards.
+*Keybindings as a file.* Built — see "The keyboard" above. The split came out
+one notch away from what this line predicted: Rust reads the file and rejects
+the shapes TOML can describe and the frontend cannot use, and the frontend
+owns the action names and the grammar of a chord, because it is the side that
+has to turn a keystroke into one and would need the whole grammar anyway.
+Validating in Rust as well would have meant the same parser written twice.
 
 *Whatever comes next that has to be remembered* — annotations, a thumbnail
 cache, per-document settings, export. These belong beside `library.rs` for the

@@ -72,6 +72,12 @@ the fingers.
 
 ## Themes
 
+HyloPDF follows the machine: the light theme while the system is light, the
+dark one when it turns dark, and the two are whichever you last chose. Picking
+a theme that disagrees with the system — or pressing ⌘D — turns the following
+off, since at that point you would rather decide yourself. The switch is in
+the Theme menu and on the Appearance page.
+
 A theme is a small TOML file. The fourteen that ship with HyloPDF are written into
 your theme folder on every run, so they can be read and copied, and so a change
 to a shipped theme reaches a machine that already has the old one. The embedded

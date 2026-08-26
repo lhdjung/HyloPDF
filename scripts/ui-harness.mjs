@@ -57,6 +57,8 @@ export const MOD = onMac ? "Meta" : "Control";
  * @param {"document"|"password"} [options.expect]  what opening the file should
  *        produce: the document itself, or the password window for an encrypted
  *        one, which never reaches a page count.
+ * @param {"light"|"dark"} [options.appearance]  what the machine outside the
+ *        app is set to, which the app follows unless told not to.
  */
 export async function openApp(options = {}) {
   const engine = options.engine === "chromium" ? chromium : webkit;
@@ -64,6 +66,7 @@ export async function openApp(options = {}) {
   const context = await browser.newContext({
     viewport: { width: options.width ?? 1280, height: options.height ?? 860 },
     deviceScaleFactor: 2,
+    colorScheme: options.appearance ?? "light",
   });
   const page = await context.newPage();
 
@@ -172,6 +175,14 @@ export async function openApp(options = {}) {
       await page.waitForTimeout(200);
     },
 
+    /** The machine outside the app changes its mind — sunset, or somebody
+        throwing the switch in System Settings. */
+    /** @param {"light"|"dark"} appearance */
+    async setAppearance(appearance) {
+      await page.emulateMedia({ colorScheme: appearance });
+      await page.waitForTimeout(200);
+    },
+
     /** What the interface currently says about itself. */
     async state() {
       return page.evaluate(() => {
@@ -190,6 +201,9 @@ export async function openApp(options = {}) {
           windowTitle: window?.querySelector(".window-title")?.textContent ?? null,
           windowText: window?.querySelector(".pane-lede")?.textContent ?? null,
           onStartScreen: document.getElementById("shell")?.dataset.empty === "true",
+          paper: getComputedStyle(document.documentElement)
+            .getPropertyValue("--page-paper")
+            .trim(),
         };
       });
     },

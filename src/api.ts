@@ -10,6 +10,7 @@ export type Settings = {
   theme: string;
   light_theme: string;
   dark_theme: string;
+  follow_system_theme: boolean;
   scroll_mode: "continuous" | "paged";
   fit_mode: "width" | "page" | "actual";
   zoom: number;
@@ -82,6 +83,7 @@ const fallbackDefaults: Settings = {
   theme: "hylo-light",
   light_theme: "hylo-light",
   dark_theme: "hylo-dark",
+  follow_system_theme: true,
   scroll_mode: "continuous",
   fit_mode: "width",
   zoom: 1,

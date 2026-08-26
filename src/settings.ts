@@ -28,6 +28,7 @@ export interface SettingsHost {
   useTheme(theme: Theme, remember?: boolean): void;
   refreshThemes(): Promise<void>;
   toggleDark(on: boolean): void;
+  followSystemTheme(): void;
   toggleToolbar(show: boolean): void;
   toggleSidebar(show: boolean): void;
   toggleFullscreen(on: boolean): Promise<void>;
@@ -323,6 +324,15 @@ function appearancePage(
   );
 
   pane.append(
+    ui.field(
+      "Follow the system",
+      ui.toggle(host.settings.follow_system_theme, (on) => {
+        host.set("follow_system_theme", on);
+        if (on) host.followSystemTheme();
+        edit.done();
+      }),
+      "Take the light theme when the machine is light and the dark one when it is dark. Choosing a theme that disagrees turns this off.",
+    ),
     ui.field(
       "Dark mode",
       ui.toggle(isDarkTheme(host.theme), (on) => {

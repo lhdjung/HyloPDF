@@ -72,6 +72,10 @@ if (import.meta.env.DEV && hasBackend) {
   );
 }
 
+/** Whether the machine is in dark mode. In a webview this is the system
+    setting, which is what it is on every platform the app ships to. */
+const darkOutside = () => window.matchMedia("(prefers-color-scheme: dark)");
+
 const ZOOM_LADDER = [25, 33, 50, 67, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 600];
 
 /** What to tell someone to press for full screen. The Mac also answers to
@@ -198,6 +202,11 @@ class App {
     this.library = data.library;
     this.paths = { config: data.config_dir, themes: data.themes_dir };
     this.theme = this.themeById(this.settings.theme);
+
+    // Before anything is painted: the theme this reader is owed may not be the
+    // one that was written down, if the machine has changed its mind since.
+    this.followSystemTheme();
+    darkOutside().addEventListener("change", () => this.followSystemTheme());
 
     applyTheme(this.theme);
     this.applyChrome();
@@ -720,6 +729,36 @@ class App {
 
   /* --------------------------------------------------------------- themes */
 
+  /**
+   * Take the light or the dark theme, according to the machine.
+   *
+   * Nothing here decides *which* light theme or *which* dark one: those are
+   * the two slots the reader has already chosen, and this only says which of
+   * them is in force. So a reader with Sepia by day and Tokyo Night by night
+   * gets exactly that pair, and one who has never thought about it gets the
+   * defaults.
+   *
+   * Called at startup as well as on every change, because the system can have
+   * changed its mind while the app was shut — and called before the first
+   * paint, so a machine in dark mode never sees a white page on the way in.
+   */
+  followSystemTheme(): void {
+    if (!this.settings.follow_system_theme) return;
+    const wanted = darkOutside().matches;
+    if (isDarkTheme(this.theme) === wanted) return;
+    // Through `toggleDark` rather than `useTheme`: the theme to move to is
+    // whichever fills that slot, and finding it is the one thing `toggleDark`
+    // knows how to do.
+    this.toggleDark(wanted);
+  }
+
+  /** Stop following, because the reader has just said otherwise. */
+  private stopFollowingSystem(): void {
+    if (!this.settings.follow_system_theme) return;
+    this.set("follow_system_theme", false);
+    ui.notice("No longer following the system's light and dark. Settings has the switch.");
+  }
+
   useTheme(theme: Theme, remember = true): void {
     this.theme = theme;
     applyTheme(theme);
@@ -727,6 +766,13 @@ class App {
     this.sidebar.setTheme(theme);
     this.reportUnreadableColors(theme);
     if (!remember) return;
+    // A theme chosen by hand whose kind is not the machine's kind is the
+    // reader overruling the system — by picking a dark theme in the daytime,
+    // or by pressing ⌘D, which comes through here for exactly the same
+    // reason. Left following, the next thing the system did would take it
+    // straight back off them. Choosing another theme of the kind already in
+    // force says nothing about the system and leaves the switch alone.
+    if (isDarkTheme(theme) !== darkOutside().matches) this.stopFollowingSystem();
     this.set("theme", theme.id);
     // Remember which light and which dark theme this reader prefers, so the
     // dark-mode switch returns to the right one rather than a default.
@@ -1059,6 +1105,15 @@ class App {
                 render();
               }),
               isMac ? "⌘D" : "Ctrl+D",
+            ),
+            ui.row(
+              "Follow the system",
+              ui.toggle(this.settings.follow_system_theme, (on) => {
+                this.set("follow_system_theme", on);
+                if (on) this.followSystemTheme();
+                render();
+              }),
+              "Light by day, dark by night.",
             ),
             ui.divider(),
             ui.section("Themes"),

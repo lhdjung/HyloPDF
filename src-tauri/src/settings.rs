@@ -41,6 +41,13 @@ pub fn defaults() -> Settings {
     s.insert("theme".into(), json!(super::theme::DEFAULT_LIGHT));
     s.insert("light_theme".into(), json!(super::theme::DEFAULT_LIGHT));
     s.insert("dark_theme".into(), json!(super::theme::DEFAULT_DARK));
+    // On, and on by default: an app that stays white while the machine around
+    // it has gone dark at sunset is the one thing every reader now notices.
+    // It is a switch rather than a mode — `theme` is still what is in use, and
+    // this only says who gets to change it when the system changes its mind.
+    // Choosing a theme that disagrees with the system turns it off, because
+    // that choice is the reader saying they would rather decide themselves.
+    s.insert("follow_system_theme".into(), json!(true));
     // Continuous scrolling is the default and stays the default: the UI only
     // changes this when the reader picks another mode by hand, and no keyboard
     // shortcut is bound to it.

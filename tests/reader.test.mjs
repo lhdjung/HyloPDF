@@ -403,10 +403,20 @@ test("menus answer the keyboard", async (t) => {
   });
 
   await t.test("the arrow keys move through it", async () => {
-    const before = await app.page.evaluate(() => document.activeElement?.textContent);
+    // By position, not by label: two rows running are two switches, and a
+    // switch has no text in it — so comparing what the focused thing says
+    // compared "" with "" and passed only for as long as the menu happened
+    // not to open on one.
+    const at = () =>
+      app.page.evaluate(() => {
+        const focusable = [
+          ...document.querySelectorAll("#popovers button, #popovers [tabindex]"),
+        ];
+        return focusable.indexOf(document.activeElement);
+      });
+    const before = await at();
     await app.page.keyboard.press("ArrowDown");
-    const after = await app.page.evaluate(() => document.activeElement?.textContent);
-    assert.notEqual(after, before);
+    assert.notEqual(await at(), before);
   });
 
   await t.test("Escape closes it", async () => {
@@ -516,7 +526,13 @@ test("selected text is repainted from the page, not from the text layer", async 
 test("a colour changed in the editor reaches the page it recolours", async () => {
   // Its own window: this one has to be reading under a theme that recolours,
   // and the shared app is on the light theme, which by design does not.
-  const editing = await openApp({ pdf: PDF, settings: { theme: "hylo-dark", sidebar: false } });
+  // `follow_system_theme` off, or the app would take the light theme back off
+  // it: the headless machine is in light mode, and following it is the
+  // default. What this test is about is the editor, not the appearance.
+  const editing = await openApp({
+    pdf: PDF,
+    settings: { theme: "hylo-dark", sidebar: false, follow_system_theme: false },
+  });
   try {
     const paper = () =>
       editing.page.evaluate(() => {

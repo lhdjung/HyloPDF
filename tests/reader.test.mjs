@@ -931,6 +931,29 @@ test("the way out is on the start screen and nowhere else", async () => {
   assert.equal(await seen(), true, "no way out of the start screen");
 });
 
+test("Ctrl+W and Ctrl+Q reach the window where no menu bar does", async () => {
+  // macOS gets a menu from Tauri whether this app asks for one or not, and
+  // AppKit answers ⌘W before the page sees it; Windows and Linux get no menu
+  // at all, so these two have to be bound here or they do nothing. Which is
+  // exactly the sort of difference that is invisible from a Mac.
+  const claimed = await app.page.evaluate(() => {
+    // Closing the window goes through Tauri, which is not here — so what is
+    // observable is whether the app claims the key at all.
+    const taken = [];
+    document.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) taken.push(event.key);
+    });
+    for (const key of ["w", "q"]) {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+    }
+    return { taken, isMac: /mac/i.test(navigator.platform) };
+  });
+  // On a Mac the app leaves both to the menu the system already gave it.
+  assert.deepEqual(claimed.taken, claimed.isMac ? [] : ["w", "q"]);
+});
+
 test("nothing went wrong on the way", () => {
   const noise = app.logs.filter(
     (line) =>

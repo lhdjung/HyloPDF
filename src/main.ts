@@ -2063,6 +2063,20 @@ class App {
         showSettingsWindow(this, { page: "keyboard" });
         return;
       }
+      // Closing the window, and quitting, on the platforms that have no menu
+      // to put them in.
+      //
+      // macOS gets a menu bar from Tauri whether this app asks for one or not,
+      // and ⌘W and ⌘Q are in it — AppKit answers them before the page ever
+      // sees the key. Windows and Linux get no menu at all, so the same two
+      // gestures did nothing there, and nothing in the window said otherwise.
+      // A menu bar of our own is the wrong fix: it would put a strip of
+      // system chrome across the top of a window whose whole top is the app's.
+      if (!isMac && event.ctrlKey && (event.key === "w" || event.key === "q")) {
+        event.preventDefault();
+        void quitApp();
+        return;
+      }
       if (meta && event.key.toLowerCase() === "o") {
         event.preventDefault();
         void this.openDialog();

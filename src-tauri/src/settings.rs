@@ -55,6 +55,11 @@ pub fn defaults() -> Settings {
     s.insert("fit_mode".into(), json!("width"));
     s.insert("zoom".into(), json!(1.0));
     s.insert("page_gap".into(), json!(16));
+    // Off, and off deliberately. Taking the margins away is the right answer
+    // for a scanned book and for anything typeset with an inch of white down
+    // each side, and it is a change to what a page looks like — so it is the
+    // reader's to ask for rather than something they find has happened.
+    s.insert("trim_margins".into(), json!(false));
     // On by default, and it was not always: recolouring used to flatten a page
     // onto two colours, which is the one thing it can do that makes a page
     // harder to read rather than easier — a photograph goes to mud, and a

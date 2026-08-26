@@ -217,6 +217,7 @@ class App {
     this.reportUnreadableColors(this.theme);
     this.viewer.setTheme(this.theme, !this.settings.recolor_images);
     this.viewer.setGap(this.settings.page_gap);
+    this.viewer.setTrimMargins(this.settings.trim_margins);
     this.viewer.setScrollMode(this.settings.scroll_mode);
     this.viewer.setFit(this.settings.fit_mode, this.settings.zoom);
     this.applySearchOptions();
@@ -974,6 +975,12 @@ class App {
     if (reopening && el.findInput.value.trim().length > 0) void this.runSearch();
   }
 
+  /** Take the margins off the page, or put them back. */
+  setTrimMargins(on: boolean): void {
+    this.set("trim_margins", on);
+    this.viewer.setTrimMargins(on);
+  }
+
   /** Turn the document a quarter, and turn the thumbnails with it. */
   rotate(quarterTurns: number): void {
     if (this.viewer.isEmpty) return;
@@ -1580,6 +1587,11 @@ class App {
               (value) => this.setPageGap(value),
               "px",
             ),
+          ),
+          ui.row(
+            "Trim the margins",
+            ui.toggle(this.settings.trim_margins, (on) => this.setTrimMargins(on)),
+            "Fit the words rather than the paper.",
           ),
           ui.row(
             "Recolour pictures too",

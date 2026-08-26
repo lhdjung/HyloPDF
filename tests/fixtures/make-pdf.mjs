@@ -27,8 +27,12 @@ const pageIds = [];
 const contentIds = [];
 for (let i = 1; i <= PAGES; i++) {
   const filler = `(Page ${i}. ${"The quick brown fox jumps over the lazy dog. ".repeat(12)}) Tj`;
+  // A block of ink in the middle of a wide-margined page, sitting a little
+  // higher on some pages than on others — so that the union over a sample is
+  // larger than any single page, which is the case margin trimming has to get
+  // right.
   const stream = NOTEXT
-    ? `0.2 0.2 0.2 rg 54 ${600 - (i % 5) * 20} 400 120 re f`
+    ? `0.2 0.2 0.2 rg 150 ${150 + (i % 2) * 50} 312 442 re f`
     : `BT /F1 11 Tf 54 720 Td 14 TL ${filler} ET`;
   contentIds.push(add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`));
   pageIds.push(0); // placeholder, filled below

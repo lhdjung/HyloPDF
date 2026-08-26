@@ -35,6 +35,7 @@ export interface SettingsHost {
   setFit(mode: FitMode, zoom?: number): void;
   setScrollMode(mode: Settings["scroll_mode"]): void;
   setPageGap(value: number): void;
+  setTrimMargins(on: boolean): void;
   setSidebarWidth(value: number): void;
   setRecolorImages(on: boolean): void;
 }
@@ -230,6 +231,11 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
       "Space between pages",
       ui.stepper(s.page_gap, { min: 0, max: 64, step: 4 }, (value) => host.setPageGap(value), "px"),
       "How much room to leave between one page and the next.",
+    ),
+    ui.field(
+      "Trim the margins",
+      ui.toggle(s.trim_margins, (on) => host.setTrimMargins(on)),
+      "Scanned books and anything typeset with an inch of white down each side spend a quarter of the window on paper. This measures where the ink starts — over a sample of the pages, so every page keeps the same scale — and gives that room back to the words.",
     ),
     ui.field(
       "Zoom",

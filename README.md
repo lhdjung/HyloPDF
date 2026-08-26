@@ -74,6 +74,11 @@ There is deliberately no shortcut for the page layout. Continuous scrolling is
 the default and switching away from it should take a decision, not a slip of
 the fingers.
 
+Scanned books and anything typeset with an inch of white down each side spend
+a quarter of the window on paper. **Trim the margins** measures where the ink
+starts — over a sample of the pages, so every page keeps the same scale — and
+gives that room back to the words. It is off until you ask for it.
+
 ## What it does not do
 
 HyloPDF reads. It does not annotate, fill in forms, or print — and of those,

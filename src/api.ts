@@ -15,6 +15,7 @@ export type Settings = {
   fit_mode: "width" | "page" | "actual";
   zoom: number;
   page_gap: number;
+  trim_margins: boolean;
   recolor_images: boolean;
   remember_position: boolean;
   reopen_last_document: boolean;
@@ -92,6 +93,7 @@ const fallbackDefaults: Settings = {
   fit_mode: "width",
   zoom: 1,
   page_gap: 16,
+  trim_margins: false,
   recolor_images: true,
   remember_position: true,
   reopen_last_document: true,

@@ -130,9 +130,41 @@ const WHEEL_TURN = 60;
     beyond roughly this many pixels, and nothing is gained past it anyway. */
 const MAX_CANVAS_PIXELS = 12_000_000;
 
+/**
+ * Trimming the margins: how many pages are looked at to decide where the ink
+ * on this document begins, how much blank is left around it, and how much of
+ * a side may be taken away at most.
+ *
+ * One crop for the whole document rather than one per page, because a
+ * per-page crop changes the scale from page to page, and in continuous
+ * scrolling that is a document that breathes as you read it. The union over a
+ * sample is exact for anything typeset — every page of a book has the same
+ * margins — and the pad and the ceiling are what keep it honest for the
+ * documents that are not.
+ */
+const CROP_SAMPLE = 8;
+/** Blank left around the ink, as a fraction of the page. */
+const CROP_PAD = 0.012;
+/** The most that may be taken off any one side. A page whose margins are
+    wider than this is more likely to be a page this has misread. */
+const CROP_MAX = 0.3;
+/** Below this there is nothing worth trimming, and the answer is to leave the
+    page as it is rather than to move it by a hair. */
+const CROP_MIN = 0.03;
+/** How wide a page is drawn when it is being measured rather than read. */
+const CROP_PROBE_WIDTH = 160;
+/** Where paper stops and ink begins, on the 0-255 scale `WHITE_POINT` uses
+    for the same question. */
+const CROP_INK = 235;
+
 /** How many places back a reader can step. Deep enough to walk out of a chain
     of cross-references, shallow enough that it is a history rather than a log. */
 const HISTORY_LIMIT = 50;
+
+/** The part of a page worth showing: an origin and a size, both as fractions
+    of the whole page. `{x: 0, y: 0, width: 1, height: 1}` is the whole of it,
+    which is what `null` means. */
+type Crop = { x: number; y: number; width: number; height: number };
 
 /** A place in the document: a page and how far down it the window sat. The
     same pair `position()` reports and `scrollTo` takes. */
@@ -290,6 +322,14 @@ export class Viewer {
   /** Quarter turns clockwise on top of whatever the page says its own
       rotation is. See `rotate`. */
   private rotation = 0;
+
+  /** Whether the reader wants the margins taken off, and where the ink turned
+      out to be. Fractions of the page, in the orientation it is being read
+      in. See `measureCrop`. */
+  private trimming = false;
+  private crop: Crop | null = null;
+  /** Bumped when a crop measurement should stop mattering. */
+  private cropping = 0;
 
   constructor(
     private container: HTMLElement,
@@ -587,6 +627,11 @@ export class Viewer {
     this.relayout();
 
     void this.measureRest(doc, estimate);
+    // Where the ink on *this* document is. The setting outlives documents and
+    // the answer does not, so this is where it is asked, rather than in
+    // `setTrimMargins` — which is called once at startup, before there is a
+    // document to measure.
+    if (this.trimming) void this.measureCrop();
     return doc;
   }
 
@@ -661,6 +706,8 @@ export class Viewer {
     this.future = [];
     this.labels = null;
     this.rotation = 0;
+    this.crop = null;
+    this.cropping++;
   }
 
   /** A page proxy, kept only while it is worth keeping.
@@ -970,6 +1017,39 @@ export class Viewer {
     slot.el.style.width = `${box.width}px`;
     slot.el.style.height = `${box.height}px`;
     slot.el.style.setProperty("--total-scale-factor", String(box.scale));
+    if (slot.textEl) this.placeOverlay(slot.textEl, slot.index, box.scale);
+    if (slot.linkEl) this.placeOverlay(slot.linkEl, slot.index, box.scale);
+  }
+
+  /**
+   * Put a layer that is measured in whole pages over a box that is not.
+   *
+   * The canvas is the cropped part of the page and fills its box. The text
+   * layer and the links are not: pdf.js lays its spans out as percentages of
+   * the page, and a link's rectangle is a fraction of the page, so both have
+   * to be the size the whole page would be and hang out past the box, which
+   * `.page` clips. With no crop this is the box, exactly, and the offsets are
+   * zero.
+   */
+  private placeOverlay(el: HTMLElement, index: number, scale: number): void {
+    const crop = this.crop;
+    if (!crop) {
+      // Back to the stylesheet's `inset: 0`, and to pdf.js's own sizing of the
+      // text layer, which rounds against the device pixel grid rather than
+      // simply multiplying.
+      el.style.inset = "";
+      el.style.left = "";
+      el.style.top = "";
+      el.style.width = "";
+      el.style.height = "";
+      return;
+    }
+    const whole = this.wholeSizeOf(index);
+    el.style.inset = "auto";
+    el.style.left = `${-crop.x * whole.width * scale}px`;
+    el.style.top = `${-crop.y * whole.height * scale}px`;
+    el.style.width = `${whole.width * scale}px`;
+    el.style.height = `${whole.height * scale}px`;
   }
 
   /* ------------------------------------------------------------ scrolling */
@@ -1182,6 +1262,176 @@ export class Viewer {
     this.jumpTo(page, 0);
   }
 
+  /* --------------------------------------------------------------- crop */
+
+  /**
+   * Take the margins off, or put them back.
+   *
+   * A scanned book and a LaTeX paper both spend a quarter of the window on
+   * white paper, and fit width fits the paper rather than the words. This is
+   * the answer every reader built for reading rather than for printing has —
+   * Sumatra calls it fit content, Zathura and Sioyek call it cropping — and
+   * it is worth more than any zoom preset on exactly the documents this app
+   * is for.
+   */
+  setTrimMargins(on: boolean): void {
+    if (on === this.trimming) return;
+    this.trimming = on;
+    if (!on) {
+      this.cropping++;
+      this.crop = null;
+      this.relayout();
+      return;
+    }
+    void this.measureCrop();
+  }
+
+  get trimsMargins(): boolean {
+    return this.trimming;
+  }
+
+  /** Whether anything was actually found to trim. A document with no margins
+      to speak of leaves the switch on and the page alone, and this is how the
+      interface can say so. */
+  get trimmed(): boolean {
+    return this.crop !== null;
+  }
+
+  /**
+   * Find the ink.
+   *
+   * A sample rather than the whole document: measuring a page means drawing
+   * it, and drawing nine hundred of them to decide on a margin is not a
+   * trade anybody would make. First page, last page and evenly spaced between
+   * them, because the shapes that vary are the front matter, the plates and
+   * the index, and those are where they live.
+   *
+   * The union of what the sample finds, padded, and refused outright if what
+   * is left is nearly the whole page (there was nothing to trim) or a sliver
+   * of it (something was misread — a blank page, a page that failed to draw).
+   */
+  private async measureCrop(): Promise<void> {
+    const doc = this.doc;
+    if (!doc) return;
+    const run = ++this.cropping;
+
+    const count = doc.numPages;
+    const pages: number[] = [];
+    const step = Math.max(1, Math.floor((count - 1) / Math.max(1, CROP_SAMPLE - 1)));
+    for (let index = 0; index < count && pages.length < CROP_SAMPLE; index += step) {
+      pages.push(index);
+    }
+    if (!pages.includes(count - 1)) pages.push(count - 1);
+
+    let left = 1;
+    let top = 1;
+    let right = 0;
+    let bottom = 0;
+    let found = false;
+    for (const index of pages) {
+      const ink = await this.inkBox(index);
+      if (this.doc !== doc || run !== this.cropping) return;
+      if (!ink) continue;
+      found = true;
+      left = Math.min(left, ink.x);
+      top = Math.min(top, ink.y);
+      right = Math.max(right, ink.x + ink.width);
+      bottom = Math.max(bottom, ink.y + ink.height);
+    }
+    if (!found) return;
+
+    const crop = {
+      x: Math.max(0, left - CROP_PAD),
+      y: Math.max(0, top - CROP_PAD),
+      width: 0,
+      height: 0,
+    };
+    crop.width = Math.min(1, right + CROP_PAD) - crop.x;
+    crop.height = Math.min(1, bottom + CROP_PAD) - crop.y;
+
+    // Never take more than a share of any side: a page whose margins measure
+    // wider than that is more likely to be a page this has misread, and the
+    // cost of being wrong is a reader who cannot see the top line.
+    crop.x = Math.min(crop.x, CROP_MAX);
+    crop.y = Math.min(crop.y, CROP_MAX);
+    crop.width = Math.max(crop.width, 1 - CROP_MAX - crop.x);
+    crop.height = Math.max(crop.height, 1 - CROP_MAX - crop.y);
+    crop.width = Math.min(crop.width, 1 - crop.x);
+    crop.height = Math.min(crop.height, 1 - crop.y);
+
+    // Nothing worth doing, either because the page has no margins or because
+    // what came back is too small to be a page of anything.
+    const trimmed = 1 - crop.width * crop.height;
+    if (trimmed < CROP_MIN || crop.width < 0.3 || crop.height < 0.3) return;
+
+    this.crop = crop;
+    this.relayout();
+  }
+
+  /**
+   * Where the ink is on one page, as fractions of it.
+   *
+   * The page is drawn small — a hundred and sixty pixels wide, which is a
+   * millisecond or two of work and enough to find a margin to within a
+   * character — and then read row by row and column by column for anything
+   * that is not paper. `CROP_INK` is the same threshold `WHITE_POINT` uses
+   * for the same question, so a hairline printed at 90% white counts as paper
+   * here exactly as it does when a page is recoloured.
+   */
+  private async inkBox(index: number): Promise<Crop | null> {
+    let page: PDFPageProxy | null = null;
+    try {
+      page = await this.page(index);
+      const full = this.viewportFor(page, 1);
+      const scale = CROP_PROBE_WIDTH / full.width;
+      const viewport = this.viewportFor(page, scale);
+      const width = Math.max(1, Math.floor(viewport.width));
+      const height = Math.max(1, Math.floor(viewport.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
+      if (!ctx) return null;
+      // White, not the theme's paper: this is a question about the document,
+      // and the answer must not move when the reader changes theme.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, width, height);
+      await page.render({ canvas, canvasContext: ctx, viewport, background: "#ffffff" }).promise;
+
+      const pixels = ctx.getImageData(0, 0, width, height).data;
+      let left = width;
+      let top = height;
+      let right = -1;
+      let bottom = -1;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const at = (y * width + x) * 4;
+          // The green channel stands in for lightness. It is most of luma,
+          // and this is a threshold rather than a measurement.
+          if (pixels[at + 1] > CROP_INK && pixels[at] > CROP_INK && pixels[at + 2] > CROP_INK) {
+            continue;
+          }
+          if (x < left) left = x;
+          if (x > right) right = x;
+          if (y < top) top = y;
+          if (y > bottom) bottom = y;
+        }
+      }
+      release(canvas);
+      if (right < left || bottom < top) return null; // A blank page says nothing.
+      return {
+        x: left / width,
+        y: top / height,
+        width: (right + 1 - left) / width,
+        height: (bottom + 1 - top) / height,
+      };
+    } catch {
+      return null;
+    } finally {
+      if (page && !this.isMounted(index + 1)) page.cleanup();
+    }
+  }
+
   /* ------------------------------------------------------------ rotation */
 
   /**
@@ -1201,6 +1451,15 @@ export class Viewer {
     const before = this.rotation;
     this.rotation = (((before + quarterTurns * 90) % 360) + 360) % 360;
     if (this.rotation === before) return;
+    // The crop is a rectangle on the page as the reader sees it, so it turns
+    // with the page: a quarter clockwise takes (x, y, w, h) to
+    // (1 − y − h, x, h, w). Turning it is exact and free; measuring it again
+    // would be eight renders for an answer already in hand.
+    let turns = ((quarterTurns % 4) + 4) % 4;
+    while (this.crop && turns-- > 0) {
+      const { x, y, width, height } = this.crop;
+      this.crop = { x: 1 - y - height, y: x, width: height, height: width };
+    }
     // Where a link is on the page is a fraction of a page that has just
     // changed shape.
     this.linkCache.clear();
@@ -1217,15 +1476,33 @@ export class Viewer {
   private sizeOf(index: number): { width: number; height: number } {
     const size = this.sizes[index];
     if (!size) return { width: 1, height: 1 };
-    return this.rotation % 180 === 0
-      ? size
-      : { width: size.height, height: size.width };
+    const turned =
+      this.rotation % 180 === 0 ? size : { width: size.height, height: size.width };
+    const crop = this.crop;
+    if (!crop) return turned;
+    return { width: turned.width * crop.width, height: turned.height * crop.height };
+  }
+
+  /** The whole page, turned but not cropped — what the text layer and the
+      links are still measured in, because their coordinates are fractions of
+      a whole page whatever is being shown of it. */
+  private wholeSizeOf(index: number): { width: number; height: number } {
+    const size = this.sizes[index] ?? { width: 1, height: 1 };
+    return this.rotation % 180 === 0 ? size : { width: size.height, height: size.width };
   }
 
   /** The viewport a page is drawn, measured and laid out through — the one
       place the reader's rotation is added to the page's own. */
-  private viewportFor(page: PDFPageProxy, scale: number) {
-    return page.getViewport({ scale, rotation: page.rotate + this.rotation });
+  private viewportFor(
+    page: PDFPageProxy,
+    scale: number,
+    offsets?: { offsetX: number; offsetY: number },
+  ) {
+    return page.getViewport({
+      scale,
+      rotation: page.rotate + this.rotation,
+      ...offsets,
+    });
   }
 
   /* ------------------------------------------------------------ metadata */
@@ -1434,7 +1711,13 @@ export class Viewer {
         }`
       : `plain|${theme ? linkColor(theme) : ""}`;
     const density = window.devicePixelRatio || 1;
-    return `${box ? box.scale.toFixed(3) : "0"}@${density}|${this.rotation}|${themeKey}`;
+    const crop = this.crop;
+    const cropKey = crop
+      ? `${crop.x.toFixed(3)},${crop.y.toFixed(3)},${crop.width.toFixed(3)},${crop.height.toFixed(3)}`
+      : "whole";
+    return `${
+      box ? box.scale.toFixed(3) : "0"
+    }@${density}|${this.rotation}|${cropKey}|${themeKey}`;
   }
 
   private createSlot(index: number): Slot {
@@ -1533,11 +1816,21 @@ export class Viewer {
     const ratio = window.devicePixelRatio || 1;
     const area = box.width * box.height * ratio * ratio;
     const density = area > MAX_CANVAS_PIXELS ? ratio * Math.sqrt(MAX_CANVAS_PIXELS / area) : ratio;
-    const viewport = this.viewportFor(page, box.scale * density);
+    const scale = box.scale * density;
+    // Only the part of the page that is being shown is drawn. `offsetX` and
+    // `offsetY` slide the page under the canvas, and the canvas is the size of
+    // the crop — so a trimmed document costs *less* to draw than an untrimmed
+    // one rather than the same, and nothing is rendered that will be clipped.
+    const whole = this.wholeSizeOf(slot.index);
+    const crop = this.crop;
+    const viewport = this.viewportFor(page, scale, {
+      offsetX: -(crop ? crop.x * whole.width * scale : 0),
+      offsetY: -(crop ? crop.y * whole.height * scale : 0),
+    });
 
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.floor(viewport.width));
-    canvas.height = Math.max(1, Math.floor(viewport.height));
+    canvas.width = Math.max(1, Math.round(whole.width * (crop?.width ?? 1) * scale));
+    canvas.height = Math.max(1, Math.round(whole.height * (crop?.height ?? 1) * scale));
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) {
       slot.renderedKey = key;
@@ -1617,7 +1910,12 @@ export class Viewer {
         try {
           if (theme.recolor) recolor(ctx, canvas.width, canvas.height, theme);
           if (links.length > 0) {
-            tintLinks(ctx, pristine, canvas.width, canvas.height, links, theme);
+            // A link's rectangle is a fraction of the whole page and the
+            // canvas is a fraction of it, so the two have to be put in the
+            // same terms before one is multiplied by the other. The layer of
+            // real links over the top keeps the page's own fractions: it is
+            // the size of the whole page. See `placeOverlay`.
+            tintLinks(ctx, pristine, canvas.width, canvas.height, inCrop(links, crop), theme);
           }
           if (pristine && coordinates && hasImages) {
             restoreImages(ctx, pristine, canvas.width, canvas.height, coordinates);
@@ -1664,6 +1962,7 @@ export class Viewer {
     const viewport = this.viewportFor(page, scale);
 
     if (slot.textLayer && slot.textEl) {
+      this.placeOverlay(slot.textEl, slot.index, scale);
       slot.textLayer.update({ viewport });
       this.paintHighlights(slot);
       this.finishReveal(slot.index + 1);
@@ -1673,6 +1972,9 @@ export class Viewer {
     slot.textEl?.remove();
     const container = document.createElement("div");
     container.className = "textLayer";
+    // Sized and offset as a whole page, because that is what its percentages
+    // are fractions of. See `placeOverlay`.
+    this.placeOverlay(container, slot.index, scale);
     slot.el.append(container);
     slot.textEl = container;
 
@@ -1822,6 +2124,10 @@ export class Viewer {
     }
 
     if (layer.childElementCount === 0) return;
+    // A link's rectangle is a fraction of the whole page, so the layer is the
+    // whole page even when only part of it is on screen.
+    const box = this.boxes[slot.index];
+    if (box) this.placeOverlay(layer, slot.index, box.scale);
     slot.el.append(layer);
     slot.linkEl = layer;
   }
@@ -2050,6 +2356,18 @@ function joinRuns(rects: DOMRect[], page: DOMRect): Rect[] {
  * than the text colour. The paper maps to the same background either way, so
  * only the letters change, and the edges of the rectangle leave no seam.
  */
+/** Link rectangles, restated as fractions of the part of the page on screen. */
+function inCrop(links: Link[], crop: Crop | null): Link[] {
+  if (!crop) return links;
+  return links.map((link) => ({
+    ...link,
+    x: (link.x - crop.x) / crop.width,
+    y: (link.y - crop.y) / crop.height,
+    width: link.width / crop.width,
+    height: link.height / crop.height,
+  }));
+}
+
 function tintLinks(
   ctx: CanvasRenderingContext2D,
   pristine: CanvasImageSource | null,

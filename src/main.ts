@@ -1314,15 +1314,16 @@ class App {
       el.zoomLevel,
       (close) => {
         const menu = document.createElement("div");
-        const modes: [FitMode, string, string][] = [
-          ["width", "Fit width", "fitWidth"],
-          ["page", "Fit page", "fitPage"],
+        const modes: [FitMode, string, string, string][] = [
+          ["width", "Fit width", "fitWidth", isMac ? "⌘0" : "Ctrl+0"],
+          ["page", "Fit page", "fitPage", isMac ? "⌘2" : "Ctrl+2"],
         ];
-        for (const [mode, label, icon] of modes) {
+        for (const [mode, label, icon, keys] of modes) {
           menu.append(
             ui.menuItem({
               label,
               icon,
+              note: keys,
               checked: this.settings.fit_mode === mode,
               onSelect: () => {
                 this.setFit(mode);
@@ -1331,6 +1332,24 @@ class App {
             }),
           );
         }
+        // The page at the size it was made, which is what somebody checking a
+        // figure against print is asking for. It was in the list of presets
+        // below as "100%" and nowhere else, which is not where anybody looks
+        // for it.
+        menu.append(
+          ui.menuItem({
+            label: "Actual size",
+            icon: "actualSize",
+            note: isMac ? "⌘1" : "Ctrl+1",
+            checked:
+              this.settings.fit_mode === "actual" &&
+              Math.round(this.settings.zoom * 100) === 100,
+            onSelect: () => {
+              this.setFit("actual", 1);
+              close();
+            },
+          }),
+        );
         menu.append(
           ui.divider(),
           ui.menuItem({
@@ -1739,9 +1758,23 @@ class App {
         this.stepZoom(-1);
         return;
       }
+      // ⌘0 stays fit width: it is this app's default and its best mode, and
+      // it is what the button says. ⌘1 is actual size, which is Acrobat's,
+      // and ⌘2 is fit page — neither had a key at all, and "100%" was
+      // reachable only by opening a menu and finding it among the presets.
       if (meta && event.key === "0") {
         event.preventDefault();
         this.setFit("width");
+        return;
+      }
+      if (meta && event.key === "1") {
+        event.preventDefault();
+        this.setFit("actual", 1);
+        return;
+      }
+      if (meta && event.key === "2") {
+        event.preventDefault();
+        this.setFit("page");
         return;
       }
       // ⌥⌘G before ⌘G, and by `code` rather than by `key`: Option turns a G

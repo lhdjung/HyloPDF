@@ -33,6 +33,10 @@ const paths: Record<string, string> = {
     '<path d="M7 9.5A6 6 0 0 1 18 8"/><path d="M18 4.5V8h-3.5"/><rect x="5" y="12" width="14" height="8" rx="1.6"/>',
   rotateLeft:
     '<path d="M17 9.5A6 6 0 0 0 6 8"/><path d="M6 4.5V8h3.5"/><rect x="5" y="12" width="14" height="8" rx="1.6"/>',
+  // A page at its own size: a rectangle with a 1:1 mark in it would be too
+  // busy at 16px, so it is the page with its corners called out instead.
+  actualSize:
+    '<rect x="5" y="4" width="14" height="16" rx="1.6"/><path d="M9 8h2M9 8v2M15 8h-2M15 8v2M9 16h2M9 16v-2M15 16h-2M15 16v-2"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/>',
   moon: '<path d="M20 13.4A8.2 8.2 0 0 1 10.6 4a8.2 8.2 0 1 0 9.4 9.4z"/>',
   // A cog, not a second sun: the old one was a circle with eight rays around

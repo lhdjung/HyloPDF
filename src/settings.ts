@@ -648,6 +648,7 @@ function keyboardPage(pane: HTMLElement): void {
       [
         ["Zoom in, zoom out", shortcut("⌘+, ⌘−", "Ctrl++, Ctrl+−")],
         ["Fit the width of the window", shortcut("⌘0", "Ctrl+0")],
+        ["Actual size, fit the whole page", shortcut("⌘1, ⌘2", "Ctrl+1, Ctrl+2")],
         ["Turn the page right, turn it left", shortcut("⌘R, ⌘L", "Ctrl+R, Ctrl+L")],
         ["Dark mode", shortcut("⌘D", "Ctrl+D")],
         ["Contents sidebar", shortcut("⌘B", "Ctrl+B")],

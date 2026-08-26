@@ -312,6 +312,28 @@ test("fit width fits the width", async (t) => {
   });
 });
 
+test("the zoom modes have keys of their own", async (t) => {
+  const zoom = async () => (await app.state()).zoom;
+
+  await t.test("actual size", async () => {
+    await app.page.keyboard.press(`${MOD}+Digit1`);
+    await app.page.waitForTimeout(300);
+    assert.equal(await zoom(), "100%");
+  });
+
+  await t.test("fit page", async () => {
+    await app.page.keyboard.press(`${MOD}+Digit2`);
+    await app.page.waitForTimeout(300);
+    assert.equal(await zoom(), "Fit page");
+  });
+
+  await t.test("and fit width, which is where the app lives", async () => {
+    await app.page.keyboard.press(`${MOD}+Digit0`);
+    await app.page.waitForTimeout(300);
+    assert.equal(await zoom(), "Fit width");
+  });
+});
+
 test("ctrl+wheel zooms", async () => {
   const before = (await app.state()).zoom;
   await app.wheel(4, -40, { ctrl: true });

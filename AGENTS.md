@@ -483,13 +483,31 @@ where each window is meant to go and `place` puts it there immediately after
 **`library.open` is a list, one path per window.** A launch puts back every
 window that was open, the first through `bootstrap` and the rest through
 `ready`. It is read from `OpenDocuments`, which is what each window says it is
-showing — and a window *closing* deliberately does not take its entry out. The
-list means "what the app was holding when it went down", and on Windows and
-Linux quitting **is** closing the last window, with no signal that separates
-the two; forgetting on close would empty the list on the way out and undo the
-feature. The cost is the right way round: a window the reader closed comes back
-next launch, rather than one they wanted disappearing. Putting a *document*
-down — the reader's own Close — is remembered as the decision it is.
+showing, and a window closing takes its entry out — a document put down does
+not come back.
+
+*Except that a window going means two things, and `Exiting` is what tells them
+apart.* Closed by the reader it is a document they have finished with; closed
+because the app is quitting it means only that it was open at the end, which is
+the whole of what the next launch puts back. So everything that ends the app
+raises that flag before any window goes — `quit_app`, `RunEvent::ExitRequested`,
+and `RunEvent::Exit`, which is what ⌘Q from the macOS menu bar arrives as, with
+no window events at all — and `tidy_after` forgets nothing while it is up.
+
+*One case no flag can reach: closing the last window, which ends the app on
+every platform and is how most people quit it.* Nothing separates "I have
+finished with this" from "goodbye" there. So a close never writes an **empty**
+list: it can forget any window but the last, and quitting with one document
+open still comes back to it. The reader who means the other thing has Close,
+which empties the list from the frontend and is the gesture that says so.
+Closing three windows one at a time therefore comes back to the third alone,
+not to all three, which is what a reader who closed them means and as close to
+it as the platforms allow.
+
+The write happens on the main thread, unlike every other write in this app: a
+quit closes windows one after another, and two threads racing over
+`library.toml` would leave whichever finished last rather than whichever knew
+most.
 
 **The restore windows are made from `ready`, not from `setup`.** A window built
 during `setup` comes out wrong on macOS: Tauri reports it as visible, and it is

@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -166,15 +166,12 @@ impl OpenFiles {
 /// and `hand_over` claims it here the moment it picks it, so two files
 /// double-clicked at once do not both land in the same empty window.
 ///
-/// A window closing does *not* take its entry out, and that is deliberate. The
-/// list is "what the app was holding when it went down", and quitting is a
-/// window closing — on Windows and Linux quitting *is* closing the last
-/// window, and there is no signal that separates the two. Forgetting on close
-/// would therefore empty the list on the way out on those platforms and undo
-/// the feature entirely. The cost of not forgetting is small and the right way
-/// round: a window the reader closed comes back next launch. Putting a
-/// *document* down — the reader's own Close, which says `None` here — is
-/// remembered as the decision it is.
+/// A window closing takes its entry out — closing a window is putting its
+/// document down, and a document put down should not come back. See
+/// `tidy_after`, which is where that happens and where the one case it cannot
+/// mean that is handled: quitting. Putting a *document* down without the
+/// window — the reader's own Close, which says `None` here — is remembered the
+/// same way.
 #[derive(Default)]
 struct OpenDocuments(Mutex<Vec<(String, String)>>);
 
@@ -196,6 +193,33 @@ impl OpenDocuments {
     fn taken(&self, window: &str) -> bool {
         let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
         held.iter().any(|(label, _)| label == window)
+    }
+}
+
+/// Whether the app is on its way out.
+///
+/// A window going means two different things and they are told apart by
+/// nothing else. Closed by the reader, it means they have finished with that
+/// document. Closed because the app is quitting, it means nothing at all — the
+/// document was open at the end, which is exactly what the next launch is
+/// meant to put back. So everything that ends the app raises this first, and
+/// `tidy_after` forgets nothing once it is up.
+///
+/// Three things can raise it: `quit_app`, which is how the app is left on the
+/// platforms with no menu bar to put Quit in; `RunEvent::ExitRequested`; and
+/// `RunEvent::Exit`, which on macOS is what ⌘Q arrives as — AppKit terminates
+/// the process without closing the windows one at a time, so the flag is up
+/// before any of them can be mistaken for a reader closing it.
+#[derive(Default)]
+struct Exiting(AtomicBool);
+
+impl Exiting {
+    fn now(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    fn under_way(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
     }
 }
 
@@ -490,6 +514,11 @@ async fn new_window(app: AppHandle, path: Option<String>) -> Result<(), String> 
 /// anyway.
 #[tauri::command]
 async fn quit_app(app: AppHandle) {
+    // Raised before the first window goes: every one of them is about to
+    // close, and none of those closes is the reader putting a document down.
+    if let Some(exiting) = app.try_state::<Exiting>() {
+        exiting.now();
+    }
     for window in app.webview_windows().values() {
         let _ = window.close();
     }
@@ -1065,12 +1094,31 @@ fn place(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
-/// What a window has to give back when it goes: its file handle, and its place
-/// in the document watch. Neither is the reader's business and neither can be
-/// asked for from the frontend, which by then is gone.
+/// What a window has to give back when it goes: its file handle, its place in
+/// the document watch, and its entry in `OpenDocuments`. None of them is the
+/// reader's business and none can be asked for from the frontend, which by
+/// then is gone.
 ///
-/// What it deliberately does *not* give back is its entry in `OpenDocuments` —
-/// see the note there.
+/// The entry is the interesting one, because a window going means two things.
+/// A window the reader closed is a document they have finished with, and it
+/// should not be back on the screen next launch — that was the complaint. A
+/// window closing *because the app is quitting* means only that it was open at
+/// the end, which is the whole of what the next launch is meant to put back.
+/// `Exiting` is what tells them apart, and it is raised by everything that
+/// ends the app before any window has gone.
+///
+/// One case is left that no flag can reach: closing the last window, which on
+/// every platform ends the app, and which is how most people quit it. There is
+/// no signal that separates "I have finished with this" from "goodbye" there,
+/// so this never writes an *empty* list — a close can forget any window but
+/// the last, and quitting with one document open still comes back to it. The
+/// reader who means the other thing has Close, which empties the list from the
+/// frontend and is the gesture that says so.
+///
+/// The write is made here on the main thread rather than handed to one of its
+/// own, unlike every other write in this file: the windows of a quit close one
+/// after another, and two threads racing over `library.toml` would leave
+/// whichever finished last, not whichever knew most.
 fn tidy_after(window: &WebviewWindow) {
     let app = window.app_handle().clone();
     let label = window.label().to_string();
@@ -1083,6 +1131,20 @@ fn tidy_after(window: &WebviewWindow) {
         }
         if let Some(watching) = app.try_state::<watch::Watching>() {
             watching.document(&label, None);
+        }
+        let leaving = app
+            .try_state::<Exiting>()
+            .is_some_and(|exiting| exiting.under_way());
+        if leaving {
+            return;
+        }
+        if let (Some(open), Some(paths)) =
+            (app.try_state::<OpenDocuments>(), app.try_state::<Paths>())
+        {
+            let all = open.set(&label, None);
+            if !all.is_empty() {
+                let _ = library::set_open(&paths.config, &all);
+            }
         }
     });
 }
@@ -1340,6 +1402,7 @@ pub fn run() {
             app.manage(Paths { config, themes });
             app.manage(OpenFiles::default());
             app.manage(OpenDocuments::default());
+            app.manage(Exiting::default());
             app.manage(Placements::default());
             #[cfg(target_os = "macos")]
             dock::install(app.handle());
@@ -1405,18 +1468,31 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building HyloPDF")
-        .run(|_app, _event| {
+        .run(|app, event| {
+            // The app is leaving, so the windows about to be destroyed are not
+            // windows the reader closed. See `Exiting`. Both events are watched
+            // because they arrive in different orders: a quit from the menu bar
+            // on macOS comes as `Exit` with no window events at all, and
+            // `ExitRequested` is what everything else raises first.
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                if let Some(exiting) = app.try_state::<Exiting>() {
+                    exiting.now();
+                }
+            }
+
             // How macOS says "open this PDF": an Apple Event into the running
             // app rather than a second process. The variant exists on Apple
             // platforms alone — naming it anywhere else does not compile — so
             // it is matched there alone, and everywhere else the same job is
-            // done by the single-instance plugin above. The arguments are
-            // underscored because on those platforms this closure is empty.
+            // done by the single-instance plugin above.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = _event {
+            if let tauri::RunEvent::Opened { urls } = event {
                 for url in urls {
                     if let Ok(path) = url.to_file_path() {
-                        hand_over(_app, path.to_string_lossy().to_string());
+                        hand_over(app, path.to_string_lossy().to_string());
                     }
                 }
             }

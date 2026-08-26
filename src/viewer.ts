@@ -277,6 +277,10 @@ export class Viewer {
   private past: Place[] = [];
   private future: Place[] = [];
 
+  /** What the document calls its own pages, when that is not simply their
+      position in the file. See `readLabels`. */
+  private labels: string[] | null = null;
+
   constructor(
     private container: HTMLElement,
     private pagesEl: HTMLElement,
@@ -563,6 +567,8 @@ export class Viewer {
     // first page is a good guess for all of them, and where it is wrong the
     // correction arrives within a second and moves pages the reader has not
     // reached yet.
+    this.readLabels(doc);
+
     const first = await this.page(0);
     if (this.doc !== doc) return doc;
     const view = first.getViewport({ scale: 1 });
@@ -642,6 +648,7 @@ export class Viewer {
     this.current = 1;
     this.past = [];
     this.future = [];
+    this.labels = null;
   }
 
   /** A page proxy, kept only while it is worth keeping.
@@ -1161,6 +1168,70 @@ export class Viewer {
 
   goToPage(page: number): void {
     this.jumpTo(page, 0);
+  }
+
+  /* -------------------------------------------------------------- labels */
+
+  /**
+   * What the document calls its own pages.
+   *
+   * A book's front matter is numbered i, ii, iii and its body starts again at
+   * 1, so the twelfth page of the file is page xii and page 314 of the index
+   * is not the 314th thing in the file. A reader typing a number off a
+   * citation, or reading the number in the toolbar, means the printed one.
+   *
+   * Asked for without waiting: the answer is in the catalogue and usually
+   * arrives before the first page is drawn, and the page number shown until
+   * then is right for the great majority of documents, which have no labels at
+   * all. When it does land, the toolbar is told again.
+   *
+   * Labels that merely restate the position are dropped. A document that
+   * labels its pages 1 to n has said nothing, and keeping the list would mean
+   * every lookup below runs for no reason.
+   */
+  private readLabels(doc: PDFDocumentProxy): void {
+    void doc
+      .getPageLabels()
+      .then((labels) => {
+        if (this.doc !== doc || !labels) return;
+        if (labels.every((label, index) => label === String(index + 1))) return;
+        this.labels = labels;
+        this.callbacks.onPageChange(this.current, this.pageCount);
+      })
+      .catch(() => {});
+  }
+
+  /** Whether this document numbers its pages its own way. */
+  get hasLabels(): boolean {
+    return this.labels !== null;
+  }
+
+  /** What to call a page (1-based) when showing it to a reader. */
+  label(page: number): string {
+    const label = this.labels?.[page - 1];
+    return label && label.length > 0 ? label : String(page);
+  }
+
+  /**
+   * The page a reader means by what they typed.
+   *
+   * A label first, because that is what is printed on the page and what an
+   * index cites; the position in the file second, so that "page 7" still
+   * finds something in a document whose seventh page is called "vii" — and
+   * because there is otherwise no way at all to reach a page whose label is
+   * blank.
+   */
+  pageForLabel(text: string): number | null {
+    const wanted = text.trim();
+    if (wanted.length === 0) return null;
+    if (this.labels) {
+      const folded = wanted.toLowerCase();
+      const index = this.labels.findIndex((label) => label.toLowerCase() === folded);
+      if (index >= 0) return index + 1;
+    }
+    const number = Number.parseInt(wanted, 10);
+    if (Number.isFinite(number) && number >= 1 && number <= this.pageCount) return number;
+    return null;
   }
 
   /* ------------------------------------------------------------- history */

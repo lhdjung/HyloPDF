@@ -157,6 +157,8 @@ class App {
   private fullscreenTimer = 0;
   private searchTimer = 0;
   private searchPending = false;
+  /** Whether the open document numbers its own pages, as last shown. */
+  private labelled = false;
 
   constructor() {
     this.viewer = new Viewer(el.viewer, el.pages, {
@@ -439,12 +441,32 @@ class App {
     if (path) await this.open(path);
   }
 
+  /** The toolbar, told where the reader is.
+   *
+   * The number shown is the one printed on the page, not the page's position
+   * in the file — those differ for the whole length of any book with front
+   * matter, and the printed one is what a citation, an index and the reader's
+   * own eyes are talking about. Where they differ the position is still said,
+   * once, beside it: "xii (12 of 340)" is what every other reader shows, and
+   * it is the only way to tell that the document is numbering itself. */
   private onPageChange(page: number, count: number): void {
-    if (document.activeElement !== el.pageNumber) {
-      el.pageNumber.value = count > 0 ? String(page) : "";
+    const label = count > 0 ? this.viewer.label(page) : "";
+    const labelled = this.viewer.hasLabels;
+    // The labels land a moment after the document opens, so the column of
+    // thumbnails is already built and numbered by position when they do.
+    if (labelled !== this.labelled) {
+      this.labelled = labelled;
+      this.sidebar.relabel();
     }
-    el.pageCount.textContent = count > 0 ? `of ${count}` : "";
-    el.pagePill.textContent = count > 0 ? `${page} of ${count}` : "";
+    if (document.activeElement !== el.pageNumber) {
+      el.pageNumber.value = label;
+    }
+    el.pageCount.textContent = count > 0 ? `of ${labelled ? this.viewer.label(count) : count}` : "";
+    el.pageNumber.title = labelled
+      ? `Page ${label} — ${page} of ${count} in the file. ${JUMP_KEYS}, or g`
+      : `Go to a page — ${JUMP_KEYS}, or g`;
+    el.pagePill.textContent =
+      count === 0 ? "" : labelled ? `${label} (${page} of ${count})` : `${page} of ${count}`;
     this.sidebar.setPage(page);
     this.updateZoomLabel();
   }
@@ -1315,20 +1337,25 @@ class App {
     el.pageNumber.title = `Go to a page — ${JUMP_KEYS}, or g`;
     el.pageNumber.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
-        const page = Number.parseInt(el.pageNumber.value, 10);
-        if (Number.isFinite(page)) this.viewer.goToPage(page);
+        // What was typed is read as a page label first and a position in the
+        // file second, which is the order that makes "go to page 314" find
+        // what the index meant by it. A number that names neither is left on
+        // screen rather than silently thrown away.
+        const page = this.viewer.pageForLabel(el.pageNumber.value);
+        if (page !== null) this.viewer.goToPage(page);
+        else el.pageNumber.value = this.viewer.label(this.viewer.pageNumber);
         el.viewer.focus();
       } else if (event.key === "Escape") {
         // As in the find field: swallow it, or AppKit takes the window out of
         // full screen for us.
         event.preventDefault();
-        el.pageNumber.value = String(this.viewer.pageNumber);
+        el.pageNumber.value = this.viewer.label(this.viewer.pageNumber);
         el.viewer.focus();
       }
       event.stopPropagation();
     });
     el.pageNumber.addEventListener("blur", () => {
-      el.pageNumber.value = String(this.viewer.pageNumber);
+      el.pageNumber.value = this.viewer.label(this.viewer.pageNumber);
       if (this.toolbarPeeking) {
         this.toolbarPeeking = false;
         this.applyChrome();

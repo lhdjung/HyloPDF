@@ -63,7 +63,7 @@ Moving around a document:
 | Space / ⇧Space | Down a screen, up a screen |
 | Page Down / Page Up | Down a screen, up a screen |
 | Home / End | First / last page |
-| g | Jump to a page number |
+| g | Jump to a page number — or to a page label, like `xii` |
 | ⌘[ / ⌘], or ⌥← / ⌥→ | Back to where you jumped from, and forward again |
 
 There is deliberately no shortcut for the page layout. Continuous scrolling is

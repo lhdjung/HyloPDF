@@ -12,6 +12,9 @@ import { setTimeout as wait } from "node:timers/promises";
 const URL_BASE = process.env.HYLOPDF_URL ?? "http://localhost:1420/";
 const FIXTURE = "tests/fixtures/book.pdf";
 const LOCKED = "tests/fixtures/locked.pdf";
+/* A short book that numbers its own pages: four of roman front matter, then a
+   body that starts again at 1. */
+const LABELLED = "tests/fixtures/labelled.pdf";
 
 async function answering() {
   try {
@@ -33,6 +36,7 @@ async function make(script, ...args) {
 
 if (!existsSync(FIXTURE)) await make("tests/fixtures/make-pdf.mjs", FIXTURE, "400");
 if (!existsSync(LOCKED)) await make("tests/fixtures/make-encrypted-pdf.mjs", LOCKED);
+if (!existsSync(LABELLED)) await make("tests/fixtures/make-pdf.mjs", LABELLED, "12", "labels");
 
 let vite = null;
 if (!(await answering())) {

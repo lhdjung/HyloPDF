@@ -193,6 +193,15 @@ export class Sidebar {
     return Math.max(120, Math.min(THUMB_MAX, room || THUMB_PLACEHOLDER));
   }
 
+  /** The document turned out to number its own pages. Said once, when the
+      labels arrive — which is usually a moment after the column is built. */
+  relabel(): void {
+    for (const [page, button] of this.thumbs) {
+      const number = button.querySelector(".thumb-number");
+      if (number) number.textContent = this.viewer.label(page);
+    }
+  }
+
   setPage(page: number): void {
     this.page = page;
     for (const [number, button] of this.thumbs) {
@@ -233,7 +242,10 @@ export class Sidebar {
       const canvas = document.createElement("canvas");
       canvas.width = THUMB_PLACEHOLDER;
       canvas.height = Math.round(THUMB_PLACEHOLDER * 1.414);
-      button.append(canvas, document.createTextNode(String(page)));
+      const number = document.createElement("span");
+      number.className = "thumb-number";
+      number.textContent = this.viewer.label(page);
+      button.append(canvas, number);
       button.addEventListener("click", () => this.viewer.goToPage(page));
       this.thumbs.set(page, button);
       fragment.append(button);

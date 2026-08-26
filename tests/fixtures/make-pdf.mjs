@@ -6,6 +6,12 @@
  * repository as a third of a megabyte of binary. */
 import { writeFileSync } from "node:fs";
 const PAGES = Number(process.argv[3] ?? 400);
+/* A third argument of "labels" numbers the pages the way a book does: roman
+   front matter, then the body starting again at 1. That is the shape that
+   makes the number in the toolbar and the position in the file disagree, and
+   it is the only shape worth generating a second fixture for. */
+const LABELLED = process.argv[4] === "labels";
+const FRONT = 4;
 const objects = [];   // 1-indexed body objects
 const add = (body) => { objects.push(body); return objects.length; };
 
@@ -26,7 +32,10 @@ for (let i = 0; i < PAGES; i++) {
   );
 }
 const realPagesId = add(`<< /Type /Pages /Count ${PAGES} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);
-const catalogId = add(`<< /Type /Catalog /Pages ${realPagesId} 0 R >>`);
+const labels = LABELLED
+  ? ` /PageLabels << /Nums [0 << /S /r >> ${FRONT} << /S /D /St 1 >>] >>`
+  : "";
+const catalogId = add(`<< /Type /Catalog /Pages ${realPagesId} 0 R${labels} >>`);
 
 let out = "%PDF-1.4\n";
 const offsets = [0];

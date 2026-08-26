@@ -261,6 +261,12 @@ export class Viewer {
 
   private current = 1;
   private matches: Match[] = [];
+  /** The same matches, by the page they are on, each keeping its place in the
+      list above. Painting a page's highlights used to walk every match in the
+      document, per mounted page, on every flush of a scan that is still
+      running — which is what kept the match limit low enough to be reached by
+      an ordinary query. */
+  private matchPages = new Map<number, { at: number; match: Match }[]>();
   private currentMatch = -1;
   private highlightAll = true;
   /** Bumped whenever the background measuring should stop, so a document put
@@ -632,6 +638,7 @@ export class Viewer {
     this.linkCache.clear();
     this.pendingReveal = -1;
     this.matches = [];
+    this.matchPages.clear();
     this.currentMatch = -1;
     this.sizes = [];
     this.boxes = [];
@@ -1835,6 +1842,13 @@ export class Viewer {
 
   setMatches(matches: Match[], current: number): void {
     this.matches = matches;
+    this.matchPages = new Map();
+    for (let at = 0; at < matches.length; at++) {
+      const match = matches[at];
+      const onPage = this.matchPages.get(match.page);
+      if (onPage) onPage.push({ at, match });
+      else this.matchPages.set(match.page, [{ at, match }]);
+    }
     this.currentMatch = current;
     if (this.pendingReveal >= matches.length) this.pendingReveal = -1;
     for (const slot of this.slots.values()) this.paintHighlights(slot);
@@ -1911,9 +1925,7 @@ export class Viewer {
     const pageRect = slot.el.getBoundingClientRect();
     let scrollTarget: HTMLDivElement | null = null;
 
-    for (let i = 0; i < this.matches.length; i++) {
-      const match = this.matches[i];
-      if (match.page !== slot.index + 1) continue;
+    for (const { at: i, match } of this.matchPages.get(slot.index + 1) ?? []) {
       if (!this.highlightAll && i !== this.currentMatch) continue;
       const range = rangeFor(divs, match);
       if (!range) continue;

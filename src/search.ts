@@ -46,9 +46,22 @@ export type SearchOptions = {
   wholeWords: boolean;
 };
 
-/** Past this many, another match is not news. Stopping keeps the highlight
-    work bounded no matter how common a letter is. */
-const MATCH_LIMIT = 2000;
+/**
+ * Where a search gives up.
+ *
+ * This was two thousand, and two thousand is a number a real query reaches: a
+ * common word in a long book hits it within the first chapter, and the scan
+ * stopped there. So the rest of the document was not "capped", it was
+ * unsearched — no highlights, and ⌘G could never walk into it — and the only
+ * thing that said so was a "+" in the corner.
+ *
+ * It could be this high because the cost it was holding down has gone: the
+ * viewer indexed matches by page, so painting a page's highlights no longer
+ * walks every match in the document. What is left is the memory the list
+ * itself takes, about sixty bytes a match, and it is given back the moment the
+ * find bar closes. A hundred thousand is beyond any query anybody means.
+ */
+const MATCH_LIMIT = 100_000;
 /** How long to scan before giving the rest of the app a turn. */
 const SLICE_MS = 12;
 /** How often results reach the screen while the scan is still running. */

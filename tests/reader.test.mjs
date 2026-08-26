@@ -447,6 +447,55 @@ test("search", async (t) => {
     await scanned();
   });
 
+  await t.test("a common letter is found on the last page too", async () => {
+    // The cap used to be two thousand and it stopped the scan, not just the
+    // count — so a letter this common was indexed for the first few chapters
+    // and the rest of the book was not searched at all, with a "+" in the
+    // corner as the only sign of it.
+    // Emptied first, and waited on. The bar holds the previous query's count
+    // until the new scan produces one, so a wait for "a finished-looking
+    // status" is answered by the answer to the last question — which is how
+    // this test first came to assert 400 matches for the letter o.
+    await app.page.fill("#find-input", "");
+    await app.page
+      .waitForFunction(() => document.getElementById("find-status")?.textContent === "", null, {
+        timeout: 10_000,
+        polling: 50,
+      })
+      .catch(() => {});
+    await app.page.fill("#find-input", "o");
+    await app.page
+      .waitForFunction(
+        () => {
+          const status = document.getElementById("find-status")?.textContent ?? "";
+          return status.length > 0 && !status.endsWith("…");
+        },
+        null,
+        { timeout: 30_000, polling: 100 },
+      )
+      .catch(() => {});
+
+    const status = await app.page.evaluate(
+      () => document.getElementById("find-status")?.textContent ?? "",
+    );
+    const total = Number(status.split(" of ")[1]?.replace("+", ""));
+    assert.ok(total > 2000, `only ${status}`);
+    assert.ok(!status.includes("+"), `the count is a floor rather than a count: ${status}`);
+
+    // And the last page really is in the index: stepping backwards from the
+    // first match wraps to the last one, which is on the last page. Through
+    // the button, because the keyboard belongs to the find field while the
+    // caret is in it.
+    await app.page.click("#find-prev");
+    await app.page
+      .waitForFunction((n) => document.getElementById("page-number")?.value === String(n), 400, {
+        timeout: 20_000,
+        polling: 50,
+      })
+      .catch(() => {});
+    assert.equal((await app.state()).page, "400");
+  });
+
   await t.test("clicking the document puts it away", async () => {
     assert.equal((await app.state()).findOpen, true);
     await app.page.mouse.click(640, 600);

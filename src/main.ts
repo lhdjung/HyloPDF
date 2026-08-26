@@ -1618,99 +1618,116 @@ class App {
     }
   }
 
+  /** Zoom and rotation are things you try on, the same as a theme — nothing
+      in here takes you anywhere else, so nothing in here puts the menu away;
+      it redraws in place and the ticks move. */
   showZoomMenu(): void {
     ui.showPopover(
       el.zoomLevel,
-      (close) => {
+      () => {
         const menu = document.createElement("div");
-        const modes: [FitMode, string, string, string][] = [
-          ["width", "Fit width", "fitWidth", isMac ? "⌘0" : "Ctrl+0"],
-          ["page", "Fit page", "fitPage", isMac ? "⌘2" : "Ctrl+2"],
-        ];
-        for (const [mode, label, icon, keys] of modes) {
-          menu.append(
-            ui.menuItem({
-              label,
-              icon,
-              note: keys,
-              checked: this.settings.fit_mode === mode,
-              onSelect: () => {
-                this.setFit(mode);
-                close();
-              },
-            }),
-          );
-        }
-        // The page at the size it was made, which is what somebody checking a
-        // figure against print is asking for. It was in the list of presets
-        // below as "100%" and nowhere else, which is not where anybody looks
-        // for it.
-        menu.append(
-          ui.menuItem({
-            label: "Actual size",
-            icon: "actualSize",
-            note: isMac ? "⌘1" : "Ctrl+1",
-            checked:
-              this.settings.fit_mode === "actual" &&
-              Math.round(this.settings.zoom * 100) === 100,
-            onSelect: () => {
-              this.setFit("actual", 1);
-              close();
-            },
-          }),
-        );
-        menu.append(
-          ui.divider(),
-          ui.menuItem({
-            label: "Rotate right",
-            icon: "rotateRight",
-            note: isMac ? "⌘R" : "Ctrl+R",
-            onSelect: () => {
-              this.rotate(1);
-              close();
-            },
-          }),
-          ui.menuItem({
-            label: "Rotate left",
-            icon: "rotateLeft",
-            note: isMac ? "⌘L" : "Ctrl+L",
-            onSelect: () => {
-              this.rotate(-1);
-              close();
-            },
-          }),
-        );
 
-        menu.append(ui.divider(), ui.section("Zoom"));
-        // The presets below are the common answers; this is the rest of them.
-        // It starts from what is actually on screen rather than from the
-        // remembered zoom, because in a fit mode those are different numbers
-        // and the one being looked at is the one to start typing over.
-        menu.append(
-          ui.row(
-            "Zoom to",
-            ui.stepper(
-              Math.round(this.viewer.isEmpty ? this.settings.zoom * 100 : this.viewer.zoomPercent()),
-              { min: ZOOM_LADDER[0], max: ZOOM_LADDER[ZOOM_LADDER.length - 1], step: 25 },
-              (value) => this.setFit("actual", value / 100),
-              "%",
-            ),
-          ),
-        );
-        for (const percent of [50, 75, 100, 125, 150, 200, 300]) {
+        const render = () => {
+          menu.replaceChildren();
+
+          const modes: [FitMode, string, string, string][] = [
+            ["width", "Fit width", "fitWidth", isMac ? "⌘0" : "Ctrl+0"],
+            ["page", "Fit page", "fitPage", isMac ? "⌘2" : "Ctrl+2"],
+          ];
+          for (const [mode, label, icon, keys] of modes) {
+            menu.append(
+              ui.menuItem({
+                label,
+                icon,
+                note: keys,
+                checked: this.settings.fit_mode === mode,
+                onSelect: () => {
+                  this.setFit(mode);
+                  render();
+                },
+              }),
+            );
+          }
+          // The page at the size it was made, which is what somebody checking
+          // a figure against print is asking for. It was in the list of
+          // presets below as "100%" and nowhere else, which is not where
+          // anybody looks for it.
           menu.append(
             ui.menuItem({
-              label: `${percent}%`,
+              label: "Actual size",
+              icon: "actualSize",
+              note: isMac ? "⌘1" : "Ctrl+1",
               checked:
                 this.settings.fit_mode === "actual" &&
-                Math.round(this.settings.zoom * 100) === percent,
+                Math.round(this.settings.zoom * 100) === 100,
               onSelect: () => {
-                this.setFit("actual", percent / 100);
-                close();
+                this.setFit("actual", 1);
+                render();
               },
             }),
           );
-        }
+          menu.append(
+            ui.divider(),
+            ui.menuItem({
+              label: "Rotate right",
+              icon: "rotateRight",
+              note: isMac ? "⌘R" : "Ctrl+R",
+              onSelect: () => {
+                this.rotate(1);
+                render();
+              },
+            }),
+            ui.menuItem({
+              label: "Rotate left",
+              icon: "rotateLeft",
+              note: isMac ? "⌘L" : "Ctrl+L",
+              onSelect: () => {
+                this.rotate(-1);
+                render();
+              },
+            }),
+          );
+
+          menu.append(ui.divider());
+          // The presets below are the common answers; this is the rest of
+          // them. It starts from what is actually on screen rather than from
+          // the remembered zoom, because in a fit mode those are different
+          // numbers and the one being looked at is the one to start typing
+          // over.
+          menu.append(
+            ui.row(
+              "Zoom to",
+              ui.stepper(
+                Math.round(
+                  this.viewer.isEmpty ? this.settings.zoom * 100 : this.viewer.zoomPercent(),
+                ),
+                { min: ZOOM_LADDER[0], max: ZOOM_LADDER[ZOOM_LADDER.length - 1], step: 25 },
+                (value) => {
+                  this.setFit("actual", value / 100);
+                  render();
+                },
+                "%",
+              ),
+            ),
+          );
+          for (const percent of [50, 75, 100, 125, 150, 200, 300]) {
+            menu.append(
+              ui.menuItem({
+                label: `${percent}%`,
+                checked:
+                  this.settings.fit_mode === "actual" &&
+                  Math.round(this.settings.zoom * 100) === percent,
+                onSelect: () => {
+                  this.setFit("actual", percent / 100);
+                  render();
+                },
+              }),
+            );
+          }
+          hydrateIcons(menu);
+        };
+
+        render();
         return menu;
       },
       "right",

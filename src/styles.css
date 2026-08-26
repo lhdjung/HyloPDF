@@ -1098,7 +1098,9 @@ body {
    fading it made a sentence that explains the switch harder to read than the
    switch itself. */
 .popover-note {
+  flex: 0 0 auto;
   color: var(--text-note);
+  white-space: nowrap;
 }
 
 .popover-divider {

@@ -347,7 +347,10 @@ export class Search {
     this.pages.set(page, built);
     // The proxy was fetched for its text and has no other work to do here;
     // holding its parsed contents would be a second copy of the document.
-    proxy.cleanup();
+    // But a page can be mounted on screen while the index walks past it, and
+    // `cleanup` cannot see that — `isMounted` is the same door `sidebar.ts`
+    // checks before evicting a thumbnail's proxy, applied here too.
+    if (!this.viewer.isMounted(page)) proxy.cleanup();
     return built;
   }
 

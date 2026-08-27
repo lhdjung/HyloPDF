@@ -404,6 +404,14 @@ export async function revealDocument(path: string): Promise<void> {
   await invoke("reveal_document", { path });
 }
 
+/** Open a file or folder with whatever this system opens it with by
+    default — a text editor for a settings file, the file manager for a
+    folder. */
+export async function openPath(path: string): Promise<void> {
+  if (!hasBackend) throw new Error("Only the app can open a file on disk.");
+  await invoke("open_path", { path });
+}
+
 /** The name of whatever shows files here, for a menu item that has to say
     where it is about to take you. */
 /** What this system prints PDFs with, by name, for the sentence that says so. */

@@ -10,7 +10,7 @@
  * things it needs through `SettingsHost`, so nothing here can drift out of
  * step with the rest of the interface. */
 
-import { type Settings, type Theme, deleteTheme, isMac, saveTheme } from "./api";
+import { type Settings, type Theme, deleteTheme, isMac, openPath, saveTheme } from "./api";
 import { hydrateIcons } from "./icons";
 import { ACTIONS, GROUPS, type Keymap, describeBinding } from "./keys";
 import * as ui from "./ui";
@@ -692,15 +692,11 @@ function keyboardPage(host: SettingsHost, pane: HTMLElement, refresh: () => void
   );
 
   pane.append(ui.text("group", "Changing keybinds"));
-  // The path on its own row, with nothing beside it. As a field's note it had
-  // to share the width with the path, which on a Mac runs to seventy
-  // characters, so the sentence explaining the file was three words wide.
   pane.append(
     ui.text(
       "note",
       "Every keybind is in the keys file, commented out. Uncomment a line to change its keys.",
     ),
-    ui.field("Keys file", pathValue(join(host.paths.config, "keys.toml"))),
   );
   if (unbound.length > 0) {
     pane.append(
@@ -716,6 +712,11 @@ function keyboardPage(host: SettingsHost, pane: HTMLElement, refresh: () => void
   const buttons = document.createElement("div");
   buttons.className = "pane-actions";
   buttons.append(
+    ui.button("Open keys file", () => {
+      void openPath(join(host.paths.config, "keys.toml")).catch((error) =>
+        ui.notice(messageOf(error)),
+      );
+    }),
     // The themes directory is watched and this file is not: a watch on the
     // config directory would fire on every `settings.toml` write the app makes
     // itself, which is several a minute while somebody is scrolling. So there

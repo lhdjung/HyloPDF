@@ -668,6 +668,45 @@ async fn wait_for(mut command: std::process::Command) -> Result<bool, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Open a file or folder with whatever this system opens it with by
+/// default — a text editor for `keys.toml`, the file manager for the themes
+/// folder. Distinct from `reveal_document`, which shows a file selected
+/// inside its parent rather than opening it.
+#[tauri::command]
+async fn open_path(path: String) -> Result<(), String> {
+    let file = PathBuf::from(&path);
+    if !file.exists() {
+        return Err(format!("{} is no longer there.", file_name(&path)));
+    }
+
+    #[cfg(target_os = "macos")]
+    let command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&file);
+        c
+    };
+
+    #[cfg(target_os = "windows")]
+    let command = {
+        let mut c = std::process::Command::new("explorer.exe");
+        c.arg(&file);
+        c
+    };
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&file);
+        c
+    };
+
+    match wait_for(command).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Nothing here knows how to open that.".into()),
+        Err(e) => Err(format!("Could not open it: {e}")),
+    }
+}
+
 /// Show a document where it lives, selected, in whatever this system uses to
 /// browse files.
 ///
@@ -1381,6 +1420,7 @@ pub fn run() {
             toggle_mark,
             forget_document,
             open_link,
+            open_path,
             reveal_document,
             print_document,
             ready,

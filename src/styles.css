@@ -236,7 +236,7 @@ body {
    stays the bar's own hover colour, so this reads as a warning on the one
    glyph that means "close" rather than as the whole button being unhappy. */
 #close-doc:hover svg,
-#quit:hover svg {
+#close-window-btn:hover svg {
   color: var(--negative);
 }
 
@@ -395,7 +395,7 @@ body {
    screen it is one of the three things there are to do, and with a document
    open it is in the menu under the title, next to the two ways of filling
    that window. */
-#shell:not([data-empty="true"]) #quit,
+#shell:not([data-empty="true"]) #close-window-btn,
 #shell:not([data-empty="true"]) #new-window {
   display: none;
 }

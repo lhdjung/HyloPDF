@@ -2415,7 +2415,6 @@ class App {
   }
 }
 
-/** The part of a web address worth reading back to someone. */
 /** A value in the document window: text the reader can select and copy, since
     half the reason to open that window is to take something out of it. */
 function selectable(value: string): HTMLElement {
@@ -2462,6 +2461,7 @@ function worthCalling(title: string, fileName: string): boolean {
   return true;
 }
 
+/** The part of a web address worth reading back to someone. */
 function hostOf(url: string): string {
   try {
     return new URL(url).host || url;

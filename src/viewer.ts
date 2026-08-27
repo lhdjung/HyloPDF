@@ -911,15 +911,6 @@ export class Viewer {
     this.relayout();
   }
 
-  /** Continuous or one page at a time.
-   *
-   * The wheel listener comes and goes with the mode, and that is the point of
-   * doing this here. It has to be non-passive — turning a page means stopping
-   * the window rubber-banding against an edge it is about to leave — and a
-   * non-passive wheel listener on a scroll container makes the browser wait
-   * for the main thread before it will scroll at all. Left permanently
-   * attached, continuous scrolling paid for a page-turning gesture it does not
-   * have. */
   /** One page across, or two. */
   setSpread(spread: SpreadMode): void {
     if (spread === this.spread) return;
@@ -962,6 +953,15 @@ export class Viewer {
     return first + 1 < this.sizes.length ? [first, first + 1] : [first];
   }
 
+  /** Continuous or one page at a time.
+   *
+   * The wheel listener comes and goes with the mode, and that is the point of
+   * doing this here. It has to be non-passive — turning a page means stopping
+   * the window rubber-banding against an edge it is about to leave — and a
+   * non-passive wheel listener on a scroll container makes the browser wait
+   * for the main thread before it will scroll at all. Left permanently
+   * attached, continuous scrolling paid for a page-turning gesture it does not
+   * have. */
   setScrollMode(mode: ScrollMode): void {
     if (mode === this.mode && this.wheelBound === (mode === "paged")) {
       this.relayout();
@@ -2620,17 +2620,6 @@ function joinRuns(rects: DOMRect[], page: DOMRect): Rect[] {
 }
 
 /**
- * Colour the links on a page that has just been recoloured.
- *
- * The obvious way — a tinted box over each link, blended into the ink below —
- * is at the mercy of the compositor, and where the blend is dropped the reader
- * gets a solid band across the line instead of a coloured word. So the tint is
- * painted into the bitmap: the untouched page is put back inside the link's
- * rectangle and recoloured again, this time towards the link colour rather
- * than the text colour. The paper maps to the same background either way, so
- * only the letters change, and the edges of the rectangle leave no seam.
- */
-/**
  * The annotations on a page that carry something to read.
  *
  * Every kind of annotation can have text on it, so this goes by whether there
@@ -2684,6 +2673,17 @@ function inCrop(links: Link[], crop: Crop | null): Link[] {
   }));
 }
 
+/**
+ * Colour the links on a page that has just been recoloured.
+ *
+ * The obvious way — a tinted box over each link, blended into the ink below —
+ * is at the mercy of the compositor, and where the blend is dropped the reader
+ * gets a solid band across the line instead of a coloured word. So the tint is
+ * painted into the bitmap: the untouched page is put back inside the link's
+ * rectangle and recoloured again, this time towards the link colour rather
+ * than the text colour. The paper maps to the same background either way, so
+ * only the letters change, and the edges of the rectangle leave no seam.
+ */
 function tintLinks(
   ctx: CanvasRenderingContext2D,
   pristine: CanvasImageSource | null,

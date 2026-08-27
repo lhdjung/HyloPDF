@@ -412,8 +412,6 @@ export async function openPath(path: string): Promise<void> {
   await invoke("open_path", { path });
 }
 
-/** The name of whatever shows files here, for a menu item that has to say
-    where it is about to take you. */
 /** What this system prints PDFs with, by name, for the sentence that says so. */
 export const systemViewerName = isMac ? "Preview" : "your PDF viewer";
 
@@ -427,6 +425,8 @@ export async function printDocument(path: string): Promise<void> {
   await invoke("print_document", { path });
 }
 
+/** The name of whatever shows files here, for a menu item that has to say
+    where it is about to take you. */
 export const fileManagerName = isMac
   ? "Finder"
   : /win/i.test(navigator.platform || navigator.userAgent)
@@ -579,12 +579,12 @@ export async function onWindowGeometryChange(handler: () => void): Promise<void>
   await window.onMoved(() => handler());
 }
 
-/** Ask for the window to go, the same way its close button does — the close
-    handler below runs first, so the place in the document and anything not
-    yet written are saved on the way out. In a browser there is no window of
-    ours to close, so this does nothing. */
 /** Close this window. It was the whole app when there was only ever one; with
-    more than one it is the window, and the app goes when the last one does. */
+    more than one it is the window, and the app goes when the last one does.
+    This asks for it the same way the close button does — the close handler
+    below runs first, so the place in the document and anything not yet
+    written are saved on the way out. In a browser there is no window of ours
+    to close, so this does nothing. */
 export async function closeWindow(): Promise<void> {
   if (!hasBackend) return;
   await getCurrentWindow().close();

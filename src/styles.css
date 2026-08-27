@@ -220,6 +220,15 @@ body {
   outline-offset: 1px;
 }
 
+/* The two ways to close something in the toolbar — the document, or the
+   window itself when there is no document. Only the cross reddens: the label
+   stays the bar's own hover colour, so this reads as a warning on the one
+   glyph that means "close" rather than as the whole button being unhappy. */
+#close-doc:hover svg,
+#quit:hover svg {
+  color: var(--negative);
+}
+
 .btn.icon-only {
   padding: 0;
   width: 30px;

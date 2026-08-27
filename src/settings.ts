@@ -262,7 +262,7 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
       "Zoom",
       ui.segmented(
         [
-          { value: "width" as const, label: "Fit width" },
+          { value: "width" as const, label: "Fit width (default)" },
           { value: "page" as const, label: "Fit page" },
           { value: "actual" as const, label: "Fixed" },
         ],

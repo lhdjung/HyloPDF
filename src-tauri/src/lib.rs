@@ -84,6 +84,19 @@ impl Pending {
         let listening = self.listening.lock().unwrap_or_else(|e| e.into_inner());
         listening.contains(window)
     }
+
+    /// Give back whatever was being held for a window that is gone — a
+    /// document queued for it, or its place in `listening`. Without this both
+    /// maps grow by one label for every window ever opened, for the life of
+    /// the process: `ready` removes its own `file` entry once it has read it,
+    /// but nothing removed `listening`, and a window whose build failed never
+    /// called `ready` at all.
+    fn forget(&self, window: &str) {
+        let mut files = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        files.remove(window);
+        let mut listening = self.listening.lock().unwrap_or_else(|e| e.into_inner());
+        listening.remove(window);
+    }
 }
 
 /// The document each window has open, held open.
@@ -1166,7 +1179,29 @@ fn spawn_window(app: &AppHandle, path: Option<String>) -> Result<(), String> {
         }
     }
 
-    let window = builder.build().map_err(|e| e.to_string())?;
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(e) => {
+            // Everything above was claimed on the assumption the window would
+            // exist to give it back — `tidy_after` never runs for a label
+            // whose build failed, so the claims are undone here instead.
+            // `OpenDocuments` is the one that matters: left in place, it is a
+            // phantom window holding a document, counted against `OPEN_LIMIT`
+            // and written into `library.toml` by the next `set_open`.
+            if let Some(pending) = app.try_state::<Pending>() {
+                pending.forget(&label);
+            }
+            if let Some(open) = app.try_state::<OpenDocuments>() {
+                open.set(&label, None);
+            }
+            if let Some(placements) = app.try_state::<Placements>() {
+                if let Ok(mut held) = placements.0.lock() {
+                    held.remove(&label);
+                }
+            }
+            return Err(e.to_string());
+        }
+    };
     tidy_after(&window);
     // The same safety net the launch window has: a frontend that never reports
     // in would otherwise leave a window that exists, holds a document, and
@@ -1205,9 +1240,9 @@ fn place(app: &AppHandle, window: &WebviewWindow) {
 }
 
 /// What a window has to give back when it goes: its file handle, its place in
-/// the document watch, and its entry in `OpenDocuments`. None of them is the
-/// reader's business and none can be asked for from the frontend, which by
-/// then is gone.
+/// the document watch, its entry in `OpenDocuments`, and whatever `Pending`
+/// was still holding for it. None of them is the reader's business and none
+/// can be asked for from the frontend, which by then is gone.
 ///
 /// The entry is the interesting one, because a window going means two things.
 /// A window the reader closed is a document they have finished with, and it
@@ -1241,6 +1276,9 @@ fn tidy_after(window: &WebviewWindow) {
         }
         if let Some(watching) = app.try_state::<watch::Watching>() {
             watching.document(&label, None);
+        }
+        if let Some(pending) = app.try_state::<Pending>() {
+            pending.forget(&label);
         }
         let leaving = app
             .try_state::<Exiting>()

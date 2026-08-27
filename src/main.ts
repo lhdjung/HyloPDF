@@ -1668,32 +1668,37 @@ class App {
       return typeof value === "string" ? value.trim() : "";
     };
 
-    ui.showWindow("Document", () => {
-      const body = document.createElement("div");
-      body.className = "window-body";
-      const pane = document.createElement("div");
-      pane.className = "window-pane";
-      pane.append(ui.text("title", text("Title") || name));
+    ui.showWindow(
+      "Document",
+      () => {
+        const body = document.createElement("div");
+        body.className = "window-body";
+        const pane = document.createElement("div");
+        pane.className = "window-pane";
+        pane.append(ui.text("title", text("Title") || name));
 
-      const rows: [string, string][] = [
-        ["Author", text("Author")],
-        ["Subject", text("Subject")],
-        ["Keywords", text("Keywords")],
-        ["Pages", String(pages)],
-        ["Page size", size],
-        ["Made with", text("Creator")],
-        ["Written by", text("Producer")],
-        ["PDF version", text("PDFFormatVersion")],
-        ["Created", readableDate(text("CreationDate"))],
-        ["Changed", readableDate(text("ModDate"))],
-      ];
-      for (const [label, value] of rows) {
-        if (value) pane.append(ui.field(label, selectable(value)));
-      }
-      if (this.path) pane.append(ui.field("File", selectable(this.path)));
-      body.append(pane);
-      return body;
-    });
+        const rows: [string, string][] = [
+          ["Author", text("Author")],
+          ["Subject", text("Subject")],
+          ["Keywords", text("Keywords")],
+          ["Pages", String(pages)],
+          ["Page size", size],
+          ["Made with", text("Creator")],
+          ["Written by", text("Producer")],
+          ["PDF version", text("PDFFormatVersion")],
+          ["Created", readableDate(text("CreationDate"))],
+          ["Changed", readableDate(text("ModDate"))],
+        ];
+        for (const [label, value] of rows) {
+          if (value) pane.append(ui.field(label, selectable(value)));
+        }
+        if (this.path) pane.append(ui.field("File", selectable(this.path)));
+        body.append(pane);
+        return body;
+      },
+      undefined,
+      "full",
+    );
   }
 
   private async copyToClipboard(text: string, said: string): Promise<void> {

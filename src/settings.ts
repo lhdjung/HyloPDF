@@ -14,7 +14,7 @@ import { type Settings, type Theme, deleteTheme, isMac, openPath, saveTheme } fr
 import { hydrateIcons } from "./icons";
 import { ACTIONS, GROUPS, type Keymap, describeBinding } from "./keys";
 import * as ui from "./ui";
-import { isDarkTheme, parseColor, selectionArea, selectionInk, toHex } from "./themes";
+import { accentOf, isDarkTheme, parseColor, selectionArea, selectionInk, toHex } from "./themes";
 import type { FitMode, SpreadMode } from "./viewer";
 
 export interface SettingsHost {
@@ -496,15 +496,26 @@ function themeEditor(
     ),
     ui.field(
       "Background",
-      ui.colorField(draft.background, (value) => {
-        draft.background = value;
-        edit.preview(draft);
-      }),
+      // White where it cannot be read, because that is what the renderer
+      // falls back to for paper — `applyTheme` asks `parseColor` for the same
+      // thing. Black is the fallback for ink and the wrong one here.
+      ui.colorField(
+        draft.background,
+        (value) => {
+          draft.background = value;
+          edit.preview(draft);
+        },
+        "#ffffff",
+      ),
       "The colour of the paper behind them.",
     ),
+    // Both of these are derived when the theme does not name them, and the
+    // derivation is the app's own — so the field shows what the page is going
+    // to use rather than a stand-in. `draft.text` was the stand-in, and it is
+    // not what `accentOf` produces for a theme with no accent.
     ui.field(
       "Accent",
-      ui.colorField(draft.accent ?? draft.text, (value) => {
+      ui.colorField(draft.accent ?? toHex(accentOf(draft)), (value) => {
         draft.accent = value;
         edit.preview(draft);
       }),
@@ -512,7 +523,7 @@ function themeEditor(
     ),
     ui.field(
       "Links",
-      ui.colorField(draft.link ?? draft.accent ?? draft.text, (value) => {
+      ui.colorField(draft.link ?? toHex(accentOf(draft)), (value) => {
         draft.link = value;
         edit.preview(draft);
       }),

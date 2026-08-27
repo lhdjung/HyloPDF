@@ -7,7 +7,7 @@
  * for it, and closes the same three ways. */
 
 import { hydrateIcons, iconMarkup } from "./icons";
-import { parseColor, toHex } from "./themes";
+import { parseColor, readColor, toHex } from "./themes";
 
 let openMenu: (() => void) | null = null;
 let openAnchor: HTMLElement | null = null;
@@ -364,18 +364,45 @@ export function textField(value: string, onInput: (value: string) => void): HTML
  * did not move still has to say what it is now. */
 export type ColorField = HTMLElement & { show(value: string): void };
 
-export function colorField(value: string, onInput: (value: string) => void): ColorField {
+/**
+ * What goes into the two halves of the control below.
+ *
+ * `<input type="color">` takes `#rrggbb` and nothing else. Its value
+ * sanitisation answers `#fff`, `#aabbccdd` and `steelblue` alike with
+ * `#000000` — silently, and beside a text field that was still showing what
+ * the theme file says, so the two halves of one control disagreed and neither
+ * of them was the colour the page was about to be.
+ *
+ * Which is the same fault the theme menu's swatch and the theme card were
+ * fixed for, and it is the fault that matters most here: the theme editor is
+ * the one place in the app whose entire job is to show you what you are about
+ * to get. Every length `readColor` accepts goes in and comes back as the six
+ * digits the picker can hold; anything it cannot read takes the caller's
+ * fallback, which is the same fallback the renderer will use.
+ */
+function pickerValue(value: string, fallback: string): string {
+  return toHex(parseColor(value, parseColor(fallback)));
+}
+
+export function colorField(
+  value: string,
+  onInput: (value: string) => void,
+  /** What to show when the value cannot be read at all. Black is right for
+      ink and wrong for paper, so the caller says. */
+  fallback = "#000000",
+): ColorField {
   const wrap = document.createElement("span");
   wrap.style.display = "flex";
   wrap.style.gap = "6px";
   wrap.style.alignItems = "center";
 
+  const readable = pickerValue(value, fallback);
   const picker = document.createElement("input");
   picker.type = "color";
-  picker.value = value;
+  picker.value = readable;
   const text = document.createElement("input");
   text.type = "text";
-  text.value = value;
+  text.value = readable;
   text.style.width = "84px";
 
   picker.addEventListener("input", () => {
@@ -383,17 +410,23 @@ export function colorField(value: string, onInput: (value: string) => void): Col
     onInput(picker.value);
   });
   text.addEventListener("input", () => {
-    if (/^#[0-9a-f]{6}$/i.test(text.value)) {
-      picker.value = text.value;
-      onInput(text.value);
-    }
+    // Every notation the renderer reads, not only the long one: a theme file
+    // may perfectly well say `#fff`, and a field that ignored it while the
+    // page rendered it was the same disagreement the other way round. What
+    // reaches the picker and the draft is the six-digit form either way,
+    // because that is what gets written back to the file.
+    const read = readColor(text.value);
+    if (!read) return;
+    picker.value = toHex(read);
+    onInput(picker.value);
   });
 
   wrap.append(picker, text);
   return Object.assign(wrap, {
     show(next: string) {
-      picker.value = next;
-      text.value = next;
+      const shown = pickerValue(next, fallback);
+      picker.value = shown;
+      text.value = shown;
     },
   });
 }

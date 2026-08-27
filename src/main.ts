@@ -1890,29 +1890,9 @@ class App {
         menu.append(ui.divider());
         menu.append(
           ui.row(
-            "Space between pages",
-            ui.stepper(
-              this.settings.page_gap,
-              { min: 0, max: 64, step: 4 },
-              (value) => this.setPageGap(value),
-              "px",
-            ),
-          ),
-          ui.row(
-            "Trim the margins",
-            ui.toggle(this.settings.trim_margins, (on) => this.setTrimMargins(on)),
-            "Fit the words rather than the paper.",
-          ),
-          ui.row(
             "Recolour pictures too",
             ui.toggle(this.settings.recolor_images, (on) => this.setRecolorImages(on)),
             "Off leaves them as printed.",
-          ),
-          ui.row(
-            "Come back to where I stopped",
-            ui.toggle(this.settings.remember_position, (on) =>
-              this.set("remember_position", on),
-            ),
           ),
           ui.row(
             "Show page count while scrolling",

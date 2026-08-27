@@ -602,19 +602,38 @@ test("menus answer the keyboard", async (t) => {
   });
 });
 
-test("the document's name is the way to another document", async () => {
+test("the document's name is what can be done with the document", async () => {
+  // Opening something else is the Open button's menu now — this one is about
+  // the document already on screen.
+  await app.page.click("#doc-title");
+  await app.page.waitForTimeout(200);
+  const items = await app.page.evaluate(() =>
+    [...document.querySelectorAll("#popovers .popover-item")].map((el) => el.textContent),
+  );
+  assert.ok(items.some((label) => label?.includes("Copy path")));
+  assert.ok(
+    items.some((label) => label?.includes("What this document says about itself")),
+    `the title menu offered ${JSON.stringify(items)}`,
+  );
+  assert.ok(!items.some((label) => label?.includes("Open a document")));
+  await app.press("Escape");
+  await app.page.waitForTimeout(150);
+  assert.equal((await app.state()).menuOpen, false);
+});
+
+test("the Open button is the way to another document", async () => {
   // The recently-read list used to live on the start screen and nowhere else,
   // which is the one screen a reader who is reading something cannot see.
-  await app.page.click("#doc-title");
+  await app.page.click("#open");
   await app.page.waitForTimeout(200);
   const items = await app.page.evaluate(() =>
     [...document.querySelectorAll("#popovers .popover-item")].map((el) => el.textContent),
   );
   assert.ok(
     items.some((label) => label?.includes("Open a document")),
-    `the title menu offered ${JSON.stringify(items)}`,
+    `the Open menu offered ${JSON.stringify(items)}`,
   );
-  assert.ok(items.some((label) => label?.includes("Copy path")));
+  assert.ok(items.some((label) => label?.includes("New window")));
   await app.press("Escape");
   await app.page.waitForTimeout(150);
   assert.equal((await app.state()).menuOpen, false);

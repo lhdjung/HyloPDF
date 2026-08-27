@@ -1489,21 +1489,16 @@ class App {
     );
   }
 
-  /** What can be done with a document, and what else there is to read.
-   *
-   * Offered wherever a document is named: the title in the toolbar, which is a
-   * button for this reason, and the recently-read list on the start screen.
-   * Only the toolbar's copy carries the list — a menu hanging off an entry in
-   * the recents does not need the recents in it — and the toolbar's copy is
-   * the only route to the list at all once a document is open. It lived on the
-   * start screen alone, which is the one screen a reader who is reading
-   * something cannot see. */
-  showDocumentMenu(
-    anchor: HTMLElement,
-    path: string,
-    name: string,
-    withLibrary = false,
-  ): void {
+  /** What can be done with a document: offered wherever one is named, which is
+   *  the title in the toolbar and the recently-read list on the start screen.
+   *  Opening something else — the picker, a new window, a paper read before —
+   *  is the Open button's menu, not this one: this is about the document
+   *  named, not about what else there is to read. `current` is the one thing
+   *  that tells the two callers apart, because it flips both of the items
+   *  that only make sense for one of them — opening a document a second time
+   *  beside itself, and asking a document what it says about itself when it
+   *  is not the one on screen. */
+  showDocumentMenu(anchor: HTMLElement, path: string, name: string, current = false): void {
     ui.showPopover(anchor, (close) => {
       const menu = document.createElement("div");
       menu.append(
@@ -1553,11 +1548,9 @@ class App {
       );
 
       // A window of its own, and only where the menu is about a document that
-      // is not the one already on screen. In the title menu it is, and this
-      // would be offering to open what you are reading a second time — beside
-      // an item three lines down that reads almost the same and means
-      // something else.
-      if (!withLibrary) {
+      // is not the one already on screen — offering to open what you are
+      // reading a second time is what the Open button's menu is for.
+      if (!current) {
         menu.append(
           ui.menuItem({
             label: "Open in a new window",
@@ -1570,7 +1563,7 @@ class App {
         );
       }
 
-      if (withLibrary) {
+      if (current) {
         menu.append(
           ui.divider(),
           ui.menuItem({
@@ -1582,69 +1575,80 @@ class App {
             },
           }),
         );
+      }
+      return menu;
+    });
+  }
 
-        menu.append(ui.divider());
-        menu.append(
-          ui.menuItem({
-            label: "Open a document…",
-            icon: "folder",
-            note: isMac ? "⌘O" : "Ctrl+O",
-            onSelect: () => {
-              close();
-              void this.openDialog();
-            },
-          }),
-          // The two-documents-at-once route, one step: pick the second one and
-          // it arrives beside the first rather than on top of it.
-          ui.menuItem({
-            label: "Open a document in a new window…",
-            icon: "window",
-            onSelect: () => {
-              close();
-              void this.openInNewWindow();
-            },
-          }),
-          // And the empty one, for a reader who would rather start the second
-          // window from its own recents than from the picker.
-          ui.menuItem({
-            label: "New window",
-            icon: "window",
-            note: isMac ? "⌘N" : "Ctrl+N",
-            onSelect: () => {
-              close();
-              void this.newWindow();
-            },
-          }),
-        );
+  /** Every way to bring a document onto the screen, kept apart from what can
+   *  be done with the one already there — that split is the whole reason this
+   *  is not one item longer in `showDocumentMenu`. The picker, a second
+   *  window, and the papers read before all belong to "open something";
+   *  marking a page or printing belong to the document itself. */
+  showOpenMenu(): void {
+    ui.showPopover(el.open, (close) => {
+      const menu = document.createElement("div");
+      menu.append(
+        ui.menuItem({
+          label: "Open a document…",
+          icon: "folder",
+          note: isMac ? "⌘O" : "Ctrl+O",
+          onSelect: () => {
+            close();
+            void this.openDialog();
+          },
+        }),
+        // The two-documents-at-once route, one step: pick the second one and
+        // it arrives beside the first rather than on top of it.
+        ui.menuItem({
+          label: "Open a document in a new window…",
+          icon: "window",
+          onSelect: () => {
+            close();
+            void this.openInNewWindow();
+          },
+        }),
+        // And the empty one, for a reader who would rather start the second
+        // window from its own recents than from the picker.
+        ui.menuItem({
+          label: "New window",
+          icon: "window",
+          note: isMac ? "⌘N" : "Ctrl+N",
+          onSelect: () => {
+            close();
+            void this.newWindow();
+          },
+        }),
+      );
 
-        // Everything but the one already open, which is the line above the
-        // menu rather than an entry in it.
-        const others = this.library.filter((entry) => entry.path !== path).slice(0, 8);
-        if (others.length > 0) {
-          menu.append(ui.divider(), ui.section("Recently read"));
-          for (const entry of others) {
-            const title = entry.title || entry.path.split(/[\\/]/).pop() || entry.path;
-            const openInWindow = document.createElement("span");
-            openInWindow.className = "popover-item-action";
-            openInWindow.innerHTML = iconMarkup("window");
-            openInWindow.title = "Open in a new window";
-            openInWindow.addEventListener("click", (event) => {
-              event.stopPropagation();
-              close();
-              void this.newWindow(entry.path);
-            });
-            menu.append(
-              ui.menuItem({
-                label: title,
-                icon: "document",
-                trail: openInWindow,
-                onSelect: () => {
-                  close();
-                  void this.open(entry.path);
-                },
-              }),
-            );
-          }
+      // The one already open, if there is one, is not offered again here —
+      // reopening it in this same window is a no-op, and opening it in a
+      // second one is what its own title menu is for.
+      const recents = this.library.filter((entry) => entry.path !== this.path).slice(0, 8);
+      if (recents.length > 0) {
+        menu.append(ui.divider(), ui.section("Recently read"));
+        for (const entry of recents) {
+          const title = entry.title || entry.path.split(/[\\/]/).pop() || entry.path;
+          const openInWindow = document.createElement("span");
+          openInWindow.className = "popover-item-action";
+          openInWindow.innerHTML = iconMarkup("window");
+          openInWindow.title = "Open in a new window";
+          openInWindow.addEventListener("click", (event) => {
+            event.stopPropagation();
+            close();
+            void this.newWindow(entry.path);
+          });
+          menu.append(
+            ui.menuItem({
+              label: title,
+              icon: "document",
+              trail: openInWindow,
+              onSelect: () => {
+                close();
+                void this.open(entry.path);
+              },
+            }),
+          );
         }
       }
       return menu;
@@ -1958,7 +1962,7 @@ class App {
       run();
     };
 
-    el.open.addEventListener("click", opens(() => void this.openDialog()));
+    el.open.addEventListener("click", opens(() => this.showOpenMenu()));
     el.welcomeOpen.addEventListener("click", () => void this.openDialog());
     // The close handler runs on the way out, so this saves what a quit saves.
     el.newWindow.addEventListener("click", opens(() => void this.newWindow()));

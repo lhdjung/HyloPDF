@@ -28,6 +28,13 @@ jobs:
         run: npx playwright install --with-deps webkit
       - name: Tests
         run: npm test
+      - name: Tests, down the pixel fallback
+        # Reads the whole app through recolorByPixel rather than the blend
+        # chain, which is the shape an engine without the non-separable
+        # blend modes is actually in — Linux, plausibly, and untested here
+        # otherwise: recolor.test.mjs covers the fallback function itself,
+        # but nothing had read the app through it.
+        run: HYLOPDF_NO_BLEND=1 npm test
       - name: Build
         run: npm run build
 

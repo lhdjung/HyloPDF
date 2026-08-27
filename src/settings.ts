@@ -237,14 +237,17 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
     ),
     ui.field(
       "Pages side by side",
-      ui.segmented(
-        [
-          { value: "single" as const, label: "One" },
-          { value: "two" as const, label: "Two" },
-          { value: "cover" as const, label: "Two, cover alone" },
-        ],
-        s.spread_mode,
-        (spread) => host.setSpread(spread),
+      withDefaultNote(
+        ui.segmented(
+          [
+            { value: "single" as const, label: "One" },
+            { value: "two" as const, label: "Two" },
+            { value: "cover" as const, label: "Two, cover alone" },
+          ],
+          s.spread_mode,
+          (spread) => host.setSpread(spread),
+        ),
+        "One is the default",
       ),
       "Two pages across uses a wide window the way a book does. “Cover alone” leaves page one on its own, so that every spread after it falls the way it was printed.",
     ),
@@ -786,6 +789,18 @@ function pathValue(value: string): HTMLElement {
 }
 
 /* ----------------------------------------------------------------- odds */
+
+/** A control with a quiet note beside it, for the one choice among several
+    that is already there until the reader picks another. */
+function withDefaultNote(control: HTMLElement, label: string): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "field-control-default";
+  const note = document.createElement("span");
+  note.className = "field-note";
+  note.textContent = label;
+  wrap.append(control, note);
+  return wrap;
+}
 
 function shortcut(mac: string, other: string): string {
   return isMac ? mac : other;

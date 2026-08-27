@@ -1697,7 +1697,7 @@ class App {
         return body;
       },
       undefined,
-      "full",
+      "tall",
     );
   }
 

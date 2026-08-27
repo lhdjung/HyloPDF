@@ -227,13 +227,13 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
       "Page progression",
       ui.segmented(
         [
-          { value: "continuous" as const, label: "Continuous" },
+          { value: "continuous" as const, label: "Continuous (default)" },
           { value: "paged" as const, label: "One page at a time" },
         ],
         s.scroll_mode,
         (mode) => host.setScrollMode(mode),
       ),
-      "Continuous scrolling is the default, and no shortcut can change it by accident.",
+      "No shortcut can change it by accident.",
     ),
     ui.field(
       "Pages side by side",

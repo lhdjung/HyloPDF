@@ -441,7 +441,7 @@ export function showWindow(
   title: string,
   build: (close: () => void) => HTMLElement,
   onClose?: () => void,
-  size: "fit" | "full" = "fit",
+  size: "fit" | "full" | "tall" = "fit",
 ): void {
   closeMenus();
 

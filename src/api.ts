@@ -536,8 +536,8 @@ export async function onExternalDocument(
 }
 
 /** Theme files rewritten on the disk, by an editor or by the app itself.
-    The whole set comes with the event — there are seven of them and a handful
-    of colours each, so asking again would cost more than sending it. */
+    The whole set comes with the event — fourteen themes of five colours each
+    at minimum, so asking again would cost more than sending it. */
 export async function onThemesChanged(
   handler: (themes: Theme[]) => void,
 ): Promise<void> {

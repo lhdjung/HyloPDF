@@ -1371,7 +1371,11 @@ export class Viewer {
     // pages stand side by side and the box before this one is its neighbour
     // rather than the row above.
     const target = box.top + offset * box.height - (offset === 0 ? box.above : 0);
-    this.container.scrollTo({ top: Math.max(0, target), behavior: smooth ? "smooth" : "auto" });
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    this.container.scrollTo({
+      top: Math.max(0, target),
+      behavior: smooth && !reduced ? "smooth" : "auto",
+    });
     this.current = index + 1;
     this.callbacks.onPageChange(this.current, this.pageCount);
     this.update();

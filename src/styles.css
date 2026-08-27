@@ -1791,3 +1791,13 @@ body {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* Every animation in this file is already user-triggered — a hover, a menu
+   opening — never ambient. This is for the reader who has told the system
+   they would rather not see even those. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

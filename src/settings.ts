@@ -761,32 +761,30 @@ function aboutPage(host: SettingsHost, pane: HTMLElement): void {
   );
 
   pane.append(
-    ui.field("Settings file", pathValue(join(host.paths.config, "settings.toml"))),
-    ui.field("Themes folder", pathValue(host.paths.themes)),
-  );
-
-  pane.append(
     ui.text(
       "note",
       "Both are plain text. Nothing is stored anywhere else, and nothing leaves this computer.",
     ),
   );
+
+  const buttons = document.createElement("div");
+  buttons.className = "pane-actions";
+  buttons.append(
+    ui.button("Open settings file", () => {
+      void openPath(join(host.paths.config, "settings.toml")).catch((error) =>
+        ui.notice(messageOf(error)),
+      );
+    }),
+    ui.button("Open themes folder", () => {
+      void openPath(host.paths.themes).catch((error) => ui.notice(messageOf(error)));
+    }),
+  );
+  pane.append(buttons);
 }
 
 function join(dir: string, name: string): string {
   const separator = dir.includes("\\") ? "\\" : "/";
   return `${dir}${dir.endsWith(separator) ? "" : separator}${name}`;
-}
-
-function pathValue(value: string): HTMLElement {
-  const element = document.createElement("span");
-  element.className = "field-note";
-  element.style.userSelect = "text";
-  element.style.wordBreak = "break-all";
-  element.style.textAlign = "right";
-  element.style.maxWidth = "440px";
-  element.textContent = value;
-  return element;
 }
 
 /* ----------------------------------------------------------------- odds */

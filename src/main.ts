@@ -463,7 +463,7 @@ class App {
       el.title.textContent = opened.name;
       void setWindowTitle(`${opened.name} — HyloPDF`);
       el.pageCount.textContent = `of ${doc.numPages}`;
-      this.search.reset();
+      this.search.forget();
       this.saidTextless = false;
       void this.sidebar.setDocument(doc, this.theme);
       this.showMarks();

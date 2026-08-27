@@ -104,11 +104,6 @@ export class Search {
     private onUpdate: (state: SearchState) => void,
   ) {}
 
-  reset(): void {
-    this.pages.clear();
-    this.clear();
-  }
-
   /** Change how a query is matched. The extracted text stays: only the fold
       and the boundary test depend on these, and both are cheap. */
   setOptions(options: SearchOptions): void {

@@ -706,16 +706,9 @@ function keyboardPage(host: SettingsHost, pane: HTMLElement, refresh: () => void
       "Every keybind is in the keys file, commented out. Uncomment a line to change its keys.",
     ),
   );
-  if (unbound.length > 0) {
-    pane.append(
-      ui.text(
-        "note",
-        // Not guessable from a row that is simply missing.
-        (isMac && (unbound.includes("quit") || unbound.includes("close-window"))
-          ? "Quitting the app is always ⌘W or ⌘Q."
-          : ""),
-      ),
-    );
+  if (isMac && (unbound.includes("quit") || unbound.includes("close-window"))) {
+    // Not guessable from a row that is simply missing.
+    pane.append(ui.text("note", "⌘W closes a window; ⌘Q quits."));
   }
   const buttons = document.createElement("div");
   buttons.className = "pane-actions";

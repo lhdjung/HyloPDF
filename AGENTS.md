@@ -1252,6 +1252,29 @@ push. They come in under other names now, and a macOS-only step promotes the
 ones that carry something. An unsigned macOS build is quarantined anywhere but
 the machine that made it.
 
+## The licence
+
+MIT, in `LICENSE`, named in `package.json`, in `Cargo.toml` and in
+`tauri.conf.json` so that the installers carry it. Nothing in the tree forces
+anything stronger: pdf.js is Apache-2.0, Tauri and nearly every crate under it
+are MIT or Apache-2.0, the handful of MPL-2.0 crates are copyleft per file and
+unmodified, and the webview is the system's rather than ours. MIT is the
+shortest thing that clears a corporate or public-sector review without a
+conversation, which is the whole reason for choosing it.
+
+What Apache-2.0 would have added is an express patent grant, which MIT is
+silent about — the one real argument against, and the reason the Rust ecosystem
+dual-licenses. It matters most for a library somebody links into a product;
+this is an application, and the shorter licence is worth more here than the
+patent clause. Dual-licensing later is additive and breaks nothing.
+
+**Attribution is the one obligation, and it is discharged by files that
+travel.** `THIRD-PARTY.md` says what is bundled and where each licence text
+lives, and `sync-pdfjs.mjs` copies pdf.js's own `LICENSE` beside the runtime
+data it already copies — the fonts, the decoders and the colour profile each
+carry theirs already. Adding a bundled component means a row in that table and,
+if its licence text does not already come with it, a copy that ships.
+
 ## Releasing a version
 
 Releases are manual and nothing else triggers them. `release.yml` is a

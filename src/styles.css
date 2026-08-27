@@ -1109,6 +1109,29 @@ body {
   white-space: nowrap;
 }
 
+.popover-item-action {
+  flex: 0 0 auto;
+  visibility: hidden;
+  display: flex;
+  padding: 3px;
+  border-radius: 6px;
+  color: var(--text-faint);
+}
+
+.popover-item-action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.popover-item:hover .popover-item-action {
+  visibility: visible;
+}
+
+.popover-item-action:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
 .popover-divider {
   height: 1px;
   margin: 6px 8px;

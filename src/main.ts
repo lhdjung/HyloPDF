@@ -1624,11 +1624,20 @@ class App {
           menu.append(ui.divider(), ui.section("Recently read"));
           for (const entry of others) {
             const title = entry.title || entry.path.split(/[\\/]/).pop() || entry.path;
+            const openInWindow = document.createElement("span");
+            openInWindow.className = "popover-item-action";
+            openInWindow.innerHTML = iconMarkup("window");
+            openInWindow.title = "Open in a new window";
+            openInWindow.addEventListener("click", (event) => {
+              event.stopPropagation();
+              close();
+              void this.newWindow(entry.path);
+            });
             menu.append(
               ui.menuItem({
                 label: title,
                 icon: "document",
-                note: `p. ${entry.page}`,
+                trail: openInWindow,
                 onSelect: () => {
                   close();
                   void this.open(entry.path);

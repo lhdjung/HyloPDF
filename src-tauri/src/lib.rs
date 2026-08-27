@@ -84,6 +84,19 @@ impl Pending {
         let listening = self.listening.lock().unwrap_or_else(|e| e.into_inner());
         listening.contains(window)
     }
+
+    /// Give back whatever was being held for a window that is gone — a
+    /// document queued for it, or its place in `listening`. Without this both
+    /// maps grow by one label for every window ever opened, for the life of
+    /// the process: `ready` removes its own `file` entry once it has read it,
+    /// but nothing removed `listening`, and a window whose build failed never
+    /// called `ready` at all.
+    fn forget(&self, window: &str) {
+        let mut files = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        files.remove(window);
+        let mut listening = self.listening.lock().unwrap_or_else(|e| e.into_inner());
+        listening.remove(window);
+    }
 }
 
 /// The document each window has open, held open.
@@ -194,6 +207,19 @@ impl OpenDocuments {
         let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
         held.iter().any(|(label, _)| label == window)
     }
+
+    /// The window already showing this document, if one is.
+    ///
+    /// Asked before a document handed over by the system is opened at all: a
+    /// file the reader already has open is one they want to *look* at, and
+    /// opening a second copy of it beside the first is the one thing
+    /// double-clicking it cannot mean.
+    fn showing(&self, path: &str) -> Option<String> {
+        let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        held.iter()
+            .find(|(_, open)| open == path)
+            .map(|(label, _)| label.clone())
+    }
 }
 
 /// Whether the app is on its way out.
@@ -246,6 +272,23 @@ struct Opened {
     offset: f64,
 }
 
+/// Whether the reader asked to come back to what was open last.
+///
+/// One reading, in one place, because two sides of the app act on it: the
+/// launch window's own document (`bootstrap`) and every other window the last
+/// session had (`Restore`, in `setup`) — and `setup` also *claims* the launch
+/// window in `OpenDocuments` on the strength of it. That claim was made
+/// unconditionally, so with the setting off the launch window sat on the start
+/// screen while this side believed it was holding a document: `idle_window`
+/// skipped it, and the next file double-clicked opened a second window rather
+/// than filling the empty one already on screen.
+fn wants_reopening(settings: &settings::Settings) -> bool {
+    settings
+        .get("reopen_last_document")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true)
+}
+
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -276,13 +319,20 @@ fn file_name(path: &str) -> String {
 #[tauri::command]
 async fn bootstrap(window: WebviewWindow, paths: State<'_, Paths>) -> Result<Bootstrap, String> {
     let stored = library::prune(&library::load(&paths.config));
-    let reopen = if window.label() == MAIN {
+    let settings = settings::load(&paths.config);
+    // Only the launch window has anything to come back to, and only when the
+    // reader asked to come back to it. The setting is asked here rather than
+    // left to the frontend: this used to hand over the document whatever it
+    // said and rely on `main.ts` to ignore the answer, which meant the two
+    // sides of the bridge disagreed about whether the launch window had
+    // anything in it. See `reopening` in `setup`, which is the other half.
+    let reopen = if window.label() == MAIN && wants_reopening(&settings) {
         stored.open.first().cloned().unwrap_or_default()
     } else {
         String::new()
     };
     Ok(Bootstrap {
-        settings: settings::load(&paths.config),
+        settings,
         themes: theme::load_all(&paths.themes),
         library: stored.files,
         open_document: reopen,
@@ -534,10 +584,22 @@ async fn quit_app(app: AppHandle) {
 /// dialog and no way back. Sending four hundred pages to a printer nobody
 /// chose is the one failure here that costs paper.
 ///
-/// So this hands the file to a program that does print, and says so. On macOS
-/// that is Preview by name rather than "the default application", because
-/// once HyloPDF is installed the default application for a PDF may well be
-/// HyloPDF, and handing it to ourselves is a loop.
+/// So this hands the file to a program that does print, and says so. Not to
+/// the *print* verb, on any platform: where a system has one it prints
+/// immediately, which is the failure above wearing a different hat. What is
+/// wanted is the file open somewhere with a File menu in it.
+///
+/// Which program is named where it can be. On macOS that is Preview, rather
+/// than "the default application", because once HyloPDF is installed the
+/// default application for a PDF may well be HyloPDF, and handing it to
+/// ourselves is a loop. Windows names Edge for the same reason — it ships with
+/// every supported version, it prints PDFs properly, and it is somewhere else
+/// — and falls back to the default handler where it has been removed. Linux
+/// has no viewer that can be assumed, so `xdg-open` is all there is.
+///
+/// So the loop is still reachable on those two, and `hand_over` is where it
+/// stops: a document already open comes to the front instead of opening a
+/// second time. The reader gets their own window back rather than a duplicate.
 #[tauri::command]
 async fn print_document(path: String) -> Result<(), String> {
     let file = PathBuf::from(&path);
@@ -554,11 +616,33 @@ async fn print_document(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     let command = {
-        // The default handler's own print verb, and the path as one argument
-        // rather than through a shell.
-        let mut c = std::process::Command::new("rundll32.exe");
-        c.arg("shell32.dll,ShellExec_RunDLL").arg(&file);
-        c
+        // Edge by name, the way macOS names Preview: it ships with every
+        // supported Windows, it prints a PDF properly, and — the point — it is
+        // not us. `ShellExec_RunDLL` alone opens the file with whatever the
+        // *default* handler is, which after installing this app may well be
+        // this app.
+        //
+        // By absolute path rather than by name, because Edge is not on `PATH`.
+        // Where it has been removed, the default handler is still better than
+        // nothing; `hand_over` is what keeps that from becoming a loop.
+        let edge = std::env::var("ProgramFiles(x86)")
+            .or_else(|_| std::env::var("ProgramFiles"))
+            .map(|root| PathBuf::from(root).join(r"Microsoft\Edge\Application\msedge.exe"))
+            .ok()
+            .filter(|path| path.exists());
+        match edge {
+            Some(edge) => {
+                let mut c = std::process::Command::new(edge);
+                c.arg(&file);
+                c
+            }
+            None => {
+                // The path as one argument, rather than through a shell.
+                let mut c = std::process::Command::new("rundll32.exe");
+                c.arg("shell32.dll,ShellExec_RunDLL").arg(&file);
+                c
+            }
+        }
     };
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -666,6 +750,45 @@ async fn wait_for(mut command: std::process::Command) -> Result<bool, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Open a file or folder with whatever this system opens it with by
+/// default — a text editor for `keys.toml`, the file manager for the themes
+/// folder. Distinct from `reveal_document`, which shows a file selected
+/// inside its parent rather than opening it.
+#[tauri::command]
+async fn open_path(path: String) -> Result<(), String> {
+    let file = PathBuf::from(&path);
+    if !file.exists() {
+        return Err(format!("{} is no longer there.", file_name(&path)));
+    }
+
+    #[cfg(target_os = "macos")]
+    let command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&file);
+        c
+    };
+
+    #[cfg(target_os = "windows")]
+    let command = {
+        let mut c = std::process::Command::new("explorer.exe");
+        c.arg(&file);
+        c
+    };
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&file);
+        c
+    };
+
+    match wait_for(command).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Nothing here knows how to open that.".into()),
+        Err(e) => Err(format!("Could not open it: {e}")),
+    }
 }
 
 /// Show a document where it lives, selected, in whatever this system uses to
@@ -1056,7 +1179,29 @@ fn spawn_window(app: &AppHandle, path: Option<String>) -> Result<(), String> {
         }
     }
 
-    let window = builder.build().map_err(|e| e.to_string())?;
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(e) => {
+            // Everything above was claimed on the assumption the window would
+            // exist to give it back — `tidy_after` never runs for a label
+            // whose build failed, so the claims are undone here instead.
+            // `OpenDocuments` is the one that matters: left in place, it is a
+            // phantom window holding a document, counted against `OPEN_LIMIT`
+            // and written into `library.toml` by the next `set_open`.
+            if let Some(pending) = app.try_state::<Pending>() {
+                pending.forget(&label);
+            }
+            if let Some(open) = app.try_state::<OpenDocuments>() {
+                open.set(&label, None);
+            }
+            if let Some(placements) = app.try_state::<Placements>() {
+                if let Ok(mut held) = placements.0.lock() {
+                    held.remove(&label);
+                }
+            }
+            return Err(e.to_string());
+        }
+    };
     tidy_after(&window);
     // The same safety net the launch window has: a frontend that never reports
     // in would otherwise leave a window that exists, holds a document, and
@@ -1095,9 +1240,9 @@ fn place(app: &AppHandle, window: &WebviewWindow) {
 }
 
 /// What a window has to give back when it goes: its file handle, its place in
-/// the document watch, and its entry in `OpenDocuments`. None of them is the
-/// reader's business and none can be asked for from the frontend, which by
-/// then is gone.
+/// the document watch, its entry in `OpenDocuments`, and whatever `Pending`
+/// was still holding for it. None of them is the reader's business and none
+/// can be asked for from the frontend, which by then is gone.
 ///
 /// The entry is the interesting one, because a window going means two things.
 /// A window the reader closed is a document they have finished with, and it
@@ -1131,6 +1276,9 @@ fn tidy_after(window: &WebviewWindow) {
         }
         if let Some(watching) = app.try_state::<watch::Watching>() {
             watching.document(&label, None);
+        }
+        if let Some(pending) = app.try_state::<Pending>() {
+            pending.forget(&label);
         }
         let leaving = app
             .try_state::<Exiting>()
@@ -1229,7 +1377,39 @@ fn document_among(args: &[String]) -> Option<String> {
 /// coming up, ahead of the `setup` hook that creates `Pending`, so without
 /// this the document a reader just double-clicked was silently dropped on the
 /// floor and they landed on the start screen instead.
+///
+/// A list, and it has to be read as one. `RunEvent::Opened` carries `urls`,
+/// plural — three files selected together and opened in one gesture are three
+/// documents arriving before `setup` — and taking one of them and leaving the
+/// rest in here was the same silent drop by a different door: two of the three
+/// never appeared and nothing anywhere said why. See `first_and_rest`.
 static EARLY_OPEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Which document the launch window takes, and which need a window each.
+///
+/// The command line wins the launch window where both are populated, which is
+/// only ever a cold launch: a second instance's arguments are routed through
+/// `hand_over` instead, so nothing else can have both, and the launch itself
+/// named the document that started it. Everything left over is a document
+/// somebody asked for and has to go somewhere, which is what `Restore` is for.
+///
+/// Split out from `setup` so that it can be tested at all — `setup` needs a
+/// running application and this is one `match`.
+fn first_and_rest(
+    argument: Option<String>,
+    mut early: Vec<String>,
+) -> (Option<String>, Vec<String>) {
+    match argument {
+        Some(path) => (Some(path), early),
+        None if early.is_empty() => (None, Vec::new()),
+        // In arrival order: the first document of a selection is the one the
+        // launch window opens on, which is the one a reader is looking for.
+        None => {
+            let first = early.remove(0);
+            (Some(first), early)
+        }
+    }
+}
 
 /// A document handed to us by the OS — "Open with", the dock, a second launch
 /// — sent to a window with nothing in it, or to a window made for it.
@@ -1241,6 +1421,16 @@ static EARLY_OPEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// window is idle if it is not named in `OpenDocuments`, and the one with the
 /// keyboard is preferred, because that is the window the reader is looking at.
 ///
+/// *A document already open is brought to the front rather than opened again.*
+/// A second copy of a document beside the first is the one thing
+/// double-clicking a file cannot mean — the reader is asking to look at it,
+/// and it is already there. It is also what closes the loop `print_document`
+/// can otherwise start: off macOS a document is handed to whatever the system
+/// opens PDFs with, and on a machine where that is HyloPDF it comes straight
+/// back here. What used to happen then was a second window on the same file,
+/// with a second pdf.js runtime behind it; now the window the reader printed
+/// from comes forward, which is the closest thing to the truth available.
+///
 /// Queued in `EARLY_OPEN` if `Pending` itself does not exist yet — on macOS an
 /// Apple Event for a cold launch can arrive before `setup` has run.
 fn hand_over(app: &AppHandle, path: String) {
@@ -1250,6 +1440,11 @@ fn hand_over(app: &AppHandle, path: String) {
         }
         return;
     };
+    if let Some(window) = already_showing(app, &path) {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return;
+    }
     let Some(window) = idle_window(app) else {
         match spawn_window(app, Some(path.clone())) {
             Ok(()) => {}
@@ -1286,6 +1481,12 @@ fn give(app: &AppHandle, pending: State<'_, Pending>, window: &WebviewWindow, pa
     }
     let _ = window.unminimize();
     let _ = window.set_focus();
+}
+
+/// The window this document is already open in, if it is open at all.
+fn already_showing(app: &AppHandle, path: &str) -> Option<WebviewWindow> {
+    let label = app.try_state::<OpenDocuments>()?.showing(path)?;
+    app.get_webview_window(&label)
 }
 
 /// Any window at all, the one with the keyboard first. The last resort above.
@@ -1381,6 +1582,7 @@ pub fn run() {
             toggle_mark,
             forget_document,
             open_link,
+            open_path,
             reveal_document,
             print_document,
             ready,
@@ -1398,7 +1600,15 @@ pub fn run() {
             // Started after the shipped themes are written, so that writing
             // them is not itself the first thing it reports.
             app.manage(watch::start(app.handle().clone(), themes.clone()));
-            let reopen = library::prune(&library::load(&config)).open;
+            // Empty when the reader would rather start fresh, so that nothing
+            // below this line has to remember to ask again — including the
+            // claim on the launch window, which is where forgetting cost most.
+            let reopening = wants_reopening(&stored);
+            let reopen = if reopening {
+                library::prune(&library::load(&config)).open
+            } else {
+                Vec::new()
+            };
             app.manage(Paths { config, themes });
             app.manage(OpenFiles::default());
             app.manage(OpenDocuments::default());
@@ -1406,14 +1616,16 @@ pub fn run() {
             app.manage(Placements::default());
             #[cfg(target_os = "macos")]
             dock::install(app.handle());
-            // The command line wins over a document that raced `setup` in as
-            // an Apple Event, in the one case both are populated: a second
-            // instance's arguments are routed through `hand_over` instead
-            // (see the single-instance plugin below), so it is only a cold
-            // launch that can have both, and the launch itself named the
-            // document that started it.
-            let initial = first_document_argument()
-                .or_else(|| EARLY_OPEN.lock().ok().and_then(|mut queue| queue.pop()));
+            // Every document that raced `setup` in as an Apple Event, in the
+            // order they arrived, and emptied rather than sampled: what is
+            // left in that static is left there for the life of the process.
+            let early: Vec<String> = EARLY_OPEN
+                .lock()
+                .map(|mut queue| std::mem::take(&mut *queue))
+                .unwrap_or_default();
+            // One of them gets the launch window; the rest get a window each,
+            // through `Restore` below. See `first_and_rest`.
+            let (initial, extra) = first_and_rest(first_document_argument(), early);
             let pending = Pending::default();
             if let Some(path) = initial.clone() {
                 pending.hold(MAIN, path);
@@ -1449,20 +1661,17 @@ pub fn run() {
                 });
             }
 
-            // Every window that was open when the app went down, put back —
-            // the first one is the launch window's, through `bootstrap`, and
-            // the rest get a window each, made once that window is up. Skipped
-            // when this launch was *for* a document: opening a file is not a
-            // request to reopen everything else as well.
-            let reopening = stored
-                .get("reopen_last_document")
-                .and_then(|value| value.as_bool())
-                .unwrap_or(true);
-            let more = if reopening && initial.is_none() {
-                reopen.into_iter().skip(1).collect()
-            } else {
-                Vec::new()
-            };
+            // What needs a window of its own once the launch window is up.
+            //
+            // The documents this launch was *for* come first: a selection of
+            // three files opened together is one document in the launch window
+            // and two here. Then, only if the launch named no document at all,
+            // the rest of the session that was open last — because opening a
+            // file is not a request to reopen everything else as well.
+            let mut more = extra;
+            if reopening && initial.is_none() {
+                more.extend(reopen.into_iter().skip(1));
+            }
             app.manage(Restore(Mutex::new(more)));
             Ok(())
         })
@@ -1497,4 +1706,100 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cold launch onto three files double-clicked together is three Apple
+    /// Events, all of them arriving before `setup` has run. One document can
+    /// have the launch window; the other two have to come back out of the
+    /// queue, or they are gone for the life of the process — which is what
+    /// `EARLY_OPEN.pop()` did, silently, and to the *first* two of the three
+    /// rather than the last.
+    #[test]
+    fn every_document_that_raced_setup_is_accounted_for() {
+        let early = vec!["one.pdf".to_string(), "two.pdf".into(), "three.pdf".into()];
+        let (first, rest) = first_and_rest(None, early);
+        assert_eq!(
+            first.as_deref(),
+            Some("one.pdf"),
+            "arrival order, not reverse"
+        );
+        assert_eq!(rest, vec!["two.pdf".to_string(), "three.pdf".into()]);
+    }
+
+    /// The command line named the document this launch was for, so it takes
+    /// the launch window — and the ones that raced in still get windows.
+    #[test]
+    fn the_command_line_wins_the_launch_window_and_loses_nothing() {
+        let (first, rest) = first_and_rest(Some("named.pdf".into()), vec!["raced.pdf".to_string()]);
+        assert_eq!(first.as_deref(), Some("named.pdf"));
+        assert_eq!(rest, vec!["raced.pdf".to_string()]);
+    }
+
+    /// The ordinary launch: nothing on the command line and nothing racing.
+    #[test]
+    fn an_empty_launch_asks_for_no_windows() {
+        let (first, rest) = first_and_rest(None, Vec::new());
+        assert!(first.is_none());
+        assert!(rest.is_empty());
+    }
+
+    /// Two places act on this setting — `bootstrap`, for the launch window's
+    /// own document, and `setup`, which claims that window in `OpenDocuments`
+    /// on the strength of it. Both go through one function so they cannot
+    /// disagree, and it has to fall the right way when the file says nothing.
+    #[test]
+    fn coming_back_to_what_was_open_is_a_setting_with_a_default() {
+        assert!(
+            settings::defaults().contains_key("reopen_last_document"),
+            "the key `wants_reopening` reads has to be one the table knows, \
+             or every file falls through to the default forever"
+        );
+        assert!(
+            wants_reopening(&settings::defaults()),
+            "on unless asked otherwise"
+        );
+
+        let mut off = settings::defaults();
+        off.insert("reopen_last_document".into(), serde_json::json!(false));
+        assert!(!wants_reopening(&off));
+
+        // A hand-edited file can say something that is not a boolean at all.
+        // `settings::load` drops it, so this should never be reached — and if
+        // it ever is, the answer is the default rather than a panic.
+        let mut nonsense = settings::defaults();
+        nonsense.insert(
+            "reopen_last_document".into(),
+            serde_json::json!("yes please"),
+        );
+        assert!(wants_reopening(&nonsense));
+    }
+    /// A document handed over by the system when it is already open is a
+    /// reader asking to look at it, not asking for a second copy of it beside
+    /// the first — and it is how `print_document` comes back when the default
+    /// PDF handler off macOS turns out to be this app.
+    #[test]
+    fn a_document_already_open_is_found_by_the_window_holding_it() {
+        let open = OpenDocuments::default();
+        open.set("main", Some("/papers/one.pdf"));
+        open.set("reader-1", Some("/papers/two.pdf"));
+
+        assert_eq!(open.showing("/papers/two.pdf").as_deref(), Some("reader-1"));
+        assert_eq!(open.showing("/papers/one.pdf").as_deref(), Some("main"));
+        assert!(open.showing("/papers/three.pdf").is_none());
+
+        // Put down, and no longer open — the next hand-over of it wants an
+        // idle window rather than the one that used to have it.
+        open.set("reader-1", None);
+        assert!(open.showing("/papers/two.pdf").is_none());
+
+        // And a window that has moved on to something else does not answer
+        // for what it used to hold.
+        open.set("main", Some("/papers/three.pdf"));
+        assert!(open.showing("/papers/one.pdf").is_none());
+        assert_eq!(open.showing("/papers/three.pdf").as_deref(), Some("main"));
+    }
 }

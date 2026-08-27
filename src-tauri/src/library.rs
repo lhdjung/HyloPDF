@@ -261,7 +261,7 @@ pub fn prune(library: &Library) -> Library {
         files: library
             .files
             .iter()
-            .filter(|entry| Path::new(&entry.path).exists())
+            .filter(|entry| Path::new(&entry.path).is_file())
             .cloned()
             .collect(),
     }

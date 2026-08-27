@@ -7,9 +7,9 @@
   <header id="toolbar" data-tauri-drag-region="deep">
     <div class="bar-group bar-left">
       <button id="contents" class="btn" data-icon="contents" aria-pressed="false">Contents</button>
-      <button id="open" class="btn" data-icon="folder" data-shortcut="⌘O">Open</button>
-      <button id="new-window" class="btn" data-icon="window" data-shortcut="⌘N" title="Another window, to read a second document beside this one">New window</button>
-      <button id="quit" class="btn" data-icon="close" title="Close this window — HyloPDF goes when the last one does">Close window</button>
+      <button id="open" class="btn" data-icon="folder" aria-haspopup="menu" aria-expanded="false">Open…</button>
+      <button id="new-window" class="btn" data-icon="window" title="Another window, to read a second document beside this one">New window</button>
+      <button id="close-window-btn" class="btn" data-icon="close" title="Close this window — HyloPDF goes when the last one does">Close window</button>
       <button id="close-doc" class="btn" data-icon="close" title="Close this document">Close</button>
       <button id="doc-title" class="doc-title" aria-haspopup="menu" aria-expanded="false"></button>
     </div>
@@ -24,7 +24,9 @@
     </div>
 
     <div class="bar-group bar-right">
-      <button id="find" class="btn" data-icon="search" data-shortcut="⌘F" aria-pressed="false">Search</button>
+      <button id="find" class="btn" data-icon="search" aria-pressed="false">Search</button>
+      <button id="rotate-left" class="btn" data-icon="rotateLeft" title="Turn the page left">Left</button>
+      <button id="rotate-right" class="btn" data-icon="rotateRight" title="Turn the page right">Right</button>
       <div class="zoom-group">
         <button id="zoom-out" class="btn icon-only" data-icon="minus" title="Zoom out"></button>
         <button id="zoom-level" class="btn zoom-level">100%</button>
@@ -55,7 +57,7 @@
     <section id="welcome">
       <div class="welcome-inner">
         <h1>HyloPDF</h1>
-        <p class="welcome-sub">A quiet place to read.</p>
+        <p class="welcome-sub">A calm place to read.</p>
         <button id="welcome-open" class="btn btn-primary" data-icon="folder">Open a document</button>
         <div id="recents" class="recents"></div>
         <p class="welcome-hint">Or drop a PDF anywhere in this window</p>

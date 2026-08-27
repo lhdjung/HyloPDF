@@ -108,6 +108,8 @@ const el = {
   pageNumber: byId<HTMLInputElement>("page-number"),
   pageCount: byId<HTMLSpanElement>("page-count"),
   find: byId<HTMLButtonElement>("find"),
+  rotateLeft: byId<HTMLButtonElement>("rotate-left"),
+  rotateRight: byId<HTMLButtonElement>("rotate-right"),
   zoomOut: byId<HTMLButtonElement>("zoom-out"),
   zoomIn: byId<HTMLButtonElement>("zoom-in"),
   zoomLevel: byId<HTMLButtonElement>("zoom-level"),
@@ -123,7 +125,7 @@ const el = {
   welcome: byId<HTMLElement>("welcome"),
   welcomeOpen: byId<HTMLButtonElement>("welcome-open"),
   newWindow: byId<HTMLButtonElement>("new-window"),
-  quit: byId<HTMLButtonElement>("quit"),
+  closeWindowBtn: byId<HTMLButtonElement>("close-window-btn"),
   recents: byId<HTMLDivElement>("recents"),
   findBar: byId<HTMLDivElement>("find-bar"),
   findInput: byId<HTMLInputElement>("find-input"),
@@ -263,10 +265,16 @@ class App {
     // A document named on the command line, or double-clicked to start the
     // app, beats the one that happened to be open last: it is what this
     // launch was *for*.
+    //
+    // `open_document` is empty unless there is really something to reopen —
+    // `reopen_last_document` is read on the Rust side now, by `bootstrap` and
+    // by `setup` together. It used to arrive whatever the setting said, with
+    // this line the only thing declining it, and that left Rust believing the
+    // launch window held a document it was never going to show: a file
+    // double-clicked afterwards opened a second window rather than filling
+    // the empty one already on screen.
     if (startWith) await this.open(startWith);
-    else if (this.settings.reopen_last_document && data.open_document) {
-      await this.open(data.open_document);
-    }
+    else if (data.open_document) await this.open(data.open_document);
 
     // Starting up in full screen with the toolbar away means starting up with
     // nothing on screen to press, so say once how to get back out.
@@ -455,7 +463,7 @@ class App {
       el.title.textContent = opened.name;
       void setWindowTitle(`${opened.name} — HyloPDF`);
       el.pageCount.textContent = `of ${doc.numPages}`;
-      this.search.reset();
+      this.search.forget();
       this.saidTextless = false;
       void this.sidebar.setDocument(doc, this.theme);
       this.showMarks();
@@ -611,7 +619,7 @@ class App {
     el.pageCount.textContent = count > 0 ? `of ${labelled ? this.viewer.label(count) : count}` : "";
     el.pageNumber.title = labelled
       ? `Page ${label} — ${page} of ${count} in the file. ${JUMP_KEYS}, or g`
-      : `Go to a page — ${JUMP_KEYS}, or g`;
+      : `Go to page — ${JUMP_KEYS}, or g`;
     el.pagePill.textContent =
       count === 0 ? "" : labelled ? `${label} (${page} of ${count})` : `${page} of ${count}`;
     this.sidebar.setPage(page);
@@ -1398,13 +1406,13 @@ class App {
               isMac ? "⌘D" : "Ctrl+D",
             ),
             ui.row(
-              "Follow the system",
+              "Light or dark follow system",
               ui.toggle(this.settings.follow_system_theme, (on) => {
                 this.set("follow_system_theme", on);
                 if (on) this.followSystemTheme();
                 render();
               }),
-              "Light by day, dark by night.",
+              "",
             ),
             ui.divider(),
             ui.section("Themes"),
@@ -1489,21 +1497,16 @@ class App {
     );
   }
 
-  /** What can be done with a document, and what else there is to read.
-   *
-   * Offered wherever a document is named: the title in the toolbar, which is a
-   * button for this reason, and the recently-read list on the start screen.
-   * Only the toolbar's copy carries the list — a menu hanging off an entry in
-   * the recents does not need the recents in it — and the toolbar's copy is
-   * the only route to the list at all once a document is open. It lived on the
-   * start screen alone, which is the one screen a reader who is reading
-   * something cannot see. */
-  showDocumentMenu(
-    anchor: HTMLElement,
-    path: string,
-    name: string,
-    withLibrary = false,
-  ): void {
+  /** What can be done with a document: offered wherever one is named, which is
+   *  the title in the toolbar and the recently-read list on the start screen.
+   *  Opening something else — the picker, a new window, a paper read before —
+   *  is the Open button's menu, not this one: this is about the document
+   *  named, not about what else there is to read. `current` is the one thing
+   *  that tells the two callers apart, because it flips both of the items
+   *  that only make sense for one of them — opening a document a second time
+   *  beside itself, and asking a document what it says about itself when it
+   *  is not the one on screen. */
+  showDocumentMenu(anchor: HTMLElement, path: string, name: string, current = false): void {
     ui.showPopover(anchor, (close) => {
       const menu = document.createElement("div");
       menu.append(
@@ -1553,11 +1556,9 @@ class App {
       );
 
       // A window of its own, and only where the menu is about a document that
-      // is not the one already on screen. In the title menu it is, and this
-      // would be offering to open what you are reading a second time — beside
-      // an item three lines down that reads almost the same and means
-      // something else.
-      if (!withLibrary) {
+      // is not the one already on screen — offering to open what you are
+      // reading a second time is what the Open button's menu is for.
+      if (!current) {
         menu.append(
           ui.menuItem({
             label: "Open in a new window",
@@ -1570,11 +1571,11 @@ class App {
         );
       }
 
-      if (withLibrary) {
+      if (current) {
         menu.append(
           ui.divider(),
           ui.menuItem({
-            label: "What this document says about itself…",
+            label: "Information",
             icon: "info",
             onSelect: () => {
               close();
@@ -1582,60 +1583,80 @@ class App {
             },
           }),
         );
+      }
+      return menu;
+    });
+  }
 
-        menu.append(ui.divider());
-        menu.append(
-          ui.menuItem({
-            label: "Open a document…",
-            icon: "folder",
-            note: isMac ? "⌘O" : "Ctrl+O",
-            onSelect: () => {
-              close();
-              void this.openDialog();
-            },
-          }),
-          // The two-documents-at-once route, one step: pick the second one and
-          // it arrives beside the first rather than on top of it.
-          ui.menuItem({
-            label: "Open a document in a new window…",
-            icon: "window",
-            onSelect: () => {
-              close();
-              void this.openInNewWindow();
-            },
-          }),
-          // And the empty one, for a reader who would rather start the second
-          // window from its own recents than from the picker.
-          ui.menuItem({
-            label: "New window",
-            icon: "window",
-            note: isMac ? "⌘N" : "Ctrl+N",
-            onSelect: () => {
-              close();
-              void this.newWindow();
-            },
-          }),
-        );
+  /** Every way to bring a document onto the screen, kept apart from what can
+   *  be done with the one already there — that split is the whole reason this
+   *  is not one item longer in `showDocumentMenu`. The picker, a second
+   *  window, and the papers read before all belong to "open something";
+   *  marking a page or printing belong to the document itself. */
+  showOpenMenu(): void {
+    ui.showPopover(el.open, (close) => {
+      const menu = document.createElement("div");
+      menu.append(
+        ui.menuItem({
+          label: "Open document…",
+          icon: "folder",
+          note: isMac ? "⌘O" : "Ctrl+O",
+          onSelect: () => {
+            close();
+            void this.openDialog();
+          },
+        }),
+        // The two-documents-at-once route, one step: pick the second one and
+        // it arrives beside the first rather than on top of it.
+        ui.menuItem({
+          label: "Open document in new window…",
+          icon: "window",
+          onSelect: () => {
+            close();
+            void this.openInNewWindow();
+          },
+        }),
+        // And the empty one, for a reader who would rather start the second
+        // window from its own recents than from the picker.
+        ui.menuItem({
+          label: "New window",
+          icon: "window",
+          note: isMac ? "⌘N" : "Ctrl+N",
+          onSelect: () => {
+            close();
+            void this.newWindow();
+          },
+        }),
+      );
 
-        // Everything but the one already open, which is the line above the
-        // menu rather than an entry in it.
-        const others = this.library.filter((entry) => entry.path !== path).slice(0, 8);
-        if (others.length > 0) {
-          menu.append(ui.divider(), ui.section("Recently read"));
-          for (const entry of others) {
-            const title = entry.title || entry.path.split(/[\\/]/).pop() || entry.path;
-            menu.append(
-              ui.menuItem({
-                label: title,
-                icon: "document",
-                note: `p. ${entry.page}`,
-                onSelect: () => {
-                  close();
-                  void this.open(entry.path);
-                },
-              }),
-            );
-          }
+      // The one already open, if there is one, is not offered again here —
+      // reopening it in this same window is a no-op, and opening it in a
+      // second one is what its own title menu is for.
+      const recents = this.library.filter((entry) => entry.path !== this.path).slice(0, 8);
+      if (recents.length > 0) {
+        menu.append(ui.divider(), ui.section("Recently read"));
+        for (const entry of recents) {
+          const title = entry.title || entry.path.split(/[\\/]/).pop() || entry.path;
+          const openInWindow = document.createElement("span");
+          openInWindow.className = "popover-item-action";
+          openInWindow.innerHTML = iconMarkup("window");
+          openInWindow.title = "Open in a new window";
+          openInWindow.addEventListener("click", (event) => {
+            event.stopPropagation();
+            close();
+            void this.newWindow(entry.path);
+          });
+          menu.append(
+            ui.menuItem({
+              label: title,
+              icon: "document",
+              trail: openInWindow,
+              onSelect: () => {
+                close();
+                void this.open(entry.path);
+              },
+            }),
+          );
         }
       }
       return menu;
@@ -1655,29 +1676,37 @@ class App {
       return typeof value === "string" ? value.trim() : "";
     };
 
-    ui.showWindow("Document", () => {
-      const pane = document.createElement("div");
-      pane.className = "pane";
-      pane.append(ui.text("title", text("Title") || name));
+    ui.showWindow(
+      "Document",
+      () => {
+        const body = document.createElement("div");
+        body.className = "window-body";
+        const pane = document.createElement("div");
+        pane.className = "window-pane";
+        pane.append(ui.text("title", text("Title") || name));
 
-      const rows: [string, string][] = [
-        ["Author", text("Author")],
-        ["Subject", text("Subject")],
-        ["Keywords", text("Keywords")],
-        ["Pages", String(pages)],
-        ["Page size", size],
-        ["Made with", text("Creator")],
-        ["Written by", text("Producer")],
-        ["PDF version", text("PDFFormatVersion")],
-        ["Created", readableDate(text("CreationDate"))],
-        ["Changed", readableDate(text("ModDate"))],
-      ];
-      for (const [label, value] of rows) {
-        if (value) pane.append(ui.field(label, selectable(value)));
-      }
-      if (this.path) pane.append(ui.field("File", selectable(this.path)));
-      return pane;
-    });
+        const rows: [string, string][] = [
+          ["Author", text("Author")],
+          ["Subject", text("Subject")],
+          ["Keywords", text("Keywords")],
+          ["Pages", String(pages)],
+          ["Page size", size],
+          ["Made with", text("Creator")],
+          ["Written by", text("Producer")],
+          ["PDF version", text("PDFFormatVersion")],
+          ["Created", readableDate(text("CreationDate"))],
+          ["Changed", readableDate(text("ModDate"))],
+        ];
+        for (const [label, value] of rows) {
+          if (value) pane.append(ui.field(label, selectable(value)));
+        }
+        if (this.path) pane.append(ui.field("File", selectable(this.path)));
+        body.append(pane);
+        return body;
+      },
+      undefined,
+      "tall",
+    );
   }
 
   private async copyToClipboard(text: string, said: string): Promise<void> {
@@ -1689,9 +1718,9 @@ class App {
     }
   }
 
-  /** Zoom and rotation are things you try on, the same as a theme — nothing
-      in here takes you anywhere else, so nothing in here puts the menu away;
-      it redraws in place and the ticks move. */
+  /** A zoom is something you try on, the same as a theme — nothing in here
+      takes you anywhere else, so nothing in here puts the menu away; it
+      redraws in place and the ticks move. */
   showZoomMenu(): void {
     ui.showPopover(
       el.zoomLevel,
@@ -1737,28 +1766,6 @@ class App {
               },
             }),
           );
-          menu.append(
-            ui.divider(),
-            ui.menuItem({
-              label: "Rotate right",
-              icon: "rotateRight",
-              note: isMac ? "⌘R" : "Ctrl+R",
-              onSelect: () => {
-                this.rotate(1);
-                render();
-              },
-            }),
-            ui.menuItem({
-              label: "Rotate left",
-              icon: "rotateLeft",
-              note: isMac ? "⌘L" : "Ctrl+L",
-              onSelect: () => {
-                this.rotate(-1);
-                render();
-              },
-            }),
-          );
-
           menu.append(ui.divider());
           // The presets below are the common answers; this is the rest of
           // them. It starts from what is actually on screen rather than from
@@ -1832,14 +1839,6 @@ class App {
             ui.toggle(this.settings.fullscreen, (on) => void this.toggleFullscreen(on)),
             FULLSCREEN_KEYS,
           ),
-          ui.row(
-            "Presenting",
-            ui.toggle(this.presenting, (on) => {
-              this.togglePresentation(on);
-              if (on) close();
-            }),
-            "The document and nothing else.",
-          ),
         );
 
         menu.append(ui.divider(), ui.section("Reading"));
@@ -1864,17 +1863,17 @@ class App {
         );
 
         menu.append(ui.divider(), ui.section("Pages side by side"));
-        const spreads: [SpreadMode, string, string][] = [
-          ["single", "One page across", ""],
-          ["two", "Two side by side", ""],
-          ["cover", "Two, first page alone", "As a book falls open"],
+        const spreads: [SpreadMode, string, string?][] = [
+          ["single", "One page across", "Default"],
+          ["two", "Two side by side"],
+          ["cover", "Two, cover alone"],
         ];
         for (const [value, label, note] of spreads) {
           menu.append(
             ui.menuItem({
               label,
-              note,
               checked: this.settings.spread_mode === value,
+              note,
               onSelect: () => {
                 this.setSpread(value);
                 close();
@@ -1886,29 +1885,9 @@ class App {
         menu.append(ui.divider());
         menu.append(
           ui.row(
-            "Space between pages",
-            ui.stepper(
-              this.settings.page_gap,
-              { min: 0, max: 64, step: 4 },
-              (value) => this.setPageGap(value),
-              "px",
-            ),
-          ),
-          ui.row(
-            "Trim the margins",
-            ui.toggle(this.settings.trim_margins, (on) => this.setTrimMargins(on)),
-            "Fit the words rather than the paper.",
-          ),
-          ui.row(
             "Recolour pictures too",
             ui.toggle(this.settings.recolor_images, (on) => this.setRecolorImages(on)),
             "Off leaves them as printed.",
-          ),
-          ui.row(
-            "Come back to where I stopped",
-            ui.toggle(this.settings.remember_position, (on) =>
-              this.set("remember_position", on),
-            ),
           ),
           ui.row(
             "Show page count while scrolling",
@@ -1950,11 +1929,11 @@ class App {
       run();
     };
 
-    el.open.addEventListener("click", opens(() => void this.openDialog()));
+    el.open.addEventListener("click", opens(() => this.showOpenMenu()));
     el.welcomeOpen.addEventListener("click", () => void this.openDialog());
     // The close handler runs on the way out, so this saves what a quit saves.
     el.newWindow.addEventListener("click", opens(() => void this.newWindow()));
-    el.quit.addEventListener("click", () => void closeWindow());
+    el.closeWindowBtn.addEventListener("click", () => void closeWindow());
     el.contents.addEventListener("click", opens(() => this.toggleSidebar()));
     el.closeDoc.addEventListener("click", opens(() => this.closeDocument()));
     el.theme.addEventListener("click", opens(() => this.showThemeMenu()));
@@ -1964,6 +1943,8 @@ class App {
     el.prevPage.addEventListener("click", () => this.viewer.previousPage());
     el.nextPage.addEventListener("click", () => this.viewer.nextPage());
     el.find.addEventListener("click", () => this.toggleFind());
+    el.rotateLeft.addEventListener("click", () => this.rotate(-1));
+    el.rotateRight.addEventListener("click", () => this.rotate(1));
 
     el.settings.addEventListener("click", opens(() => this.showSettingsMenu(el.settings)));
 
@@ -1998,7 +1979,7 @@ class App {
       }
     });
 
-    el.pageNumber.title = `Go to a page — ${JUMP_KEYS}, or g`;
+    el.pageNumber.title = `Go to page — ${JUMP_KEYS}, or g`;
     el.pageNumber.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         // What was typed is read as a page label first and a position in the
@@ -2434,7 +2415,6 @@ class App {
   }
 }
 
-/** The part of a web address worth reading back to someone. */
 /** A value in the document window: text the reader can select and copy, since
     half the reason to open that window is to take something out of it. */
 function selectable(value: string): HTMLElement {
@@ -2481,6 +2461,7 @@ function worthCalling(title: string, fileName: string): boolean {
   return true;
 }
 
+/** The part of a web address worth reading back to someone. */
 function hostOf(url: string): string {
   try {
     return new URL(url).host || url;

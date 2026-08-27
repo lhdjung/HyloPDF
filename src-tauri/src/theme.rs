@@ -24,7 +24,11 @@ pub const DEFAULT_DARK: &str = "hylo-dark";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
-    /// Slug, taken from the file name. Not stored in the file itself.
+    /// The stem of the file this theme lives in, verbatim. Not stored in the
+    /// file itself, and not a slug: a theme the app made has a slug for a name
+    /// because `slugify` chose one, and a theme somebody wrote by hand is
+    /// called whatever they called the file. Anything looking for the file has
+    /// to use this exactly — see `path_for`.
     #[serde(default)]
     pub id: String,
     pub name: String,
@@ -216,15 +220,23 @@ pub fn save(dir: &Path, theme: &Theme) -> Result<Theme, String> {
         return Err("A theme needs a name.".into());
     }
     let mut id = if theme.id.trim().is_empty() {
-        // A new theme never lands on top of one that is already there.
+        // A new theme never lands on top of one that is already there. This is
+        // the one place a slug is made rather than kept: a *name* is prose and
+        // has to become a file name somehow.
         unique_id(dir, &slugify(&theme.name))
     } else {
-        slugify(&theme.id)
+        // An id that already exists is the stem of the file the theme lives in
+        // — see `path_for`. Slugifying it here wrote `my-theme.toml` beside the
+        // `My Theme.toml` it was meant to be editing, so a hand-written theme
+        // came back doubled instead of changed.
+        theme.id.trim().to_string()
     };
     if is_built_in(&id) {
         // Editing a built-in makes a copy rather than shadowing the original.
-        id = unique_id(dir, &format!("{id}-custom"));
+        id = unique_id(dir, &format!("{}-custom", slugify(&id)));
     }
+    let path = path_for(dir, &id)
+        .ok_or("A theme cannot be saved under that name — it is not a file name.")?;
 
     let stored = ThemeFile {
         name: theme.name.trim(),
@@ -238,7 +250,7 @@ pub fn save(dir: &Path, theme: &Theme) -> Result<Theme, String> {
     };
     let body = toml::to_string_pretty(&stored).map_err(|e| e.to_string())?;
 
-    atomic_write(&path_for(dir, &id), body.as_bytes())?;
+    atomic_write(&path, body.as_bytes())?;
 
     let mut saved = theme.clone();
     saved.id = id;
@@ -250,24 +262,49 @@ pub fn delete(dir: &Path, id: &str) -> Result<(), String> {
     if is_built_in(id) {
         return Err("Built-in themes cannot be deleted.".into());
     }
-    let path = path_for(dir, &slugify(id));
-    if path.exists() {
-        fs::remove_file(path).map_err(|e| e.to_string())?;
+    let path =
+        path_for(dir, id).ok_or("That is not a theme name, so there is nothing to delete.")?;
+    if !path.exists() {
+        // Not silence. This used to return `Ok(())` for a theme it had failed
+        // to find — because it was looking under a slugified name and the file
+        // is named whatever its author named it — and the app then said
+        // "Deleted X" about a theme still sitting in the list.
+        return Err(format!("{id} is not there to delete."));
     }
-    Ok(())
+    fs::remove_file(path).map_err(|e| e.to_string())
 }
 
-fn path_for(dir: &Path, id: &str) -> PathBuf {
-    dir.join(format!("{id}.toml"))
+/// The file a theme lives in, or nothing if that id could not name one.
+///
+/// An id **is** a file stem: `load_all` reads it off the directory verbatim,
+/// so a theme somebody wrote by hand is called `My Theme` and not `my-theme`,
+/// and everything that goes looking for it has to use the name it actually
+/// has. Slugifying on the way back out is what made `delete` miss the file and
+/// report success, and `save` write a second one beside the first.
+///
+/// Verbatim is not unchecked. An id crosses the bridge from the frontend, so
+/// it has to name a file in this directory and nothing else: no separators, no
+/// walking upwards, nothing empty. Anything else is refused rather than
+/// repaired, because a repaired path is a path pointing somewhere nobody asked
+/// for.
+fn path_for(dir: &Path, id: &str) -> Option<PathBuf> {
+    let name = format!("{id}.toml");
+    if id.trim().is_empty() || Path::new(&name).file_name() != Some(name.as_ref()) {
+        return None;
+    }
+    Some(dir.join(name))
 }
 
+/// A slug nothing in the directory is using yet. `base` comes from `slugify`,
+/// so it is always a name a file can have.
 fn unique_id(dir: &Path, base: &str) -> String {
-    if !path_for(dir, base).exists() && !is_built_in(base) {
+    let free = |id: &str| !is_built_in(id) && path_for(dir, id).is_some_and(|path| !path.exists());
+    if free(base) {
         return base.to_string();
     }
     for n in 2.. {
         let candidate = format!("{base}-{n}");
-        if !path_for(dir, &candidate).exists() && !is_built_in(&candidate) {
+        if free(&candidate) {
             return candidate;
         }
     }
@@ -311,5 +348,116 @@ mod tests {
         let body = toml::to_string_pretty(&stored).unwrap();
         assert!(body.contains("selection_area = \"#123456\""), "{body}");
         assert!(!body.contains("\nselection = "), "{body}");
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("hylopdf-theme-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    fn hand_written(dir: &Path, file: &str, name: &str) {
+        fs::write(
+            dir.join(file),
+            format!("name = {name:?}\ntext = \"#111111\"\nbackground = \"#eeeeee\"\n"),
+        )
+        .expect("theme file");
+    }
+
+    /// The whole argument for keeping themes as plain TOML is that somebody
+    /// can write one by hand — and a file written by hand is exactly the one
+    /// whose name is not already a slug. An id is the file's stem, so a round
+    /// trip through the app has to find the file the author named.
+    #[test]
+    fn a_hand_written_theme_can_be_deleted() {
+        let dir = scratch("delete");
+        hand_written(&dir, "My Theme.toml", "My Theme");
+
+        let listed = load_all(&dir);
+        let mine = listed
+            .iter()
+            .find(|theme| theme.name == "My Theme")
+            .expect("listed");
+        assert_eq!(mine.id, "My Theme", "the id is the file's own stem");
+
+        delete(&dir, &mine.id).expect("delete");
+        assert!(!dir.join("My Theme.toml").exists());
+        assert!(!load_all(&dir).iter().any(|theme| theme.name == "My Theme"));
+    }
+
+    /// And editing one changes it rather than producing a second copy beside
+    /// it under a slugified name.
+    #[test]
+    fn editing_a_hand_written_theme_changes_that_file() {
+        let dir = scratch("edit");
+        hand_written(&dir, "My Theme.toml", "My Theme");
+        let mut mine = load_all(&dir)
+            .into_iter()
+            .find(|theme| theme.name == "My Theme")
+            .expect("listed");
+
+        mine.background = "#222222".into();
+        let saved = save(&dir, &mine).expect("save");
+        assert_eq!(saved.id, "My Theme");
+
+        let files: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|name| !is_built_in(name.trim_end_matches(".toml")))
+            .collect();
+        assert_eq!(files, vec!["My Theme.toml".to_string()], "a copy was made");
+        assert!(fs::read_to_string(dir.join("My Theme.toml"))
+            .unwrap()
+            .contains("#222222"));
+    }
+
+    /// A theme that is not there is said to be not there. Reporting success
+    /// is how "Deleted X" came to be said about a theme still in the list.
+    #[test]
+    fn deleting_something_that_is_not_there_says_so() {
+        let dir = scratch("missing");
+        let problem = delete(&dir, "never-existed").expect_err("should report it");
+        assert!(problem.contains("never-existed"), "{problem}");
+    }
+
+    /// An id crosses the bridge from the frontend, and a file name is the only
+    /// thing it may be.
+    #[test]
+    fn an_id_that_is_not_a_file_name_is_refused() {
+        let dir = scratch("escape");
+        for id in ["../outside", "sub/theme", "", "   "] {
+            assert!(path_for(&dir, id).is_none(), "{id:?} was allowed through");
+            assert!(
+                delete(&dir, id).is_err(),
+                "{id:?} was allowed through delete"
+            );
+        }
+        // And a name with nothing wrong with it still works.
+        assert_eq!(path_for(&dir, "My Theme"), Some(dir.join("My Theme.toml")),);
+    }
+
+    /// A built-in is never overwritten, however it is asked for.
+    #[test]
+    fn editing_a_built_in_saves_a_copy() {
+        let dir = scratch("built-in");
+        install_built_ins(&dir);
+        let original = fs::read_to_string(dir.join(format!("{DEFAULT_DARK}.toml"))).unwrap();
+
+        let mut theme = load_all(&dir)
+            .into_iter()
+            .find(|theme| theme.id == DEFAULT_DARK)
+            .expect("shipped");
+        theme.background = "#010203".into();
+        let saved = save(&dir, &theme).expect("save");
+
+        assert_ne!(saved.id, DEFAULT_DARK);
+        assert!(!saved.built_in);
+        assert_eq!(
+            fs::read_to_string(dir.join(format!("{DEFAULT_DARK}.toml"))).unwrap(),
+            original,
+            "the shipped file was written over"
+        );
     }
 }

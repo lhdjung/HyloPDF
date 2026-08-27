@@ -3,6 +3,7 @@ name = "hylopdf"
 version = "0.1.0"
 description = "HyloPDF — a smooth reading experience"
 authors = ["HyloPDF contributors"]
+license = "MIT OR Apache-2.0"
 edition = "2021"
 rust-version = "1.77.2"
 

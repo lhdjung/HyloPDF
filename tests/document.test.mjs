@@ -52,7 +52,7 @@ test("what the document says about itself, in a window", async () => {
   const app = await openApp({ pdf: PDF });
   try {
     await app.page.click("#doc-title");
-    await app.page.click('#popovers .popover-item:has-text("says about itself")');
+    await app.page.click('#popovers .popover-item:has-text("Information")');
     await app.page.waitForSelector("#windows .window", { timeout: 10_000 });
 
     const shown = await app.page.evaluate(() => ({

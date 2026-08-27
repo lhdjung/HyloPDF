@@ -104,11 +104,6 @@ export class Search {
     private onUpdate: (state: SearchState) => void,
   ) {}
 
-  reset(): void {
-    this.pages.clear();
-    this.clear();
-  }
-
   /** Change how a query is matched. The extracted text stays: only the fold
       and the boundary test depend on these, and both are cheap. */
   setOptions(options: SearchOptions): void {
@@ -347,7 +342,10 @@ export class Search {
     this.pages.set(page, built);
     // The proxy was fetched for its text and has no other work to do here;
     // holding its parsed contents would be a second copy of the document.
-    proxy.cleanup();
+    // But a page can be mounted on screen while the index walks past it, and
+    // `cleanup` cannot see that — `isMounted` is the same door `sidebar.ts`
+    // checks before evicting a thumbnail's proxy, applied here too.
+    if (!this.viewer.isMounted(page)) proxy.cleanup();
     return built;
   }
 

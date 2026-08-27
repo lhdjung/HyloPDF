@@ -10,11 +10,11 @@
  * things it needs through `SettingsHost`, so nothing here can drift out of
  * step with the rest of the interface. */
 
-import { type Settings, type Theme, deleteTheme, isMac, saveTheme } from "./api";
+import { type Settings, type Theme, deleteTheme, isMac, openPath, saveTheme } from "./api";
 import { hydrateIcons } from "./icons";
 import { ACTIONS, GROUPS, type Keymap, describeBinding } from "./keys";
 import * as ui from "./ui";
-import { isDarkTheme, parseColor, selectionArea, selectionInk, toHex } from "./themes";
+import { accentOf, isDarkTheme, parseColor, selectionArea, selectionInk, toHex } from "./themes";
 import type { FitMode, SpreadMode } from "./viewer";
 
 export interface SettingsHost {
@@ -220,7 +220,6 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
   const s = host.settings;
   pane.append(
     ui.text("title", "Reading"),
-    ui.text("lede", "How a document moves and how much of it you see."),
   );
 
   pane.append(
@@ -228,19 +227,19 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
       "Page progression",
       ui.segmented(
         [
-          { value: "continuous" as const, label: "Continuous" },
+          { value: "continuous" as const, label: "Continuous (default)" },
           { value: "paged" as const, label: "One page at a time" },
         ],
         s.scroll_mode,
         (mode) => host.setScrollMode(mode),
       ),
-      "Continuous scrolling is the default, and no shortcut can change it by accident.",
+      "No shortcut can change it by accident.",
     ),
     ui.field(
       "Pages side by side",
       ui.segmented(
         [
-          { value: "single" as const, label: "One" },
+          { value: "single" as const, label: "One (default)" },
           { value: "two" as const, label: "Two" },
           { value: "cover" as const, label: "Two, cover alone" },
         ],
@@ -263,7 +262,7 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
       "Zoom",
       ui.segmented(
         [
-          { value: "width" as const, label: "Fit width" },
+          { value: "width" as const, label: "Fit width (default)" },
           { value: "page" as const, label: "Fit page" },
           { value: "actual" as const, label: "Fixed" },
         ],
@@ -353,7 +352,6 @@ function appearancePage(
 ): void {
   pane.append(
     ui.text("title", "Appearance"),
-    ui.text("lede", "Two colours make a theme: the ink and the paper. The accent, the links and the two selection colours are all worked out from those until you say otherwise."),
   );
 
   pane.append(
@@ -498,15 +496,26 @@ function themeEditor(
     ),
     ui.field(
       "Background",
-      ui.colorField(draft.background, (value) => {
-        draft.background = value;
-        edit.preview(draft);
-      }),
+      // White where it cannot be read, because that is what the renderer
+      // falls back to for paper — `applyTheme` asks `parseColor` for the same
+      // thing. Black is the fallback for ink and the wrong one here.
+      ui.colorField(
+        draft.background,
+        (value) => {
+          draft.background = value;
+          edit.preview(draft);
+        },
+        "#ffffff",
+      ),
       "The colour of the paper behind them.",
     ),
+    // Both of these are derived when the theme does not name them, and the
+    // derivation is the app's own — so the field shows what the page is going
+    // to use rather than a stand-in. `draft.text` was the stand-in, and it is
+    // not what `accentOf` produces for a theme with no accent.
     ui.field(
       "Accent",
-      ui.colorField(draft.accent ?? draft.text, (value) => {
+      ui.colorField(draft.accent ?? toHex(accentOf(draft)), (value) => {
         draft.accent = value;
         edit.preview(draft);
       }),
@@ -514,7 +523,7 @@ function themeEditor(
     ),
     ui.field(
       "Links",
-      ui.colorField(draft.link ?? draft.accent ?? draft.text, (value) => {
+      ui.colorField(draft.link ?? toHex(accentOf(draft)), (value) => {
         draft.link = value;
         edit.preview(draft);
       }),
@@ -603,10 +612,6 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
   const s = host.settings;
   pane.append(
     ui.text("title", "Window"),
-    ui.text(
-      "lede",
-      "How much of the app stays on screen around the document. Each of these is its own switch: full screen fills the screen and changes nothing else.",
-    ),
   );
 
   pane.append(
@@ -657,10 +662,6 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
 function keyboardPage(host: SettingsHost, pane: HTMLElement, refresh: () => void): void {
   pane.append(
     ui.text("title", "Keyboard"),
-    ui.text(
-      "lede",
-      `Everything the app listens for, in one place. ${shortcut("F1 or ⌘/", "F1 or Ctrl+/")} brings you back here.`,
-    ),
   );
 
   // What could not be read comes first: a key that does nothing is otherwise
@@ -699,31 +700,24 @@ function keyboardPage(host: SettingsHost, pane: HTMLElement, refresh: () => void
   );
 
   pane.append(ui.text("group", "Changing keybinds"));
-  // The path on its own row, with nothing beside it. As a field's note it had
-  // to share the width with the path, which on a Mac runs to seventy
-  // characters, so the sentence explaining the file was three words wide.
   pane.append(
     ui.text(
       "note",
       "Every keybind is in the keys file, commented out. Uncomment a line to change its keys.",
     ),
-    ui.field("Keys file", pathValue(join(host.paths.config, "keys.toml"))),
   );
-  if (unbound.length > 0) {
-    pane.append(
-      ui.text(
-        "note",
-        `Not bound to a key: ${unbound.join(", ")}.` +
-          // Not guessable from a row that is simply missing.
-          (isMac && (unbound.includes("quit") || unbound.includes("close-window"))
-            ? " Use ⌘W or ⌘Q."
-            : ""),
-      ),
-    );
+  if (isMac && (unbound.includes("quit") || unbound.includes("close-window"))) {
+    // Not guessable from a row that is simply missing.
+    pane.append(ui.text("note", "⌘W closes a window; ⌘Q quits."));
   }
   const buttons = document.createElement("div");
   buttons.className = "pane-actions";
   buttons.append(
+    ui.button("Open keys file", () => {
+      void openPath(join(host.paths.config, "keys.toml")).catch((error) =>
+        ui.notice(messageOf(error)),
+      );
+    }),
     // The themes directory is watched and this file is not: a watch on the
     // config directory would fire on every `settings.toml` write the app makes
     // itself, which is several a minute while somebody is scrolling. So there
@@ -768,32 +762,30 @@ function aboutPage(host: SettingsHost, pane: HTMLElement): void {
   );
 
   pane.append(
-    ui.field("Settings file", pathValue(join(host.paths.config, "settings.toml"))),
-    ui.field("Themes folder", pathValue(host.paths.themes)),
-  );
-
-  pane.append(
     ui.text(
       "note",
-      "Both are plain text. Nothing is stored anywhere else, and nothing leaves this computer.",
+      "Your settings and your themes are plain text. Nothing is stored anywhere else, and nothing leaves this computer.",
     ),
   );
+
+  const buttons = document.createElement("div");
+  buttons.className = "pane-actions";
+  buttons.append(
+    ui.button("Open settings file", () => {
+      void openPath(join(host.paths.config, "settings.toml")).catch((error) =>
+        ui.notice(messageOf(error)),
+      );
+    }),
+    ui.button("Open themes folder", () => {
+      void openPath(host.paths.themes).catch((error) => ui.notice(messageOf(error)));
+    }),
+  );
+  pane.append(buttons);
 }
 
 function join(dir: string, name: string): string {
   const separator = dir.includes("\\") ? "\\" : "/";
   return `${dir}${dir.endsWith(separator) ? "" : separator}${name}`;
-}
-
-function pathValue(value: string): HTMLElement {
-  const element = document.createElement("span");
-  element.className = "field-note";
-  element.style.userSelect = "text";
-  element.style.wordBreak = "break-all";
-  element.style.textAlign = "right";
-  element.style.maxWidth = "440px";
-  element.textContent = value;
-  return element;
 }
 
 /* ----------------------------------------------------------------- odds */

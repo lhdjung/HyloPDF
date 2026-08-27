@@ -1,186 +1,131 @@
 # HyloPDF
 
-A calm, spacious PDF reader: simple UI, easy dark mode, and ergonomic controls.
+A PDF reader that gets out of the way. One thin toolbar, a document that fills
+the rest of the window, and dark mode that actually recolours the page instead
+of dimming the screen.
 
-This is the working implementation of the description in [AGENTS.md](AGENTS.md).
+It is small, quick to open a book of any size, and it puts you back on the page
+you left.
 
-## Installing
+## Getting it
 
-Each release on the [releases page](../../releases) carries an installer for
-every platform:
+Every [release](../../releases) carries an installer for each platform:
 
 | | |
 |---|---|
-| macOS | `HyloPDF_<version>_aarch64.dmg` for Apple silicon, `_x64.dmg` for Intel |
+| macOS | `HyloPDF_<version>_aarch64.dmg` (Apple silicon) or `_x64.dmg` (Intel) |
 | Linux | a `.deb`, an `.rpm`, or an AppImage |
-| Windows | an `.msi`, or `-setup.exe` for the NSIS installer |
+| Windows | an `.msi`, or `-setup.exe` |
 
-Until the builds are signed, macOS will say the app cannot be checked for
-malicious software: open it once from the right-click menu, or allow it in
-System Settings → Privacy & Security.
+The builds are not signed yet, so the first launch on macOS needs a right-click
+→ Open, or a nudge in System Settings → Privacy & Security. Windows
+SmartScreen will want "More info" → "Run anyway".
 
-## Running it
+## Reading
 
-```sh
-npm install
-npm run tauri dev      # development, with hot reload for the interface
-npm test               # the interface, headlessly — takes nobody's screen
-npm run tauri build    # a release build and an installer in src-tauri/target/release
-```
+Drop a PDF on the window, press ⌘O, or double-click a file — HyloPDF registers
+itself for `.pdf`, and a second document opens in a second window rather than
+pushing the first one out. Quit with something open and it comes back next
+time, on the page you left it.
 
-`HyloPDF path/to/file.pdf` opens a document straight away, and the app
-registers itself for `.pdf` files, so "Open with" works too. Opening a second
-document hands it to the window that is already open rather than starting
-another copy.
+Pages scroll continuously and fit the width of the window. Both are settings,
+but they are the defaults for a reason.
 
-Documents are read a piece at a time rather than loaded whole, so a very large
-PDF opens as quickly as a small one and costs about as much to keep open.
-
-## Keyboard
-
-The shortcuts below use ⌘ on macOS and Ctrl elsewhere.
+**A few keys worth knowing.** ⌘ on macOS, Ctrl elsewhere. **F1** shows the
+whole list, including anything you have rebound.
 
 | | |
 |---|---|
-| ⌘O | Open a document |
-| ⌘, | Settings |
-| F1, or ⌘/ | Every shortcut, in one list |
-| ⌘P | Hand the document to a program that prints |
-| ⌘A | Select the text of the page you are on |
-| ⌘⇧C | Copy what is selected, with its page number |
-| ⌘⇧B | Mark this page, or take the mark off |
-| ⌘F | Search this document |
-| Enter / ⇧Enter | Next / previous match, from the search field |
-| ⌘G / ⌘⇧G | Next / previous match, from anywhere |
-| The count in the find bar | Every match, listed with the line it is on |
-| ⌘D | Dark mode on or off |
-| ⌘B | Show or hide the contents panel |
-| ⌘T | Show or hide the toolbar |
-| ⌘+ / ⌘− / ⌘0 | Zoom in, zoom out, back to fit width |
-| ⌘1 / ⌘2 | Actual size, fit the whole page |
-| ⌘R / ⌘L | Turn the page right, turn it left |
-| ⌘⇧F, or ⌃⌘F on macOS, or F11 | Full screen |
-| ⌘⇧P | Presenting: full screen with nothing else on it |
-| Escape | Close the search bar, or leave full screen |
-
-Moving around a document:
-
-| | |
-|---|---|
+| ⌘F | Search — the match count opens a list of every hit |
+| ⌘G / ⌘⇧G | Next / previous match |
 | → / ← | Next / previous page |
-| ↓ / ↑, or j / k | A little down, a little up |
 | Space / ⇧Space | Down a screen, up a screen |
-| Page Down / Page Up | Down a screen, up a screen |
-| Home / End | First / last page |
-| g | Jump to a page number — or to a page label, like `xii` |
-| ⌘[ / ⌘], or ⌥← / ⌥→ | Back to where you jumped from, and forward again |
+| p | Go to a page number, or a label like `xii` |
+| ⌘[ / ⌘] | Back to where you jumped from, and forward again |
+| ⌘D | Dark mode |
+| ⌘B | Contents, marks and thumbnails |
+| ⌘T | Hide the toolbar; ⌘⇧F for full screen |
+| ⌘⇧B | Put a pin in this page |
+| ⌘⇧C | Copy what you selected, with its page number |
 
-Two pages can stand side by side — Settings → Reading, or the Settings menu in
-the bar. "Two, cover alone" leaves page one on its own, which is how a book
-falls open: page one is a right-hand page, so pairing it with page two puts
-every spread after it out by one.
+Vim's `j k h l`, `g g` and `G` work too, and every key can be changed —
+Settings → Keyboard has a button that opens `keys.toml` for you.
 
-There is deliberately no shortcut for the page layout. Continuous scrolling is
-the default and switching away from it should take a decision, not a slip of
-the fingers.
+**Two worth finding.** Under Settings → Reading, *Trim the margins* measures
+where the ink actually starts and gives the white edges back to the words,
+which on a scan is a quarter of the window. *Pages side by side* uses a wide
+window the way a book does; "Two, cover alone" keeps page one on its own, so
+every spread after it falls the way it was printed.
 
-Scanned books and anything typeset with an inch of white down each side spend
-a quarter of the window on paper. **Trim the margins** measures where the ink
-starts — over a sample of the pages, so every page keeps the same scale — and
-gives that room back to the words. It is off until you ask for it.
-
-## Marks
-
-⌘⇧B puts a pin in the page you are on; the Contents panel lists your marks
-above the document's own contents, and a mark is named for the section it
-falls in when the document says. Nothing is written into the PDF — a mark is a
-page number in `library.toml`, beside the page each document was left on.
-
-Notes somebody else left in a document can be read: pdf.js draws the sticky
-note and the highlight into the page, and pressing either shows what it says.
-Writing one is a different matter — see below.
-
-## What it does not do
-
-HyloPDF reads. It does not annotate, fill in forms, or print — and of those,
-printing is the one that answers back rather than doing nothing: ⌘P hands the
-document to Preview, or to whatever this system opens PDFs with, and says so.
-Printing well needs a print dialog — a page range, a paper size, a printer, a
-preview — and every shortcut around writing one ends with four hundred pages
-coming out of a printer nobody chose.
+**Marks** (⌘⇧B) are pins, listed in the sidebar above the document's own
+contents and named for the section they fall in. Nothing is written into the
+PDF. Notes somebody else left in a document show up and can be read; writing
+one is not something HyloPDF does.
 
 ## Themes
 
-HyloPDF follows the machine: the light theme while the system is light, the
-dark one when it turns dark, and the two are whichever you last chose. Picking
-a theme that disagrees with the system — or pressing ⌘D — turns the following
-off, since at that point you would rather decide yourself. The switch is in
-the Theme menu and on the Appearance page.
+Fourteen ship with it, from Sepia to Gruvbox to Tokyo Night. HyloPDF follows
+your system between a light theme and a dark one; choosing a theme yourself, or
+pressing ⌘D, takes that over.
 
-A theme is a small TOML file. The fourteen that ship with HyloPDF are written into
-your theme folder on every run, so they can be read and copied, and so a change
-to a shipped theme reaches a machine that already has the old one. The embedded
-copies are the authoritative ones: a built-in edited in place is overwritten,
-while editing one through the app saves a copy under a name of its own, which
-is never touched. Each shipped file says as much at the top of it, so nobody
-finds that out by losing an afternoon's work.
-
-```
-~/Library/Application Support/app.hylopdf/themes/   (macOS)
-~/.config/app.hylopdf/themes/                       (Linux)
-%APPDATA%\app.hylopdf\themes\                       (Windows)
-```
-
-A whole theme is five lines:
+A theme is a small file you can write by hand, in `themes/` beside the
+settings:
 
 ```toml
 name = "Hylo Dark"
 text = "#e9eaee"
 background = "#24272f"
 accent = "#8fb0d4"
-# link = "#8ec5e8"           # links in the document; the accent if left out
-# selection_area = "#44475a" # behind selected text; from the accent if left out
+# link = "#e0a271"           # links in the document; the accent if left out
+# selection_area = "#7a4247" # behind selected text; from the accent if left out
 # selection_text = "#f8eeec" # the ink on it; from selection_area if left out
 # recolor = false            # leave the document as printed, theme only the app
 ```
 
-Two colours are enough because everything else — the toolbar, the borders, the
-muted text, the shadow under a page — is derived from them. Documents are
-mapped onto those two colours by luminance, so black ink lands on the text
-colour, white paper on the background, and a grey rule stays a grey rule.
+Two colours are enough: everything else is worked out from them, and the page
+is mapped onto them by brightness, so black type lands on your text colour and
+white paper on your background. A figure keeps its hues. Save the file and the
+open document repaints. The theme editor in the app writes the same files, so
+you can start in one and finish in the other.
 
-The theme editor in the app writes the same files; anything you save there can
-be edited by hand afterwards, and anything you write by hand shows up in the
-app.
-
-## Settings
-
-HyloPDF starts on the document that was open when you last quit. Closing a
-document yourself means you have finished with it, and it is not reopened;
-`reopen_last_document = false` turns the whole thing off.
-
-Settings live next to the themes in `settings.toml`, one flat table of plain
-values, and the file is yours to edit. Every setting is written on its own:
-changing one never rewrites another, and a key HyloPDF does not recognise is
-carried through untouched rather than dropped.
-
-Where you stopped reading is remembered per document in `library.toml`, which
-is reading history rather than configuration and so keeps its own file.
-
-## How it is put together
+## Where your things live
 
 ```
-src-tauri/     Rust: settings, themes, reading history, window state
-  themes/      the built-in theme files, embedded in the binary
-src/           the interface: viewer, sidebar, search, themes, menus
-public/pdfjs/  character maps, standard fonts, colour profiles, wasm decoders
+~/Library/Application Support/app.hylopdf/   macOS
+~/.config/app.hylopdf/                       Linux
+%APPDATA%\app.hylopdf\                       Windows
 ```
 
-The viewer measures every page up front, so the scrollbar tells the truth from
-the first frame, then keeps only the pages near the viewport in the DOM. A page
-is drawn once per zoom level and theme; the theme is baked into the bitmap with
-canvas blend modes rather than a CSS filter, so scrolling afterwards costs
-nothing.
+`settings.toml` is one flat table of plain values, `keys.toml` your keyboard,
+`themes/` your themes, and `library.toml` the page each document was left on.
+All of them are yours to edit; HyloPDF changes one setting at a time and leaves
+anything it does not recognise alone.
 
-## Name
-HyloPDF is named after the [rusty-barred owl](https://en.wikipedia.org/wiki/Rusty-barred_owl), *Strix hylophila*. Night owls might appreciate dark themes. Also, Rust.
+## What it does not do
+
+It reads. It does not annotate or fill in forms, and ⌘P hands the document to
+whatever your system prints PDFs with rather than pretending to have a print
+dialog of its own.
+
+## Building it
+
+```sh
+npm install
+npm run tauri dev      # the app, with the interface hot-reloading
+npm test               # the whole interface, headlessly
+npm run tauri build    # installers, in src-tauri/target/release
+```
+
+[AGENTS.md](AGENTS.md) is the long version: what the app is meant to be, and
+how the one that exists is put together.
+
+## Licence
+
+MIT or Apache-2.0, whichever suits you — both are in [LICENSE](LICENSE).
+[THIRD-PARTY.md](THIRD-PARTY.md) lists what a built app carries with it, all of
+it permissive.
+
+## The name
+
+*Strix hylophila*, the [rusty-barred owl](https://en.wikipedia.org/wiki/Rusty-barred_owl).
+Night owls appreciate a dark theme. Also, Rust.

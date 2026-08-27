@@ -107,13 +107,28 @@ fn path(dir: &Path) -> PathBuf {
     dir.join("settings.toml")
 }
 
-fn from_toml(value: toml::Value) -> Value {
+/// A setting's value, as JSON. `None` for anything that is not a scalar.
+///
+/// This used to stringify an array, a table or a datetime — and a string
+/// passes `same_shape` for every setting whose default is a string, so the
+/// shape check below was defeated by the conversion in front of it before it
+/// ever ran. `theme = ["dracula"]` reached the frontend as the *text*
+/// `["dracula"]`, and `scroll_mode = 1979-05-27` reached it as
+/// `{ "$__toml_private_datetime" = "1979-05-27" }` — a `scroll_mode` that is
+/// neither of the two words its type says it can be.
+///
+/// Nothing here reads a datetime or a list, so refusing them costs nothing
+/// this version wants. What is not lost with them is the key: `write` leaves
+/// alone anything on disk that this table does not know about, so a setting
+/// belonging to a version that is not this one survives being written by it —
+/// which is what the promise about downgrades in `load` is worth.
+fn from_toml(value: toml::Value) -> Option<Value> {
     match value {
-        toml::Value::String(s) => json!(s),
-        toml::Value::Integer(i) => json!(i),
-        toml::Value::Float(f) => json!(f),
-        toml::Value::Boolean(b) => json!(b),
-        other => json!(other.to_string()),
+        toml::Value::String(s) => Some(json!(s)),
+        toml::Value::Integer(i) => Some(json!(i)),
+        toml::Value::Float(f) => Some(json!(f)),
+        toml::Value::Boolean(b) => Some(json!(b)),
+        _ => None,
     }
 }
 
@@ -146,9 +161,12 @@ fn to_toml(value: &Value) -> Option<toml::Value> {
 /// it, and nothing anywhere had said no.
 ///
 /// A value of the wrong shape is dropped rather than repaired, so the default
-/// stands and the app is usable. Unknown keys are still carried through
-/// untouched — those belong to a version that is not this one, and dropping
-/// them is how a downgrade eats your settings.
+/// stands and the app is usable. Unknown keys are still carried through —
+/// those belong to a version that is not this one, and dropping them is how a
+/// downgrade eats your settings. An unknown key holding something that is not
+/// a scalar cannot come through *here*, because everything this hands over is
+/// a setting the frontend's types describe; it survives on disk instead, which
+/// `write` is where.
 pub fn load(dir: &Path) -> Settings {
     let known = defaults();
     let mut settings = known.clone();
@@ -159,7 +177,9 @@ pub fn load(dir: &Path) -> Settings {
         return settings;
     };
     for (key, value) in table {
-        let value = from_toml(value);
+        let Some(value) = from_toml(value) else {
+            continue;
+        };
         match known.get(&key) {
             Some(default) if !same_shape(default, &value) => continue,
             _ => settings.insert(key, value),
@@ -168,8 +188,24 @@ pub fn load(dir: &Path) -> Settings {
     settings
 }
 
+/// Write the table out, over whatever is already there.
+///
+/// Started from the file rather than from nothing, and that is the whole of
+/// what keeps the downgrade promise honest. `load` hands the frontend scalars
+/// and only scalars, so a key belonging to a later version that holds a list
+/// or a table cannot travel through it — and a write built from `load`'s
+/// answer alone would therefore delete it. Read here, left exactly as found,
+/// and only the keys this version actually knows about are replaced.
+///
+/// Safe to read again: `set_many` holds `LOCK` across the load and this write,
+/// so nothing else in this process can have moved the file in between.
 fn write(dir: &Path, settings: &Settings) -> Result<(), String> {
-    let mut table = toml::Table::new();
+    let known = defaults();
+    let mut table = fs::read_to_string(path(dir))
+        .ok()
+        .and_then(|body| body.parse::<toml::Table>().ok())
+        .unwrap_or_default();
+    table.retain(|key, _| !known.contains_key(key));
     for (key, value) in settings {
         if let Some(scalar) = to_toml(value) {
             table.insert(key.clone(), scalar);
@@ -347,6 +383,66 @@ something_a_later_version_added = "kept"
             loaded.get("something_a_later_version_added"),
             Some(&json!("kept"))
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The shape check is only worth what the conversion in front of it lets
+    /// through. Every wrong *scalar* was already refused; a value that is not
+    /// a scalar at all was stringified first — and a string passes for any
+    /// setting whose default is a string, so this was the one path through.
+    #[test]
+    fn a_value_that_is_not_a_scalar_cannot_stand_in_for_one() {
+        let dir = std::env::temp_dir().join(format!("hylopdf-scalar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.toml"),
+            r#"
+theme = ["dracula"]
+scroll_mode = 1979-05-27
+show_toolbar = { yes = true }
+page_gap = 20
+"#,
+        )
+        .unwrap();
+
+        let loaded = load(&dir);
+        // Each of these used to arrive as text: `["dracula"]`, and a
+        // `scroll_mode` spelled `{ "$__toml_private_datetime" = ... }` under a
+        // type that says it is one of two words.
+        assert_eq!(loaded.get("theme"), defaults().get("theme"));
+        assert_eq!(loaded.get("scroll_mode"), Some(&json!("continuous")));
+        assert_eq!(loaded.get("show_toolbar"), Some(&json!(true)));
+        // And the line beside them that is perfectly good still lands.
+        assert_eq!(loaded.get("page_gap"), Some(&json!(20)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A setting belonging to a version that is not this one survives being
+    /// written by this one, whatever shape it is in. `load` cannot carry a
+    /// list or a table — everything it hands over is a scalar the frontend's
+    /// types describe — so the file itself is what remembers.
+    #[test]
+    fn a_later_versions_setting_survives_a_write_by_this_one() {
+        let dir = std::env::temp_dir().join(format!("hylopdf-downgrade-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.toml"),
+            "page_gap = 16\nfuture_scalar = \"kept\"\nfuture_list = [1, 2, 3]\n\n[future_table]\na = 1\n",
+        )
+        .unwrap();
+
+        set_many(&dir, vec![("page_gap".into(), json!(24))]).expect("write");
+
+        let body = std::fs::read_to_string(dir.join("settings.toml")).unwrap();
+        let table: toml::Table = body.parse().expect("readable TOML");
+        assert_eq!(table["page_gap"].as_integer(), Some(24), "{body}");
+        assert_eq!(table["future_scalar"].as_str(), Some("kept"), "{body}");
+        assert!(table["future_list"].is_array(), "{body}");
+        assert!(table["future_table"].is_table(), "{body}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

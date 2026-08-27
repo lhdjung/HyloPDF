@@ -10,7 +10,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { openApp } from "../scripts/ui-harness.mjs";
+import { MOD, openApp } from "../scripts/ui-harness.mjs";
 
 const PDF = "tests/fixtures/notext.pdf";
 
@@ -101,8 +101,11 @@ test("and it can be put back", async () => {
   const app = await openApp({ pdf: PDF, settings: { trim_margins: true } });
   try {
     await settled(app, INK);
-    await app.page.click("#settings");
-    await app.page.click('#popovers .popover-row:has(label:text-is("Trim the margins")) .switch');
+    await app.press(`${MOD}+,`);
+    await app.page.waitForSelector("#windows .window", { timeout: 10_000 });
+    await app.page.click(
+      '#windows .field:has(.field-label:text-is("Trim the margins")) .switch',
+    );
     await settled(app, WHOLE);
     const now = await shape(app);
     assert.ok(Math.abs(now.page - WHOLE) < 0.02, `page ratio was ${now.page.toFixed(3)}`);

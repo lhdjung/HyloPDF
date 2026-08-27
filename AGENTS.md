@@ -1252,6 +1252,37 @@ push. They come in under other names now, and a macOS-only step promotes the
 ones that carry something. An unsigned macOS build is quarantined anywhere but
 the machine that made it.
 
+## The licence
+
+MIT **or** Apache-2.0, at the taker's option, which is the Rust ecosystem's
+own arrangement. Both texts are in `LICENSE`; the pair is named as the SPDX
+expression `MIT OR Apache-2.0` in `package.json`, in `Cargo.toml` and in
+`tauri.conf.json`, and `bundle.licenseFile` points the installers at the same
+file so a `.deb` and an `.msi` say what the repository says.
+
+Nothing in the tree forced this or anything stronger: pdf.js is Apache-2.0,
+Tauri and nearly every crate under it are MIT or Apache-2.0, the handful of
+MPL-2.0 crates are copyleft per file and unmodified, and the webview is the
+system's rather than ours. The choice was free, and offering both is strictly
+more permissive than offering either — MIT is the short one every legal review
+already knows, Apache-2.0 is the one with an express patent grant, and a taker
+who needs one of those does not have to argue for it.
+
+**One file, not two.** The convention elsewhere is `LICENSE-MIT` beside
+`LICENSE-APACHE`, and the reason for departing from it is the reason this
+codebase keeps departing from it: a bundler takes one path, and pointing it at
+one of a pair would have shipped installers that name a licence the project
+does not offer alone. So `LICENSE` opens with the "either of … at your option"
+statement and carries both texts under it, and there is exactly one copy of
+each in the tree.
+
+**Attribution is the one obligation, and it is discharged by files that
+travel.** `THIRD-PARTY.md` says what is bundled and where each licence text
+lives, and `sync-pdfjs.mjs` copies pdf.js's own `LICENSE` beside the runtime
+data it already copies — the fonts, the decoders and the colour profile each
+carry theirs already. Adding a bundled component means a row in that table and,
+if its licence text does not already come with it, a copy that ships.
+
 ## Releasing a version
 
 Releases are manual and nothing else triggers them. `release.yml` is a

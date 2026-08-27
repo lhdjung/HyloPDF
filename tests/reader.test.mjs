@@ -602,19 +602,38 @@ test("menus answer the keyboard", async (t) => {
   });
 });
 
-test("the document's name is the way to another document", async () => {
-  // The recently-read list used to live on the start screen and nowhere else,
-  // which is the one screen a reader who is reading something cannot see.
+test("the document's name is what can be done with the document", async () => {
+  // Opening something else is the Open button's menu now — this one is about
+  // the document already on screen.
   await app.page.click("#doc-title");
   await app.page.waitForTimeout(200);
   const items = await app.page.evaluate(() =>
     [...document.querySelectorAll("#popovers .popover-item")].map((el) => el.textContent),
   );
+  assert.ok(items.some((label) => label?.includes("Copy path")));
   assert.ok(
-    items.some((label) => label?.includes("Open a document")),
+    items.some((label) => label?.includes("Information")),
     `the title menu offered ${JSON.stringify(items)}`,
   );
-  assert.ok(items.some((label) => label?.includes("Copy path")));
+  assert.ok(!items.some((label) => label?.includes("Open a document")));
+  await app.press("Escape");
+  await app.page.waitForTimeout(150);
+  assert.equal((await app.state()).menuOpen, false);
+});
+
+test("the Open button is the way to another document", async () => {
+  // The recently-read list used to live on the start screen and nowhere else,
+  // which is the one screen a reader who is reading something cannot see.
+  await app.page.click("#open");
+  await app.page.waitForTimeout(200);
+  const items = await app.page.evaluate(() =>
+    [...document.querySelectorAll("#popovers .popover-item")].map((el) => el.textContent),
+  );
+  assert.ok(
+    items.some((label) => label?.includes("Open document")),
+    `the Open menu offered ${JSON.stringify(items)}`,
+  );
+  assert.ok(items.some((label) => label?.includes("New window")));
   await app.press("Escape");
   await app.page.waitForTimeout(150);
   assert.equal((await app.state()).menuOpen, false);
@@ -918,12 +937,12 @@ test("printing says what it can and cannot do", async () => {
 test("the way out is on the start screen and nowhere else", async () => {
   const seen = () =>
     app.page.evaluate(() => {
-      const button = document.getElementById("quit");
+      const button = document.getElementById("close-window-btn");
       return button.getBoundingClientRect().width > 0 && button.offsetParent !== null;
     });
 
   // A document is open by the time this runs; the start screen is behind it.
-  assert.equal(await seen(), false, "the quit button showed over a document");
+  assert.equal(await seen(), false, "the close-window button showed over a document");
 
   await app.page.click("#close-doc");
   await app.page.waitForTimeout(300);

@@ -5,12 +5,15 @@ order = 2
 text = "#e9eaee"
 background = "#24272f"
 accent = "#8fb0d4"
-# A calm blue for links: clearly not body text, and nowhere near a warning.
-link = "#8ec5e8"
+# Hylo Light's copper, lit for a dark page — the same warmth, and the same
+# reasons: not the accent, which the chrome has taken; not the selection's red,
+# which belongs to the reader; and warm, against a ground that is not.
+link = "#e0a271"
 # The same warm red as Hylo Light's, banked down to sit on a dark page: the
 # derived colour here is the accent's blue over a slate background, which is
-# blue on blue, and the one hue this theme does not otherwise use reads at a
-# glance where a lighter shade of the ground does not. A warm off-white on top
+# blue on blue, and a red reads at a glance where a lighter shade of the ground
+# does not. It is the one colour the theme keeps for the reader — the links
+# are warm too, but a copper letter and a maroon band are not each other. A warm off-white on top
 # rather than the theme's own cool ink, which would fight the band under it.
 selection_area = "#7a4247"
 selection_text = "#f8eeec"

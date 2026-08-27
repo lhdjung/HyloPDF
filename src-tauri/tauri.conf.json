@@ -33,8 +33,11 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "license": "MIT OR Apache-2.0",
+    "licenseFile": "../LICENSE",
+    "copyright": "Copyright © 2026 Lukas Jung and the HyloPDF contributors",
     "shortDescription": "A calm PDF reader",
-    "longDescription": "HyloPDF is a quiet, fast PDF reader: continuous scrolling, readable themes, and a window that gets out of the way.",
+    "longDescription": "HyloPDF is a calm, fast PDF reader: no clutter, easy dark mode, flexible themes.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

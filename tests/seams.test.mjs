@@ -60,6 +60,41 @@ test("viewer.ts is the only file that imports pdf.js for rendering", () => {
   assert.deepEqual(offenders, [], "these import pdf.js itself rather than only its types");
 });
 
+/** Every JSDoc block comment, as an offset pair, so two of them can be
+    asked whether anything but whitespace lies between them. */
+function docBlocks(body) {
+  return [...body.matchAll(/\/\*\*[\s\S]*?\*\//g)].map((match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+}
+
+test("no doc comment is orphaned above the one below it", () => {
+  // AGENTS.md records this exact fault once already — a comment left above
+  // `joinRuns` when the function it described was `tintLinks` — and a critical
+  // read later found four more of it: a doc comment sits above a function, but
+  // describes the *next* one down, with nothing but whitespace between the two
+  // comment blocks to say the first is not where it belongs. A stacked pair
+  // like that is invisible to a reader who trusts the comment nearest the code
+  // and never checked which symbol wrote it.
+  const offenders = [];
+  for (const { name, body } of sources) {
+    const blocks = docBlocks(body);
+    for (let i = 1; i < blocks.length; i++) {
+      const between = body.slice(blocks[i - 1].end, blocks[i].start);
+      if (between.length > 0 && /^\s*$/.test(between)) {
+        const line = body.slice(0, blocks[i - 1].start).split("\n").length;
+        offenders.push(`${name}:${line}`);
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    "two doc comments in a row with nothing between them — the first describes whatever follows the second",
+  );
+});
+
 test("the packaged dependencies are the ones that ship", () => {
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
   const deps = Object.keys(pkg.dependencies ?? {});

@@ -404,8 +404,14 @@ export async function revealDocument(path: string): Promise<void> {
   await invoke("reveal_document", { path });
 }
 
-/** The name of whatever shows files here, for a menu item that has to say
-    where it is about to take you. */
+/** Open a file or folder with whatever this system opens it with by
+    default — a text editor for a settings file, the file manager for a
+    folder. */
+export async function openPath(path: string): Promise<void> {
+  if (!hasBackend) throw new Error("Only the app can open a file on disk.");
+  await invoke("open_path", { path });
+}
+
 /** What this system prints PDFs with, by name, for the sentence that says so. */
 export const systemViewerName = isMac ? "Preview" : "your PDF viewer";
 
@@ -419,6 +425,8 @@ export async function printDocument(path: string): Promise<void> {
   await invoke("print_document", { path });
 }
 
+/** The name of whatever shows files here, for a menu item that has to say
+    where it is about to take you. */
 export const fileManagerName = isMac
   ? "Finder"
   : /win/i.test(navigator.platform || navigator.userAgent)
@@ -528,8 +536,8 @@ export async function onExternalDocument(
 }
 
 /** Theme files rewritten on the disk, by an editor or by the app itself.
-    The whole set comes with the event — there are seven of them and a handful
-    of colours each, so asking again would cost more than sending it. */
+    The whole set comes with the event — fourteen themes of five colours each
+    at minimum, so asking again would cost more than sending it. */
 export async function onThemesChanged(
   handler: (themes: Theme[]) => void,
 ): Promise<void> {
@@ -571,12 +579,12 @@ export async function onWindowGeometryChange(handler: () => void): Promise<void>
   await window.onMoved(() => handler());
 }
 
-/** Ask for the window to go, the same way its close button does — the close
-    handler below runs first, so the place in the document and anything not
-    yet written are saved on the way out. In a browser there is no window of
-    ours to close, so this does nothing. */
 /** Close this window. It was the whole app when there was only ever one; with
-    more than one it is the window, and the app goes when the last one does. */
+    more than one it is the window, and the app goes when the last one does.
+    This asks for it the same way the close button does — the close handler
+    below runs first, so the place in the document and anything not yet
+    written are saved on the way out. In a browser there is no window of ours
+    to close, so this does nothing. */
 export async function closeWindow(): Promise<void> {
   if (!hasBackend) return;
   await getCurrentWindow().close();

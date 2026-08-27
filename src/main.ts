@@ -265,10 +265,16 @@ class App {
     // A document named on the command line, or double-clicked to start the
     // app, beats the one that happened to be open last: it is what this
     // launch was *for*.
+    //
+    // `open_document` is empty unless there is really something to reopen —
+    // `reopen_last_document` is read on the Rust side now, by `bootstrap` and
+    // by `setup` together. It used to arrive whatever the setting said, with
+    // this line the only thing declining it, and that left Rust believing the
+    // launch window held a document it was never going to show: a file
+    // double-clicked afterwards opened a second window rather than filling
+    // the empty one already on screen.
     if (startWith) await this.open(startWith);
-    else if (this.settings.reopen_last_document && data.open_document) {
-      await this.open(data.open_document);
-    }
+    else if (data.open_document) await this.open(data.open_document);
 
     // Starting up in full screen with the toolbar away means starting up with
     // nothing on screen to press, so say once how to get back out.

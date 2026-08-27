@@ -246,6 +246,23 @@ struct Opened {
     offset: f64,
 }
 
+/// Whether the reader asked to come back to what was open last.
+///
+/// One reading, in one place, because two sides of the app act on it: the
+/// launch window's own document (`bootstrap`) and every other window the last
+/// session had (`Restore`, in `setup`) — and `setup` also *claims* the launch
+/// window in `OpenDocuments` on the strength of it. That claim was made
+/// unconditionally, so with the setting off the launch window sat on the start
+/// screen while this side believed it was holding a document: `idle_window`
+/// skipped it, and the next file double-clicked opened a second window rather
+/// than filling the empty one already on screen.
+fn wants_reopening(settings: &settings::Settings) -> bool {
+    settings
+        .get("reopen_last_document")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true)
+}
+
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -276,13 +293,20 @@ fn file_name(path: &str) -> String {
 #[tauri::command]
 async fn bootstrap(window: WebviewWindow, paths: State<'_, Paths>) -> Result<Bootstrap, String> {
     let stored = library::prune(&library::load(&paths.config));
-    let reopen = if window.label() == MAIN {
+    let settings = settings::load(&paths.config);
+    // Only the launch window has anything to come back to, and only when the
+    // reader asked to come back to it. The setting is asked here rather than
+    // left to the frontend: this used to hand over the document whatever it
+    // said and rely on `main.ts` to ignore the answer, which meant the two
+    // sides of the bridge disagreed about whether the launch window had
+    // anything in it. See `reopening` in `setup`, which is the other half.
+    let reopen = if window.label() == MAIN && wants_reopening(&settings) {
         stored.open.first().cloned().unwrap_or_default()
     } else {
         String::new()
     };
     Ok(Bootstrap {
-        settings: settings::load(&paths.config),
+        settings,
         themes: theme::load_all(&paths.themes),
         library: stored.files,
         open_document: reopen,
@@ -1470,7 +1494,15 @@ pub fn run() {
             // Started after the shipped themes are written, so that writing
             // them is not itself the first thing it reports.
             app.manage(watch::start(app.handle().clone(), themes.clone()));
-            let reopen = library::prune(&library::load(&config)).open;
+            // Empty when the reader would rather start fresh, so that nothing
+            // below this line has to remember to ask again — including the
+            // claim on the launch window, which is where forgetting cost most.
+            let reopening = wants_reopening(&stored);
+            let reopen = if reopening {
+                library::prune(&library::load(&config)).open
+            } else {
+                Vec::new()
+            };
             app.manage(Paths { config, themes });
             app.manage(OpenFiles::default());
             app.manage(OpenDocuments::default());
@@ -1530,10 +1562,6 @@ pub fn run() {
             // and two here. Then, only if the launch named no document at all,
             // the rest of the session that was open last — because opening a
             // file is not a request to reopen everything else as well.
-            let reopening = stored
-                .get("reopen_last_document")
-                .and_then(|value| value.as_bool())
-                .unwrap_or(true);
             let mut more = extra;
             if reopening && initial.is_none() {
                 more.extend(reopen.into_iter().skip(1));
@@ -1611,5 +1639,36 @@ mod tests {
         let (first, rest) = first_and_rest(None, Vec::new());
         assert!(first.is_none());
         assert!(rest.is_empty());
+    }
+
+    /// Two places act on this setting — `bootstrap`, for the launch window's
+    /// own document, and `setup`, which claims that window in `OpenDocuments`
+    /// on the strength of it. Both go through one function so they cannot
+    /// disagree, and it has to fall the right way when the file says nothing.
+    #[test]
+    fn coming_back_to_what_was_open_is_a_setting_with_a_default() {
+        assert!(
+            settings::defaults().contains_key("reopen_last_document"),
+            "the key `wants_reopening` reads has to be one the table knows, \
+             or every file falls through to the default forever"
+        );
+        assert!(
+            wants_reopening(&settings::defaults()),
+            "on unless asked otherwise"
+        );
+
+        let mut off = settings::defaults();
+        off.insert("reopen_last_document".into(), serde_json::json!(false));
+        assert!(!wants_reopening(&off));
+
+        // A hand-edited file can say something that is not a boolean at all.
+        // `settings::load` drops it, so this should never be reached — and if
+        // it ever is, the answer is the default rather than a panic.
+        let mut nonsense = settings::defaults();
+        nonsense.insert(
+            "reopen_last_document".into(),
+            serde_json::json!("yes please"),
+        );
+        assert!(wants_reopening(&nonsense));
     }
 }

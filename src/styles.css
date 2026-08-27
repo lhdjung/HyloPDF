@@ -1614,12 +1614,6 @@ body {
   gap: 8px;
 }
 
-.field-control-default {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .field input[type="text"] {
   width: 150px;
   height: 30px;

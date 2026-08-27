@@ -1877,16 +1877,17 @@ class App {
         );
 
         menu.append(ui.divider(), ui.section("Pages side by side"));
-        const spreads: [SpreadMode, string][] = [
-          ["single", "One page across"],
+        const spreads: [SpreadMode, string, string?][] = [
+          ["single", "One page across", "Default"],
           ["two", "Two side by side"],
           ["cover", "Two, cover alone"],
         ];
-        for (const [value, label] of spreads) {
+        for (const [value, label, note] of spreads) {
           menu.append(
             ui.menuItem({
               label,
               checked: this.settings.spread_mode === value,
+              note,
               onSelect: () => {
                 this.setSpread(value);
                 close();

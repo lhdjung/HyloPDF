@@ -194,6 +194,19 @@ impl OpenDocuments {
         let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
         held.iter().any(|(label, _)| label == window)
     }
+
+    /// The window already showing this document, if one is.
+    ///
+    /// Asked before a document handed over by the system is opened at all: a
+    /// file the reader already has open is one they want to *look* at, and
+    /// opening a second copy of it beside the first is the one thing
+    /// double-clicking it cannot mean.
+    fn showing(&self, path: &str) -> Option<String> {
+        let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        held.iter()
+            .find(|(_, open)| open == path)
+            .map(|(label, _)| label.clone())
+    }
 }
 
 /// Whether the app is on its way out.
@@ -558,10 +571,22 @@ async fn quit_app(app: AppHandle) {
 /// dialog and no way back. Sending four hundred pages to a printer nobody
 /// chose is the one failure here that costs paper.
 ///
-/// So this hands the file to a program that does print, and says so. On macOS
-/// that is Preview by name rather than "the default application", because
-/// once HyloPDF is installed the default application for a PDF may well be
-/// HyloPDF, and handing it to ourselves is a loop.
+/// So this hands the file to a program that does print, and says so. Not to
+/// the *print* verb, on any platform: where a system has one it prints
+/// immediately, which is the failure above wearing a different hat. What is
+/// wanted is the file open somewhere with a File menu in it.
+///
+/// Which program is named where it can be. On macOS that is Preview, rather
+/// than "the default application", because once HyloPDF is installed the
+/// default application for a PDF may well be HyloPDF, and handing it to
+/// ourselves is a loop. Windows names Edge for the same reason — it ships with
+/// every supported version, it prints PDFs properly, and it is somewhere else
+/// — and falls back to the default handler where it has been removed. Linux
+/// has no viewer that can be assumed, so `xdg-open` is all there is.
+///
+/// So the loop is still reachable on those two, and `hand_over` is where it
+/// stops: a document already open comes to the front instead of opening a
+/// second time. The reader gets their own window back rather than a duplicate.
 #[tauri::command]
 async fn print_document(path: String) -> Result<(), String> {
     let file = PathBuf::from(&path);
@@ -578,11 +603,33 @@ async fn print_document(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     let command = {
-        // The default handler's own print verb, and the path as one argument
-        // rather than through a shell.
-        let mut c = std::process::Command::new("rundll32.exe");
-        c.arg("shell32.dll,ShellExec_RunDLL").arg(&file);
-        c
+        // Edge by name, the way macOS names Preview: it ships with every
+        // supported Windows, it prints a PDF properly, and — the point — it is
+        // not us. `ShellExec_RunDLL` alone opens the file with whatever the
+        // *default* handler is, which after installing this app may well be
+        // this app.
+        //
+        // By absolute path rather than by name, because Edge is not on `PATH`.
+        // Where it has been removed, the default handler is still better than
+        // nothing; `hand_over` is what keeps that from becoming a loop.
+        let edge = std::env::var("ProgramFiles(x86)")
+            .or_else(|_| std::env::var("ProgramFiles"))
+            .map(|root| PathBuf::from(root).join(r"Microsoft\Edge\Application\msedge.exe"))
+            .ok()
+            .filter(|path| path.exists());
+        match edge {
+            Some(edge) => {
+                let mut c = std::process::Command::new(edge);
+                c.arg(&file);
+                c
+            }
+            None => {
+                // The path as one argument, rather than through a shell.
+                let mut c = std::process::Command::new("rundll32.exe");
+                c.arg("shell32.dll,ShellExec_RunDLL").arg(&file);
+                c
+            }
+        }
     };
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -1336,6 +1383,16 @@ fn first_and_rest(
 /// window is idle if it is not named in `OpenDocuments`, and the one with the
 /// keyboard is preferred, because that is the window the reader is looking at.
 ///
+/// *A document already open is brought to the front rather than opened again.*
+/// A second copy of a document beside the first is the one thing
+/// double-clicking a file cannot mean — the reader is asking to look at it,
+/// and it is already there. It is also what closes the loop `print_document`
+/// can otherwise start: off macOS a document is handed to whatever the system
+/// opens PDFs with, and on a machine where that is HyloPDF it comes straight
+/// back here. What used to happen then was a second window on the same file,
+/// with a second pdf.js runtime behind it; now the window the reader printed
+/// from comes forward, which is the closest thing to the truth available.
+///
 /// Queued in `EARLY_OPEN` if `Pending` itself does not exist yet — on macOS an
 /// Apple Event for a cold launch can arrive before `setup` has run.
 fn hand_over(app: &AppHandle, path: String) {
@@ -1345,6 +1402,11 @@ fn hand_over(app: &AppHandle, path: String) {
         }
         return;
     };
+    if let Some(window) = already_showing(app, &path) {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return;
+    }
     let Some(window) = idle_window(app) else {
         match spawn_window(app, Some(path.clone())) {
             Ok(()) => {}
@@ -1381,6 +1443,12 @@ fn give(app: &AppHandle, pending: State<'_, Pending>, window: &WebviewWindow, pa
     }
     let _ = window.unminimize();
     let _ = window.set_focus();
+}
+
+/// The window this document is already open in, if it is open at all.
+fn already_showing(app: &AppHandle, path: &str) -> Option<WebviewWindow> {
+    let label = app.try_state::<OpenDocuments>()?.showing(path)?;
+    app.get_webview_window(&label)
 }
 
 /// Any window at all, the one with the keyboard first. The last resort above.
@@ -1670,5 +1738,30 @@ mod tests {
             serde_json::json!("yes please"),
         );
         assert!(wants_reopening(&nonsense));
+    }
+    /// A document handed over by the system when it is already open is a
+    /// reader asking to look at it, not asking for a second copy of it beside
+    /// the first — and it is how `print_document` comes back when the default
+    /// PDF handler off macOS turns out to be this app.
+    #[test]
+    fn a_document_already_open_is_found_by_the_window_holding_it() {
+        let open = OpenDocuments::default();
+        open.set("main", Some("/papers/one.pdf"));
+        open.set("reader-1", Some("/papers/two.pdf"));
+
+        assert_eq!(open.showing("/papers/two.pdf").as_deref(), Some("reader-1"));
+        assert_eq!(open.showing("/papers/one.pdf").as_deref(), Some("main"));
+        assert!(open.showing("/papers/three.pdf").is_none());
+
+        // Put down, and no longer open — the next hand-over of it wants an
+        // idle window rather than the one that used to have it.
+        open.set("reader-1", None);
+        assert!(open.showing("/papers/two.pdf").is_none());
+
+        // And a window that has moved on to something else does not answer
+        // for what it used to hold.
+        open.set("main", Some("/papers/three.pdf"));
+        assert!(open.showing("/papers/one.pdf").is_none());
+        assert_eq!(open.showing("/papers/three.pdf").as_deref(), Some("main"));
     }
 }

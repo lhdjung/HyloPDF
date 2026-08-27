@@ -1,6 +1,7 @@
 /* The panel on the left: the document's own table of contents, and a column
-   of page thumbnails. Both are built lazily — a thumbnail is only drawn once
-   it is about to be looked at. */
+   of page thumbnails. Both are built lazily — the column itself only when the
+   Pages tab is first shown, which most documents never open, and a thumbnail
+   in it is only drawn once it is about to be looked at. */
 
 import type {
   PDFDocumentProxy,
@@ -71,6 +72,12 @@ export class Sidebar {
   /** The reader's own marks, above the document's contents. See `showMarks`. */
   private marksEl: HTMLElement | null = null;
   private page = 1;
+  /** Whether the column has been built for the document currently set. Built
+      on first showing rather than in `setDocument`, so a document opened with
+      the sidebar shut — the common case, `show_sidebar` defaults to false —
+      pays nothing for a column of buttons, canvases and observer entries
+      nobody is going to look at. */
+  private thumbsBuilt = false;
 
   constructor(
     private outlinePanel: HTMLElement,
@@ -93,7 +100,21 @@ export class Sidebar {
     this.outlinePanel.hidden = name !== "outline";
     this.pagesPanel.hidden = name !== "pages";
     this.resultsPanel.hidden = name !== "results";
-    if (name === "pages") this.revealCurrentThumb();
+    if (name === "pages") {
+      this.ensureThumbs();
+      this.revealCurrentThumb();
+    }
+  }
+
+  /** Build the thumbnail column the first time it is actually shown for the
+      document currently set. A no-op every time after. */
+  private ensureThumbs(): void {
+    if (this.thumbsBuilt || !this.doc) return;
+    this.thumbsBuilt = true;
+    this.buildThumbs(this.doc);
+    for (const [number, button] of this.thumbs) {
+      button.classList.toggle("current", number === this.page);
+    }
   }
 
   /**
@@ -188,11 +209,11 @@ export class Sidebar {
     this.theme = theme;
     if (!doc) return;
 
-    this.buildThumbs(doc);
     const outline = (await doc.getOutline()) as OutlineNode[] | null;
     if (this.doc !== doc) return;
     await this.buildOutline(doc, outline);
     if (!this.hasOutline) this.showTab("pages");
+    else if (this.tab === "pages") this.ensureThumbs();
   }
 
   /** A copy, for the reason `Viewer.setTheme` keeps one: the theme editor
@@ -373,6 +394,7 @@ export class Sidebar {
     this.drawn.clear();
     this.tasks.clear();
     this.flights.clear();
+    this.thumbsBuilt = false;
     this.outlineButtons = [];
     this.outlinePanel.replaceChildren();
     this.pagesPanel.replaceChildren();

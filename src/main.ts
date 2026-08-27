@@ -1404,7 +1404,7 @@ class App {
                 if (on) this.followSystemTheme();
                 render();
               }),
-              "Light by day, dark by night.",
+              "Light or dark, following the machine.",
             ),
             ui.divider(),
             ui.section("Themes"),

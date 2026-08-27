@@ -630,7 +630,7 @@ test("the Open button is the way to another document", async () => {
     [...document.querySelectorAll("#popovers .popover-item")].map((el) => el.textContent),
   );
   assert.ok(
-    items.some((label) => label?.includes("Open a document")),
+    items.some((label) => label?.includes("Open document")),
     `the Open menu offered ${JSON.stringify(items)}`,
   );
   assert.ok(items.some((label) => label?.includes("New window")));

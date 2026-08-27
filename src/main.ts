@@ -1669,8 +1669,10 @@ class App {
     };
 
     ui.showWindow("Document", () => {
+      const body = document.createElement("div");
+      body.className = "window-body";
       const pane = document.createElement("div");
-      pane.className = "pane";
+      pane.className = "window-pane";
       pane.append(ui.text("title", text("Title") || name));
 
       const rows: [string, string][] = [
@@ -1689,7 +1691,8 @@ class App {
         if (value) pane.append(ui.field(label, selectable(value)));
       }
       if (this.path) pane.append(ui.field("File", selectable(this.path)));
-      return pane;
+      body.append(pane);
+      return body;
     });
   }
 

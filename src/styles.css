@@ -1169,7 +1169,7 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--text);
-  font-weight: 460;
+  font-weight: 420;
 }
 
 .popover-row input[type="text"],

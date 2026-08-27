@@ -149,7 +149,7 @@ export const ACTIONS: readonly ActionSpec[] = [
   },
   {
     id: "copy-quote",
-    label: "Copy what is selected, with its page number",
+    label: "Copy selection, with its page number",
     group: "Documents",
     keys: ["mod+shift+c"],
   },
@@ -255,7 +255,7 @@ export const ACTIONS: readonly ActionSpec[] = [
   // both act at once and wait to see what follows it.
   {
     id: "go-to-page",
-    label: "Go to a page: type the number, press Enter",
+    label: "Go to page: type the number, press Enter",
     group: "Moving around",
     needsDocument: true,
     keys: ["mod+alt+g", "p"],

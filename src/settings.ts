@@ -220,7 +220,6 @@ function readingPage(host: SettingsHost, pane: HTMLElement): void {
   const s = host.settings;
   pane.append(
     ui.text("title", "Reading"),
-    ui.text("lede", "How a document moves and how much of it you see."),
   );
 
   pane.append(
@@ -353,7 +352,6 @@ function appearancePage(
 ): void {
   pane.append(
     ui.text("title", "Appearance"),
-    ui.text("lede", "Two colours make a theme: the ink and the paper. The accent, the links and the two selection colours are all worked out from those until you say otherwise."),
   );
 
   pane.append(
@@ -603,10 +601,6 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
   const s = host.settings;
   pane.append(
     ui.text("title", "Window"),
-    ui.text(
-      "lede",
-      "How much of the app stays on screen around the document. Each of these is its own switch: full screen fills the screen and changes nothing else.",
-    ),
   );
 
   pane.append(
@@ -657,10 +651,6 @@ function windowPage(host: SettingsHost, pane: HTMLElement): void {
 function keyboardPage(host: SettingsHost, pane: HTMLElement, refresh: () => void): void {
   pane.append(
     ui.text("title", "Keyboard"),
-    ui.text(
-      "lede",
-      `Everything the app listens for, in one place. ${shortcut("F1 or ⌘/", "F1 or Ctrl+/")} brings you back here.`,
-    ),
   );
 
   // What could not be read comes first: a key that does nothing is otherwise
@@ -713,11 +703,10 @@ function keyboardPage(host: SettingsHost, pane: HTMLElement, refresh: () => void
     pane.append(
       ui.text(
         "note",
-        `Not bound to a key: ${unbound.join(", ")}.` +
-          // Not guessable from a row that is simply missing.
-          (isMac && (unbound.includes("quit") || unbound.includes("close-window"))
-            ? " Use ⌘W or ⌘Q."
-            : ""),
+        // Not guessable from a row that is simply missing.
+        (isMac && (unbound.includes("quit") || unbound.includes("close-window"))
+          ? "Quitting the app is always ⌘W or ⌘Q."
+          : ""),
       ),
     );
   }

@@ -612,7 +612,7 @@ test("the document's name is what can be done with the document", async () => {
   );
   assert.ok(items.some((label) => label?.includes("Copy path")));
   assert.ok(
-    items.some((label) => label?.includes("What this document says about itself")),
+    items.some((label) => label?.includes("Information")),
     `the title menu offered ${JSON.stringify(items)}`,
   );
   assert.ok(!items.some((label) => label?.includes("Open a document")));

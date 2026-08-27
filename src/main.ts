@@ -611,7 +611,7 @@ class App {
     el.pageCount.textContent = count > 0 ? `of ${labelled ? this.viewer.label(count) : count}` : "";
     el.pageNumber.title = labelled
       ? `Page ${label} — ${page} of ${count} in the file. ${JUMP_KEYS}, or g`
-      : `Go to a page — ${JUMP_KEYS}, or g`;
+      : `Go to page — ${JUMP_KEYS}, or g`;
     el.pagePill.textContent =
       count === 0 ? "" : labelled ? `${label} (${page} of ${count})` : `${page} of ${count}`;
     this.sidebar.setPage(page);
@@ -1398,13 +1398,13 @@ class App {
               isMac ? "⌘D" : "Ctrl+D",
             ),
             ui.row(
-              "Follow the system",
+              "Light or dark follow system",
               ui.toggle(this.settings.follow_system_theme, (on) => {
                 this.set("follow_system_theme", on);
                 if (on) this.followSystemTheme();
                 render();
               }),
-              "Light or dark, following the machine.",
+              "",
             ),
             ui.divider(),
             ui.section("Themes"),
@@ -1567,7 +1567,7 @@ class App {
         menu.append(
           ui.divider(),
           ui.menuItem({
-            label: "What this document says about itself…",
+            label: "Information",
             icon: "info",
             onSelect: () => {
               close();
@@ -1590,7 +1590,7 @@ class App {
       const menu = document.createElement("div");
       menu.append(
         ui.menuItem({
-          label: "Open a document…",
+          label: "Open document…",
           icon: "folder",
           note: isMac ? "⌘O" : "Ctrl+O",
           onSelect: () => {
@@ -1601,7 +1601,7 @@ class App {
         // The two-documents-at-once route, one step: pick the second one and
         // it arrives beside the first rather than on top of it.
         ui.menuItem({
-          label: "Open a document in a new window…",
+          label: "Open document in new window…",
           icon: "window",
           onSelect: () => {
             close();
@@ -1982,7 +1982,7 @@ class App {
       }
     });
 
-    el.pageNumber.title = `Go to a page — ${JUMP_KEYS}, or g`;
+    el.pageNumber.title = `Go to page — ${JUMP_KEYS}, or g`;
     el.pageNumber.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         // What was typed is read as a page label first and a position in the

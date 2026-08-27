@@ -33,6 +33,7 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "license": "MIT OR Apache-2.0",
     "licenseFile": "../LICENSE",
     "copyright": "Copyright © 2026 Lukas Jung and the HyloPDF contributors",
     "shortDescription": "A calm PDF reader",

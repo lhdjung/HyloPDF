@@ -121,8 +121,9 @@ how the one that exists is put together.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). [THIRD-PARTY.md](THIRD-PARTY.md) lists what a
-built app carries with it, all of it permissive.
+MIT or Apache-2.0, whichever suits you — both are in [LICENSE](LICENSE).
+[THIRD-PARTY.md](THIRD-PARTY.md) lists what a built app carries with it, all of
+it permissive.
 
 ## The name
 

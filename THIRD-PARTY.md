@@ -1,7 +1,7 @@
 # Third-party components
 
-HyloPDF's own source is MIT (see `LICENSE`). A built app also carries the
-components below, each under its own licence. All of them are permissive:
+HyloPDF's own source is MIT or Apache-2.0, at your option (see `LICENSE`). A
+built app also carries the components below, each under its own licence. All of them are permissive:
 nothing here places a condition on what you may do with HyloPDF, and nothing
 here has to be shared back. What they do ask for is attribution, which is why
 this file exists and why the licence texts travel with the files they cover.

@@ -1845,14 +1845,6 @@ class App {
             ui.toggle(this.settings.fullscreen, (on) => void this.toggleFullscreen(on)),
             FULLSCREEN_KEYS,
           ),
-          ui.row(
-            "Presenting",
-            ui.toggle(this.presenting, (on) => {
-              this.togglePresentation(on);
-              if (on) close();
-            }),
-            "The document and nothing else.",
-          ),
         );
 
         menu.append(ui.divider(), ui.section("Reading"));

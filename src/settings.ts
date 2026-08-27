@@ -771,7 +771,7 @@ function aboutPage(host: SettingsHost, pane: HTMLElement): void {
   pane.append(
     ui.text(
       "note",
-      "Both are plain text. Nothing is stored anywhere else, and nothing leaves this computer.",
+      "Your settings and your themes are plain text. Nothing is stored anywhere else, and nothing leaves this computer.",
     ),
   );
 

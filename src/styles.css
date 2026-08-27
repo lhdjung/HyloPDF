@@ -113,8 +113,19 @@ body {
   min-width: 0;
 }
 
+/* The two side groups start from what they hold and share the slack evenly,
+   which keeps the page controls near the middle without promising that they
+   are in it. Each side used to be given exactly half the bar so that the
+   middle came out dead centre, and the right side holds rather more than the
+   left — more still since the turns moved onto it — so at the width the
+   window opens at its contents ran out of room and spilled leftwards across
+   the page counter.
+
+   When there is not enough room for everything, the left gives way: it is
+   the side with a title in it, and a title has an ellipsis to shrink into.
+   Hence shrink on the left and none on the right. */
 .bar-left {
-  flex: 1 1 0;
+  flex: 1 1 auto;
 }
 
 .bar-center {
@@ -122,7 +133,7 @@ body {
 }
 
 .bar-right {
-  flex: 1 1 0;
+  flex: 1 0 auto;
   justify-content: flex-end;
 }
 
@@ -363,13 +374,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* With no document open there is nothing to page through, zoom, search or
-   list, so those controls step aside rather than sit there greyed out —
+/* With no document open there is nothing to page through, turn, zoom, search
+   or list, so those controls step aside rather than sit there greyed out —
    and no page counter has to invent a "1 of 0". */
 #shell[data-empty="true"] .bar-center,
 #shell[data-empty="true"] #contents,
 #shell[data-empty="true"] #close-doc,
 #shell[data-empty="true"] #find,
+#shell[data-empty="true"] #rotate-left,
+#shell[data-empty="true"] #rotate-right,
 #shell[data-empty="true"] .bar-right .zoom-group {
   display: none;
 }

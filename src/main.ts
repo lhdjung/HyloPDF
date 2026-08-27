@@ -108,6 +108,8 @@ const el = {
   pageNumber: byId<HTMLInputElement>("page-number"),
   pageCount: byId<HTMLSpanElement>("page-count"),
   find: byId<HTMLButtonElement>("find"),
+  rotateLeft: byId<HTMLButtonElement>("rotate-left"),
+  rotateRight: byId<HTMLButtonElement>("rotate-right"),
   zoomOut: byId<HTMLButtonElement>("zoom-out"),
   zoomIn: byId<HTMLButtonElement>("zoom-in"),
   zoomLevel: byId<HTMLButtonElement>("zoom-level"),
@@ -1710,9 +1712,9 @@ class App {
     }
   }
 
-  /** Zoom and rotation are things you try on, the same as a theme — nothing
-      in here takes you anywhere else, so nothing in here puts the menu away;
-      it redraws in place and the ticks move. */
+  /** A zoom is something you try on, the same as a theme — nothing in here
+      takes you anywhere else, so nothing in here puts the menu away; it
+      redraws in place and the ticks move. */
   showZoomMenu(): void {
     ui.showPopover(
       el.zoomLevel,
@@ -1758,28 +1760,6 @@ class App {
               },
             }),
           );
-          menu.append(
-            ui.divider(),
-            ui.menuItem({
-              label: "Rotate right",
-              icon: "rotateRight",
-              note: isMac ? "⌘R" : "Ctrl+R",
-              onSelect: () => {
-                this.rotate(1);
-                render();
-              },
-            }),
-            ui.menuItem({
-              label: "Rotate left",
-              icon: "rotateLeft",
-              note: isMac ? "⌘L" : "Ctrl+L",
-              onSelect: () => {
-                this.rotate(-1);
-                render();
-              },
-            }),
-          );
-
           menu.append(ui.divider());
           // The presets below are the common answers; this is the rest of
           // them. It starts from what is actually on screen rather than from
@@ -1957,6 +1937,8 @@ class App {
     el.prevPage.addEventListener("click", () => this.viewer.previousPage());
     el.nextPage.addEventListener("click", () => this.viewer.nextPage());
     el.find.addEventListener("click", () => this.toggleFind());
+    el.rotateLeft.addEventListener("click", () => this.rotate(-1));
+    el.rotateRight.addEventListener("click", () => this.rotate(1));
 
     el.settings.addEventListener("click", opens(() => this.showSettingsMenu(el.settings)));
 

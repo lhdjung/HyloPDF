@@ -937,12 +937,12 @@ test("printing says what it can and cannot do", async () => {
 test("the way out is on the start screen and nowhere else", async () => {
   const seen = () =>
     app.page.evaluate(() => {
-      const button = document.getElementById("quit");
+      const button = document.getElementById("close-window-btn");
       return button.getBoundingClientRect().width > 0 && button.offsetParent !== null;
     });
 
   // A document is open by the time this runs; the start screen is behind it.
-  assert.equal(await seen(), false, "the quit button showed over a document");
+  assert.equal(await seen(), false, "the close-window button showed over a document");
 
   await app.page.click("#close-doc");
   await app.page.waitForTimeout(300);

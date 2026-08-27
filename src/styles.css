@@ -1724,6 +1724,17 @@ body {
   margin-top: 14px;
 }
 
+/* A plain `.btn` is see-through by design — right on a toolbar, where the bar
+   itself is the contour, and wrong here, where it floats on the same surface
+   as the pane around it and vanishes until the pointer finds it. */
+.pane-actions .btn:not(.btn-primary):not(.btn-danger) {
+  border: 1px solid var(--line);
+}
+
+.pane-actions .btn:not(.btn-primary):not(.btn-danger):hover {
+  border-color: var(--text-faint);
+}
+
 .keys {
   display: grid;
   grid-template-columns: 1fr auto;

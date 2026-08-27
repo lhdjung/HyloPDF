@@ -1268,7 +1268,39 @@ fn document_among(args: &[String]) -> Option<String> {
 /// coming up, ahead of the `setup` hook that creates `Pending`, so without
 /// this the document a reader just double-clicked was silently dropped on the
 /// floor and they landed on the start screen instead.
+///
+/// A list, and it has to be read as one. `RunEvent::Opened` carries `urls`,
+/// plural — three files selected together and opened in one gesture are three
+/// documents arriving before `setup` — and taking one of them and leaving the
+/// rest in here was the same silent drop by a different door: two of the three
+/// never appeared and nothing anywhere said why. See `first_and_rest`.
 static EARLY_OPEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Which document the launch window takes, and which need a window each.
+///
+/// The command line wins the launch window where both are populated, which is
+/// only ever a cold launch: a second instance's arguments are routed through
+/// `hand_over` instead, so nothing else can have both, and the launch itself
+/// named the document that started it. Everything left over is a document
+/// somebody asked for and has to go somewhere, which is what `Restore` is for.
+///
+/// Split out from `setup` so that it can be tested at all — `setup` needs a
+/// running application and this is one `match`.
+fn first_and_rest(
+    argument: Option<String>,
+    mut early: Vec<String>,
+) -> (Option<String>, Vec<String>) {
+    match argument {
+        Some(path) => (Some(path), early),
+        None if early.is_empty() => (None, Vec::new()),
+        // In arrival order: the first document of a selection is the one the
+        // launch window opens on, which is the one a reader is looking for.
+        None => {
+            let first = early.remove(0);
+            (Some(first), early)
+        }
+    }
+}
 
 /// A document handed to us by the OS — "Open with", the dock, a second launch
 /// — sent to a window with nothing in it, or to a window made for it.
@@ -1446,14 +1478,16 @@ pub fn run() {
             app.manage(Placements::default());
             #[cfg(target_os = "macos")]
             dock::install(app.handle());
-            // The command line wins over a document that raced `setup` in as
-            // an Apple Event, in the one case both are populated: a second
-            // instance's arguments are routed through `hand_over` instead
-            // (see the single-instance plugin below), so it is only a cold
-            // launch that can have both, and the launch itself named the
-            // document that started it.
-            let initial = first_document_argument()
-                .or_else(|| EARLY_OPEN.lock().ok().and_then(|mut queue| queue.pop()));
+            // Every document that raced `setup` in as an Apple Event, in the
+            // order they arrived, and emptied rather than sampled: what is
+            // left in that static is left there for the life of the process.
+            let early: Vec<String> = EARLY_OPEN
+                .lock()
+                .map(|mut queue| std::mem::take(&mut *queue))
+                .unwrap_or_default();
+            // One of them gets the launch window; the rest get a window each,
+            // through `Restore` below. See `first_and_rest`.
+            let (initial, extra) = first_and_rest(first_document_argument(), early);
             let pending = Pending::default();
             if let Some(path) = initial.clone() {
                 pending.hold(MAIN, path);
@@ -1489,20 +1523,21 @@ pub fn run() {
                 });
             }
 
-            // Every window that was open when the app went down, put back —
-            // the first one is the launch window's, through `bootstrap`, and
-            // the rest get a window each, made once that window is up. Skipped
-            // when this launch was *for* a document: opening a file is not a
-            // request to reopen everything else as well.
+            // What needs a window of its own once the launch window is up.
+            //
+            // The documents this launch was *for* come first: a selection of
+            // three files opened together is one document in the launch window
+            // and two here. Then, only if the launch named no document at all,
+            // the rest of the session that was open last — because opening a
+            // file is not a request to reopen everything else as well.
             let reopening = stored
                 .get("reopen_last_document")
                 .and_then(|value| value.as_bool())
                 .unwrap_or(true);
-            let more = if reopening && initial.is_none() {
-                reopen.into_iter().skip(1).collect()
-            } else {
-                Vec::new()
-            };
+            let mut more = extra;
+            if reopening && initial.is_none() {
+                more.extend(reopen.into_iter().skip(1));
+            }
             app.manage(Restore(Mutex::new(more)));
             Ok(())
         })
@@ -1537,4 +1572,44 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cold launch onto three files double-clicked together is three Apple
+    /// Events, all of them arriving before `setup` has run. One document can
+    /// have the launch window; the other two have to come back out of the
+    /// queue, or they are gone for the life of the process — which is what
+    /// `EARLY_OPEN.pop()` did, silently, and to the *first* two of the three
+    /// rather than the last.
+    #[test]
+    fn every_document_that_raced_setup_is_accounted_for() {
+        let early = vec!["one.pdf".to_string(), "two.pdf".into(), "three.pdf".into()];
+        let (first, rest) = first_and_rest(None, early);
+        assert_eq!(
+            first.as_deref(),
+            Some("one.pdf"),
+            "arrival order, not reverse"
+        );
+        assert_eq!(rest, vec!["two.pdf".to_string(), "three.pdf".into()]);
+    }
+
+    /// The command line named the document this launch was for, so it takes
+    /// the launch window — and the ones that raced in still get windows.
+    #[test]
+    fn the_command_line_wins_the_launch_window_and_loses_nothing() {
+        let (first, rest) = first_and_rest(Some("named.pdf".into()), vec!["raced.pdf".to_string()]);
+        assert_eq!(first.as_deref(), Some("named.pdf"));
+        assert_eq!(rest, vec!["raced.pdf".to_string()]);
+    }
+
+    /// The ordinary launch: nothing on the command line and nothing racing.
+    #[test]
+    fn an_empty_launch_asks_for_no_windows() {
+        let (first, rest) = first_and_rest(None, Vec::new());
+        assert!(first.is_none());
+        assert!(rest.is_empty());
+    }
 }

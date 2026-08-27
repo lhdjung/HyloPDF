@@ -1496,12 +1496,13 @@ body {
   height: min(600px, 100%);
 }
 
-/* As wide as "full", but taller: for a pane of fields with nothing beside it
-   to keep short, like the Document window's. */
+/* As wide as "full", but a window that fits what is in it rather than a fixed
+   frame: a document with few fields should not gain "full"'s empty space
+   along with its width, and one with many should get more room than "fit"'s
+   460px-window cap gives before it has to scroll. */
 .window[data-size="tall"] {
   width: min(860px, 100%);
   max-height: min(680px, 100%);
-  height: min(680px, 100%);
 }
 
 .window-body {

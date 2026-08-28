@@ -54,6 +54,7 @@
 # select-page = ["mod+a"]
 # copy-quote = ["mod+shift+c"]
 # mark = ["mod+shift+b"]
+# markup = ["mod+shift+h"]
 # dismiss = ["escape"]
 
 # ─── moving around ───────────────────────────────────────────────────────

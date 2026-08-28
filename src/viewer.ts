@@ -6,6 +6,7 @@
  * a two page letter, and the scrollbar tells the truth from the first frame. */
 
 import {
+  AnnotationEditorType,
   AnnotationType,
   getDocument,
   GlobalWorkerOptions,
@@ -200,6 +201,12 @@ type Slot = {
   renderedKey: string;
 };
 
+/** A selection captured by `Viewer.captureSelection`, opaque to callers
+    outside this file: which page each group of rectangles is on, and the
+    rectangles themselves. See `captureSelection` for why this is captured
+    rather than read again when a colour is finally chosen. */
+export type MarkupSelection = [Slot, DOMRect[]][];
+
 type Box = {
   top: number;
   left: number;
@@ -331,6 +338,9 @@ export class Viewer {
   private linkCache = new Map<number, Link[]>();
   private noteCache = new Map<number, Note[]>();
   private markupCache = new Map<number, MarkupRegion[]>();
+  /** A counter for `markSelection`'s own `annotationStorage` keys. See
+      `ANNOTATION_EDITOR_PREFIX`. */
+  private markupEditorId = 0;
   /** A match asked for but not yet shown, because its page had no text layer
       when it was asked for. Index into `matches`; -1 when there is none. */
   private pendingReveal = -1;
@@ -580,6 +590,148 @@ export class Viewer {
       if (x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) return slot;
     }
     return null;
+  }
+
+  /**
+   * The current selection's rectangles, grouped by the page each is on —
+   * captured now rather than left to be read again later.
+   *
+   * That matters because of what "later" means here: the reader picks a
+   * colour from a popover, and clicking anything — the swatch included —
+   * collapses the browser's own selection before its click handler ever
+   * runs. Reading `window.getSelection()` inside that handler would see
+   * nothing. So the popover captures this the moment it opens, while the
+   * selection is still the reader's, and hands the same snapshot to
+   * `markSelection` however long the popover stays open.
+   *
+   * `null` where there is nothing to capture — no selection, or one outside
+   * the pages, such as one made in the sidebar or the settings window.
+   */
+  captureSelection(): MarkupSelection | null {
+    const selection = window.getSelection();
+    if (!selection) return null;
+
+    const bySlot = new Map<Slot, DOMRect[]>();
+    for (let index = 0; index < selection.rangeCount; index++) {
+      const range = selection.getRangeAt(index);
+      if (range.collapsed || !this.pagesEl.contains(range.commonAncestorContainer)) continue;
+      for (const rect of range.getClientRects()) {
+        if (rect.width < 0.5 || rect.height < 0.5) continue;
+        const slot = this.slotAt(rect);
+        if (!slot) continue;
+        const held = bySlot.get(slot);
+        if (held) held.push(rect);
+        else bySlot.set(slot, [rect]);
+      }
+    }
+    return bySlot.size > 0 ? [...bySlot.entries()] : null;
+  }
+
+  /**
+   * Fresh incremental-update bytes for the document, with a captured
+   * selection (see `captureSelection`) saved into it as one `/Highlight`
+   * annotation per page the selection touches — `/QuadPoints` anchors to a
+   * single page, so a selection that runs over a page break becomes two
+   * annotations rather than one.
+   *
+   * This builds the `annotationStorage` entry pdf.js's own highlight editor
+   * would build, by hand — see `markup-assessment.md`'s "Write the storage
+   * entries directly", the recommendation over adopting the whole editor
+   * layer. `AnnotationEditorType.HIGHLIGHT` is also the *only* markup style
+   * this version of pdf.js can create through `saveDocument()`: reading the
+   * shipped worker shows `UnderlineAnnotation`, `SquigglyAnnotation` and
+   * `StrikeOutAnnotation` have no `createNewAnnotation`/`createNewDict` of
+   * their own, and `AnnotationFactory.saveNewAnnotations`'s switch has no
+   * case for them — only `FREETEXT`, `HIGHLIGHT`, `INK`, `STAMP` and
+   * `SIGNATURE` are buildable at all. So this is highlight-only for now; the
+   * other three stay readable (`markupOf`) but not writable.
+   *
+   * The shape below — `quadPoints`, `outlines`, `rect`, the
+   * `pdfjs_internal_editor_` key prefix `getNewAnnotationsMap` in the worker
+   * looks for — is read straight out of `pdf.mjs` and `pdf.worker.mjs` for
+   * pdfjs-dist 5.7 rather than from any documented API, exactly the risk
+   * the plan calls out. If a version bump ever makes this produce a file
+   * Preview cannot open, that pair of files is where to look first.
+   *
+   * Returns `null` where nothing could be saved — an empty capture, or one
+   * whose pages have since scrolled out of the mounted window — rather than
+   * throwing: "select something first" is the caller's to say, not this
+   * method's to raise. Nothing here touches the disk or the journal. The
+   * caller writes the bytes back and lets the write's own reload re-read the
+   * file, which is what both the journal and the drawing already do on every
+   * open — see `syncMarkup` and `markupOf`. That is also why there is no
+   * in-place invalidation here: a full reload already rebuilds every cache
+   * this would otherwise have to bump by hand.
+   */
+  async markSelection(
+    captured: MarkupSelection,
+    color: string,
+    opacity: number,
+  ): Promise<Uint8Array | null> {
+    const doc = this.doc;
+    if (!doc) return null;
+
+    const [r, g, b] = parseColor(color);
+    let wrote = false;
+    for (const [slot, rects] of captured) {
+      const box = this.boxes[slot.index];
+      const textRect = slot.textEl?.getBoundingClientRect();
+      if (!box || !textRect) continue;
+      const page = await this.page(slot.index);
+      // The same viewport `renderText` positioned this page's text layer
+      // with — scale `box.scale`, no crop offset, because the text layer is
+      // always a whole page regardless of the crop. See `placeOverlay`.
+      const viewport = this.viewportFor(page, box.scale);
+
+      const quadPoints: number[] = [];
+      const outlines: number[][] = [];
+      let minXAll = Infinity;
+      let maxXAll = -Infinity;
+      let minYAll = Infinity;
+      let maxYAll = -Infinity;
+      for (const run of joinRuns(rects, textRect)) {
+        const corners = [
+          viewport.convertToPdfPoint(run.x, run.y),
+          viewport.convertToPdfPoint(run.x + run.w, run.y),
+          viewport.convertToPdfPoint(run.x, run.y + run.h),
+          viewport.convertToPdfPoint(run.x + run.w, run.y + run.h),
+        ];
+        const xs = corners.map((p) => p[0] as number);
+        const ys = corners.map((p) => p[1] as number);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        // PDF order is upper-left, upper-right, lower-left, lower-right —
+        // and normalised again by whoever reads it back (`getQuadPoints` in
+        // the worker does the same min/max), so getting this wrong on write
+        // costs nothing.
+        quadPoints.push(minX, maxY, maxX, maxY, minX, minY, maxX, minY);
+        // A closed rectangle traversal for the appearance stream's fill —
+        // any simple, non-self-intersecting order works under `f*`.
+        outlines.push([minX, maxY, maxX, maxY, maxX, minY, minX, minY]);
+        minXAll = Math.min(minXAll, minX);
+        maxXAll = Math.max(maxXAll, maxX);
+        minYAll = Math.min(minYAll, minY);
+        maxYAll = Math.max(maxYAll, maxY);
+      }
+      if (quadPoints.length === 0) continue;
+
+      const key = `${ANNOTATION_EDITOR_PREFIX}${this.markupEditorId++}`;
+      doc.annotationStorage.setValue(key, {
+        annotationType: AnnotationEditorType.HIGHLIGHT,
+        color: [r, g, b],
+        opacity,
+        quadPoints: Float32Array.from(quadPoints),
+        outlines,
+        rect: [minXAll, minYAll, maxXAll, maxYAll],
+        rotation: 0,
+        pageIndex: slot.index,
+        popupRef: "",
+      });
+      wrote = true;
+    }
+    return wrote ? doc.saveDocument() : null;
   }
 
   /* ------------------------------------------------------------ lifecycle */
@@ -2704,6 +2856,13 @@ function notesIn(
   }
   return notes;
 }
+
+/** pdf.js's own prefix for an `annotationStorage` key that describes a *new*
+    annotation to create, as opposed to an edit to one already in the file —
+    `getNewAnnotationsMap` in the shipped worker keys off exactly this string.
+    Undocumented, and pinned to the pdfjs-dist version this was read against;
+    see `Viewer.markSelection`. */
+const ANNOTATION_EDITOR_PREFIX = "pdfjs_internal_editor_";
 
 /** The PDF spec's own four markup subtypes, as pdf.js names them, mapped onto
     the journal's own spelling. Nothing this app invents. */

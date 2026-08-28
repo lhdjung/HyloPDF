@@ -17,13 +17,20 @@
  * viewer.ts redraws it from the pristine copy towards `markupWashColor`
  * instead — see `markup-assessment.md`'s "the trap" for the reasoning, and
  * `recolor.test.mjs` for the two paths (a blend chain, and the pixel fallback
- * `HYLOPDF_NO_BLEND=1` reads the whole suite down) this rides on. */
+ * `HYLOPDF_NO_BLEND=1` reads the whole suite down) this rides on.
+ *
+ * The third part is step 5, the gesture: selecting text, pressing ⌘⇧H,
+ * picking a colour from the popover that opens, and having a real
+ * `/Highlight` land in the file — `Viewer.markSelection` builds it,
+ * `writeDocument` saves it, and the reload that write causes reads it back
+ * into the journal the same way the first test here reads one nobody's own
+ * gesture wrote. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { openApp } from "../scripts/ui-harness.mjs";
+import { openApp, MOD } from "../scripts/ui-harness.mjs";
 
 const PDF = "tests/fixtures/notes.pdf";
 const DOC_PATH = path.basename(PDF);
@@ -201,6 +208,64 @@ test("a theme that leaves the document alone leaves the highlight as pdf.js drew
     assert.ok(seen, "no page was drawn");
     assert.deepEqual(seen.plain, [0xff, 0xff, 0xff], "plain paper is not white");
     assert.notDeepEqual(seen.wash, seen.plain, "the highlight is not visible on its own page");
+  } finally {
+    await app.close();
+  }
+});
+
+/* ------------------------------------------------------------- the gesture */
+
+const BOOK = "tests/fixtures/book.pdf";
+const BOOK_PATH = path.basename(BOOK);
+
+if (!existsSync(BOOK)) {
+  throw new Error(`missing ${BOOK} — run: node tests/fixtures/make-pdf.mjs ${BOOK}`);
+}
+
+test("selecting text and choosing a colour saves a real highlight into the file", async () => {
+  const app = await openApp({ pdf: BOOK });
+  try {
+    await app.page.waitForSelector("#pages .textLayer span", { timeout: 10_000 });
+    // A short, known run of text on page one — the same shape
+    // reader.test.mjs selects to test the selection-repaint path.
+    const selected = await app.page.evaluate(() => {
+      const span = [...document.querySelectorAll("#pages .textLayer span")].find(
+        (candidate) => (candidate.firstChild?.textContent?.length ?? 0) >= 12,
+      );
+      const range = document.createRange();
+      range.setStart(span.firstChild, 0);
+      range.setEnd(span.firstChild, 12);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return range.toString();
+    });
+    assert.ok(selected.length > 0, "nothing was selected to mark");
+
+    await app.press(`${MOD}+Shift+KeyH`);
+    await app.page.waitForSelector(".markup-popover .markup-swatch", { timeout: 5_000 });
+    // The first swatch is `markup_color_1`'s default — see settings.rs.
+    await app.page.click(".markup-popover .markup-swatch >> nth=0");
+
+    await app.page
+      .waitForFunction(
+        () => (document.getElementById("notice")?.textContent ?? "") === "Marked.",
+        null,
+        { timeout: 10_000 },
+      )
+      .catch(() => {});
+
+    const highlights = await waitForJournal(app, BOOK_PATH);
+    assert.equal(highlights.length, 1, "the highlight did not round-trip through the file");
+    const [highlight] = highlights;
+    assert.equal(highlight.page, 1);
+    assert.equal(highlight.style, "highlight");
+    assert.equal(highlight.color, "#ffd60a");
+    assert.equal(highlight.quads.length, 8);
+    // The selection is cleared once it is saved, and the reload that saving
+    // causes would have cleared it anyway.
+    const stillSelected = await app.page.evaluate(() => getSelection()?.toString() ?? "");
+    assert.equal(stillSelected, "");
   } finally {
     await app.close();
   }

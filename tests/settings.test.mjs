@@ -49,7 +49,7 @@ function rustDefaults() {
   const body = rust.slice(rust.indexOf("pub fn defaults()"), rust.indexOf("\nfn path("));
   const found = {};
   // One entry per line, which is what lets the closing `);` end the match.
-  for (const [, key, raw] of body.matchAll(/s\.insert\("([a-z_]+)"\.into\(\),\s*(.+?)\);\s*$/gm)) {
+  for (const [, key, raw] of body.matchAll(/s\.insert\("([a-z0-9_]+)"\.into\(\),\s*(.+?)\);\s*$/gm)) {
     const value = raw.trim();
     if (value === "Value::Null") found[key] = null;
     else if (value.startsWith("json!(")) found[key] = literal(value.slice("json!(".length), named);
@@ -77,7 +77,7 @@ function browserDefaults() {
   const body = api.slice(api.indexOf("{", at), api.indexOf("\n};", at) + 2);
   const json = body
     .replace(/\/\/.*$/gm, "")
-    .replace(/^(\s*)([a-z_]+):/gm, '$1"$2":')
+    .replace(/^(\s*)([a-z0-9_]+):/gm, '$1"$2":')
     .replace(/,(\s*})/g, "$1");
   return JSON.parse(json);
 }
@@ -115,6 +115,6 @@ test("the Settings type covers exactly those settings", () => {
   // one the interface cannot reach.
   const start = api.indexOf("export type Settings = {");
   const declared = api.slice(start, api.indexOf("\n};", start));
-  const names = [...declared.matchAll(/^\s{2}([a-z_]+):/gm)].map(([, name]) => name);
+  const names = [...declared.matchAll(/^\s{2}([a-z0-9_]+):/gm)].map(([, name]) => name);
   assert.deepEqual(names.sort(), Object.keys(rustDefaults()).sort());
 });

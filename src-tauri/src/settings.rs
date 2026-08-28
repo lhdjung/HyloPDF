@@ -100,6 +100,19 @@ pub fn defaults() -> Settings {
     s.insert("window_x".into(), Value::Null);
     s.insert("window_y".into(), Value::Null);
     s.insert("window_maximized".into(), json!(true));
+    // Markup. Six colours a highlight can be, offered from the popover a
+    // selection opens — a shortcut, not the constraint, since each highlight
+    // still carries whichever colour was picked. Plain strings like every
+    // other setting: this table has no list type (see `same_shape`), so a
+    // palette is six independent keys rather than one array, which is also
+    // what keeps them each independently rebindable the way every setting
+    // here already is.
+    s.insert("markup_color_1".into(), json!("#ffd60a"));
+    s.insert("markup_color_2".into(), json!("#7bed9f"));
+    s.insert("markup_color_3".into(), json!("#ff6b6b"));
+    s.insert("markup_color_4".into(), json!("#74c0fc"));
+    s.insert("markup_color_5".into(), json!("#ffa94d"));
+    s.insert("markup_color_6".into(), json!("#da77f2"));
     s
 }
 

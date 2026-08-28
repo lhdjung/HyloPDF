@@ -43,6 +43,7 @@ import {
   setDocumentTitle,
   setHighlights,
   setOpenDocument,
+  writeDocument,
   revealDocument,
   saveWindowState,
   focusWindow,
@@ -63,7 +64,14 @@ import { isEditingTheme, refreshSettingsWindow, showSettingsWindow } from "./set
 import { Sidebar } from "./sidebar";
 import { applyTheme, isDarkTheme, unreadableColors } from "./themes";
 import * as ui from "./ui";
-import { Cancelled, type FitMode, markupOf, type SpreadMode, Viewer } from "./viewer";
+import {
+  Cancelled,
+  type FitMode,
+  markupOf,
+  type MarkupSelection,
+  type SpreadMode,
+  Viewer,
+} from "./viewer";
 
 if (import.meta.env.DEV && hasBackend) {
   // The webview has no terminal of its own; send what it says to the one
@@ -96,6 +104,11 @@ const FULLSCREEN_KEYS = isMac ? "⌘⇧F" : "F11";
 
 /** Preview's own "Go to Page…", which is the one people already know. */
 const JUMP_KEYS = isMac ? "⌥⌘G" : "Ctrl+Alt+G";
+
+/** A conventional highlighter wash, over paper or over `markupWashColor`'s
+    theme-adapted stand-in for it — see `markup-assessment.md`'s "the trap".
+    Not a setting: the six colours vary, how strong the wash is does not. */
+const MARKUP_OPACITY = 0.35;
 
 const el = {
   shell: byId<HTMLDivElement>("shell"),
@@ -186,6 +199,11 @@ class App {
   private toolbarBeforePresenting = true;
   /** Said once per document: there is no text in this one to search. */
   private saidTextless = false;
+  /** The path `markSelection` just wrote, so the reload its own write causes
+      says "Marked." instead of the ordinary "Reloaded — the document changed
+      on disk." — the reader already knows why, they just asked for it. See
+      `reload`. */
+  private pendingOwnWrite: string | null = null;
   /** What the keyboard is bound to, and what of `keys.toml` could not be
       read. Rebuilt when the reader edits the file and presses Reload. */
   keymap: Keymap = buildKeymap();
@@ -385,11 +403,17 @@ class App {
    * got shorter lands on its last page; `scrollTo` clamps. */
   private async reload(path: string): Promise<void> {
     if (path !== this.path) return;
+    // Our own write lands through this same event — see `write_document` in
+    // lib.rs and `writeDocument`'s browser twin — and the reader who just
+    // marked a passage does not need to be told the file changed on disk;
+    // `markSelection` already said so.
+    const quiet = this.pendingOwnWrite === path;
+    this.pendingOwnWrite = null;
     const at = this.viewer.position();
     await this.open(path);
     if (this.path !== path) return;
     this.viewer.scrollTo(at.page, at.offset);
-    ui.notice("Reloaded — the document changed on disk.");
+    if (!quiet) ui.notice("Reloaded — the document changed on disk.");
   }
 
   themeById(id: string): Theme {
@@ -1123,9 +1147,10 @@ class App {
    * scroll past, which is what keeps this replacement safe — a page-at-a-time
    * count would truncate the journal down to whatever had been visited so far.
    *
-   * No UI reads this yet; see `markup-assessment.md`, step 3. A document
-   * someone else highlighted now has those highlights in its journal, the
-   * moment it is opened.
+   * Called on every open, including the reload `markSelection` causes: a
+   * highlight this app just wrote is not added to the journal directly, it
+   * is read back the same way any other application's would be, which is
+   * what keeps there being exactly one path in rather than two.
    */
   private async syncMarkup(path: string, doc: PDFDocumentProxy): Promise<void> {
     const highlights = await markupOf(doc);
@@ -1133,6 +1158,115 @@ class App {
     const entry = this.library.find((item) => item.path === path);
     if (entry) entry.highlights = highlights;
     void setHighlights(path, highlights).catch(() => {});
+  }
+
+  /**
+   * Mark the current selection in one colour, and open the colour popover
+   * beside it — bound to ⌘⇧H, and offered wherever markup makes sense: the
+   * document menu, and a swatch's own click.
+   *
+   * The whole round trip is: build the annotation and save it to bytes
+   * (`Viewer.markSelection`, which touches neither the disk nor the
+   * journal), write the bytes back (`writeDocument`), and let the reload
+   * that write causes — the same `document-changed` path a recompiled
+   * document arrives through — read the saved highlight back out of the
+   * file and into the journal (`syncMarkup`, on the `open` inside `reload`).
+   * Nothing here calls `addHighlight` directly: the file is the only
+   * authority a highlight has, so this reads its own write back rather than
+   * assuming what it wrote landed the way it meant it to.
+   *
+   * Saved immediately, on every mark, rather than batched or debounced —
+   * `markup-assessment.md` calls out a debounce as the right answer for a
+   * very large document, where `saveDocument()` re-reading the whole loaded
+   * stream on every gesture would be felt. That is deliberately not built
+   * yet: it is an optimisation for a document this app does not usually
+   * see, and building it before the gesture it would be optimising existed
+   * was the wrong order to do the work in.
+   */
+  private async markSelection(captured: MarkupSelection, color: string): Promise<void> {
+    const path = this.path;
+    if (!path) return;
+    let bytes: Uint8Array | null;
+    try {
+      bytes = await this.viewer.markSelection(captured, color, MARKUP_OPACITY);
+    } catch (error) {
+      ui.notice(messageOf(error));
+      return;
+    }
+    if (!bytes) {
+      ui.notice("That selection is gone — try marking it again.");
+      return;
+    }
+    window.getSelection()?.removeAllRanges();
+    try {
+      this.pendingOwnWrite = path;
+      await writeDocument(path, bytes);
+      ui.notice("Marked.");
+    } catch (error) {
+      this.pendingOwnWrite = null;
+      ui.notice(messageOf(error));
+    }
+  }
+
+  /**
+   * The colour popover: a swatch per palette colour, opened beside the
+   * selection it will mark. Anchored to a throwaway element positioned over
+   * the selection's own rectangle rather than to a toolbar button, because
+   * nothing in the toolbar is what this is about — `ui.showPopover` only
+   * needs the anchor to read its position once, on the way in, so the
+   * element does not have to outlive the call.
+   */
+  private showMarkupPopover(): void {
+    // Captured now, and handed to the swatches rather than re-read when one
+    // is clicked: clicking anything, this popover included, collapses the
+    // browser's own selection before the click handler runs. See
+    // `Viewer.captureSelection`.
+    const captured = this.viewer.captureSelection();
+    if (!captured) {
+      ui.notice("Select something first, and this marks it.");
+      return;
+    }
+    const selection = window.getSelection()!;
+    const rect = selection.getRangeAt(selection.rangeCount - 1).getBoundingClientRect();
+    const anchor = document.createElement("div");
+    anchor.style.position = "fixed";
+    anchor.style.left = `${rect.left}px`;
+    anchor.style.top = `${rect.top}px`;
+    anchor.style.width = `${rect.width}px`;
+    document.body.append(anchor);
+
+    ui.showPopover(anchor, (close) => {
+      const menu = document.createElement("div");
+      menu.className = "markup-popover";
+      for (const color of this.markupPalette()) {
+        const swatch = document.createElement("button");
+        swatch.type = "button";
+        swatch.className = "markup-swatch";
+        swatch.style.background = color;
+        swatch.setAttribute("aria-label", `Mark in ${color}`);
+        swatch.addEventListener("click", () => {
+          close();
+          void this.markSelection(captured, color);
+        });
+        menu.append(swatch);
+      }
+      return menu;
+    });
+    anchor.remove();
+  }
+
+  /** The six colours the popover offers, in the order the swatches show
+      them. Independent settings — see `settings.rs` — because this table has
+      no list type and a palette is not worth adding one for. */
+  private markupPalette(): string[] {
+    return [
+      this.settings.markup_color_1,
+      this.settings.markup_color_2,
+      this.settings.markup_color_3,
+      this.settings.markup_color_4,
+      this.settings.markup_color_5,
+      this.settings.markup_color_6,
+    ];
   }
 
   /** Select the page being read, and say what was selected — the reader asked
@@ -2185,6 +2319,7 @@ class App {
       // reading for work: quote it, and say where it came from.
       "copy-quote": () => void this.copyQuote(),
       mark: () => void this.toggleMark(),
+      markup: () => this.showMarkupPopover(),
       dismiss: () => {
         // One thing per press, closest layer first.
         if (!el.findBar.hidden) this.closeFind();

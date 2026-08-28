@@ -33,6 +33,12 @@ export type Settings = {
   window_x: number | null;
   window_y: number | null;
   window_maximized: boolean;
+  markup_color_1: string;
+  markup_color_2: string;
+  markup_color_3: string;
+  markup_color_4: string;
+  markup_color_5: string;
+  markup_color_6: string;
 };
 
 export type Theme = {
@@ -162,6 +168,12 @@ const fallbackDefaults: Settings = {
   window_x: null,
   window_y: null,
   window_maximized: true,
+  markup_color_1: "#ffd60a",
+  markup_color_2: "#7bed9f",
+  markup_color_3: "#ff6b6b",
+  markup_color_4: "#74c0fc",
+  markup_color_5: "#ffa94d",
+  markup_color_6: "#da77f2",
 };
 
 /* The packaged themes, for the browser.
@@ -343,6 +355,29 @@ export async function readRange(
 export async function closeReading(): Promise<void> {
   if (!hasBackend) return;
   await invoke("close_document").catch(() => {});
+}
+
+/** Write bytes pdf.js produced — an incremental update carrying a highlight
+    — over the document a window has open, and let the reload that follows
+    pick it back up. See `write_document` in lib.rs: on the real backend the
+    reload is fired from there, as the same `document-changed` event a
+    recompiled document arrives through, so `App.reload` needs nothing new to
+    handle it. The browser fallback has no such event to ride, so it raises
+    its own — see `onDocumentChanged` below — the moment the bytes land in
+    `browserFiles`, which is what makes the whole gesture testable in the
+    harness with no Rust behind it. `Array.from` rather than handing the
+    typed array straight to `invoke`: `bytes` travels inside an ordinary JSON
+    argument object alongside `path`, not through the raw-body path
+    `read_range`'s *response* uses, so it has to already be a plain array of
+    numbers for `Vec<u8>` on the other side to read. */
+export async function writeDocument(path: string, bytes: Uint8Array): Promise<void> {
+  if (!hasBackend) {
+    const name = browserFiles.get(path)?.name ?? path;
+    browserFiles.set(path, new File([bytes as BlobPart], name, { type: "application/pdf" }));
+    for (const handler of browserDocumentChangedHandlers) handler(path);
+    return;
+  }
+  await invoke("write_document", { path, bytes: Array.from(bytes) });
 }
 
 export async function rememberPosition(
@@ -613,16 +648,27 @@ export async function onThemesChanged(
 }
 
 /** The open document, rewritten underneath the reader — a paper recompiled,
-    usually. Rust only says so once what is on the disk is a whole PDF again. */
+    usually, or this app's own `writeDocument`. Rust only says so once what
+    is on the disk is a whole PDF again.
+
+    The browser fallback has no window to emit an event to, so it keeps its
+    own list of handlers and `writeDocument` above calls them directly —
+    the same shape, so `App.reload` does not need to know which backend it
+    is running against. */
 export async function onDocumentChanged(
   handler: (path: string) => void,
 ): Promise<void> {
-  if (!hasBackend) return;
+  if (!hasBackend) {
+    browserDocumentChangedHandlers.push(handler);
+    return;
+  }
   // This window's document, and no other's — see `onExternalDocument`.
   await getCurrentWindow().listen<string>("document-changed", (event) =>
     handler(event.payload),
   );
 }
+
+const browserDocumentChangedHandlers: ((path: string) => void)[] = [];
 
 export async function onFileDrop(handlers: {
   hover: () => void;

@@ -288,6 +288,35 @@ another incremental update saying so. Deleting one **somebody else** put in the
 file is a different act and should look different — offer it, but not on the
 same button, and never silently.
 
+**Correction, from actually building step 5 against pdfjs-dist 5.7:** the
+paragraph above is wrong about how deletion would work, and the mistake is
+worth recording so nobody re-derives it the hard way. `saveDocument()`'s
+per-page pass (`Page.save` in the shipped worker) calls `annotation.save(...)`
+on every annotation already in the file, and that is where an edit or a
+deletion of an *existing* annotation would have to happen — but
+`HighlightAnnotation`, `UnderlineAnnotation`, `SquigglyAnnotation` and
+`StrikeOutAnnotation` none of them override it, so it resolves to the base
+`Annotation.save()`, which returns `null` and does nothing. `deleted: true`
+only has an effect on the *other* path, `saveNewAnnotations`, which is for
+annotations that do not exist in the file yet — a deleted one there is simply
+skipped, which removes nothing. So in this version of pdf.js, **an existing
+`/Highlight` cannot be edited or deleted through `saveDocument()` at all**,
+whether this app wrote it a moment ago or found it already in the file.
+Removing markup for real needs the hand-rolled incremental-update writer the
+plan already keeps in its back pocket for very large files; it did not get
+built for step 5. What step 5 ships instead: creating a highlight works fully
+and is proven end to end (see below), and there is no "remove markup" gesture
+yet.
+
+**And a second correction:** "pdf.js already writes it" (the short answer,
+above) is only true for `/Highlight`. `AnnotationFactory.saveNewAnnotations`'s
+switch only has cases for `FREETEXT`, `HIGHLIGHT`, `INK`, `STAMP` and
+`SIGNATURE` — `UnderlineAnnotation`, `SquigglyAnnotation` and
+`StrikeOutAnnotation` have no `createNewAnnotation`/`createNewDict` of their
+own to be called at all. All three stay readable (`markupOf` already handled
+them from step 3) but are not writable through this door. Highlight is the one
+style step 5 builds.
+
 ## What this still does not do
 
 - **A scan with no text cannot be marked this way.** No text layer, no
@@ -302,6 +331,10 @@ same button, and never silently.
 - **Two windows on the same document still go stale** in memory, as marks do.
   The write path forces this to be dealt with rather than noted, which is an
   improvement: whichever window writes, both reopen.
+- **Underline, strike-out and squiggly cannot be created**, only read — see
+  the correction above. Highlight is the one style this app can write.
+- **Nothing removes a highlight**, this app's own or somebody else's — see the
+  first correction above. The gesture only adds.
 
 ## The plan
 
@@ -343,6 +376,43 @@ High Contrast — the white-point trap shows up on exactly two of those three.
 (keeping `tests/settings.test.mjs` green — it checks the Rust table, the
 browser fallback and the `Settings` type against each other), theme adaptation,
 the debounce, and the save on close.
+
+**Done, in this shape:** `Viewer.captureSelection`/`Viewer.markSelection` in
+`viewer.ts` build the `annotationStorage` entry and call `saveDocument()`;
+`writeDocument` in `api.ts` is the door (with a browser twin that updates the
+in-memory `File` and fires a synthetic `document-changed`, which is what makes
+the whole gesture testable with no Rust behind it); `App.markSelection` and
+`App.showMarkupPopover` in `main.ts` are the orchestration, bound to ⌘⇧H
+(`markup` in `keys.ts`); the six-colour palette is `markup_color_1..6` in
+`settings.rs` — independent scalar settings rather than one list, because this
+settings table has no list type at all (see `same_shape` in `settings.rs`) and
+adding one was a larger, riskier change than the feature asked for.
+
+**Not done, on purpose:** the palette has no settings-window UI yet (only
+sensible defaults, editable today by hand in `settings.toml`, same as anything
+else there); the debounce and the save-on-close are not built — every mark
+saves immediately, which is correct and simple for anything that is not a very
+large document (see the two corrections above the plan for why a debounce
+matters less than it looked like it would, and `markSelection`'s own comment in
+`main.ts`); `keyFor` never learned a markup revision and `drawSelection` was
+never asked for a pending-markup layer, because saving immediately and
+reloading through the existing `document-changed` path already invalidates
+everything a full `Viewer.load()` would — see the doc comment on
+`Viewer.markSelection` for why that turned out to make the deferred machinery
+unnecessary rather than merely delayed. No document-title-menu entry either:
+clicking to open that menu collapses the text selection before the menu's own
+`onSelect` ever runs, the same way clicking a colour swatch does — the swatch
+path is fixed by capturing the selection when the popover opens rather than
+when a swatch is clicked (see `captureSelection`), but the menu would need the
+same capture one layer further out, over a click that also has to open a menu
+first, and it was not worth it for a feature the keyboard shortcut already
+reaches from anywhere. **Proven working**, not just tested against pdf.js's own
+read path: `tests/markup.test.mjs` selects real text, drives the actual
+gesture (⌘⇧H, click a swatch) and reads the highlight back through the normal
+journal-sync path; separately, the bytes `saveDocument()` produced were run
+through `mutool` (MuPDF, a PDF engine with no relation to pdf.js) and
+rendered — a correctly positioned, correctly coloured highlight, on the exact
+twelve characters selected.
 
 **6 · The sidebar and the export.** Second section in Contents, jump, remove,
 copy-all-as-Markdown.

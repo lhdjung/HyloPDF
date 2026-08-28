@@ -49,6 +49,7 @@ export type Action =
   | "select-page"
   | "copy-quote"
   | "mark"
+  | "markup"
   | "dismiss"
   // Moving around
   | "next-page"
@@ -158,6 +159,16 @@ export const ACTIONS: readonly ActionSpec[] = [
     label: "Mark this page, or take the mark off",
     group: "Documents",
     keys: ["mod+shift+b"],
+  },
+  // copy-quote's neighbour: the other thing a reader does with a selection.
+  // Opens the colour popover rather than marking outright, because "which
+  // colour" is the one thing this key cannot answer for itself.
+  {
+    id: "markup",
+    label: "Mark the selection — opens the colour popover",
+    group: "Documents",
+    needsDocument: true,
+    keys: ["mod+shift+h"],
   },
   {
     id: "dismiss",

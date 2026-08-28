@@ -25,6 +25,9 @@ const NOTES = "tests/fixtures/notes.pdf";
    the fixture `quoteFor` in viewer.ts needs to be tested at all, since every
    other fixture's lines are one giant text item apiece. */
 const QUOTE = "tests/fixtures/quote.pdf";
+/* A document that says it carries a signature, which is a thing to ask the
+   reader about before writing markup into it. */
+const SIGNED = "tests/fixtures/signed.pdf";
 
 async function answering() {
   try {
@@ -51,6 +54,7 @@ if (!existsSync(NOTEXT)) await make("tests/fixtures/make-pdf.mjs", NOTEXT, "6", 
 if (!existsSync(TITLED)) await make("tests/fixtures/make-pdf.mjs", TITLED, "3", "titled");
 if (!existsSync(NOTES)) await make("tests/fixtures/make-pdf.mjs", NOTES, "3", "notes");
 if (!existsSync(QUOTE)) await make("tests/fixtures/make-pdf.mjs", QUOTE, "1", "quote");
+if (!existsSync(SIGNED)) await make("tests/fixtures/make-pdf.mjs", SIGNED, "2", "signed");
 
 let vite = null;
 if (!(await answering())) {

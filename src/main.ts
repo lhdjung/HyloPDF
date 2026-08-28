@@ -14,8 +14,11 @@ import {
   type Mark,
   type Settings,
   type Theme,
+  type Writability,
+  addHighlight,
   bootstrap,
   closeReading,
+  documentWritability,
   copyText,
   deleteTheme,
   fileManagerName,
@@ -69,6 +72,7 @@ import {
   Cancelled,
   type FitMode,
   markupOf,
+  type MarkupMark,
   type MarkupSelection,
   type SpreadMode,
   Viewer,
@@ -110,6 +114,62 @@ const JUMP_KEYS = isMac ? "⌥⌘G" : "Ctrl+Alt+G";
     theme-adapted stand-in for it — see `markup-assessment.md`'s "the trap".
     Not a setting: the six colours vary, how strong the wash is does not. */
 const MARKUP_OPACITY = 0.35;
+
+/** Past this much document, markup is kept beside the file rather than
+    written into it.
+ *
+ * `saveDocument()` begins by pulling the whole document into the worker —
+ * `requestLoadedStream()`, the one place a file this app has deliberately
+ * been reading 64KB at a time is read from end to end — and then the new
+ * bytes come back across the bridge and are written out again. For a paper
+ * that is nothing. For a scanned volume it is the reader's gesture stalling
+ * on hundreds of megabytes, twice, every time they mark a sentence.
+ *
+ * A hundred megabytes is roughly a thousand pages of typeset text or a few
+ * dozen of photographs, which is to say: past the size where anybody would
+ * describe what they are reading as a paper. The number is here rather than
+ * in the settings table because it is a fact about the round trip, not a
+ * preference — see `markup-assessment.md`, step 7, and the Rust-side
+ * incremental writer it keeps in its back pocket for exactly this case. */
+const MARKUP_IN_FILE_LIMIT = 100 * 1024 * 1024;
+
+/** Where markup on the open document can go, decided once when it opens
+    rather than found out halfway through the reader's gesture.
+ *
+ * `into` is the ordinary answer and the whole point of the feature: the
+ * annotation is written into the PDF and is there in every other reader. The
+ * rest is step 7's list of edges — a file that cannot be written, a document
+ * that is encrypted, one too large to rewrite on every mark — and they all
+ * end in the same place: the markup is kept in the journal and the reader is
+ * told, once, in one line. */
+type MarkupStanding = {
+  /** Whether a mark can be written into the document itself. */
+  into: boolean;
+  /** Why not, in one line. Said the first time the reader marks something,
+      because that is when it matters and not before. */
+  because: string;
+  /** Something true that is not a refusal — a syncing folder — said once,
+      the first time it is about to matter. */
+  caution: string;
+  /** Whether writing needs the reader's word first: a signed document, where
+      an incremental update is exactly what the signature is there to
+      detect. */
+  ask: boolean;
+  /** Said already, this document. */
+  told: boolean;
+  /** The reader has said yes to writing into this signed document. */
+  allowed: boolean;
+};
+
+/** What a document with nothing in it to mark says, once. */
+const NOTHING_TO_MARK =
+  "There is no text in this document to mark — it is a scan. Nothing can be selected until it has been through OCR.";
+
+/** The standing a document has until the disk says otherwise: markup goes
+    into the file, which is what this whole feature is for. */
+function writableStanding(): MarkupStanding {
+  return { into: true, because: "", caution: "", ask: false, told: false, allowed: false };
+}
 
 const el = {
   shell: byId<HTMLDivElement>("shell"),
@@ -205,6 +265,13 @@ class App {
       on disk." — the reader already knows why, they just asked for it. See
       `reload`. */
   private pendingOwnWrite: string | null = null;
+  /** Where markup on the open document can go, and what has already been
+      said about it. Read once per open — see `readMarkupStanding` — and
+      reset with the document. */
+  private markup: MarkupStanding = writableStanding();
+  /** Which document the standing above is about, so that a reload of the
+      same one does not ask the reader the same question again. */
+  private markupPath: string | null = null;
   /** What the keyboard is bound to, and what of `keys.toml` could not be
       read. Rebuilt when the reader edits the file and presses Reload. */
   keymap: Keymap = buildKeymap();
@@ -491,16 +558,32 @@ class App {
       el.pageCount.textContent = `of ${doc.numPages}`;
       this.search.forget();
       this.saidTextless = false;
+      // What the library already knows about this document, before the entry
+      // below replaces it. The marks and the markup journal are the reader's
+      // rather than the document's, so they are carried across an open rather
+      // than rebuilt from it — and a reload is an open, which is where
+      // dropping them would have cost most: `syncMarkup` reconciles the
+      // journal against the file, and a journal emptied on the way in
+      // reconciles to whatever the file happens to say.
+      const known = this.library.find((entry) => entry.path === path);
       void this.sidebar.setDocument(doc, this.theme);
       this.showMarks();
-      void this.reportFormFields(doc);
+      void this.readMarkupStanding(path, doc);
       void this.adoptDocumentTitle(path, opened.name);
-      void this.syncMarkup(path, doc);
+      void this.syncMarkup(path, doc, known?.highlights ?? []);
 
       const start = this.settings.remember_position ? opened : { page: 1, offset: 0 };
       this.viewer.scrollTo(start.page, start.offset);
       this.library = [
-        { path, title: opened.name, page: start.page, offset: start.offset, opened_at: 0 },
+        {
+          path,
+          title: opened.name,
+          page: start.page,
+          offset: start.offset,
+          opened_at: 0,
+          marks: known?.marks,
+          highlights: known?.highlights,
+        },
         ...this.library.filter((entry) => entry.path !== path),
       ];
       this.renderRecents();
@@ -562,17 +645,31 @@ class App {
    * to type: that needs an interactive annotation layer, which this app does
    * not have. So the fields look live, click like nothing, and leave the
    * reader wondering which half is broken. Said once, when the document
-   * opens, rather than on the click — by then they have already tried. */
-  private async reportFormFields(doc: PDFDocumentProxy): Promise<void> {
+   * opens, rather than on the click — by then they have already tried.
+   *
+   * Answers, as well, whether one of those fields is a signature. That is the
+   * same question asked of the same trip into the worker, and the one caller
+   * that wants it is `readMarkupStanding`: writing markup into a signed
+   * document is exactly the change a signature exists to detect. */
+  private async reportFormFields(doc: PDFDocumentProxy): Promise<boolean> {
     try {
       const fields = await doc.getFieldObjects();
-      if (this.viewer.document !== doc) return;
-      if (!fields || Object.keys(fields).length === 0) return;
+      if (this.viewer.document !== doc) return false;
+      if (!fields || Object.keys(fields).length === 0) return false;
+      const signed = Object.values(fields)
+        .flat()
+        .some((field) => (field as { type?: string }).type === "signature");
+      // Not said here: a signature is only worth a word when the reader is
+      // about to write into the document, and that is `markSelection`'s to
+      // say. This is the notice about *filling in* fields, which a signature
+      // field is not the interesting case of.
       ui.notice(
         "This document has form fields. HyloPDF shows what is in them but cannot fill them in.",
       );
+      return signed;
     } catch {
       // A document that cannot say whether it has fields is not worth a word.
+      return false;
     }
   }
 
@@ -594,6 +691,10 @@ class App {
     // launch, and failing every launch, is the worst version of this feature.
     void setOpenDocument(null);
 
+    // Nothing is open, so nothing is known about where markup on it could
+    // go. The next document asks the disk again.
+    this.markup = writableStanding();
+    this.markupPath = null;
     this.viewer.close();
     // The handle on the file goes here rather than in `viewer.close()`: this
     // is the one path that means "no document open", where opening another one
@@ -1137,29 +1238,224 @@ class App {
   /* -------------------------------------------------------------- markup */
 
   /**
-   * Rebuild this document's markup journal from what the file itself says,
-   * the moment it can be read.
+   * What standing this app has to write markup into the document that has
+   * just opened — step 7 of `markup-assessment.md`, and the part of this
+   * feature that decides whether people trust it.
    *
-   * The file is always the authority — see `library::set_highlights` — so
-   * this replaces the journal outright rather than merging into it: a
-   * highlight the file no longer carries must not go on living in
-   * `library.toml` because nothing told it to leave. `markupOf` makes one
-   * trip over the whole document rather than the pages a reader happens to
-   * scroll past, which is what keeps this replacement safe — a page-at-a-time
-   * count would truncate the journal down to whatever had been visited so far.
+   * Four questions, asked in the order of how completely they settle it:
+   *
+   * *Is it encrypted?* pdf.js's writer does encrypt what it writes, and this
+   * app has one encrypted-document test. Markup that lands in a file nobody
+   * can open again is the worst outcome available here, so it goes beside
+   * the document instead until there is a test suite that says otherwise.
+   *
+   * *Can the file be written at all?* Read-only files, read-only volumes and
+   * folders somebody shared without write access are ordinary, and the honest
+   * moment to find out is before the reader has marked anything — not from a
+   * failed rename halfway through the gesture. Rust asks the disk; see
+   * `document_writability`.
+   *
+   * *Is it too large to rewrite?* `saveDocument()` pulls the whole file into
+   * the worker and hands the whole file back. See `MARKUP_IN_FILE_LIMIT`.
+   *
+   * *Is it signed, or syncing?* Neither is a refusal. A signature is a thing
+   * the reader gets to decide about, because the document is theirs and an
+   * incremental update is exactly what a signature is for; a syncing folder
+   * is worth one sentence about which copy wins.
+   *
+   * Nothing here says anything. The notice belongs to the first mark, which
+   * is when it means something — see `markSelection`.
+   */
+  private async readMarkupStanding(path: string, doc: PDFDocumentProxy): Promise<void> {
+    const standing = writableStanding();
+    // What the reader has already been told, and already agreed to, about
+    // *this* document survives a reload of it — and every mark causes one.
+    // Without this the signed-document question would be asked again after
+    // every single highlight, which is the app arguing rather than asking.
+    if (this.markupPath === path) {
+      standing.told = this.markup.told;
+      standing.allowed = this.markup.allowed;
+    }
+    // Installed before the first await rather than after the last, so there
+    // is no window in which a document is open and the standing on screen is
+    // the previous document's. Everything below mutates this same object,
+    // and a document that has moved on since leaves it orphaned rather than
+    // wrong.
+    this.markupPath = path;
+    this.markup = standing;
+    const name = fileNameOf(path);
+
+    if (this.viewer.encrypted) {
+      standing.into = false;
+      standing.because = `${name} is encrypted. HyloPDF keeps markup on it beside the document rather than writing into a file it cannot promise to leave readable.`;
+    }
+
+    // Asked whatever the answer above was: the size and the syncing folder
+    // are worth knowing, and one round trip is one round trip.
+    const disk = await documentWritability(path).catch(
+      (): Writability => ({ writable: true, reason: "", cloud: null, size: 0 }),
+    );
+    if (this.path !== path || this.viewer.document !== doc) return;
+
+    if (standing.into && !disk.writable) {
+      standing.into = false;
+      standing.because = `${disk.reason} Markup on it is kept in HyloPDF instead — the Contents panel lists it, and can copy it out.`;
+    } else if (standing.into && disk.size > MARKUP_IN_FILE_LIMIT) {
+      standing.into = false;
+      standing.because = `${name} is ${sizeOf(disk.size)}. Writing markup into a document that size means rewriting all of it on every mark, so markup on it is kept in HyloPDF instead.`;
+    }
+    if (disk.cloud) {
+      standing.caution = `${name} is in ${disk.cloud}. Markup is written into the file, so if it is open on another machine as well, the copy that syncs last is the one that keeps it.`;
+    }
+
+    standing.ask = await this.reportFormFields(doc);
+  }
+
+  /**
+   * Reconcile this document's markup journal with what the file itself says,
+   * the moment the file can be read.
+   *
+   * The file is the authority, and it used to be the only one: this replaced
+   * the journal outright with what `markupOf` found. Step 7 is where that
+   * stopped being enough, because there are now two ways for the journal to
+   * know about a highlight the file does not carry, and they mean opposite
+   * things:
+   *
+   * *Never written.* The document cannot be written into — read-only,
+   * encrypted, too large — so the mark was kept beside it instead (see
+   * `markSelection`). The journal is the only copy there is, and replacing it
+   * with the file's answer would throw the reader's markup away on the next
+   * open, silently, which is the failure this whole feature exists not to
+   * have.
+   *
+   * *Written, and then the file was rebuilt underneath it.* A paper
+   * recompiled by LaTeX is a new file and every annotation in the old one is
+   * gone with it — the case this app goes out of its way to support
+   * everywhere else. The words are usually still there, so the entry is kept
+   * and offered back rather than dropped: see `restoreMarkup`, which is what
+   * the "Put back" button in the Contents panel runs.
+   *
+   * Both are kept with `annotation_id: null`, which is precisely what they
+   * now have in common — the journal knows about them and the file does not.
+   * Everything the file *does* carry is taken from the file, whoever wrote
+   * it, so the authority rule is unchanged for every highlight that has one.
    *
    * Called on every open, including the reload `markSelection` causes: a
    * highlight this app just wrote is not added to the journal directly, it
    * is read back the same way any other application's would be, which is
    * what keeps there being exactly one path in rather than two.
    */
-  private async syncMarkup(path: string, doc: PDFDocumentProxy): Promise<void> {
-    const highlights = await markupOf(doc);
+  private async syncMarkup(
+    path: string,
+    doc: PDFDocumentProxy,
+    journal: Highlight[],
+  ): Promise<void> {
+    const inFile = await markupOf(doc);
     if (this.path !== path || this.viewer.document !== doc) return;
+
+    const missing = journal.filter((held) => !inFile.some((found) => sameHighlight(found, held)));
+    const highlights = [
+      ...inFile,
+      ...missing.map((held) => ({ ...held, annotation_id: null })),
+    ];
     const entry = this.library.find((item) => item.path === path);
     if (entry) entry.highlights = highlights;
     void setHighlights(path, highlights).catch(() => {});
     this.showHighlights();
+
+    // Said only for the ones that were in the file and no longer are: those
+    // are markup a rebuild took away, and there is something the reader can
+    // do about it. The ones that were never written are already accounted
+    // for by the line `markSelection` said when it kept them.
+    const lost = missing.filter((held) => held.annotation_id !== null && held.quote.trim());
+    if (lost.length > 0) {
+      ui.notice(
+        `This document was rebuilt, and ${count(lost.length, "highlight")} went with the old copy. The Contents panel can put ${lost.length === 1 ? "it" : "them"} back.`,
+      );
+    }
+  }
+
+  /**
+   * Put markup the file no longer carries back into it, by finding the words
+   * again.
+   *
+   * This is the journal earning its keep. A highlight anchors to
+   * `/QuadPoints` in a particular file, and a recompiled paper is a different
+   * file — so the anchor is gone and the quote is not, and re-anchoring by
+   * the quote through the same fold the search uses (`Viewer.findQuote`) is
+   * the only thing that can survive a rebuild at all.
+   *
+   * One write for the lot: every re-anchored run goes into pdf.js's
+   * annotation storage and then a single `saveDocument()`, so putting thirty
+   * highlights back is one incremental update rather than thirty. What could
+   * not be found is left in the journal exactly as it was — a passage that
+   * was rewritten is not a passage that moved, and the honest thing is to say
+   * how many rather than to put the markup on the nearest words.
+   */
+  private async restoreMarkup(): Promise<void> {
+    const path = this.path;
+    if (!path || !this.markup.into) return;
+    const lost = this.restorable();
+    if (lost.length === 0) return;
+
+    ui.notice(`Looking for ${count(lost.length, "passage")}…`);
+    const found: { highlight: Highlight; mark: MarkupMark }[] = [];
+    for (const highlight of lost) {
+      const run = await this.viewer.findQuote(highlight.quote, highlight.page);
+      if (this.path !== path) return;
+      if (run) {
+        found.push({
+          highlight,
+          mark: { ...run, color: highlight.color, opacity: highlight.opacity },
+        });
+      }
+    }
+    if (found.length === 0) {
+      ui.notice("None of that markup could be found in the document as it is now.");
+      return;
+    }
+
+    let bytes: Uint8Array | null;
+    try {
+      bytes = await this.viewer.markQuads(found.map((entry) => entry.mark));
+    } catch (error) {
+      ui.notice(messageOf(error));
+      return;
+    }
+    if (!bytes) return;
+
+    // The journal entries being put back are dropped before the write, not
+    // after it: the reload the write causes reconciles the journal against
+    // the file again, and an entry still carrying the *old* file's quads
+    // would not match the annotation just written from the new ones — so it
+    // would come back as lost, forever, and the button would never go away.
+    const restored = new Set(found.map((entry) => entry.highlight.id));
+    const entry = this.library.find((item) => item.path === path);
+    if (entry) entry.highlights = (entry.highlights ?? []).filter((held) => !restored.has(held.id));
+
+    try {
+      this.pendingOwnWrite = path;
+      await writeDocument(path, bytes);
+      ui.notice(
+        found.length === lost.length
+          ? `Put ${count(found.length, "highlight")} back.`
+          : `Put ${found.length} of ${lost.length} back — the rest are not in this document any more.`,
+        "done",
+      );
+    } catch (error) {
+      this.pendingOwnWrite = null;
+      ui.notice(messageOf(error));
+    }
+  }
+
+  /** Journalled markup that is not in the file and could be put back into it:
+      it was written once, so the document takes markup, and it has a quote to
+      find the passage by. */
+  private restorable(): Highlight[] {
+    if (!this.markup.into) return [];
+    return this.highlights().filter(
+      (highlight) => highlight.annotation_id === null && highlight.quote.trim().length > 0,
+    );
   }
 
   /** The document's coloured markup, in the order the file gave it. */
@@ -1168,12 +1464,16 @@ class App {
     return this.library.find((entry) => entry.path === this.path)?.highlights ?? [];
   }
 
-  /** Hand the markup to the panel that lists it, below the marks. */
+  /** Hand the markup to the panel that lists it, below the marks — with the
+      offer to put back whatever this document no longer carries, when there
+      is any and the document would take it. */
   private showHighlights(): void {
+    const lost = this.restorable();
     this.sidebar.showHighlights(
       this.highlights(),
       (highlight) => this.viewer.jumpTo(highlight.page),
       () => void this.copyAllMarkup(),
+      lost.length > 0 ? { count: lost.length, put: () => void this.restoreMarkup() } : null,
     );
   }
 
@@ -1200,31 +1500,64 @@ class App {
   }
 
   /**
-   * Mark the current selection in one colour, and open the colour popover
-   * beside it — bound to ⌘⇧H, and offered wherever markup makes sense: the
-   * document menu, and a swatch's own click.
+   * Mark a captured selection in one colour.
    *
-   * The whole round trip is: build the annotation and save it to bytes
+   * The ordinary round trip is: build the annotation and save it to bytes
    * (`Viewer.markSelection`, which touches neither the disk nor the
    * journal), write the bytes back (`writeDocument`), and let the reload
    * that write causes — the same `document-changed` path a recompiled
    * document arrives through — read the saved highlight back out of the
    * file and into the journal (`syncMarkup`, on the `open` inside `reload`).
-   * Nothing here calls `addHighlight` directly: the file is the only
-   * authority a highlight has, so this reads its own write back rather than
-   * assuming what it wrote landed the way it meant it to.
+   * The file is the only authority a highlight has, so this reads its own
+   * write back rather than assuming what it wrote landed the way it meant
+   * it to.
    *
    * Saved immediately, on every mark, rather than batched or debounced —
    * `markup-assessment.md` calls out a debounce as the right answer for a
-   * very large document, where `saveDocument()` re-reading the whole loaded
-   * stream on every gesture would be felt. That is deliberately not built
-   * yet: it is an optimisation for a document this app does not usually
-   * see, and building it before the gesture it would be optimising existed
-   * was the wrong order to do the work in.
+   * very large document. `MARKUP_IN_FILE_LIMIT` is the other half of that
+   * answer and the one that arrived: past a certain size the round trip is
+   * not something to make quicker, it is something not to make.
+   *
+   * Everything else here is step 7. Three ways this does not end in a write:
+   *
+   * *The document cannot take markup* — read-only, encrypted, too large. The
+   * mark goes into the journal instead and the reader is told, once, in one
+   * line, what happened and where their markup is. Journalling it is not a
+   * consolation prize: it carries the quads and the quote, so
+   * `restoreMarkup` can put it into the file the day the file becomes
+   * writable.
+   *
+   * *The document is signed* and the reader has not yet said to go ahead.
+   * Writing markup into it is exactly the change the signature exists to
+   * detect, and it is their document, so they are asked rather than refused
+   * — once per document.
+   *
+   * *The document is syncing.* Not a refusal at all, and not a question:
+   * one sentence about which copy wins, said once, and then the write.
    */
-  private async markSelection(captured: MarkupSelection, color: string): Promise<void> {
+  private async markSelection(
+    captured: MarkupSelection,
+    color: string,
+    quote: string,
+  ): Promise<void> {
     const path = this.path;
     if (!path) return;
+
+    if (!this.markup.into) {
+      await this.journalSelection(path, captured, color, quote);
+      return;
+    }
+    if (this.markup.ask && !this.markup.allowed) {
+      const name = fileNameOf(path);
+      const go = await ui.confirmWrite(
+        "This document is signed",
+        `Markup is written into ${name} itself, which is the change a signature is there to detect. Anyone checking it afterwards will be told the document has been altered.`,
+        "Mark anyway",
+      );
+      if (!go) return;
+      this.markup.allowed = true;
+    }
+
     let bytes: Uint8Array | null;
     try {
       bytes = await this.viewer.markSelection(captured, color, MARKUP_OPACITY);
@@ -1240,10 +1573,82 @@ class App {
     try {
       this.pendingOwnWrite = path;
       await writeDocument(path, bytes);
-      ui.notice("Marked.");
+      if (this.markup.caution && !this.markup.told) {
+        this.markup.told = true;
+        ui.notice(this.markup.caution);
+      } else {
+        ui.notice("Marked.");
+      }
     } catch (error) {
       this.pendingOwnWrite = null;
-      ui.notice(messageOf(error));
+      // A write that fails after everything above said it would work is the
+      // one case left, and the markup is not thrown away over it: it goes
+      // where the markup on an unwritable document goes, and the reader is
+      // told which of the two happened.
+      this.markup.into = false;
+      this.markup.because = `${messageOf(error)} Markup on it is kept in HyloPDF instead.`;
+      await this.journalSelection(path, captured, color, quote);
+    }
+  }
+
+  /**
+   * Keep a mark beside the document rather than in it, because the document
+   * cannot take it — and say so once.
+   *
+   * The entry is the same shape the file would have given back: real quads,
+   * in the page's own coordinate space, and the words that were selected. So
+   * it lists and copies out exactly like markup that did land in a file, and
+   * `restoreMarkup` can write it in later if the reason it could not goes
+   * away.
+   *
+   * What it does not do is appear on the page. Drawing it would mean a
+   * layer of this app's own over the canvas, which is precisely the machinery
+   * writing into the file was chosen to avoid — see step 5 in
+   * `markup-assessment.md`, and the note on `Viewer.markSelection` about why
+   * saving immediately made the deferred drawing unnecessary rather than
+   * merely delayed. The honest version of that trade is this sentence in the
+   * notice: the markup is kept, it is listed, and it is not on the page.
+   */
+  private async journalSelection(
+    path: string,
+    captured: MarkupSelection,
+    color: string,
+    quote: string,
+  ): Promise<void> {
+    const runs = await this.viewer.quadsFor(captured);
+    if (this.path !== path) return;
+    if (runs.length === 0) {
+      ui.notice("That selection is gone — try marking it again.");
+      return;
+    }
+
+    const at = Date.now();
+    let highlights: Highlight[] = [];
+    for (const run of runs) {
+      highlights = await addHighlight(path, {
+        id: crypto.randomUUID(),
+        page: run.page,
+        quads: run.quads,
+        color,
+        opacity: MARKUP_OPACITY,
+        style: "highlight",
+        quote,
+        at,
+        annotation_id: null,
+      });
+    }
+    if (this.path !== path) return;
+    window.getSelection()?.removeAllRanges();
+
+    const entry = this.library.find((item) => item.path === path);
+    if (entry) entry.highlights = highlights;
+    this.showHighlights();
+
+    if (!this.markup.told) {
+      this.markup.told = true;
+      ui.notice(`${this.markup.because} It is listed in the Contents panel, and it is not drawn on the page.`);
+    } else {
+      ui.notice("Kept beside the document.", "done");
     }
   }
 
@@ -1262,10 +1667,23 @@ class App {
     // `Viewer.captureSelection`.
     const captured = this.viewer.captureSelection();
     if (!captured) {
-      ui.notice("Select something first, and this marks it.");
+      // A scan has no text layer, so there is nothing to select and nothing
+      // this gesture could ever mark — which is a different sentence from
+      // "select something first", and the one worth saying. See
+      // `markup-assessment.md`, step 7.
+      ui.notice(
+        this.viewer.hasSelectableText()
+          ? "Select something first, and this marks it."
+          : NOTHING_TO_MARK,
+      );
       return;
     }
     const selection = window.getSelection()!;
+    // The words themselves, taken now for the same reason the rectangles are
+    // — a click collapses the selection before any handler runs. They are
+    // what a mark kept beside the document has to show for itself, and the
+    // only thing `restoreMarkup` could ever find the passage again by.
+    const quote = selection.toString().trim().replace(/\s+/g, " ");
     const rect = selection.getRangeAt(selection.rangeCount - 1).getBoundingClientRect();
     const anchor = document.createElement("div");
     anchor.style.position = "fixed";
@@ -1285,7 +1703,7 @@ class App {
         swatch.setAttribute("aria-label", `Mark in ${color}`);
         swatch.addEventListener("click", () => {
           close();
-          void this.markSelection(captured, color);
+          void this.markSelection(captured, color, quote);
         });
         menu.append(swatch);
       }
@@ -2674,6 +3092,46 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+/** Whether two journal entries are the same piece of markup.
+ *
+ * By annotation id where both have one, because that is the file's own
+ * answer; by page and quads otherwise, which is what a highlight this app
+ * wrote and then read back out of the file agree on exactly. Half a point of
+ * slack, because the numbers make a round trip through a PDF's own decimal
+ * notation on the way. */
+function sameHighlight(a: Highlight, b: Highlight): boolean {
+  if (a.annotation_id && b.annotation_id) return a.annotation_id === b.annotation_id;
+  if (a.page !== b.page || a.quads.length !== b.quads.length) return false;
+  return a.quads.every((number, at) => Math.abs(number - b.quads[at]) < 0.5);
+}
+
+/** "one highlight", "three highlights" — a count with its noun, so a sentence
+    does not have to be written twice to be read once. */
+function count(many: number, noun: string): string {
+  return `${many} ${noun}${many === 1 ? "" : "s"}`;
+}
+
+/** The document's own name, for a sentence about the file rather than about
+    what is in it. The toolbar shows the title the document gives itself,
+    which is the wrong name to use when the subject is the file on the disk. */
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+/** A file size a reader would say out loud. One decimal below ten, none
+    above: "1.4 GB", "340 MB". */
+function sizeOf(bytes: number): string {
+  const units = ["bytes", "KB", "MB", "GB"];
+  let size = bytes;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  const rounded = unit === 0 || size >= 10 ? Math.round(size) : Math.round(size * 10) / 10;
+  return `${rounded} ${units[unit]}`;
 }
 
 function messageOf(error: unknown): string {

@@ -94,6 +94,20 @@ export type Highlight = {
   annotation_id: string | null;
 };
 
+/** What standing this app has to write markup into a document, asked of the
+    disk before the reader marks anything — see `document_writability` in
+    lib.rs. `writable` is a fact ("an attempt would fail"); `cloud` is not a
+    refusal but the one thing worth saying about a file two machines may be
+    writing at once. */
+export type Writability = {
+  writable: boolean;
+  /** Why not, in one line, ready to be shown. Empty when it is writable. */
+  reason: string;
+  /** The syncing service whose folder the document sits in, named. */
+  cloud: string | null;
+  size: number;
+};
+
 export type LibraryEntry = {
   path: string;
   title: string;
@@ -140,6 +154,11 @@ const FALLBACK_KEY = "hylopdf.settings";
  * here, so the same table arrives as JSON — which is what lets the harness
  * open the app with a key rebound and press it. */
 const KEYS_FALLBACK_KEY = "hylopdf.keys";
+/* What the disk would say about the open document, for the browser path.
+ * There is no disk here, so a test that wants a read-only document — the
+ * whole of step 7's first edge — seeds this instead. See
+ * `documentWritability`. */
+const WRITABILITY_FALLBACK_KEY = "hylopdf.writability";
 
 const fallbackDefaults: Settings = {
   theme: "hylo-light",
@@ -378,6 +397,29 @@ export async function writeDocument(path: string, bytes: Uint8Array): Promise<vo
     return;
   }
   await invoke("write_document", { path, bytes: Array.from(bytes) });
+}
+
+/** Whether markup can be written into this document at all, asked once when
+    it opens rather than found out by a write that fails halfway through the
+    reader's gesture.
+
+    The browser twin answers from `localStorage`, which is what lets the
+    harness open the app on a document that is read only, or in a syncing
+    folder, without either of those existing — the same trick the settings and
+    the keymap already use. Nothing seeds it in the real app, where the key is
+    absent and every document is writable until Rust says otherwise. */
+export async function documentWritability(path: string): Promise<Writability> {
+  if (!hasBackend) {
+    const size = browserFiles.get(path)?.size ?? 0;
+    let seeded: Partial<Writability> = {};
+    try {
+      seeded = JSON.parse(localStorage.getItem(WRITABILITY_FALLBACK_KEY) || "{}");
+    } catch {
+      // A hand-edited seed is not worth a failure: the default stands.
+    }
+    return { writable: true, reason: "", cloud: null, size, ...seeded };
+  }
+  return invoke<Writability>("document_writability", { path });
 }
 
 export async function rememberPosition(

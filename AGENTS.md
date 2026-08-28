@@ -85,6 +85,7 @@ tests/              node --test; `npm test` starts a dev server for them
   spread.test.mjs   two pages side by side, and the cover on its own
   marks.test.mjs    a pin in a page, and the same pin taken out
   notes.test.mjs    the notes a document already carries, made readable
+  markup.test.mjs   marking a passage, the file it lands in, and the edges
   document.test.mjs what a document says about itself
   notext.test.mjs   a scan with nothing in it to search
   keys.test.mjs     chords, the keymap, the shipped template, and a rebound key
@@ -560,6 +561,83 @@ window-targeted listens and the keyed handle, and `keys.test.mjs` for ⌘N and
 for ⌘W and ⌘Q meaning two different things now. The rest was checked by running
 the real app: two documents handed over, three windows restored from a session,
 ⌘N, a window closed, and "New Window" chosen from the Dock.
+
+## Markup, which is written into the document
+
+A reader who marks a passage gets a `/Subtype /Highlight` in the PDF, with
+`/QuadPoints`, `/C` and an appearance stream — the spec's own annotation, and
+the same one Preview, Acrobat and Zotero read. It is in the file the next time
+it is opened, by this app or any other. `markup-assessment.md` is the long
+form: what a highlight is, what pdf.js can and cannot write, and the plan this
+was built from.
+
+**pdf.js does the writing, and only for highlights.**
+`Viewer.markSelection` builds the entry pdf.js's own annotation editor would
+build — `annotationStorage.setValue` under the `pdfjs_internal_editor_` prefix
+— and `saveDocument()` returns the whole file back as an incremental update:
+original bytes untouched, new objects appended. That shape is read out of
+`pdf.mjs` and `pdf.worker.mjs` rather than out of any documented API, which is
+the risk it carries; `markup.test.mjs` saves a file and reads a `/Highlight`
+back out of it, which is what keeps the risk visible. Two things in that
+worker decide most of what this feature is: `saveNewAnnotations` has cases for
+`FREETEXT`, `HIGHLIGHT`, `INK`, `STAMP` and `SIGNATURE` alone, so underline,
+strike-out and squiggly stay readable and are not writable; and `Annotation.save()`
+is not overridden by any markup subtype, so **an annotation already in the file
+cannot be edited or deleted through `saveDocument()` at all**. Nothing removes
+a highlight. A button that could only take the entry out of the journal, which
+the next open would put straight back, is worse than no button.
+
+**The write goes through Rust, because Rust owns the disk and the watch.**
+`write_document` takes the same per-window lock the read path does, writes
+atomically, leaves a `.hylopdf-original` beside the document the first time it
+ever appends to it, tells `watch.rs` the burst about to arrive is ours, and
+emits `document-changed` to the writing window itself. So a mark reloads the
+document through the path a recompile already used, and every cache a reload
+rebuilds — `keyFor`, the markup cache, the journal — is invalidated by having
+been rebuilt. That is why there is no pending-markup layer and no markup
+revision in `keyFor`: saving immediately made the deferred machinery
+unnecessary rather than merely delayed.
+
+**The journal is a cache and a recovery log, never an authority.** `Highlight`
+in `library.rs` keeps the quads, the colour, the quote and the page beside
+`marks`; on open, `syncMarkup` rebuilds it from what `markupOf` reads out of
+the file. What survives that rebuild is only what the file cannot carry:
+markup on a document that could not be written, and markup a rebuilt document
+lost. Both are held with `annotation_id: null`, which is what they have in
+common, and the sidebar marks them as not being in the document.
+
+**Step 7 is the edges, and they are most of what makes this trustworthy.**
+`readMarkupStanding` asks four questions once per open and says nothing;
+`markSelection` is where the answer is finally worth a sentence.
+
+- *Encrypted, unwritable, or very large* (`MARKUP_IN_FILE_LIMIT`, 100MB, because
+  `saveDocument()` pulls the whole file into the worker and hands the whole
+  file back): the mark is kept in the journal with real quads and its quote,
+  and the reader is told once, in one line, what happened and where it is.
+- *Read-only* is asked of the disk rather than discovered from a failed
+  rename: `document_writability` opens the file for writing and closes it
+  again, which is the only question whose answer is actually true — permission
+  bits, a read-only volume, another owner and a sandbox all come back the same
+  way. It names a syncing folder while it is there.
+- *Signed*: asked, not refused. It is their document and an incremental update
+  is exactly what a signature detects. Once per document.
+- *Syncing*: one sentence about which copy wins, said once, and then the write.
+- *A scan*: "there is no text in this document to mark", which is a different
+  sentence from "select something first" and the one worth saying.
+
+**A rebuilt document is where the journal earns its keep.** A paper recompiled
+by LaTeX is a new file and every annotation in the old one went with it — the
+case this app goes out of its way to support everywhere else. The words are
+usually still there, so `Viewer.findQuote` looks the quote up again through
+`fold` from `search.ts` (the one thing `viewer.ts` borrows from the search:
+ligatures split and soft hyphens dropped, because a passage that moved has very
+often been re-typeset on the way), starting at the page it used to be on and
+working outwards. What it finds goes back in as one write for the lot; what it
+does not find is left in the journal and counted out loud, because a passage
+that was rewritten is not a passage that moved. The offer is a button in the
+Contents panel and never a thing that happens on its own: re-anchoring is a
+guess, however good a one, and this app does not write to somebody's file
+without being asked.
 
 ## The keyboard
 

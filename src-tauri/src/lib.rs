@@ -579,6 +579,127 @@ async fn write_document(
     Ok(length)
 }
 
+/// What standing this app has to write markup into a document — asked before
+/// the reader marks anything rather than discovered by trying.
+///
+/// Two answers, and they are different in kind. `writable` is a fact about
+/// the disk: false means an attempt would fail, so the gesture keeps the
+/// markup in the journal instead and says so once. `cloud` is not a refusal
+/// at all — a file in a syncing folder can be written perfectly well, and the
+/// thing worth saying is that the service, not this app, decides which copy
+/// wins if it is open on two machines at once.
+#[derive(Debug, Clone, Serialize)]
+pub struct Writability {
+    writable: bool,
+    /// Why not, in one line, ready to be shown. Empty when it is writable.
+    reason: String,
+    /// The syncing service whose folder this document sits in, named, when it
+    /// sits in one.
+    cloud: Option<String>,
+    /// How long the document is. The frontend decides from this whether
+    /// `saveDocument()` — which pulls the whole file into the worker — is a
+    /// reasonable thing to do on every mark.
+    size: u64,
+}
+
+/// Folders that mean a file is being synced somewhere else as well. Matched
+/// against a whole path component, and by prefix within it, because these
+/// arrive personalised: "OneDrive - Acme", "Dropbox (Personal)".
+const SYNCED_FOLDERS: &[(&str, &str)] = &[
+    ("Mobile Documents", "iCloud Drive"),
+    ("com~apple~CloudDocs", "iCloud Drive"),
+    ("Dropbox", "Dropbox"),
+    ("Google Drive", "Google Drive"),
+    ("GoogleDrive", "Google Drive"),
+    ("My Drive", "Google Drive"),
+    ("OneDrive", "OneDrive"),
+    ("Nextcloud", "Nextcloud"),
+    ("ownCloud", "ownCloud"),
+    ("pCloud Drive", "pCloud"),
+    ("Sync.com", "Sync.com"),
+    ("Proton Drive", "Proton Drive"),
+    ("Box Sync", "Box"),
+];
+
+/// The syncing service this path is inside, if it is inside one.
+///
+/// A guess by name, and it can only ever be a guess: a folder called Dropbox
+/// that is nothing of the kind produces one extra line of notice, and a
+/// service nobody here has heard of produces none. Both are the right way to
+/// be wrong for something whose whole output is one sentence of warning.
+fn cloud_service(path: &Path) -> Option<String> {
+    for part in path.components() {
+        let name = part.as_os_str().to_string_lossy();
+        for (folder, service) in SYNCED_FOLDERS {
+            if name.len() >= folder.len() && name[..folder.len()].eq_ignore_ascii_case(folder) {
+                return Some((*service).to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Whether the disk would refuse this write, and what to say if it does.
+///
+/// The file is asked by opening it for writing and closing it again, which is
+/// the only question with an answer that is actually true: a read-only file,
+/// a read-only volume, a file somebody else owns and a sandbox that has not
+/// granted this path all come back the same way, and none of them can be read
+/// off the permission bits alone. Nothing is written by the probe — no
+/// `truncate`, no `append` — so a document that survives it is exactly as it
+/// was.
+///
+/// The folder is asked separately and more cheaply, because an incremental
+/// update is written *beside* the document and renamed over it (see
+/// `atomic_write`), so a writable file in an unwritable folder is still a
+/// write that cannot happen. That half is read off the permission bits and is
+/// therefore the half that can be wrong; the write itself still fails safely
+/// and reports, so this is a better message rather than the only guard.
+fn refuses_writing(path: &Path) -> Option<String> {
+    let name = file_name(&path.to_string_lossy());
+    match std::fs::OpenOptions::new().write(true).open(path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Some(format!("{name} is read only."));
+        }
+        Err(error) => return Some(format!("{name} cannot be written: {error}")),
+    }
+    let folder = path.parent()?;
+    match std::fs::metadata(folder) {
+        Ok(meta) if meta.permissions().readonly() => {
+            Some(format!("The folder {name} is in is read only."))
+        }
+        _ => None,
+    }
+}
+
+/// Ask the disk about a document before offering to write into it.
+fn writability(path: &Path) -> Writability {
+    let size = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    let cloud = cloud_service(path);
+    match refuses_writing(path) {
+        Some(reason) => Writability {
+            writable: false,
+            reason,
+            cloud,
+            size,
+        },
+        None => Writability {
+            writable: true,
+            reason: String::new(),
+            cloud,
+            size,
+        },
+    }
+}
+
+/// Whether markup can be written into this document, and what to say about it
+/// if it cannot. Asked once per open — see `App.readMarkupStanding`.
+#[tauri::command]
+async fn document_writability(path: String) -> Result<Writability, String> {
+    Ok(writability(Path::new(&path)))
+}
+
 /// Let go of the open document, so the handle does not outlive the reading.
 #[tauri::command]
 async fn close_document(
@@ -1688,6 +1809,7 @@ pub fn run() {
             open_for_reading,
             read_range,
             write_document,
+            document_writability,
             close_document,
             remember_position,
             set_open_document,
@@ -1931,6 +2053,86 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, body).expect("scratch file");
         path
+    }
+
+    /// The write door is asked before the gesture, not after the failure.
+    /// A file the reader cannot write is the ordinary case this exists for:
+    /// a paper in a folder somebody shared read-only, or a document opened
+    /// off a mounted volume.
+    #[test]
+    fn a_read_only_document_says_so_rather_than_failing_later() {
+        let path = scratch_pdf("locked.pdf", b"%PDF-1.7\n%%EOF\n");
+        let ordinary = writability(&path);
+        assert!(ordinary.writable, "{}", ordinary.reason);
+        assert_eq!(ordinary.reason, "");
+        assert_eq!(ordinary.size, 15);
+
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions).unwrap();
+
+        let locked = writability(&path);
+        // Root is allowed to write a read-only file, so a suite running as
+        // root would find this writable and be right. Skip rather than fail:
+        // the claim is about the probe, not about who is running it.
+        if locked.writable {
+            eprintln!("skipped: this user can write a read-only file");
+        } else {
+            assert_eq!(locked.reason, "locked.pdf is read only.");
+        }
+
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).unwrap();
+    }
+
+    /// A document that is not there at all is not writable either, and the
+    /// message says which document rather than which system call.
+    #[test]
+    fn a_document_that_is_gone_is_not_writable() {
+        let missing = std::env::temp_dir().join(format!("hylopdf-gone-{}.pdf", std::process::id()));
+        let _ = std::fs::remove_file(&missing);
+        let answer = writability(&missing);
+        assert!(!answer.writable);
+        assert!(
+            answer.reason.contains(".pdf"),
+            "the reason should name the document: {}",
+            answer.reason
+        );
+    }
+
+    /// Syncing folders arrive personalised — "OneDrive - Acme", "Dropbox
+    /// (Personal)" — so the match is a prefix within one whole component,
+    /// and a folder that merely starts the same way somewhere in the middle
+    /// of a name is not one.
+    #[test]
+    fn a_synced_folder_is_named_by_the_service_that_syncs_it() {
+        let cases: &[(&str, Option<&str>)] = &[
+            (
+                "/Users/x/Dropbox (Personal)/papers/one.pdf",
+                Some("Dropbox"),
+            ),
+            ("/Users/x/OneDrive - Acme/one.pdf", Some("OneDrive")),
+            (
+                "/Users/x/Library/Mobile Documents/com~apple~CloudDocs/one.pdf",
+                Some("iCloud Drive"),
+            ),
+            (
+                "/Users/x/Google Drive/My Drive/one.pdf",
+                Some("Google Drive"),
+            ),
+            ("/Users/x/Papers/one.pdf", None),
+            // Not a synced folder: the name only contains one.
+            ("/Users/x/Not Dropbox/one.pdf", None),
+        ];
+        for (path, service) in cases {
+            assert_eq!(
+                cloud_service(Path::new(path)).as_deref(),
+                *service,
+                "for {path}"
+            );
+        }
     }
 
     /// The write door's authorisation: it takes the same lock the read path

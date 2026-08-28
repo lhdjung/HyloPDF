@@ -36,7 +36,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { openApp, MOD } from "../scripts/ui-harness.mjs";
 
@@ -360,6 +360,260 @@ test("clicking a piece of markup jumps to its page", async () => {
       })
       .catch(() => {});
     assert.equal((await app.state()).page, "1");
+  } finally {
+    await app.close();
+  }
+});
+
+/* ---------------------------------------------------------------- the edges
+
+   Step 7. Everything above assumes the ordinary case: a document this app can
+   open, write and read back. These are the ones where it cannot, and each is
+   one branch and one line of notice — which together are the difference
+   between markup being trustworthy and being a thing people turn off.
+
+   The disk is seeded rather than made: `openApp({ writability })` writes what
+   Rust's `document_writability` would have answered into the same
+   `localStorage` the browser twin of every other door reads from, so a
+   read-only document needs no read-only file. See `documentWritability` in
+   api.ts. */
+
+/** Select a run of text on the page and ask for the markup popover. */
+async function selectAndAsk(app, length = 12) {
+  await app.page.waitForSelector("#pages .textLayer span", { timeout: 10_000 });
+  const selected = await app.page.evaluate((length) => {
+    const span = [...document.querySelectorAll("#pages .textLayer span")].find(
+      (candidate) => (candidate.firstChild?.textContent?.length ?? 0) >= length,
+    );
+    const range = document.createRange();
+    range.setStart(span.firstChild, 0);
+    range.setEnd(span.firstChild, length);
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return range.toString();
+  }, length);
+  assert.ok(selected.length > 0, "nothing was selected to mark");
+  await app.press(`${MOD}+Shift+KeyH`);
+  await app.page.waitForSelector(".markup-popover .markup-swatch", { timeout: 5_000 });
+  return selected;
+}
+
+/** What the notice line says, once it says anything but this. */
+async function noticeAfter(app, before = "") {
+  await app.page
+    .waitForFunction(
+      (before) => {
+        const said = document.getElementById("notice")?.textContent ?? "";
+        return said.length > 0 && said !== before;
+      },
+      before,
+      { timeout: 15_000, polling: 100 },
+    )
+    .catch(() => {});
+  return app.page.evaluate(() => document.getElementById("notice")?.textContent ?? "");
+}
+
+test("markup on a document that cannot be written is kept beside it, and said once", async () => {
+  const app = await openApp({
+    pdf: BOOK,
+    writability: { writable: false, reason: "book.pdf is read only." },
+  });
+  try {
+    await selectAndAsk(app);
+    await app.page.click(".markup-popover .markup-swatch >> nth=0");
+
+    const said = await noticeAfter(app);
+    assert.match(said, /read only/, `the notice did not say why: ${said}`);
+    assert.match(said, /Contents panel/, `the notice did not say where it went: ${said}`);
+
+    const highlights = await waitForJournal(app, BOOK_PATH);
+    assert.equal(highlights.length, 1, "the mark was not kept anywhere");
+    // Never in the file, which is exactly what an absent annotation id means:
+    // every highlight that has been through `markupOf` carries one.
+    assert.equal(highlights[0].annotation_id, null);
+    assert.equal(highlights[0].quads.length, 8);
+    assert.ok(highlights[0].quote.length > 0, "a kept mark carries the words it marked");
+
+    // Listed, which is the other half of what the notice promised.
+    await app.page.click("#contents");
+    const row = await app.page
+      .waitForSelector("#outline-panel .highlight-row .highlight-quote", { timeout: 10_000 })
+      .catch(() => null);
+    assert.ok(row, "the kept markup is not listed in the Contents panel");
+
+    // And the second mark does not repeat the explanation.
+    await selectAndAsk(app, 8);
+    await app.page.click(".markup-popover .markup-swatch >> nth=1");
+    const again = await noticeAfter(app, said);
+    assert.equal(again, "Kept beside the document.");
+  } finally {
+    await app.close();
+  }
+});
+
+test("a scan says there is nothing here to mark, not that nothing is selected", async () => {
+  const app = await openApp({ pdf: "tests/fixtures/notext.pdf" });
+  try {
+    await app.press(`${MOD}+Shift+KeyH`);
+    const said = await noticeAfter(app);
+    assert.match(said, /it is a scan/, `wrong notice for a scan: ${said}`);
+    assert.equal(
+      await app.page.locator(".markup-popover").count(),
+      0,
+      "the colour popover opened over a document with nothing to mark",
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("a signed document is asked about before it is written to, once", async () => {
+  const app = await openApp({ pdf: "tests/fixtures/signed.pdf" });
+  try {
+    await selectAndAsk(app);
+    await app.page.click(".markup-popover .markup-swatch >> nth=0");
+
+    const asked = await app.page
+      .waitForSelector("#windows .window", { timeout: 10_000 })
+      .catch(() => null);
+    assert.ok(asked, "a signed document was written to without asking");
+    const title = await app.page.evaluate(
+      () => document.querySelector("#windows .window .window-title")?.textContent ?? "",
+    );
+    assert.equal(title, "This document is signed");
+
+    // Cancel: nothing is written and nothing is kept.
+    await app.page.click("#windows .window .btn:not(.btn-primary)");
+    await app.page.waitForTimeout(300);
+    assert.equal((await journalOf(app, "signed.pdf")).length, 0);
+
+    // Again, and this time yes.
+    await selectAndAsk(app);
+    await app.page.click(".markup-popover .markup-swatch >> nth=0");
+    await app.page.waitForSelector("#windows .window .btn-primary", { timeout: 10_000 });
+    await app.page.click("#windows .window .btn-primary");
+
+    const highlights = await waitForJournal(app, "signed.pdf");
+    assert.equal(highlights.length, 1, "the highlight did not reach the file");
+    assert.equal(typeof highlights[0].annotation_id, "string");
+
+    // And the question is not asked twice about the same document.
+    await selectAndAsk(app, 8);
+    await app.page.click(".markup-popover .markup-swatch >> nth=1");
+    await app.page
+      .waitForFunction(
+        () => (document.getElementById("notice")?.textContent ?? "") === "Marked.",
+        null,
+        { timeout: 15_000 },
+      )
+      .catch(() => {});
+    assert.equal(
+      await app.page.evaluate(() => document.querySelectorAll("#windows .window").length),
+      0,
+      "the signed-document question was asked a second time",
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("markup a rebuilt document lost is offered back, and re-anchored by its words", async () => {
+  const app = await openApp({ pdf: QUOTE });
+  try {
+    // The fixture's own highlight, plus one of this app's own over a word
+    // whose text item stands alone — which is what gives it a quote to be
+    // found again by.
+    await waitForJournal(app, QUOTE_PATH);
+    await app.page.waitForSelector("#pages .textLayer span", { timeout: 10_000 });
+    const marked = await app.page.evaluate(() => {
+      const span = [...document.querySelectorAll("#pages .textLayer span")].find(
+        (candidate) => candidate.textContent?.trim() === "jumps",
+      );
+      if (!span) return "";
+      const range = document.createRange();
+      range.selectNodeContents(span);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return range.toString().trim();
+    });
+    assert.equal(marked, "jumps", "the fixture's words are not one item each any more");
+
+    await app.press(`${MOD}+Shift+KeyH`);
+    await app.page.waitForSelector(".markup-popover .markup-swatch", { timeout: 5_000 });
+    await app.page.click(".markup-popover .markup-swatch >> nth=2");
+    await app.page
+      .waitForFunction(
+        () => (document.getElementById("notice")?.textContent ?? "") === "Marked.",
+        null,
+        { timeout: 15_000 },
+      )
+      .catch(() => {});
+
+    let highlights = await journalOf(app, QUOTE_PATH);
+    for (let tries = 0; tries < 100 && highlights.length < 2; tries++) {
+      await app.page.waitForTimeout(100);
+      highlights = await journalOf(app, QUOTE_PATH);
+    }
+    assert.equal(highlights.length, 2, "the second highlight never reached the file");
+    const mine = highlights.find((held) => held.quote === "jumps");
+    assert.ok(mine, `no highlight quoting "jumps": ${JSON.stringify(highlights)}`);
+
+    // The rebuild: the file goes back to exactly the bytes it shipped with,
+    // which is what a recompile does — same words, no annotations of ours.
+    const original = readFileSync(QUOTE).toString("base64");
+    await app.page.evaluate(async ({ docPath, original }) => {
+      const loaded = performance
+        .getEntriesByType("resource")
+        .map((entry) => entry.name)
+        .filter((name) => /\/src\/api\.ts(\?|$)/.test(name));
+      const api = await import(loaded.at(-1) ?? "/src/api.ts");
+      const binary = atob(original);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      await api.writeDocument(docPath, bytes);
+    }, { docPath: QUOTE_PATH, original });
+
+    // The journal keeps what the file has lost, and the panel offers it back.
+    await app.page.click("#contents");
+    const offer = await app.page
+      .waitForSelector("#outline-panel .highlights-restore", { timeout: 15_000 })
+      .catch(() => null);
+    assert.ok(offer, "nothing offered to put the lost markup back");
+    assert.equal(await offer.textContent(), "Put 1 back");
+
+    await offer.click();
+    await app.page
+      .waitForFunction(
+        () => /Put 1 highlight back/.test(document.getElementById("notice")?.textContent ?? ""),
+        null,
+        { timeout: 20_000, polling: 100 },
+      )
+      .catch(() => {});
+    const said = await app.page.evaluate(
+      () => document.getElementById("notice")?.textContent ?? "",
+    );
+    assert.match(said, /Put 1 highlight back/, `the restore did not report: ${said}`);
+
+    // Back in the file, at the words it was on — and the offer is gone,
+    // because there is nothing left the document does not carry.
+    let back = await journalOf(app, QUOTE_PATH);
+    for (let tries = 0; tries < 100; tries++) {
+      back = await journalOf(app, QUOTE_PATH);
+      if (back.length === 2 && back.every((held) => held.annotation_id)) break;
+      await app.page.waitForTimeout(100);
+    }
+    const restored = back.find((held) => held.quote === "jumps");
+    assert.ok(restored, `the passage was not found again: ${JSON.stringify(back)}`);
+    assert.equal(restored.page, 1);
+    assert.equal(typeof restored.annotation_id, "string");
+    assert.equal(restored.color, mine.color);
+    assert.equal(
+      await app.page.locator("#outline-panel .highlights-restore").count(),
+      0,
+      "the offer to put markup back is still there with nothing left to put",
+    );
   } finally {
     await app.close();
   }

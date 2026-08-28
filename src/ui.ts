@@ -617,6 +617,44 @@ export function askForPassword(wrong: boolean): Promise<string | null> {
   });
 }
 
+/**
+ * Ask before doing something to the reader's file that they might not have
+ * meant — writing markup into a signed document, which is the one case there
+ * is so far.
+ *
+ * Deliberately a window rather than a notice: a notice is something you find
+ * out afterwards, and the whole point here is that the decision is the
+ * reader's to make first. Cancel is the default focus and the plain button;
+ * the thing that writes is the one they have to reach for.
+ */
+export function confirmWrite(title: string, message: string, go: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let confirmed = false;
+
+    showWindow(
+      title,
+      (close) => {
+        const body = document.createElement("div");
+        body.className = "window-ask";
+
+        body.append(
+          text("lede", message),
+          actions(
+            button("Cancel", close),
+            button(go, () => {
+              confirmed = true;
+              close();
+            }, "primary"),
+          ),
+        );
+
+        return body;
+      },
+      () => resolve(confirmed),
+    );
+  });
+}
+
 /** Ask before a theme is gone for good. Resolves to whether the reader
     confirmed the deletion. */
 export function confirmDeleteTheme(name: string): Promise<boolean> {

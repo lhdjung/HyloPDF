@@ -32,6 +32,12 @@ const NOTES = process.argv[4] === "notes";
    covers the middle two words, "quick" and "brown", so a correct read finds
    exactly that phrase and neither of the words either side of it. */
 const QUOTE = process.argv[4] === "quote";
+/* "signed" carries an AcroForm with one signature field, which is what makes
+   `getFieldObjects` report a field of type "signature" — the signal
+   `readMarkupStanding` (`main.ts`) asks the reader before writing markup into
+   a document on. Nothing here is a real signature: what is being tested is
+   that the app notices the document claims to have one and asks first. */
+const SIGNED = process.argv[4] === "signed";
 const objects = [];   // 1-indexed body objects
 const add = (body) => { objects.push(body); return objects.length; };
 
@@ -77,10 +83,19 @@ if (QUOTE) {
     ),
   );
 }
+const signatureIds = [];
+if (SIGNED) {
+  signatureIds.push(
+    add(
+      "<< /Type /Annot /Subtype /Widget /FT /Sig /T (Signature1) /Ff 0 " +
+        "/Rect [400 60 560 110] /F 4 >>",
+    ),
+  );
+}
 const pagesId = objects.length + PAGES + 1;
 for (let i = 0; i < PAGES; i++) {
-  const annots =
-    (NOTES || QUOTE) && i === 0 ? ` /Annots [${noteIds.map((id) => `${id} 0 R`).join(" ")}]` : "";
+  const onPage = i === 0 ? [...noteIds, ...signatureIds] : [];
+  const annots = onPage.length > 0 ? ` /Annots [${onPage.map((id) => `${id} 0 R`).join(" ")}]` : "";
   pageIds[i] = add(
     `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 612 792] ` +
     `/Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentIds[i]} 0 R${annots} >>`
@@ -90,7 +105,10 @@ const realPagesId = add(`<< /Type /Pages /Count ${PAGES} /Kids [${pageIds.map((i
 const labels = LABELLED
   ? ` /PageLabels << /Nums [0 << /S /r >> ${FRONT} << /S /D /St 1 >>] >>`
   : "";
-const catalogId = add(`<< /Type /Catalog /Pages ${realPagesId} 0 R${labels} >>`);
+const acroForm = SIGNED
+  ? ` /AcroForm << /Fields [${signatureIds.map((id) => `${id} 0 R`).join(" ")}] /SigFlags 3 >>`
+  : "";
+const catalogId = add(`<< /Type /Catalog /Pages ${realPagesId} 0 R${labels}${acroForm} >>`);
 const infoId = TITLED
   ? add(
       "<< /Title (On the Quiet Reading of Documents) /Author (A. Reader) " +

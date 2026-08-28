@@ -31,6 +31,12 @@ import type { PageViewport } from "pdfjs-dist/types/src/display/display_utils";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import { openForReading, readRange, type Highlight, type HighlightStyle, type Theme } from "./api";
+// The one thing this file borrows from the search: a query and a quote are
+// the same kind of question — "these words, however they were typeset" — and
+// re-anchoring a highlight into a rebuilt document has to fold its quote
+// exactly the way a search folds what the reader typed, or a ligature the new
+// run of LaTeX chose differently loses the passage.
+import { fold } from "./search";
 import {
   duotone,
   luminance,
@@ -208,6 +214,18 @@ type Slot = {
     rather than read again when a colour is finally chosen. */
 export type MarkupSelection = [Slot, DOMRect[]][];
 
+/** Markup on one page, as `/QuadPoints` wants it: four points per marked
+    line — x then y, line after line — in that page's own PDF coordinate
+    space. What `quadsFor` produces from a selection, what `findQuote`
+    produces from words, and what `markQuads` writes. */
+export type MarkupRun = { page: number; quads: number[] };
+
+/** A run of quads with the colour to draw it in: what `markQuads` writes.
+    The colour is per mark rather than per call because restoring markup into
+    a rebuilt document puts back whatever colours the reader chose at the
+    time, in one write. */
+export type MarkupMark = MarkupRun & { color: string; opacity: number };
+
 type Box = {
   top: number;
   left: number;
@@ -342,6 +360,12 @@ export class Viewer {
   /** A counter for `markSelection`'s own `annotationStorage` keys. See
       `ANNOTATION_EDITOR_PREFIX`. */
   private markupEditorId = 0;
+  /** Whether the document that is open asked for a password on the way in.
+      Markup is kept beside such a document rather than written into it —
+      see `App.markupStanding` for the reasoning, which is about how little
+      this app has tested writing encrypted files rather than about pdf.js
+      being unable to. */
+  private askedForPassword = false;
   /** A match asked for but not yet shown, because its page had no text layer
       when it was asked for. Index into `matches`; -1 when there is none. */
   private pendingReveal = -1;
@@ -669,11 +693,23 @@ export class Viewer {
     color: string,
     opacity: number,
   ): Promise<Uint8Array | null> {
-    const doc = this.doc;
-    if (!doc) return null;
+    const runs = await this.quadsFor(captured);
+    return this.markQuads(runs.map((run) => ({ ...run, color, opacity })));
+  }
 
-    const [r, g, b] = parseColor(color);
-    let wrote = false;
+  /**
+   * A captured selection, restated as `/QuadPoints` — one entry per page the
+   * selection touches, each a flat run of eight numbers per line, in that
+   * page's own PDF coordinate space.
+   *
+   * Split out of `markSelection` because the journal wants the same numbers
+   * without anything being written: a document that cannot be written at all
+   * (see `App.markupStanding`) still keeps its markup beside it, and that
+   * entry has to carry real quads or nothing could ever put it back into the
+   * file later.
+   */
+  async quadsFor(captured: MarkupSelection): Promise<MarkupRun[]> {
+    const runs: MarkupRun[] = [];
     for (const [slot, rects] of captured) {
       const box = this.boxes[slot.index];
       const textRect = slot.textEl?.getBoundingClientRect();
@@ -684,12 +720,7 @@ export class Viewer {
       // always a whole page regardless of the crop. See `placeOverlay`.
       const viewport = this.viewportFor(page, box.scale);
 
-      const quadPoints: number[] = [];
-      const outlines: number[][] = [];
-      let minXAll = Infinity;
-      let maxXAll = -Infinity;
-      let minYAll = Infinity;
-      let maxYAll = -Infinity;
+      const quads: number[] = [];
       for (const run of joinRuns(rects, textRect)) {
         const corners = [
           viewport.convertToPdfPoint(run.x, run.y),
@@ -699,15 +730,46 @@ export class Viewer {
         ];
         const xs = corners.map((p) => p[0] as number);
         const ys = corners.map((p) => p[1] as number);
+        quads.push(...quadOf(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)));
+      }
+      if (quads.length > 0) runs.push({ page: slot.index + 1, quads });
+    }
+    return runs;
+  }
+
+  /**
+   * Fresh incremental-update bytes with one `/Highlight` per run of quads —
+   * the half of `markSelection` that touches pdf.js's annotation storage,
+   * given the geometry rather than working it out.
+   *
+   * Two callers, and the second is the reason this is its own method:
+   * `App.restoreMarkup` puts markup back into a document that was rebuilt
+   * underneath the reader, where the quads come from re-anchoring a quote
+   * (`findQuote`) and there is no selection anywhere on screen. Every entry
+   * goes into the storage before a single `saveDocument()`, so restoring
+   * thirty highlights is one incremental update and one write rather than
+   * thirty of each.
+   */
+  async markQuads(marks: MarkupMark[]): Promise<Uint8Array | null> {
+    const doc = this.doc;
+    if (!doc || marks.length === 0) return null;
+
+    let wrote = false;
+    for (const { page, quads, color, opacity } of marks) {
+      const [r, g, b] = parseColor(color);
+      if (quads.length === 0) continue;
+      const outlines: number[][] = [];
+      let minXAll = Infinity;
+      let maxXAll = -Infinity;
+      let minYAll = Infinity;
+      let maxYAll = -Infinity;
+      for (let at = 0; at + 8 <= quads.length; at += 8) {
+        const xs = [quads[at], quads[at + 2], quads[at + 4], quads[at + 6]];
+        const ys = [quads[at + 1], quads[at + 3], quads[at + 5], quads[at + 7]];
         const minX = Math.min(...xs);
         const maxX = Math.max(...xs);
         const minY = Math.min(...ys);
         const maxY = Math.max(...ys);
-        // PDF order is upper-left, upper-right, lower-left, lower-right —
-        // and normalised again by whoever reads it back (`getQuadPoints` in
-        // the worker does the same min/max), so getting this wrong on write
-        // costs nothing.
-        quadPoints.push(minX, maxY, maxX, maxY, minX, minY, maxX, minY);
         // A closed rectangle traversal for the appearance stream's fill —
         // any simple, non-self-intersecting order works under `f*`.
         outlines.push([minX, maxY, maxX, maxY, maxX, minY, minX, minY]);
@@ -716,18 +778,18 @@ export class Viewer {
         minYAll = Math.min(minYAll, minY);
         maxYAll = Math.max(maxYAll, maxY);
       }
-      if (quadPoints.length === 0) continue;
+      if (outlines.length === 0) continue;
 
       const key = `${ANNOTATION_EDITOR_PREFIX}${this.markupEditorId++}`;
       doc.annotationStorage.setValue(key, {
         annotationType: AnnotationEditorType.HIGHLIGHT,
         color: [r, g, b],
         opacity,
-        quadPoints: Float32Array.from(quadPoints),
+        quadPoints: Float32Array.from(quads),
         outlines,
         rect: [minXAll, minYAll, maxXAll, maxYAll],
         rotation: 0,
-        pageIndex: slot.index,
+        pageIndex: page - 1,
         popupRef: "",
       });
       wrote = true;
@@ -735,6 +797,52 @@ export class Viewer {
     return wrote ? doc.saveDocument() : null;
   }
 
+  /**
+   * Where a quoted passage sits in the document now — the quads a highlight
+   * of it would need, read out of the page's own text.
+   *
+   * This is the recompile path, and it is the one thing the journal exists
+   * for that a file cannot do for itself: a paper rebuilt by LaTeX is a new
+   * file, and every annotation in the old one is gone with it. The words
+   * usually are not. So a lost highlight is offered back by looking its quote
+   * up again, through the same fold `search.ts` matches with — ligatures
+   * split, accents dropped, the soft hyphen a line break left behind taken
+   * out — because a passage that has moved down half a page has very often
+   * also been re-typeset on the way.
+   *
+   * The search starts at the page the highlight used to be on and works
+   * outwards, because a rebuild moves a passage by a page or two far more
+   * often than it moves it to the other end of the book, and stops at the
+   * first page that carries the quote. `null` when nothing does: a passage
+   * that was rewritten is not a passage that moved, and guessing at the
+   * nearest thing to it would put the reader's markup on words they never
+   * marked.
+   */
+  async findQuote(quote: string, near: number): Promise<MarkupRun | null> {
+    const doc = this.doc;
+    const wanted = fold(quote).text.trim();
+    if (!doc || wanted.length === 0) return null;
+
+    for (const number of outwards(near, doc.numPages)) {
+      let page: PDFPageProxy;
+      try {
+        page = await doc.getPage(number);
+      } catch {
+        continue;
+      }
+      let items: TextItem[] = [];
+      try {
+        items = await readTextItems(page);
+      } catch {
+        // A page with no readable text cannot hold the quote either.
+      }
+      page.cleanup();
+      if (this.doc !== doc) return null;
+      const quads = quadsAround(items, wanted);
+      if (quads) return { page: number, quads };
+    }
+    return null;
+  }
   /* ------------------------------------------------------------ lifecycle */
 
   async load(path: string): Promise<PDFDocumentProxy> {
@@ -787,6 +895,7 @@ export class Viewer {
       wasmUrl: asset("pdfjs/wasm/"),
     });
     this.loading = task;
+    this.askedForPassword = false;
     // The rejection that a decline produces travels back through the worker
     // and comes out the other side as something else entirely, so whether the
     // reader declined is remembered here rather than read off the error.
@@ -797,6 +906,7 @@ export class Viewer {
     // "Something went wrong" is the wrong thing to tell someone whose PDF is
     // merely locked.
     task.onPassword = (respond: (password: string | Error) => void, reason: number) => {
+      this.askedForPassword = true;
       void this.callbacks
         .onPassword(reason === PasswordResponses.INCORRECT_PASSWORD)
         .then((password) => {
@@ -999,6 +1109,13 @@ export class Viewer {
 
   get document(): PDFDocumentProxy | null {
     return this.doc;
+  }
+
+  /** Whether the document that is open needed a password to be read at all.
+      One of the things that decides where markup on it goes — see
+      `App.markupStanding`. */
+  get encrypted(): boolean {
+    return this.askedForPassword;
   }
 
   get isEmpty(): boolean {
@@ -1805,6 +1922,21 @@ export class Viewer {
   }
 
   /* ----------------------------------------------------------- the text */
+
+  /** Whether any page on screen has text on it to select.
+   *
+   * The honest answer to "is this a scan" for the purpose of a gesture that
+   * works off a selection: the search knows for the whole document but only
+   * once it has scanned it, and a reader who has never searched should still
+   * be told plainly that there is nothing here to mark rather than to select
+   * something first. Every mounted page having an empty text layer is that
+   * answer, a page and a half of document at a time. */
+  hasSelectableText(): boolean {
+    for (const slot of this.slots.values()) {
+      if (slot.textEl && slot.textEl.childElementCount > 0) return true;
+    }
+    return false;
+  }
 
   /**
    * Select everything on one page.
@@ -3017,6 +3149,108 @@ async function readTextItems(page: PDFPageProxy): Promise<TextItem[]> {
     }
   }
   return items;
+}
+
+/** One line of markup, as `/QuadPoints` spells a rectangle: upper-left,
+    upper-right, lower-left, lower-right. Normalised again by whoever reads it
+    back — `getQuadPoints` in the worker does the same min/max — so the order
+    costs nothing to get wrong and is written properly anyway. */
+function quadOf(minX: number, minY: number, maxX: number, maxY: number): number[] {
+  return [minX, maxY, maxX, maxY, minX, minY, maxX, minY];
+}
+
+/** Page numbers from `near` outwards: the page itself, then the one after,
+    then the one before, and so on to both ends. A rebuilt document has moved
+    a passage by a page or two far more often than it has moved it to the
+    other end of the book, and this is the difference between one page read
+    and four hundred. */
+function outwards(near: number, count: number): number[] {
+  const start = Math.min(Math.max(Math.round(near) || 1, 1), Math.max(count, 1));
+  const order = [start];
+  for (let step = 1; order.length < count; step++) {
+    if (start + step <= count) order.push(start + step);
+    if (start - step >= 1) order.push(start - step);
+  }
+  return order;
+}
+
+/**
+ * The quads a highlight over `wanted` would need on the page these text items
+ * came from — or `null` where the page does not carry those words.
+ *
+ * `wanted` is already folded; the page's own text is folded the same way here
+ * and matched as one string, because that is the only way a quote that runs
+ * across the boundary between two text items can be found at all, which is
+ * most of them: a producer splits a line wherever the font or the kerning
+ * changes, so "the quick brown fox" is routinely four items and matching them
+ * one at a time would find none of it.
+ *
+ * `origin` maps each folded character back to an offset in the page's real
+ * text, and `owner` maps each of *those* back to the item it came from, so a
+ * hit becomes a set of items rather than a pair of numbers. One quad per line
+ * — items are grouped by baseline, the way a reader would draw a highlighter
+ * across a line and start again on the next — and each line's box is padded
+ * below the baseline so that it covers the descenders, which is what makes
+ * `quoteFor` read the same words back out of it afterwards.
+ */
+function quadsAround(items: TextItem[], wanted: string): number[] | null {
+  if (items.length === 0) return null;
+
+  let raw = "";
+  const owner: number[] = [];
+  items.forEach((item, index) => {
+    for (let i = 0; i < item.str.length; i++) owner.push(index);
+    raw += item.str;
+    if (item.hasEOL) {
+      owner.push(index);
+      raw += " ";
+    }
+  });
+
+  const folded = fold(raw);
+  const at = folded.text.indexOf(wanted);
+  if (at === -1) return null;
+  const from = folded.origin[at];
+  const to = folded.origin[Math.min(at + wanted.length, folded.origin.length - 1)];
+
+  const marked = new Set<number>();
+  for (let i = from; i < to && i < owner.length; i++) marked.add(owner[i]);
+  if (marked.size === 0) return null;
+
+  // By baseline, to the nearest point: two items on one line agree on it
+  // exactly far more often than not, and where they are a fraction apart the
+  // rounding puts them together rather than drawing two overlapping washes.
+  const lines = new Map<number, { minX: number; maxX: number; minY: number; maxY: number }>();
+  for (const index of marked) {
+    const item = items[index];
+    const height = item.height || Math.abs(item.transform[3]) || 1;
+    const baseline = item.transform[5];
+    const key = Math.round(baseline);
+    const box = lines.get(key);
+    const left = item.transform[4];
+    const right = left + item.width;
+    // Down a fifth of the line to clear the descenders, up the full height:
+    // `quoteFor` only credits a highlight with an item that sits *wholly*
+    // inside it, so a box drawn tight to the baseline would read its own
+    // words back as nothing.
+    const bottom = baseline - height * 0.2;
+    const top = baseline + height;
+    if (box) {
+      box.minX = Math.min(box.minX, left);
+      box.maxX = Math.max(box.maxX, right);
+      box.minY = Math.min(box.minY, bottom);
+      box.maxY = Math.max(box.maxY, top);
+    } else {
+      lines.set(key, { minX: left, maxX: right, minY: bottom, maxY: top });
+    }
+  }
+
+  const quads: number[] = [];
+  // Down the page, which is the order the words were read in.
+  for (const box of [...lines.values()].sort((a, b) => b.maxY - a.maxY)) {
+    quads.push(...quadOf(box.minX, box.minY, box.maxX, box.maxY));
+  }
+  return quads.length > 0 ? quads : null;
 }
 
 /**

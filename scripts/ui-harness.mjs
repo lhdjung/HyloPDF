@@ -61,6 +61,10 @@ export const MOD = onMac ? "Meta" : "Control";
  *        app is set to, which the app follows unless told not to.
  * @param {Record<string, string[]>} [options.keys]  bindings, as `keys.toml`
  *        would give them: `{ "next-page": ["n"] }`.
+ * @param {{writable?: boolean, reason?: string, cloud?: string|null, size?: number}}
+ *        [options.writability]  what the disk says about the document:
+ *        `{ writable: false, reason: "x.pdf is read only." }` for the
+ *        journal-only path, `{ cloud: "Dropbox" }` for the warning.
  */
 export async function openApp(options = {}) {
   const engine = options.engine === "chromium" ? chromium : webkit;
@@ -128,6 +132,15 @@ export async function openApp(options = {}) {
     await page.addInitScript((seed) => {
       localStorage.setItem("hylopdf.keys", JSON.stringify(seed));
     }, options.keys);
+  }
+
+  // What the disk would say about the document, for the browser twin of
+  // `documentWritability`. There is no disk here, so a read-only document —
+  // or one in a syncing folder — is seeded rather than made.
+  if (options.writability) {
+    await page.addInitScript((seed) => {
+      localStorage.setItem("hylopdf.writability", JSON.stringify(seed));
+    }, options.writability);
   }
 
   await page.goto(URL_BASE, { waitUntil: "domcontentloaded" });

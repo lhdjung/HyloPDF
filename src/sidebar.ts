@@ -368,8 +368,18 @@ export class Sidebar {
    * straight back the moment `syncMarkup` reads the file again. Offering a
    * button that undoes itself on the next launch is worse than offering
    * none.
+   *
+   * The one button here that does change something is "Put N back", and it
+   * is the mirror image of that: it *writes*, which is the direction
+   * `saveDocument()` can go, and what it writes back is markup the journal
+   * still has and the file has lost — see `App.restoreMarkup`.
    */
-  showHighlights(highlights: Highlight[], onPick: (highlight: Highlight) => void, onCopyAll: () => void): void {
+  showHighlights(
+    highlights: Highlight[],
+    onPick: (highlight: Highlight) => void,
+    onCopyAll: () => void,
+    lost: { count: number; put: () => void } | null = null,
+  ): void {
     this.highlightsEl?.remove();
     this.highlightsEl = null;
     if (highlights.length === 0) return;
@@ -390,9 +400,32 @@ export class Sidebar {
     heading.append(title, copyAll);
     box.append(heading);
 
+    // Markup the journal has and the document does not — which, for a
+    // document this app can write to, means the file was rebuilt underneath
+    // it. Offered rather than done: re-anchoring by the quoted words is a
+    // guess, however good a one, and writing to somebody's file is not a
+    // thing to do without being asked. See `App.restoreMarkup`.
+    if (lost) {
+      const putBack = document.createElement("button");
+      putBack.className = "highlights-restore";
+      putBack.textContent = `Put ${lost.count} back`;
+      putBack.title =
+        lost.count === 1
+          ? "This document no longer carries one piece of markup. Find the passage again and write it back in."
+          : `This document no longer carries ${lost.count} pieces of markup. Find the passages again and write them back in.`;
+      putBack.addEventListener("click", lost.put);
+      box.append(putBack);
+    }
+
     for (const highlight of highlights) {
       const row = document.createElement("div");
-      row.className = "mark highlight-row";
+      // Markup the document itself does not carry — kept beside it because
+      // the file could not be written, or lost when the file was rebuilt —
+      // is marked as such. It lists and copies out exactly like the rest,
+      // and it is not on the page: a row that looked identical to markup in
+      // the file would be saying something that is not true.
+      const aside = highlight.annotation_id === null;
+      row.className = aside ? "mark highlight-row aside" : "mark highlight-row";
 
       const go = document.createElement("button");
       go.className = "mark-go highlight-go";
@@ -401,7 +434,8 @@ export class Sidebar {
       label.className = "highlight-quote";
       label.textContent = highlight.quote || `Page ${this.viewer.label(highlight.page)}`;
       go.append(label);
-      go.title = highlight.quote || `Page ${this.viewer.label(highlight.page)}`;
+      const where = highlight.quote || `Page ${this.viewer.label(highlight.page)}`;
+      go.title = aside ? `${where} — kept in HyloPDF, not in the document` : where;
       go.addEventListener("click", () => onPick(highlight));
 
       row.append(go);

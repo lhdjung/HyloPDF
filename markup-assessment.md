@@ -335,6 +335,9 @@ style step 5 builds.
   the correction above. Highlight is the one style this app can write.
 - **Nothing removes a highlight**, this app's own or somebody else's — see the
   first correction above. The gesture only adds.
+- **A document that cannot be written keeps its markup in HyloPDF alone**, and
+  markup kept that way is listed but not drawn on the page — see step 7. It is
+  not lost and it is not portable, and the notice says which.
 
 ## The plan
 
@@ -471,6 +474,119 @@ goes with it; the recompile path offering markup back; a scan saying plainly
 there is nothing here to mark. Each is one notice line and one branch, and
 together they are the difference between this being trustworthy and being
 something people turn off.
+
+**Done, in this shape.** `App.readMarkupStanding` (`main.ts`) asks four
+questions once when a document opens and says nothing about any of them;
+`MarkupStanding` is the answer it leaves behind, and `App.markSelection` is
+where it is finally worth a sentence. The notice belongs to the first mark
+because that is when it means something: telling somebody on open that a
+document they have not marked cannot be marked is noise, and telling them
+mid-gesture is the app arguing.
+
+*Is it writable?* Asked of the disk, in Rust: `document_writability` opens the
+file for writing and closes it again, which is the only form of the question
+whose answer is actually true — a read-only file, a read-only volume, a file
+somebody else owns and a sandbox that has not granted the path all come back
+the same way, and none of them can be read off the permission bits. It reports
+the size (see the threshold below) and names the syncing folder, if any, from
+the same trip. `Writability` in `api.ts` has a browser twin seeded from
+`localStorage`, which is what makes a read-only document testable in a harness
+that has no disk: `openApp({ writability: { writable: false, reason: "…" } })`.
+
+*Is it encrypted?* `Viewer.encrypted` — did pdf.js ask for a password on the
+way in. pdf.js's writer does encrypt what it writes; this app has one
+encrypted-document test, and markup that lands in a file nobody can open again
+is the worst outcome available here, so it goes beside the document until
+there is a suite that says otherwise.
+
+*Is it too large?* `MARKUP_IN_FILE_LIMIT`, a hundred megabytes.
+`saveDocument()` begins with `requestLoadedStream()` — the one place a document
+this app deliberately reads 64KB at a time is read end to end — and then hands
+the whole file back across the bridge to be written out again. This is the
+answer the plan expected a debounce to be: past a certain size the round trip
+is not a thing to make quicker, it is a thing not to make. The constant is not
+a setting, because it is a fact about the round trip rather than a preference.
+
+*Is it signed?* `reportFormFields` already made the one trip into the worker
+that can answer this, so it answers it: a field of type `signature` among the
+field objects. Not a refusal — `ui.confirmWrite` asks, once per document, and
+the reader decides, because it is their document and an incremental update is
+precisely the change a signature exists to detect.
+
+All three of the first group end in the same place, which is what the plan
+asked for: **the markup is kept in the journal and the reader is told, once,
+in one line.** `App.journalSelection` is that path, and the entry it writes
+carries the same quads `Viewer.quadsFor` gives the write path and the words
+that were selected — so it lists, copies out and can be put into the file
+later exactly like markup that did land in one. What it does not do is appear
+on the page, and the notice says so rather than leaving the reader to notice.
+The sidebar marks those rows as not being in the document (`.highlight-row.aside`):
+a row that looked identical to markup in the file would be telling a small lie.
+
+**The recompile path, which is the one that needed real machinery.**
+`Viewer.findQuote` re-anchors a lost highlight by looking its quote up again —
+`fold` from `search.ts`, now exported and imported by `viewer.ts` for this one
+purpose, because a rebuilt paper has usually been re-typeset as well as moved,
+and a ligature the new run of LaTeX chose differently would otherwise lose the
+passage. It starts at the page the highlight used to be on and works outwards,
+stopping at the first page that carries the words; `quadsAround` turns the
+matched text items back into quads, one per line, padded below the baseline so
+that `quoteFor` reads the same words back out of them afterwards.
+`App.restoreMarkup` puts every one it found back in a single `saveDocument()`
+and one write, drops the journal entries it restored *before* writing (or they
+would come back as lost forever, holding the old file's quads), and says how
+many it could not find rather than putting the markup on the nearest words.
+
+It is offered rather than done: a button in the Contents panel's Markup
+heading, shown only when the journal holds something the file does not and the
+document would take it. Re-anchoring is a guess, however good a one, and this
+app does not write to somebody's file without being asked.
+
+**And `syncMarkup` is where the authority rule got its exception.** "On open,
+the file wins and the journal is rebuilt from it" held for as long as the
+journal was only ever a copy of the file. It is not any more: a mark kept
+beside an unwritable document is the only copy there is, and a mark a rebuild
+took away is the only reason the offer above exists. Both survive the rebuild,
+both carry `annotation_id: null` — which is exactly what they have in common,
+the journal knowing about them and the file not — and everything the file does
+carry still comes from the file. The rule is unchanged for every highlight
+that has an id.
+
+**One bug fell out of building it, and it was not a markup bug.** `App.open`
+built a fresh library entry for the document it was opening, dropping whatever
+the old one held — so a document's marks were gone from memory the moment it
+finished opening, and only came back because `toggleMark` reads the list back
+from Rust. Harmless for marks and fatal here: a reload is an open, every mark
+causes a reload, and `syncMarkup` reconciles the journal against the file. A
+journal emptied on the way in reconciles to whatever the file happens to say,
+which for an unwritable document is nothing at all. The entry now carries the
+marks and the journal across, and `syncMarkup` is handed the journal
+explicitly rather than reading it back out of a field somebody might rebuild
+again.
+
+**Tests.** Four in `markup.test.mjs`, on top of the six that were there: a
+read-only document keeping markup beside it and saying so once (and not
+twice); a scan saying there is nothing to mark rather than "select something
+first"; a signed document asking, being refused, being agreed to, and not
+asking again; and the whole recompile round trip — mark a word, put the
+document's original bytes back the way a rebuild would, watch the offer
+appear, press it, and find the highlight in the file again on the same word,
+in the colour it was. Three in `lib.rs` for the writability probe: a read-only
+file, a file that is not there, and the syncing folders named by prefix within
+a whole path component ("OneDrive - Acme", "Dropbox (Personal)"). One new
+fixture mode, `signed`, which is an AcroForm with a signature field —
+`getFieldObjects` reports it and nothing else about it is real, which is
+exactly the part being tested.
+
+**Not done, on purpose.** Removal still does not exist, for the reason under
+step 6: this version of pdf.js cannot edit or delete an annotation that is
+already in the file. A journal entry the reader wants gone has no gesture
+either — the same trap, one layer out, since `syncMarkup` would keep it only
+if the file lacks it, which it does by definition. The area drag for a scan is
+still designed and not built. And the notice for a very large document is the
+threshold rather than the Rust-side incremental writer that would remove the
+need for one; that writer is still the thing to build if the threshold turns
+out to bite, and it is still what removal would need first.
 
 **Tests to add**, in the shape the suite already has: a save-and-reopen
 round trip (the phase 0 spike, kept), `markup.test.mjs` for quads from a

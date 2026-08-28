@@ -384,7 +384,7 @@ export class Search {
  * Case is the one part of this the reader can turn off. The other three are
  * not offered as choices because nobody types a soft hyphen on purpose.
  */
-function fold(input: string, caseSensitive = false): { text: string; origin: number[] } {
+export function fold(input: string, caseSensitive = false): { text: string; origin: number[] } {
   let text = "";
   const origin: number[] = [];
 

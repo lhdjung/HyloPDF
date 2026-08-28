@@ -771,6 +771,45 @@ body {
   height: 13px;
 }
 
+/* Markup this app is holding rather than showing on the page: kept beside a
+   document that could not be written, or lost when one was rebuilt. Quieter
+   than the rest of the list, and marked at the edge rather than by a badge —
+   the row is still a place to jump to, which is what it looks like. */
+.highlight-row.aside .highlight-quote {
+  color: var(--text-soft);
+}
+
+.highlight-row.aside .mark-go {
+  border-left: 2px dashed var(--line);
+  border-radius: 4px 7px 7px 4px;
+}
+
+/* "Put N back": markup the journal still has and the document has lost, most
+   often because it was rebuilt. Quiet at rest — it is an offer, not a
+   warning — and a full-width row so it reads as belonging to the section
+   above it rather than to the last highlight in it. */
+.highlights-restore {
+  display: block;
+  width: calc(100% - 8px);
+  margin: 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+}
+
+.highlights-restore:hover,
+.highlights-restore:focus-visible {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
 .highlight-go {
   display: flex;
   align-items: center;

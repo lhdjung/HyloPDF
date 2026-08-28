@@ -24,6 +24,14 @@ const TITLED = process.argv[4] === "titled";
    into the page and leaves their text unreachable, which is what the note
    layer is for. */
 const NOTES = process.argv[4] === "notes";
+/* "quote" gives the first page five separate words — a `Td` between each
+   `Tj`, rather than one long string — because pdf.js hands back one text
+   item per `Tj`, and the giant single-item lines every other fixture uses
+   cannot exercise `quoteFor` (`viewer.ts`): a highlight over part of a line
+   that is one item either takes the whole item or none of it. A `/Highlight`
+   covers the middle two words, "quick" and "brown", so a correct read finds
+   exactly that phrase and neither of the words either side of it. */
+const QUOTE = process.argv[4] === "quote";
 const objects = [];   // 1-indexed body objects
 const add = (body) => { objects.push(body); return objects.length; };
 
@@ -36,9 +44,12 @@ for (let i = 1; i <= PAGES; i++) {
   // higher on some pages than on others — so that the union over a sample is
   // larger than any single page, which is the case margin trimming has to get
   // right.
-  const stream = NOTEXT
-    ? `0.2 0.2 0.2 rg 150 ${150 + (i % 2) * 50} 312 442 re f`
-    : `BT /F1 11 Tf 54 720 Td 14 TL ${filler} ET`;
+  const stream =
+    QUOTE && i === 1
+      ? "BT /F1 14 Tf 54 700 Td (The) Tj 40 0 Td (quick) Tj 55 0 Td (brown) Tj 55 0 Td (fox) Tj 40 0 Td (jumps) Tj ET"
+      : NOTEXT
+        ? `0.2 0.2 0.2 rg 150 ${150 + (i % 2) * 50} 312 442 re f`
+        : `BT /F1 11 Tf 54 720 Td 14 TL ${filler} ET`;
   contentIds.push(add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`));
   pageIds.push(0); // placeholder, filled below
 }
@@ -56,9 +67,20 @@ if (NOTES) {
     ),
   );
 }
+if (QUOTE) {
+  // "quick" starts at x=94, "brown" ends around x=187 — see the comment on
+  // `QUOTE` above for why the words either side must fall outside this box.
+  noteIds.push(
+    add(
+      "<< /Type /Annot /Subtype /Highlight /Rect [90 695 190 715] " +
+        "/QuadPoints [90 715 190 715 90 695 190 695] /C [1 0.84 0.04] /CA 0.25 >>",
+    ),
+  );
+}
 const pagesId = objects.length + PAGES + 1;
 for (let i = 0; i < PAGES; i++) {
-  const annots = NOTES && i === 0 ? ` /Annots [${noteIds.map((id) => `${id} 0 R`).join(" ")}]` : "";
+  const annots =
+    (NOTES || QUOTE) && i === 0 ? ` /Annots [${noteIds.map((id) => `${id} 0 R`).join(" ")}]` : "";
   pageIds[i] = add(
     `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 612 792] ` +
     `/Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentIds[i]} 0 R${annots} >>`

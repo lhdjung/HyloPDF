@@ -417,6 +417,54 @@ twelve characters selected.
 **6 · The sidebar and the export.** Second section in Contents, jump, remove,
 copy-all-as-Markdown.
 
+**Done, in this shape:** `Sidebar.showHighlights` (`sidebar.ts`) is a second
+section below `showMarks`'s "Marked" — always positioned right after it,
+whichever of the two renders first, because `showHighlights` inserts itself
+with `this.marksEl.after(box)` rather than a blind `prepend` — a coloured
+swatch (`ui.swatch`, reused rather than a new one) and the quote, click to
+jump. `App.showHighlights`/`App.highlights()` in `main.ts` are the
+orchestration, called from the end of `syncMarkup` once the file has actually
+been read — there is no synchronous path the way marks have one, because a
+highlight's list has no meaning before the file says what it is. The section
+heading carries "Copy all as Markdown" (`App.copyAllMarkup`), one blockquote
+per highlight with its page label, the same shape `copyQuote` already gives a
+single passage.
+
+**Not done, on purpose: removal.** The plan above says "jump, remove,
+copy-all-as-Markdown", and the middle one did not get built — see the
+corrections above, under step 5: `saveDocument()` in this version of pdf.js
+cannot edit or delete an annotation already in the file, whether this app
+wrote it a moment ago or found it already there. A "remove" button in the
+sidebar could only take the entry out of the *journal*, and `syncMarkup`
+rebuilds the journal from the file on every open — so the entry would be back
+the moment the document was reopened, with nothing to explain why. A button
+that quietly undoes itself is worse than no button; `showHighlights`'s own doc
+comment says this in place, for whoever next reads the code without this
+document open beside it. Building it for real needs the hand-rolled
+incremental-update writer the plan already keeps in its back pocket.
+
+**A gap the plan did not name: `quote` was always empty.** `toHighlight` in
+`viewer.ts` returned `quote: ""` unconditionally, with a doc comment saying
+reading the words out from under a quad was "a job of its own for whichever
+screen shows a highlight this app did not draw" — which is what this step is.
+Without it, "the quote in its colour" in the sidebar plan had nothing to show:
+every row would have read "Page 4" and nothing else, sighted or not. `quoteFor`
+now reads a marked page's text once (`readTextItems`, grouped by page so a
+page with three highlights pays for its text once) and keeps a text item only
+when it sits *wholly* inside a quad's bounding box, not merely centred in
+it — a producer that writes a whole line as one `Tj` (which the app's own test
+fixtures do) hands back one item far wider than a highlight drawn over part of
+it, and a centre-point test would have credited the highlight with the rest of
+the line. The cost is the reverse case: a highlight over part of a wide item
+gets no quote at all rather than the wrong one, which is the safer failure and
+is exactly what the pre-existing `notes.pdf` fixture exercises — its
+highlight's quote is still `""`, not because nothing changed but because its
+one giant text item is wider than the box drawn over part of it.
+`tests/fixtures/make-pdf.mjs`'s new `quote` mode is what proves the code path
+that fixture cannot: one page, five separate `Tj` calls so pdf.js hands back
+one item per word, and a `/Highlight` over the middle two — `quick brown` back
+out, `The` and `fox` on either side excluded.
+
 **7 · The edges, which are the feature.** Read-only and cloud-synced files;
 signed documents; encrypted documents; the size threshold and the notice that
 goes with it; the recompile path offering markup back; a scan saying plainly

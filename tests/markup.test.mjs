@@ -24,7 +24,15 @@
  * `/Highlight` land in the file — `Viewer.markSelection` builds it,
  * `writeDocument` saves it, and the reload that write causes reads it back
  * into the journal the same way the first test here reads one nobody's own
- * gesture wrote. */
+ * gesture wrote.
+ *
+ * Step 6 is the UI this was all for: a "Markup" section in the Contents
+ * panel, below the marks, built by `Sidebar.showHighlights` and shown by
+ * `App.showHighlights` — a row per highlight, its colour and its quote, a
+ * click to jump to its page — and "Copy all as Markdown" in the section's own
+ * heading. There is deliberately no way to remove one from here; see the doc
+ * comment on `showHighlights` and the corrections above step 6 in
+ * `markup-assessment.md` for why. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -92,10 +100,32 @@ test("a highlight already in the document is read into the journal on open", asy
     assert.equal(highlight.color, "#ffff00");
     assert.equal(highlight.opacity, 0.25);
     assert.deepEqual(highlight.quads, [54, 726, 460, 726, 54, 700, 460, 700]);
-    // Read out of the file, not drawn by this app — nothing here knows the
-    // words underneath the quad or when it was originally made.
+    // This fixture's whole line is one text item — a single `Tj` — wider than
+    // the highlight drawn over part of it, which `quoteFor` (viewer.ts) is
+    // built to recognise and leave empty rather than credit with the rest of
+    // the line. See "quote.pdf" below for the case it does resolve.
     assert.equal(highlight.quote, "");
     assert.equal(typeof highlight.annotation_id, "string");
+  } finally {
+    await app.close();
+  }
+});
+
+const QUOTE = "tests/fixtures/quote.pdf";
+const QUOTE_PATH = path.basename(QUOTE);
+
+if (!existsSync(QUOTE)) {
+  throw new Error(`missing ${QUOTE} — run: node tests/fixtures/make-pdf.mjs ${QUOTE} 1 quote`);
+}
+
+test("a highlight's quote is the words under it, not the whole line they sit on", async () => {
+  const app = await openApp({ pdf: QUOTE });
+  try {
+    const highlights = await waitForJournal(app, QUOTE_PATH);
+    assert.equal(highlights.length, 1);
+    // "quick" and "brown" are their own text items, each wholly inside the
+    // highlight's box; "The" and "fox" sit either side of it and are not.
+    assert.equal(highlights[0].quote, "quick brown");
   } finally {
     await app.close();
   }
@@ -266,6 +296,70 @@ test("selecting text and choosing a colour saves a real highlight into the file"
     // causes would have cleared it anyway.
     const stillSelected = await app.page.evaluate(() => getSelection()?.toString() ?? "");
     assert.equal(stillSelected, "");
+  } finally {
+    await app.close();
+  }
+});
+
+/* ------------------------------------------------------------ the sidebar */
+
+test("the Contents panel lists a document's markup, below its marks", async () => {
+  const app = await openApp({ pdf: QUOTE });
+  try {
+    await waitForJournal(app, QUOTE_PATH);
+    await app.page.click("#contents");
+
+    const row = await app.page
+      .waitForSelector("#outline-panel .highlight-row .highlight-quote", { timeout: 10_000 })
+      .catch(() => null);
+    assert.ok(row, "no markup row appeared in the Contents panel");
+    assert.equal(await row.textContent(), "quick brown");
+
+    // The section heading names what it is, and offers to copy the lot.
+    const heading = await app.page.evaluate(
+      () => document.querySelector("#outline-panel .highlights-heading .marks-title")?.textContent ?? "",
+    );
+    assert.equal(heading, "Markup");
+
+    await app.page.click("#outline-panel .highlights-copy");
+    await app.page
+      .waitForFunction(
+        () => (document.getElementById("notice")?.textContent ?? "") === "Copied all markup.",
+        null,
+        { timeout: 10_000 },
+      )
+      .catch(() => {});
+    const said = await app.page.evaluate(() => document.getElementById("notice")?.textContent ?? "");
+    assert.equal(said, "Copied all markup.");
+  } finally {
+    await app.close();
+  }
+});
+
+test("clicking a piece of markup jumps to its page", async () => {
+  const app = await openApp({ pdf: PDF }); // notes.pdf: three pages, a highlight on the first
+  try {
+    await waitForJournal(app, DOC_PATH);
+    await app.page.click("#contents");
+    // This fixture's highlight sits on a line too wide for `quoteFor` to
+    // resolve (see the first test above), so the row falls back to naming
+    // the page — which is still enough to jump by.
+    await app.page.waitForSelector("#outline-panel .highlight-row .highlight-quote", {
+      timeout: 10_000,
+    });
+
+    await app.press("End");
+    await app.page.waitForTimeout(500);
+    assert.notEqual((await app.state()).page, "1");
+
+    await app.page.click("#outline-panel .highlight-row .highlight-go");
+    await app.page
+      .waitForFunction(() => document.getElementById("page-number")?.value === "1", null, {
+        timeout: 15_000,
+        polling: 50,
+      })
+      .catch(() => {});
+    assert.equal((await app.state()).page, "1");
   } finally {
     await app.close();
   }

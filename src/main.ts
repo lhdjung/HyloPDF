@@ -9,6 +9,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist/types/src/display/api";
 
 import {
   type Bootstrap,
+  type Highlight,
   type LibraryEntry,
   type Mark,
   type Settings,
@@ -1158,6 +1159,44 @@ class App {
     const entry = this.library.find((item) => item.path === path);
     if (entry) entry.highlights = highlights;
     void setHighlights(path, highlights).catch(() => {});
+    this.showHighlights();
+  }
+
+  /** The document's coloured markup, in the order the file gave it. */
+  private highlights(): Highlight[] {
+    if (!this.path) return [];
+    return this.library.find((entry) => entry.path === this.path)?.highlights ?? [];
+  }
+
+  /** Hand the markup to the panel that lists it, below the marks. */
+  private showHighlights(): void {
+    this.sidebar.showHighlights(
+      this.highlights(),
+      (highlight) => this.viewer.jumpTo(highlight.page),
+      () => void this.copyAllMarkup(),
+    );
+  }
+
+  /**
+   * Every highlight in the document, as one blockquote each — the same shape
+   * `copyQuote` gives a single passage, over the whole list, which is what
+   * makes markup useful to somebody who is not reading it inside HyloPDF.
+   *
+   * A highlight this app could not read a quote for (see `quoteFor` in
+   * `viewer.ts`) still says where it is, rather than being left out — a
+   * marked passage with nothing under the blockquote would read as a mistake.
+   */
+  private async copyAllMarkup(): Promise<void> {
+    const highlights = this.highlights();
+    if (highlights.length === 0) return;
+    const name = el.title.textContent || "";
+    const text = highlights
+      .map((highlight) => {
+        const where = `${name ? `${name}, ` : ""}p. ${this.viewer.label(highlight.page)}`;
+        return highlight.quote ? `> ${highlight.quote}\n> — ${where}` : `> (${where})`;
+      })
+      .join("\n\n");
+    await this.copyToClipboard(text, "Copied all markup.");
   }
 
   /**

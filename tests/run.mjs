@@ -21,6 +21,10 @@ const NOTEXT = "tests/fixtures/notext.pdf";
 const TITLED = "tests/fixtures/titled.pdf";
 /* A document somebody else has commented on. */
 const NOTES = "tests/fixtures/notes.pdf";
+/* One page of five separate words, with a highlight over the middle two —
+   the fixture `quoteFor` in viewer.ts needs to be tested at all, since every
+   other fixture's lines are one giant text item apiece. */
+const QUOTE = "tests/fixtures/quote.pdf";
 
 async function answering() {
   try {
@@ -46,6 +50,7 @@ if (!existsSync(LABELLED)) await make("tests/fixtures/make-pdf.mjs", LABELLED, "
 if (!existsSync(NOTEXT)) await make("tests/fixtures/make-pdf.mjs", NOTEXT, "6", "notext");
 if (!existsSync(TITLED)) await make("tests/fixtures/make-pdf.mjs", TITLED, "3", "titled");
 if (!existsSync(NOTES)) await make("tests/fixtures/make-pdf.mjs", NOTES, "3", "notes");
+if (!existsSync(QUOTE)) await make("tests/fixtures/make-pdf.mjs", QUOTE, "1", "quote");
 
 let vite = null;
 if (!(await answering())) {

@@ -728,6 +728,62 @@ body {
   height: 13px;
 }
 
+/* The document's own coloured markup, below the marks. */
+.highlights {
+  padding: 4px 6px 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+
+.highlights-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 2px 0 4px;
+}
+
+.highlights-heading .marks-title {
+  margin: 0 0 0 4px;
+}
+
+.highlights-copy {
+  flex: 0 0 auto;
+  display: flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.highlights-copy:hover,
+.highlights-copy:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.highlights-copy svg {
+  width: 13px;
+  height: 13px;
+}
+
+.highlight-go {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.highlight-quote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-empty {
   padding: 16px 10px;
   color: var(--text-faint);

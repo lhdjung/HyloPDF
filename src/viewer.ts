@@ -21,6 +21,7 @@ import type {
   PDFDocumentProxy,
   PDFPageProxy,
   RenderTask,
+  TextItem,
 } from "pdfjs-dist/types/src/display/api";
 import type { PageViewport } from "pdfjs-dist/types/src/display/display_utils";
 // The minified worker, deliberately. Vite copies a `?url` import through
@@ -2959,12 +2960,12 @@ type MarkupAnnotation = {
  * be un-converted before it meant anything to a PDF reader that is not this
  * one.
  *
- * `quote` comes back empty and `at` is when this was read rather than when it
- * was drawn: this is markup the reader did not just make, so neither is known
- * without reading the words out from under the quad, which is a job of its
- * own for whichever screen shows a highlight this app did not draw.
+ * `quote` is read out from under the quad, using the same PDF-space text item
+ * positions `quoteFor` compares against — see there for why that is the same
+ * space and `at` is when this was read rather than when it was drawn: this is
+ * markup the reader did not just make, so the moment is not known.
  */
-function toHighlight(annotation: MarkupAnnotation, page: number): Highlight | null {
+function toHighlight(annotation: MarkupAnnotation, page: number, items: TextItem[]): Highlight | null {
   const style = MARKUP_STYLES[annotation.subtype ?? ""];
   const quads = annotation.quadPoints;
   if (!style || !quads || quads.length === 0 || quads.length % 8 !== 0) return null;
@@ -2980,7 +2981,7 @@ function toHighlight(annotation: MarkupAnnotation, page: number): Highlight | nu
     color: toHex(rgb),
     opacity: annotation.opacity ?? 1,
     style,
-    quote: "",
+    quote: quoteFor(quads, items),
     at: Date.now(),
     annotation_id: annotation.id ?? null,
   };
@@ -2994,6 +2995,83 @@ const MARKUP_TYPES = new Set<number>([
   AnnotationType.STRIKEOUT,
   AnnotationType.SQUIGGLY,
 ]);
+
+/**
+ * A page's text items, read for their position rather than for a running
+ * transcript — `quoteFor` below is the only caller, and it needs each item's
+ * own box, not the joined string `search.ts`'s `readTextRuns` builds from the
+ * same stream.
+ *
+ * Deliberately not `getTextContent()`, for the reason `readTextRuns` in
+ * `search.ts` gives: it iterates the stream with `for await`, which WebKit's
+ * `ReadableStream` has no async iterator for.
+ */
+async function readTextItems(page: PDFPageProxy): Promise<TextItem[]> {
+  const reader = page.streamTextContent().getReader();
+  const items: TextItem[] = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    for (const item of value.items) {
+      if ("str" in item) items.push(item as TextItem);
+    }
+  }
+  return items;
+}
+
+/**
+ * The words under a highlight's quads, read back out of the page rather than
+ * carried from the gesture that drew them — which is what keeps this correct
+ * for a highlight this app did not draw, and is the reason there is only one
+ * path here rather than one for each.
+ *
+ * A text item's `transform` places its baseline origin in the page's own PDF
+ * space — the same space `/QuadPoints` is written in, both fixed regardless
+ * of the app's own display rotation — so an item counts as under a run of
+ * quad points when it sits *wholly* inside that run's bounding box, not
+ * merely centred in it: a producer that writes a whole line as one item — a
+ * single `Tj` call, which is common — hands back an item far wider than any
+ * highlight drawn over part of it, and a centre-point test would have credited
+ * the highlight with the rest of the line merely because the line's middle
+ * happened to fall inside the box. Requiring the item's whole span costs the
+ * case where only part of a wide item is actually marked — nothing is
+ * attributed rather than the wrong thing being attributed, which is the safer
+ * of the two failures. Rotated glyphs and vertical writing are not accounted for
+ * either, which is the same limit `joinRuns` accepts for the screen; both are
+ * rare enough in practice to leave for whoever hits one.
+ */
+function quoteFor(quads: ArrayLike<number>, items: TextItem[]): string {
+  const runs: { xMin: number; xMax: number; yMin: number; yMax: number }[] = [];
+  for (let i = 0; i + 7 < quads.length; i += 8) {
+    const xs = [quads[i], quads[i + 2], quads[i + 4], quads[i + 6]];
+    const ys = [quads[i + 1], quads[i + 3], quads[i + 5], quads[i + 7]];
+    runs.push({
+      xMin: Math.min(...xs),
+      xMax: Math.max(...xs),
+      yMin: Math.min(...ys),
+      yMax: Math.max(...ys),
+    });
+  }
+  if (runs.length === 0) return "";
+
+  let quote = "";
+  let last = -2;
+  items.forEach((item, index) => {
+    const left = item.transform[4];
+    const right = left + item.width;
+    const height = item.height || Math.abs(item.transform[3]) || 1;
+    const cy = item.transform[5] + height / 2;
+    const under = runs.some(
+      (r) => left >= r.xMin - 1 && right <= r.xMax + 1 && cy >= r.yMin - 1 && cy <= r.yMax + 1,
+    );
+    if (!under) return;
+    if (quote && index !== last + 1) quote += " ";
+    quote += item.str;
+    if (item.hasEOL) quote += " ";
+    last = index;
+  });
+  return quote.trim().replace(/\s+/g, " ");
+}
 
 /**
  * Every highlight, underline, strike-out and squiggly the document already
@@ -3011,6 +3089,11 @@ const MARKUP_TYPES = new Set<number>([
  * structural read, no appearance stream and no canvas — the same shape of
  * trip `doc.getFieldObjects()` already makes for form fields, and each
  * annotation comes back carrying the `pageIndex` it was found on.
+ *
+ * Getting the quoted text back costs one more trip per *marked* page — its
+ * text content, for `quoteFor` to search — which is why annotations are
+ * grouped by page first: a page with three highlights on it pays for its text
+ * once, and a document with none pays nothing at all.
  */
 export async function markupOf(doc: PDFDocumentProxy): Promise<Highlight[]> {
   let annotations: MarkupAnnotation[] | null;
@@ -3024,10 +3107,30 @@ export async function markupOf(doc: PDFDocumentProxy): Promise<Highlight[]> {
   }
   if (!annotations) return [];
 
-  const markup: Highlight[] = [];
+  const byPage = new Map<number, MarkupAnnotation[]>();
   for (const annotation of annotations) {
-    const highlight = toHighlight(annotation, (annotation.pageIndex ?? 0) + 1);
-    if (highlight) markup.push(highlight);
+    const page = (annotation.pageIndex ?? 0) + 1;
+    const onPage = byPage.get(page);
+    if (onPage) onPage.push(annotation);
+    else byPage.set(page, [annotation]);
+  }
+
+  const markup: Highlight[] = [];
+  for (const [page, onPage] of byPage) {
+    let items: TextItem[] = [];
+    try {
+      const proxy = await doc.getPage(page);
+      items = await readTextItems(proxy);
+      proxy.cleanup();
+    } catch {
+      // No text on this page, or none pdf.js could read — the quads still
+      // anchor the highlight, so it is kept with an empty quote rather than
+      // dropped.
+    }
+    for (const annotation of onPage) {
+      const highlight = toHighlight(annotation, page, items);
+      if (highlight) markup.push(highlight);
+    }
   }
   return markup;
 }

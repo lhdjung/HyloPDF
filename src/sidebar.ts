@@ -9,9 +9,10 @@ import type {
   RenderTask,
 } from "pdfjs-dist/types/src/display/api";
 
-import type { Mark, Theme } from "./api";
+import type { Highlight, Mark, Theme } from "./api";
 import { hydrateIcons } from "./icons";
 import { recolor } from "./themes";
+import { swatch } from "./ui";
 import { isRenderCancelled, type Viewer } from "./viewer";
 
 /** The three things the panel can be showing. Results only exists while there
@@ -71,6 +72,8 @@ export class Sidebar {
   private outlineButtons: { el: HTMLButtonElement; page: number }[] = [];
   /** The reader's own marks, above the document's contents. See `showMarks`. */
   private marksEl: HTMLElement | null = null;
+  /** The document's coloured markup, below the marks. See `showHighlights`. */
+  private highlightsEl: HTMLElement | null = null;
   private page = 1;
   /** Whether the column has been built for the document currently set. Built
       on first showing rather than in `setDocument`, so a document opened with
@@ -353,6 +356,65 @@ export class Sidebar {
     if (this.tab === "pages" && !this.hasOutline) this.showTab("outline");
   }
 
+  /**
+   * The document's own coloured markup, below the marks — see
+   * `markup-assessment.md`, step 6.
+   *
+   * There is no way to remove a highlight from here, this app's own or
+   * somebody else's: `saveDocument()` in this version of pdf.js cannot edit
+   * or delete an annotation already in the file — see the corrections above
+   * step 6 in `markup-assessment.md` — so a "remove" button here could only
+   * ever take the entry out of the journal, which the next open would put
+   * straight back the moment `syncMarkup` reads the file again. Offering a
+   * button that undoes itself on the next launch is worse than offering
+   * none.
+   */
+  showHighlights(highlights: Highlight[], onPick: (highlight: Highlight) => void, onCopyAll: () => void): void {
+    this.highlightsEl?.remove();
+    this.highlightsEl = null;
+    if (highlights.length === 0) return;
+
+    const box = document.createElement("div");
+    box.className = "highlights";
+    const heading = document.createElement("div");
+    heading.className = "highlights-heading";
+    const title = document.createElement("p");
+    title.className = "marks-title";
+    title.textContent = "Markup";
+    const copyAll = document.createElement("button");
+    copyAll.className = "highlights-copy";
+    copyAll.setAttribute("aria-label", "Copy all markup as Markdown");
+    copyAll.title = "Copy all as Markdown";
+    copyAll.dataset.icon = "copy";
+    copyAll.addEventListener("click", onCopyAll);
+    heading.append(title, copyAll);
+    box.append(heading);
+
+    for (const highlight of highlights) {
+      const row = document.createElement("div");
+      row.className = "mark highlight-row";
+
+      const go = document.createElement("button");
+      go.className = "mark-go highlight-go";
+      go.append(swatch("#000000", highlight.color, ""));
+      const label = document.createElement("span");
+      label.className = "highlight-quote";
+      label.textContent = highlight.quote || `Page ${this.viewer.label(highlight.page)}`;
+      go.append(label);
+      go.title = highlight.quote || `Page ${this.viewer.label(highlight.page)}`;
+      go.addEventListener("click", () => onPick(highlight));
+
+      row.append(go);
+      box.append(row);
+    }
+
+    hydrateIcons(box);
+    this.highlightsEl = box;
+    if (this.marksEl) this.marksEl.after(box);
+    else this.outlinePanel.prepend(box);
+    if (this.tab === "pages" && !this.hasOutline) this.showTab("outline");
+  }
+
   /** The reader turned the document; the column follows. */
   rotated(): void {
     this.redrawVisible();
@@ -384,6 +446,8 @@ export class Sidebar {
   private reset(): void {
     this.marksEl?.remove();
     this.marksEl = null;
+    this.highlightsEl?.remove();
+    this.highlightsEl = null;
     this.showResults([], 0, -1, () => {});
     this.observer?.disconnect();
     this.observer = null;

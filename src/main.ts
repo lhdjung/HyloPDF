@@ -1067,11 +1067,15 @@ class App {
   /**
    * Put a pin in this page, or take the same pin out.
    *
-   * Marks are not annotations — nothing is written into the document, and
-   * nothing appears on it. They are the reader's own note of where they were
-   * going back to, which is the half of what people ask annotations for that
-   * a reader can honestly answer, and they live in `library.toml` beside the
-   * page each document was left on.
+   * A mark is navigation and not markup, which is the whole of why it stays
+   * out of the file. Markup is a change to the document and is written into
+   * it, where it belongs and where every other reader can see it; a mark is
+   * the reader's note of where they were going back to, and putting a sticky
+   * note on page 40 of somebody's shared PDF because they wanted to find it
+   * again is not what marking a page means. So marks live in `library.toml`
+   * beside the page each document was left on. Writing them into the file as
+   * `/Text` annotations is a setting this could grow, not a principle it is
+   * keeping — see `markup-assessment.md`.
    */
   private async toggleMark(page = this.viewer.pageNumber): Promise<void> {
     if (!this.path || this.viewer.isEmpty) return;

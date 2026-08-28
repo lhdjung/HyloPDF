@@ -1,0 +1,423 @@
+# Coloured markup, written into the document
+
+An assessment of adding reader-drawn colour markup to HyloPDF — arbitrary text
+runs, arbitrary colours, several of them on a page — followed by a plan, and
+then a shorter note on making the page marks that already exist visible on the
+pages they are on.
+
+Written against the tree at `bfed355`, `pdfjs-dist` 5.7.284. Every file, line
+and API named below was read rather than remembered.
+
+**The stipulation this is written under:** markup is written **into the PDF**
+and is there the next time the file is opened, by this app or any other.
+Careful markup that vanishes between sessions is worse than no markup, and a
+reader who marks up a paper expects the marks to be in the paper. The earlier
+version of this document argued the opposite from the "marks are not
+annotations" line in `main.ts`; that line is disavowed and has been changed.
+
+## The short answer
+
+**Realistic, and writing into the file makes the viewer side simpler rather
+than harder.** The reason is that a PDF already has the concept, pdf.js already
+reads it, pdf.js already writes it, and this app already renders it:
+
+| what markup needs | what already does it |
+| --- | --- |
+| a format for "these words, this colour" | `/Subtype /Highlight` with `/QuadPoints` and `/C` — the PDF spec's own, understood by Preview, Acrobat, Zotero, everything |
+| writing that into a file without rewriting it | pdf.js `PDFDocumentProxy.saveDocument()` (`api.d.ts:1072`), which does an **incremental update** (`incrementalUpdate` in the shipped worker): original bytes untouched, new objects appended |
+| drawing them | already happens — pdf.js paints an annotation's appearance stream into the page canvas, which is why other people's highlights already arrive highlighted |
+| reading them back | `page.getAnnotations({ intent: "display" })` is already called on every mounted page (`viewer.ts:2234`), and `data.quadPoints` is in what it returns |
+| a selection turned into rectangles on one page | `joinRuns` (`viewer.ts:2599`), which already rounds outwards and closes the gaps between pdf.js's spans |
+| ink recoloured to a chosen colour, theme-aware | `drawRun` (`viewer.ts:508`), `duotone` and `restoreImages`/`tintLinks` (`themes.ts:384`, `themes.ts:778`, `viewer.ts:2691`) |
+
+The anchoring problem that dominated the previous assessment mostly **goes
+away**: a highlight's anchor is its `/QuadPoints`, in the file, in the page's
+own coordinate space, and the document is the thing that answers "what is
+marked here". No offset bookkeeping, no re-anchoring on zoom, no drift.
+
+What replaces it is a harder and more consequential problem: **this app would
+now write to the reader's files.** That is the riskiest thing HyloPDF has ever
+done, it is where every remaining hour of this feature should go, and the rest
+of this document is mostly about it.
+
+Estimate: **1200–1600 lines net** across Rust, TypeScript, CSS and tests, and
+call it a week rather than a few days. The risk is concentrated in one place
+instead of spread thin, which is the better shape.
+
+## What a highlight is
+
+A standard markup annotation on a page:
+
+- `/Subtype /Highlight`, `/Underline`, `/StrikeOut` or `/Squiggly` — four
+  styles, all standard, all free.
+- `/QuadPoints` — eight numbers per marked run, in PDF user space. This is
+  exactly what `joinRuns` already produces, transformed through the page's
+  viewport.
+- `/C` — the colour, three numbers, and `/CA` for opacity.
+- `/AP` — an appearance stream. **Not optional in practice**: many viewers draw
+  only the appearance stream and ignore `/C`, so an annotation without one is
+  invisible in half the world. pdf.js writes one; that is a strong argument for
+  letting pdf.js do the writing rather than hand-rolling it in Rust.
+- `/T`, `/Contents`, `/CreationDate` — who, a note, when. `/Contents` is where
+  a comment on a highlight goes, which is the feature after this one and costs
+  a field now rather than a migration later.
+
+**pdf.js writes these itself.** The shipped worker has
+`AnnotationFactory` cases writing `Subtype /Highlight` with an appearance
+stream, driven by entries in `doc.annotationStorage` of the shape
+`{ annotationType: AnnotationEditorType.HIGHLIGHT, color, opacity, quadPoints,
+rect, pageIndex, … }`. `saveDocument()` then returns the whole new file as a
+`Uint8Array`.
+
+Two ways to put entries into that storage:
+
+**Adopt pdf.js's annotation editor** (`AnnotationEditorLayer`,
+`AnnotationEditorUIManager`, `DrawLayer`, `ColorPicker` — all exported by
+`pdfjs-dist` 5.7). This is the supported path and it comes with the gesture,
+the free colours and the deletion of existing highlights for nothing. It also
+brings pdf.js's own DOM and its own look into an app that builds every element
+by hand, sits on top of the text layer this app paints selections from, and
+adds a second thing that owns the pointer inside a page. Worth a day's spike;
+expect to reject it on fit.
+
+**Write the storage entries directly** — construct the same object shape and
+call `annotationStorage.setValue(...)`. Half a day, no foreign DOM, and it
+depends on an internal shape rather than a documented API, so it is pinned to a
+pdf.js version and needs a test that actually saves a file and reads a
+`/Highlight` back out of it. This is the recommendation, with that test as the
+condition.
+
+The third option — **write the annotation in Rust** with `lopdf` or a
+hand-rolled incremental update — is the one to keep in the back pocket. It is
+the right long-term answer for very large files (only the appended bytes cross
+the bridge and touch the disk, instead of the whole document twice), and it is
+the wrong first answer, because appearance streams, encryption and xref
+arithmetic are all things pdf.js already gets right.
+
+## Writing to somebody's file
+
+This is the section to read twice. None of it is exotic; all of it is the
+difference between a feature and a bug report about a damaged document.
+
+**Incremental update is the only acceptable form.** The original bytes are
+never rewritten — new objects, a new xref pointing back at the old one with
+`/Prev`, appended. A file that was fine before is byte-for-byte still in there,
+which means a bad write is recoverable and a partial write is, at worst, an
+update the next reader's xref repair will skip. pdf.js does it this way.
+Anything that rewrites the whole document from a parsed model — which is what
+the obvious `lopdf` route does — is a much larger promise about round-tripping
+every strange file in the world, and this app should not make it.
+
+**The document watcher will see our own write.** `watch.rs` follows the open
+document and emits `document-changed`, and the frontend reopens the file and
+puts the reader back where they were. Write a highlight and the app reloads the
+document under the reader's hands — mid-scroll, losing the selection, on every
+mark. This is the same shape as the themes directory, which the app also writes
+to and also watches, and it is solved there by deciding from the *content*
+rather than from the fact that something moved. Here the cheapest correct
+answer is for the write to go through Rust, which already owns both the disk
+and the watch, and for `follow` to hold a "this one is ours" mark that
+`whole()`'s settle window clears. **Do not skip this.** It is invisible until
+the first end-to-end test and then it is the whole feature failing.
+
+**A file is open for reading while it is being written.** `OpenFiles` keys a
+read handle by window (`lib.rs`), and a second window may have the same
+document open. The write path must take the same lock the read path does, and
+after a successful write both windows' transports are looking at a file that
+has grown. Reopening is the honest answer, and the app is already good at it —
+that is the `document-changed` path — which is another reason the write should
+go through Rust and come back as the same event, with the "ours" mark meaning
+"reload, but quietly, and keep the place".
+
+**`saveDocument()` pulls the whole file.** The `SaveDocument` handler in the
+worker begins with `requestLoadedStream()`, so a document this app has
+deliberately been reading in 64KB pieces is fetched in full the moment the
+reader marks a sentence. For a paper that is nothing; for a 500MB scan it is
+the one place the piecewise reading is defeated, and then the new bytes come
+back across the bridge and are written out again. Bound it: save on a debounce
+rather than per gesture, save on close and on window destroy, and above a size
+threshold say plainly that markup on this document is being kept beside it
+rather than in it. The Rust-side incremental writer is the fix if that
+threshold turns out to be low.
+
+**Write atomically, and keep one way back.** `atomic_write` already exists and
+is the right shape — temp file beside the target, then rename. The first time
+this app appends to a given document it should also leave the original
+recoverable: a `.hylopdf-original` copy beside it, or nothing at all if the
+reader has said not to. The point is not to be clever, it is that the first
+person whose thesis comes back wrong will not care how careful the design was.
+
+**Things that make a file unwritable, all of which happen:** the file is
+read-only or on a read-only volume; it is in a cloud-synced folder that will
+resolve a conflict by keeping the wrong side; it is signed, and an incremental
+update is exactly the thing a signature is there to detect (do not refuse —
+warn once, plainly, and let the reader decide); it is encrypted, where pdf.js's
+writer does encrypt what it writes but this app has one encrypted-document test
+(`password.test.mjs`) and would need more; it is being recompiled by a
+compiler that will overwrite it wholesale in a minute. Every one of these ends
+in the same place: **the markup is kept in the journal and the reader is told,
+once, in one line.**
+
+## The journal, which is not the store
+
+Since the file holds the truth, a local copy is no longer where markup lives.
+It is still worth keeping, for four things a file cannot do:
+
+1. **Surviving a recompile.** The case this app goes out of its way to support
+   — a paper rebuilt by LaTeX under the reader — destroys every annotation in
+   the file, because the file is replaced. The journal is what makes it
+   possible to offer them back, matched by the quoted text with the matcher
+   `search.ts` already has (`fold` handles the ligatures and soft hyphens that
+   defeat naive matching).
+2. **Documents that cannot be written**, above.
+3. **Listing without opening.** A "marked passages across my library" view, and
+   the sidebar's list before the page is mounted.
+4. **Recovering from a bad write.**
+
+So the journal stores, per document, per highlight: the quads, the colour, the
+style, the quoted text, the page, the timestamp, and the annotation's id in the
+file once it has one. It goes beside `marks` in `library.toml` through a door
+shaped like `toggle_mark` — with the same TOML trap in mind, that an array of
+tables written above a plain key swallows it (`Entry.marks` is last in its
+struct for exactly this reason, and two tests say so). Nest one array of tables
+inside another and it has to be last at both levels; a flat `Vec<f64>` of
+quads, four numbers each, is a plain key and sidesteps it.
+
+**The rule for divergence, stated once:** on open, the file wins and the
+journal is rebuilt from what `getAnnotations` returns. The journal is a cache
+and a recovery log, never an authority. Anything else is two sources of truth
+and a bug that only reproduces on somebody else's machine.
+
+Volume: a heavily marked book is hundreds of records, and `library.toml` is
+rewritten whole under a lock on every change. If a document passes roughly a
+thousand, move that document's journal to a sidecar (`markup/<hash>.toml`) — a
+new door of the same shape, built when the reason is measurable.
+
+## Drawing it, and the one trap
+
+**Saved markup draws itself.** pdf.js paints an annotation's appearance stream
+into the page canvas, so a highlight in the file arrives on screen as part of
+the page bitmap with no layer, no overlay and no memory of its own. That is
+already true today for other people's highlights. It also means markup goes
+through recolouring like every other pixel, and the colour-keeping path added
+to `recolor` is exactly right for it: a saturated wash keeps its hue and moves
+its lightness, so a yellow highlight comes back light yellow on Hylo Dark
+rather than grey.
+
+**The trap is `WHITE_POINT`** (`themes.ts:44`, 235). Everything above level 235
+is called paper and carried to the theme's background, because a hairline
+printed at 90% white is invisible on paper and would otherwise arrive as a
+bright cage around every hyperref box. A conventional highlighter wash — yellow
+at 20–25% opacity over white — lands around level 250. **It is paper by that
+rule, and it disappears entirely on every recolouring theme.** A reader would
+mark a page, switch to dark mode, and find their markup gone. Three ways out,
+and the third is the one that fits this codebase:
+
+1. Only write saturated colours at an opacity high enough to clear the white
+   point. Cheap, and it constrains "freely selectable" in a way the reader will
+   notice.
+2. Raise or special-case `WHITE_POINT`. No — it is load-bearing for hyperref
+   boxes and for scans with warm paper, and the constant's own comment explains
+   what it is buying.
+3. **Redraw the marked quads over the recoloured page**, from the pristine copy
+   taken before recolouring, toward a theme-adapted markup colour. This is
+   precisely what `restoreImages` and `tintLinks` already do for pictures and
+   links: one clip covering every rectangle at once, one `drawImage` per page.
+   Markup quads become a third class of region alongside those two, they come
+   from the `getAnnotations` call the viewer already makes, and the work is a
+   variation on a function that exists rather than a new path. It also gets the
+   theme adaptation for free, which options 1 and 2 do not.
+
+Take option 3, and note that it wants the annotation quads on
+`page.imageCoordinates`'s neighbour rather than in a new cache — the same
+per-page bag the recolour path already carries.
+
+**Unsaved markup is the app's own.** Between the reader marking a passage and
+the save landing, the highlight does not exist in the file and pdf.js will not
+draw it. `drawSelection` (`viewer.ts:473`) is almost exactly the painter for
+that gap: it takes a slot, rectangles and a pair of colours, joins them into
+runs, keys each run by place and colour, keeps what has not changed and
+releases the rest. Reuse it for a "pending markup" layer, drop the layer when
+the page next renders with the annotation baked in, and the reader sees the
+mark appear under the pointer and never sees it flicker.
+
+That leaves one invalidation to add: `keyFor` (`viewer.ts:1918`) decides when a
+page is repainted, and it must learn about a markup revision, or a page marked
+and saved will not redraw.
+
+## Colours
+
+The theme rule applies unchanged: **hex and nothing else, through
+`parseColor`/`readColor` (`themes.ts:103`)**, never handed raw to CSS — the
+theme picker's swatch lied about a colour exactly once and the fix was to route
+it through the same reader the renderer uses. `ui.colorField` (`ui.ts:387`) is
+already the control, used six times in the settings window.
+
+Each highlight carries its own colour, which is what makes them freely
+selectable and combinable; a palette of six in settings (`markup_colors`) is
+the shortcut, not the constraint. The colour written to `/C` is the one the
+reader picked — that is what other applications will show — and the colour
+*drawn* on a recolouring theme is that colour adapted for contrast against the
+theme's paper (`luminance` and `contrastRatio` are already in `themes.ts`). A
+highlight is "the red one" on every theme, and it is red in Preview.
+
+## The gesture, the sidebar, getting it out
+
+- **A popover by the selection** on mouseup: a row of swatches, a "more" entry
+  opening the colour field, and the four styles. `ui.showPopover` exists; the
+  find bar's `FIND_KEEPS_OPEN` list and the popover Escape handling
+  (AGENTS.md, "Escape and menus") both have to learn about it.
+- **Actions in the keymap**, because everything here is an action first:
+  `markup` (mark the selection in the current colour), `markup-color-1..6`,
+  `markup-remove`. `copy-quote` (`keys.ts:151`) is the sibling that also works
+  off the live selection, and its neighbour `mod+shift+h` is free.
+- **A menu entry** under the document title, beside "Mark this page".
+- The webview's context menu is already suppressed except over a live selection
+  (`main.ts:1963`), which makes a right-click over marked text the natural home
+  for "Remove markup".
+- **The Contents panel** already carries a "Marked" section (`sidebar.ts:315`);
+  markup is a second section — the quote in its colour, click to jump, a button
+  to remove. A fourth tab is right at fifty highlights, not at the first.
+- **Copy all markup as Markdown**, one blockquote per highlight with its page
+  label. `copyQuote` (`main.ts:1128`) already formats a quote with its page and
+  the document's title; this is that over a list, about forty lines, and it is
+  what makes markup useful outside the reader.
+
+Removal has a subtlety worth naming: deleting a highlight this app wrote is
+another incremental update saying so. Deleting one **somebody else** put in the
+file is a different act and should look different — offer it, but not on the
+same button, and never silently.
+
+## What this still does not do
+
+- **A scan with no text cannot be marked this way.** No text layer, no
+  selection, no quads. An area drag — a rectangle the reader draws — is the
+  answer, it is a `/Square` annotation, and the storage above already holds it
+  (quads, empty text). Design it in now, build it later.
+- **Printing does not include markup**, because `print_document` hands the
+  file to the system printer — though once markup is *in* the file, this fixes
+  itself for everything saved, which is a second argument for the stipulation.
+- **Comments on highlights are not editable**, only readable, as today. The
+  `/Contents` field is written empty and the feature after this one fills it.
+- **Two windows on the same document still go stale** in memory, as marks do.
+  The write path forces this to be dealt with rather than noted, which is an
+  improvement: whichever window writes, both reopen.
+
+## The plan
+
+Ordered so the thing that could sink it is proven before anything is built on
+it. The riskiest part is no longer the anchor; it is the round trip.
+
+**0 · Spike the round trip, one day.** In the harness: open a fixture, put a
+`HIGHLIGHT` entry into `annotationStorage`, `saveDocument()`, write the bytes,
+reopen, and assert `getAnnotations` returns a `/Highlight` with the right quads
+and colour — and that Preview shows it. Everything else depends on this being
+true against pdf.js 5.7 with a range transport behind it. If the direct storage
+route does not hold up, this is where the editor-layer alternative gets its
+day.
+
+**1 · The write door, in Rust.** `write_document(path, bytes)` beside the read
+path: the same per-window lock, `atomic_write`, the one-time original copy, and
+— the part that is easy to forget — telling `watch.rs` that this write is ours
+so the reader is not thrown out of their scroll. Rust tests for the lock, the
+atomic replace and the watcher suppression, which is where `cargo test` earns
+its place in CI again.
+
+**2 · The journal.** `Highlight` in `library.rs`, its door, its browser twin in
+`api.ts` (without which the harness sees none of this), the flat-quads
+decision, and a Rust test round-tripping an entry that has both `marks` and
+`highlights` — the TOML ordering trap.
+
+**3 · Reading markup out of the file.** A sibling to `notesIn`
+(`viewer.ts:2634`) that picks the markup subtypes out of the annotations the
+viewer already fetches, and the journal rebuilt from it on open. No UI yet;
+a document someone else highlighted should now list its highlights.
+
+**4 · Drawing.** The quad redraw over the recoloured page (option 3 above),
+`keyFor` learning a markup revision, and the pending-markup layer lifted out of
+`drawSelection`. Test under `HYLOPDF_NO_BLEND=1`, since that is the path Linux
+may actually be on, and check a marked page on Hylo Light, Hylo Dark and
+High Contrast — the white-point trap shows up on exactly two of those three.
+
+**5 · The gesture and the colours.** Popover, actions, palette in settings
+(keeping `tests/settings.test.mjs` green — it checks the Rust table, the
+browser fallback and the `Settings` type against each other), theme adaptation,
+the debounce, and the save on close.
+
+**6 · The sidebar and the export.** Second section in Contents, jump, remove,
+copy-all-as-Markdown.
+
+**7 · The edges, which are the feature.** Read-only and cloud-synced files;
+signed documents; encrypted documents; the size threshold and the notice that
+goes with it; the recompile path offering markup back; a scan saying plainly
+there is nothing here to mark. Each is one notice line and one branch, and
+together they are the difference between this being trustworthy and being
+something people turn off.
+
+**Tests to add**, in the shape the suite already has: a save-and-reopen
+round trip (the phase 0 spike, kept), `markup.test.mjs` for quads from a
+selection and the re-anchor-by-quote path, reader-level select → mark →
+reopen → still there, the Rust tests above, and a `seams` addition if a new
+import lands in `viewer.ts`. Everything waits for a condition rather than for a
+clock.
+
+---
+
+# Bonus: making a marked page look marked
+
+A mark today exists in the Contents panel and nowhere else. It should be
+visible on the page and findable in the document. Five options, best value
+first.
+
+**A question the stipulation reopens:** now that this app writes to files, a
+page mark *could* be a `/Text` annotation — a sticky note in the corner, which
+every other reader would show. Recommendation is still no, and for a reason
+that is not the disavowed one: a mark is where the reader was going back to,
+which is navigation state and not a change to the document, and putting a
+sticky note on page 40 of somebody's shared PDF because they wanted to find it
+again is not what they asked for. Markup is a change to the document and
+belongs in it; a mark is a bookmark and belongs beside it. Offer writing marks
+into the file as a setting if anyone asks for it.
+
+**1 · A ribbon at the page's corner.** A small tab in the theme's accent at the
+top-right of a marked page, carrying the mark's title as its label, clicking it
+takes the mark off. The physical metaphor — a bookmark sticking out of a book —
+and it reads instantly with no legend. Pure DOM over the page, placed through
+`placeOverlay` (`viewer.ts:1152`) so it follows a trim, no canvas, survives
+zoom. Roughly thirty lines and some CSS.
+
+*One thing to watch:* `.page` is `overflow: hidden` (`styles.css:738`), so the
+ribbon cannot hang outside the paper — it sits just inside the right edge. On
+an untrimmed page that is margin and it looks like a bookmark; with the margins
+trimmed away it may land on ink, so it wants to be small and semi-transparent
+at rest, solid on hover.
+
+**2 · A dot on the thumbnail.** The Pages tab already builds a button per page
+(`sidebar.ts`), so this is a class and a pseudo-element — about ten lines. The
+one real requirement is that the sidebar be *told* when marks change;
+`showMarks` (`main.ts:1098`) is already that single hook, so it grows a second
+call rather than a second mechanism.
+
+Build 1 and 2 together. One says "this page", the other says "these pages".
+
+**3 · A rail of ticks down the edge of the viewport.** Each mark at its
+fractional position through the document, click to jump. This is what makes
+marks navigable at book scale — a list of forty marks does not tell you they
+cluster in chapter 7. It needs `boxes`, so it needs the paged-mode guard, and
+it is the natural home for search matches and for markup too, which argues for
+building it as "positions with colours" rather than as "marks". Sixty lines
+plus styling, after 1 and 2 have been lived with.
+
+**4 · The page pill.** `.page-pill` (`styles.css:1380`) already appears when
+the page changes; a small glyph on it when the current page is marked is nearly
+free and gives the mark toggle the feedback it currently lacks anywhere outside
+a menu.
+
+**5 · The toolbar.** The document menu shows the mark as a tick
+(`main.ts:1525`) and nothing at the top level does. If 4 is built this is
+redundant; if it is not, the toolbar is where it belongs.
+
+None of these changes what a mark *is*, which is why they are cheap: a mark is
+already a page number and a title in `library.toml`, and every option above is
+a different projection of that same list. The work is presentation, and it is
+the presentation that is missing.

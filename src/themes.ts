@@ -227,6 +227,26 @@ export function selectionInk(theme: Theme): Rgb {
   return theme.selection_text ? parseColor(theme.selection_text, derived) : derived;
 }
 
+/**
+ * What a saved highlight's wash looks like on a recolouring theme.
+ *
+ * The colour written to `/C` is the reader's own choice and is never changed
+ * — that is what makes a highlight "the red one" on every theme and red again
+ * in Preview. What this answers is a narrower question: a highlighter wash is
+ * translucent paint, and `opacity` (`/CA`) is exactly the alpha it was meant
+ * to be laid down at, so mixing the raw colour with the theme's own paper by
+ * that same fraction is not a guess about how to adapt it — it is the same
+ * paint, on this theme's page instead of white. See `markup-assessment.md`,
+ * "the trap", for why this cannot be left to the ordinary luminance ramp: a
+ * conventional wash lands past `WHITE_POINT` and the ramp calls it paper.
+ */
+export function markupWashColor(theme: Theme, color: string, opacity: number): string {
+  const bg = parseColor(theme.background, WHITE);
+  const raw = parseColor(color, BLACK);
+  const alpha = Math.min(1, Math.max(0, opacity));
+  return toHex(mix(raw, bg, 1 - alpha));
+}
+
 /** Apply a theme to the app chrome. The document itself is recoloured at
     render time — see `recolor` below. */
 export function applyTheme(theme: Theme): void {

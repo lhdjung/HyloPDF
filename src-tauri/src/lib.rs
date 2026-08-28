@@ -53,6 +53,18 @@ pub(crate) fn atomic_write(target: &Path, body: &[u8]) -> Result<(), String> {
     })
 }
 
+/// Where the pristine copy of a document goes the first time this app writes
+/// into it. Beside the document rather than tucked away in the config
+/// directory, because the point is that the reader can find it without
+/// knowing this app keeps one.
+fn original_backup_path(target: &Path) -> PathBuf {
+    let name = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("document.pdf");
+    target.with_file_name(format!("{name}.hylopdf-original"))
+}
+
 /// Resolved once at startup: the config directory and the themes directory
 /// inside it.
 struct Paths {
@@ -155,6 +167,50 @@ impl OpenFiles {
         }
         buffer.truncate(filled);
         Ok(buffer)
+    }
+
+    /// Replace the document a window has open with `bytes` — an incremental
+    /// update pdf.js produced, original bytes untouched and new objects
+    /// appended — and report the new length.
+    ///
+    /// Locked the same way `range` is: one `Mutex` over every window's
+    /// handle, so a read and a write for the same document cannot interleave
+    /// mid-operation. Coarser than a per-document lock would be, and there is
+    /// only one document worth writing at a time in practice, so this is the
+    /// existing shape rather than a new one.
+    ///
+    /// The first write to a given document leaves `.hylopdf-original` beside
+    /// it — untouched by every write after the first, because it exists to
+    /// answer for all of them, not just the last one.
+    fn write(&self, window: &str, path: &str, bytes: &[u8]) -> Result<u64, String> {
+        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((open, _)) = held.get(window) else {
+            return Err("No document is open.".into());
+        };
+        if open != path {
+            return Err("That is not the document that is open.".into());
+        }
+
+        let target = Path::new(path);
+        let backup = original_backup_path(target);
+        if !backup.exists() {
+            std::fs::copy(target, &backup).map_err(|e| format!("Could not back up: {e}"))?;
+        }
+
+        atomic_write(target, bytes)?;
+
+        // The rename that just happened detached the old handle from the file
+        // it used to point at — POSIX leaves an open descriptor reading
+        // whatever inode it had, not whatever is at the path now — so every
+        // read after this one needs a handle opened fresh against the new
+        // file.
+        let file = File::open(target).map_err(|e| format!("Could not reopen: {e}"))?;
+        let length = file
+            .metadata()
+            .map_err(|e| format!("Could not measure: {e}"))?
+            .len();
+        held.insert(window.to_string(), (path.to_string(), file));
+        Ok(length)
     }
 
     fn close(&self, window: &str) {
@@ -497,6 +553,32 @@ async fn read_range(
         .map(tauri::ipc::Response::new)
 }
 
+/// Write bytes pdf.js produced — an incremental update carrying a highlight —
+/// over the document a window has open, and tell that window to reload the
+/// same way it would for a change made outside the app.
+///
+/// The reload is deliberate rather than left to the watcher: `open.write`
+/// already knows the write landed, so this fires `document-changed` for the
+/// writing window itself, and `watching.wrote` tells the watcher that the
+/// burst of file-system events the write is about to cause is not news — the
+/// baseline moves right here, before the real burst arrives, rather than
+/// racing it. A second window with the same document open is not touched by
+/// either call and gets the ordinary reload once the watcher notices on its
+/// own, which is correct: its transport really is stale.
+#[tauri::command]
+async fn write_document(
+    window: WebviewWindow,
+    open: State<'_, OpenFiles>,
+    watching: State<'_, watch::Watching>,
+    path: String,
+    bytes: Vec<u8>,
+) -> Result<u64, String> {
+    let length = open.write(window.label(), &path, &bytes)?;
+    watching.wrote(window.label(), Path::new(&path));
+    let _ = window.emit_to(window.label(), "document-changed", &path);
+    Ok(length)
+}
+
 /// Let go of the open document, so the handle does not outlive the reading.
 #[tauri::command]
 async fn close_document(
@@ -676,6 +758,38 @@ async fn toggle_mark(
 ) -> Result<Marked, String> {
     let (marked, marks) = library::toggle_mark(&paths.config, &path, page, offset, &title, now())?;
     Ok(Marked { marked, marks })
+}
+
+/// Journal a highlight the reader just drew. See `library::add_highlight`.
+#[tauri::command]
+async fn add_highlight(
+    paths: State<'_, Paths>,
+    path: String,
+    highlight: library::Highlight,
+) -> Result<Vec<library::Highlight>, String> {
+    library::add_highlight(&paths.config, &path, highlight)
+}
+
+/// Take a highlight out of the journal, by the id it was added with.
+#[tauri::command]
+async fn remove_highlight(
+    paths: State<'_, Paths>,
+    path: String,
+    id: String,
+) -> Result<Vec<library::Highlight>, String> {
+    library::remove_highlight(&paths.config, &path, &id)
+}
+
+/// Replace a document's journaled highlights with what the file itself says,
+/// once it has been read. See `library::set_highlights` for why this
+/// discards rather than merges.
+#[tauri::command]
+async fn set_highlights(
+    paths: State<'_, Paths>,
+    path: String,
+    highlights: Vec<library::Highlight>,
+) -> Result<(), String> {
+    library::set_highlights(&paths.config, &path, highlights)
 }
 
 /// The title the document gives itself, which the frontend reads out of the
@@ -1573,6 +1687,7 @@ pub fn run() {
             open_document,
             open_for_reading,
             read_range,
+            write_document,
             close_document,
             remember_position,
             set_open_document,
@@ -1580,6 +1695,9 @@ pub fn run() {
             quit_app,
             set_document_title,
             toggle_mark,
+            add_highlight,
+            remove_highlight,
+            set_highlights,
             forget_document,
             open_link,
             open_path,
@@ -1801,5 +1919,103 @@ mod tests {
         open.set("main", Some("/papers/three.pdf"));
         assert!(open.showing("/papers/one.pdf").is_none());
         assert_eq!(open.showing("/papers/three.pdf").as_deref(), Some("main"));
+    }
+
+    /// Its own directory per file, not shared across tests — `cargo test`
+    /// runs this module's tests in parallel, and a directory holding more
+    /// than one test's files means a scan for "no temp file survived" can
+    /// catch a different test's write mid-flight.
+    fn scratch_pdf(name: &str, body: &[u8]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("hylopdf-write-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        let path = dir.join(name);
+        std::fs::write(&path, body).expect("scratch file");
+        path
+    }
+
+    /// The write door's authorisation: it takes the same lock the read path
+    /// does, which means the same question — is this the document *this*
+    /// window has open — gets asked before a single byte moves.
+    #[test]
+    fn a_window_cannot_write_a_document_it_does_not_have_open() {
+        let path = scratch_pdf("unopened.pdf", b"%PDF-1.7\n%%EOF\n");
+        let open = OpenFiles::default();
+        let err = open
+            .write("main", &path.to_string_lossy(), b"anything")
+            .unwrap_err();
+        assert_eq!(err, "No document is open.");
+
+        let elsewhere = scratch_pdf("elsewhere.pdf", b"%PDF-1.7\n%%EOF\n");
+        open.begin("main", &elsewhere.to_string_lossy()).unwrap();
+        let err = open
+            .write("main", &path.to_string_lossy(), b"anything")
+            .unwrap_err();
+        assert_eq!(err, "That is not the document that is open.");
+    }
+
+    /// The write itself: atomic (no half-written file is ever visible under
+    /// the target name), and the handle a window reads through afterwards
+    /// sees the new bytes rather than the detached old inode.
+    #[test]
+    fn writing_replaces_the_file_and_the_handle_reading_it() {
+        let path = scratch_pdf("write-me.pdf", b"%PDF-1.7\noriginal\n%%EOF\n");
+        let open = OpenFiles::default();
+        open.begin("main", &path.to_string_lossy()).unwrap();
+
+        let new_bytes = b"%PDF-1.7\noriginal\nappended\n%%EOF\n";
+        let length = open
+            .write("main", &path.to_string_lossy(), new_bytes)
+            .unwrap();
+        assert_eq!(length, new_bytes.len() as u64);
+        assert_eq!(std::fs::read(&path).unwrap(), new_bytes);
+
+        // No staging file left behind beside it.
+        let siblings: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(siblings.is_empty(), "a temp file survived the write");
+
+        // And the handle this window reads through sees the new bytes, not
+        // whatever the old, now-detached inode still holds.
+        let read = open
+            .range("main", &path.to_string_lossy(), 0, new_bytes.len() as u64)
+            .unwrap();
+        assert_eq!(read, new_bytes);
+    }
+
+    /// The first write to a document leaves a pristine copy beside it; a
+    /// second write must not overwrite that copy with the document's
+    /// already-modified state.
+    #[test]
+    fn only_the_first_write_creates_the_original_backup() {
+        let path = scratch_pdf("backed-up.pdf", b"%PDF-1.7\nfirst draft\n%%EOF\n");
+        let open = OpenFiles::default();
+        open.begin("main", &path.to_string_lossy()).unwrap();
+
+        open.write(
+            "main",
+            &path.to_string_lossy(),
+            b"%PDF-1.7\nsecond draft\n%%EOF\n",
+        )
+        .unwrap();
+        let backup = original_backup_path(&path);
+        assert_eq!(
+            std::fs::read(&backup).unwrap(),
+            b"%PDF-1.7\nfirst draft\n%%EOF\n"
+        );
+
+        open.write(
+            "main",
+            &path.to_string_lossy(),
+            b"%PDF-1.7\nthird draft\n%%EOF\n",
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(&backup).unwrap(),
+            b"%PDF-1.7\nfirst draft\n%%EOF\n",
+            "a later write clobbered the original backup"
+        );
     }
 }

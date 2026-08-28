@@ -6,6 +6,7 @@
  * a two page letter, and the scrollbar tells the truth from the first frame. */
 
 import {
+  AnnotationType,
   getDocument,
   GlobalWorkerOptions,
   PasswordResponses,
@@ -20,16 +21,18 @@ import type {
   PDFPageProxy,
   RenderTask,
 } from "pdfjs-dist/types/src/display/api";
+import type { PageViewport } from "pdfjs-dist/types/src/display/display_utils";
 // The minified worker, deliberately. Vite copies a `?url` import through
 // untouched — it is an asset rather than part of the module graph, so it never
 // meets the minifier — and importing the development build shipped a megabyte
 // of whitespace and comments that the worker then had to parse at every open.
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-import { openForReading, readRange, type Theme } from "./api";
+import { openForReading, readRange, type Highlight, type HighlightStyle, type Theme } from "./api";
 import {
   duotone,
   luminance,
+  markupWashColor,
   parseColor,
   recolor,
   type Rect,
@@ -231,6 +234,22 @@ type Link = {
   dest?: unknown;
 };
 
+/** One saved highlight, underline, strike-out or squiggly on a page, in
+    fractions of the page like a link's rectangle — one entry per run of
+    `/QuadPoints`, so a highlight spanning two lines is two of these. This is
+    the drawing path's own shape, not the journal's: `Highlight` in `api.ts`
+    keeps the raw PDF-space quads for writing back to the file, and this keeps
+    only what painting a run needs. */
+type MarkupRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  opacity: number;
+  style: HighlightStyle;
+};
+
 /** A note somebody else left in the document: a sticky note, or a comment on
     a highlight. Its rectangle is a fraction of the page, like a link's. */
 type Note = {
@@ -311,6 +330,7 @@ export class Viewer {
   private pictorial = new Set<number>();
   private linkCache = new Map<number, Link[]>();
   private noteCache = new Map<number, Note[]>();
+  private markupCache = new Map<number, MarkupRegion[]>();
   /** A match asked for but not yet shown, because its page had no text layer
       when it was asked for. Index into `matches`; -1 when there is none. */
   private pendingReveal = -1;
@@ -724,6 +744,7 @@ export class Viewer {
     this.releasePages();
     this.linkCache.clear();
     this.noteCache.clear();
+    this.markupCache.clear();
     this.pendingReveal = -1;
     this.matches = [];
     this.matchPages.clear();
@@ -1583,10 +1604,11 @@ export class Viewer {
       const { x, y, width, height } = this.crop;
       this.crop = { x: 1 - y - height, y: x, width: height, height: width };
     }
-    // Where a link or a note is on the page is a fraction of a page that has
-    // just changed shape.
+    // Where a link, a note or a highlight is on the page is a fraction of a
+    // page that has just changed shape.
     this.linkCache.clear();
     this.noteCache.clear();
+    this.markupCache.clear();
     this.relayout();
   }
 
@@ -2101,6 +2123,12 @@ export class Viewer {
         // recoloured is beside that point.
         const links = await this.linksFor(slot.index, page);
         if (this.doc !== doc || this.slots.get(slot.index) !== slot) return;
+        // Populated by the same call, above — see `markupRegionsFrom`. Only
+        // `/Highlight` runs need the redraw `tintMarkup` does; an underline or
+        // a squiggly survives `recolor`'s own colour-keeping pass unaided.
+        const markup = (this.markupCache.get(slot.index) ?? []).filter(
+          (region) => region.style === "highlight",
+        );
         // `page.imageCoordinates`, not `task.imageCoordinates`: the RenderTask
         // getter reads `_internalRenderTask.imageCoordinates`, which pdf.js
         // never sets — the `complete` callback inside `PDFPageProxy.render`
@@ -2118,11 +2146,17 @@ export class Viewer {
         // canvas — at a high zoom that is tens of megabytes, so a theme that
         // leaves the document alone must not pay for it. Every zoom step
         // repaints every visible page, which is where that cost would land.
-        const pristine = theme.recolor && (hasImages || links.length > 0)
+        const pristine = theme.recolor && (hasImages || links.length > 0 || markup.length > 0)
           ? copyCanvas(canvas)
           : null;
         try {
           if (theme.recolor) recolor(ctx, canvas.width, canvas.height, theme);
+          if (markup.length > 0) {
+            // Before the links: a highlighted cross-reference is rare, and
+            // where the two overlap the link's own colour is the one that
+            // should win, the same way it already wins over a page's own ink.
+            tintMarkup(ctx, pristine, canvas.width, canvas.height, inCrop(markup, crop), theme);
+          }
           if (links.length > 0) {
             // A link's rectangle is a fraction of the whole page and the
             // canvas is a fraction of it, so the two have to be put in the
@@ -2228,6 +2262,9 @@ export class Viewer {
       url?: string;
       contentsObj?: { str?: string };
       titleObj?: { str?: string };
+      quadPoints?: ArrayLike<number> | null;
+      color?: ArrayLike<number> | null;
+      opacity?: number;
     };
     let annotations: Annotation[];
     try {
@@ -2237,9 +2274,12 @@ export class Viewer {
     }
 
     const view = this.viewportFor(page, 1);
-    // Notes come out of the same fetch, because they are the same annotations:
-    // asking twice would be two trips into the worker for one answer.
+    // Notes and markup come out of the same fetch, because they are the same
+    // annotations: asking twice would be two trips into the worker for one
+    // answer. See `markupRegionsFrom` for why this is the drawing path's own
+    // shape rather than the journal's `Highlight`.
     this.noteCache.set(index, notesIn(annotations, view));
+    this.markupCache.set(index, markupRegionsFrom(annotations, view));
     const links: Link[] = [];
     for (const annotation of annotations) {
       if (annotation.subtype !== "Link" || !annotation.rect) continue;
@@ -2665,15 +2705,187 @@ function notesIn(
   return notes;
 }
 
-/** Link rectangles, restated as fractions of the part of the page on screen. */
-function inCrop(links: Link[], crop: Crop | null): Link[] {
-  if (!crop) return links;
-  return links.map((link) => ({
-    ...link,
-    x: (link.x - crop.x) / crop.width,
-    y: (link.y - crop.y) / crop.height,
-    width: link.width / crop.width,
-    height: link.height / crop.height,
+/** The PDF spec's own four markup subtypes, as pdf.js names them, mapped onto
+    the journal's own spelling. Nothing this app invents. */
+const MARKUP_STYLES: Record<string, HighlightStyle> = {
+  Highlight: "highlight",
+  Underline: "underline",
+  StrikeOut: "strikeout",
+  Squiggly: "squiggly",
+};
+
+/**
+ * Coloured markup on a page, ready to paint — one `MarkupRegion` per run of
+ * `/QuadPoints`, in fractions of the page like a link's rectangle.
+ *
+ * This is `linksFor`'s own conversion, not `toHighlight`'s below: the drawing
+ * path wants a run on screen, in the units everything else it draws in is
+ * already in, and the journal wants the run in the file's own coordinate
+ * space, because that is what a later save writes back unchanged. The two
+ * never have to agree with each other, only with the same annotation.
+ *
+ * All four quads of a run are converted and the axis-aligned box around them
+ * kept — the same simplification a link's own `/Rect` already is, and a fair
+ * one for the horizontal text every quad in practice anchors.
+ */
+function markupRegionsFrom(
+  annotations: {
+    subtype?: string;
+    quadPoints?: ArrayLike<number> | null;
+    color?: ArrayLike<number> | null;
+    opacity?: number;
+  }[],
+  view: PageViewport,
+): MarkupRegion[] {
+  const regions: MarkupRegion[] = [];
+  for (const annotation of annotations) {
+    const style = MARKUP_STYLES[annotation.subtype ?? ""];
+    const quads = annotation.quadPoints;
+    if (!style || !quads || quads.length === 0 || quads.length % 8 !== 0) continue;
+
+    const c = annotation.color;
+    const color = toHex(c && c.length >= 3 ? [c[0], c[1], c[2]] : [0, 0, 0]);
+    const opacity = annotation.opacity ?? 1;
+
+    for (let i = 0; i + 7 < quads.length; i += 8) {
+      let left = Infinity;
+      let top = Infinity;
+      let right = -Infinity;
+      let bottom = -Infinity;
+      for (let corner = 0; corner < 4; corner++) {
+        const [vx, vy] = view.convertToViewportPoint(quads[i + corner * 2], quads[i + corner * 2 + 1]);
+        left = Math.min(left, vx);
+        right = Math.max(right, vx);
+        top = Math.min(top, vy);
+        bottom = Math.max(bottom, vy);
+      }
+      const width = right - left;
+      const height = bottom - top;
+      if (width < 1 || height < 1) continue;
+      regions.push({
+        x: left / view.width,
+        y: top / view.height,
+        width: width / view.width,
+        height: height / view.height,
+        color,
+        opacity,
+        style,
+      });
+    }
+  }
+  return regions;
+}
+
+/** The shape `getAnnotationsByType` hands back for one of the four subtypes
+    above. The rest of what an annotation carries — `rect`, `contentsObj` and
+    so on — belongs to links and notes, not this. */
+type MarkupAnnotation = {
+  subtype?: string;
+  quadPoints?: ArrayLike<number> | null;
+  color?: ArrayLike<number> | null;
+  opacity?: number;
+  id?: string;
+  pageIndex?: number;
+};
+
+/**
+ * One annotation, read as coloured markup — or `null` where it is not one of
+ * the four subtypes above, or carries no quads to anchor it.
+ *
+ * The quads are kept exactly as pdf.js reports them: four numbers per run, in
+ * the page's own PDF coordinate space — the space `/QuadPoints` is written
+ * in — and not converted to a fraction of a viewport the way a link's or a
+ * note's rectangle is. That space is what the file itself agrees on and what
+ * a later save writes straight back into; a viewport fraction would have to
+ * be un-converted before it meant anything to a PDF reader that is not this
+ * one.
+ *
+ * `quote` comes back empty and `at` is when this was read rather than when it
+ * was drawn: this is markup the reader did not just make, so neither is known
+ * without reading the words out from under the quad, which is a job of its
+ * own for whichever screen shows a highlight this app did not draw.
+ */
+function toHighlight(annotation: MarkupAnnotation, page: number): Highlight | null {
+  const style = MARKUP_STYLES[annotation.subtype ?? ""];
+  const quads = annotation.quadPoints;
+  if (!style || !quads || quads.length === 0 || quads.length % 8 !== 0) return null;
+
+  const rgb: [number, number, number] =
+    annotation.color && annotation.color.length >= 3
+      ? [annotation.color[0], annotation.color[1], annotation.color[2]]
+      : [0, 0, 0];
+  return {
+    id: crypto.randomUUID(),
+    page,
+    quads: Array.from(quads),
+    color: toHex(rgb),
+    opacity: annotation.opacity ?? 1,
+    style,
+    quote: "",
+    at: Date.now(),
+    annotation_id: annotation.id ?? null,
+  };
+}
+
+/** Every subtype `toHighlight` reads, as the numbers `AnnotationType` gives
+    them — what `getAnnotationsByType` is asked for below. */
+const MARKUP_TYPES = new Set<number>([
+  AnnotationType.HIGHLIGHT,
+  AnnotationType.UNDERLINE,
+  AnnotationType.STRIKEOUT,
+  AnnotationType.SQUIGGLY,
+]);
+
+/**
+ * Every highlight, underline, strike-out and squiggly the document already
+ * carries, read in one trip rather than one page at a time.
+ *
+ * This is what the journal in `library.toml` is rebuilt from on open — see
+ * `markup-assessment.md`, step 3, and `App.syncMarkup` in `main.ts`, which
+ * calls this once and replaces the journal outright with what comes back.
+ * It has to be the whole document and not the pages a reader happens to
+ * scroll past: a replace built from a partial scroll would discard the
+ * entries for every page nobody has looked at yet in this session, which is
+ * worse than never having read them, because the file still carries them.
+ *
+ * pdf.js answers this by reading every page's own `/Annots` dictionary — a
+ * structural read, no appearance stream and no canvas — the same shape of
+ * trip `doc.getFieldObjects()` already makes for form fields, and each
+ * annotation comes back carrying the `pageIndex` it was found on.
+ */
+export async function markupOf(doc: PDFDocumentProxy): Promise<Highlight[]> {
+  let annotations: MarkupAnnotation[] | null;
+  try {
+    annotations = (await doc.getAnnotationsByType(
+      MARKUP_TYPES,
+      new Set(),
+    )) as MarkupAnnotation[] | null;
+  } catch {
+    return []; // A document with unreadable annotations still reads fine.
+  }
+  if (!annotations) return [];
+
+  const markup: Highlight[] = [];
+  for (const annotation of annotations) {
+    const highlight = toHighlight(annotation, (annotation.pageIndex ?? 0) + 1);
+    if (highlight) markup.push(highlight);
+  }
+  return markup;
+}
+
+/** A link's or a markup region's rectangle, restated as fractions of the part
+    of the page on screen — the same trim, whichever it is being asked of. */
+function inCrop<T extends { x: number; y: number; width: number; height: number }>(
+  items: T[],
+  crop: Crop | null,
+): T[] {
+  if (!crop) return items;
+  return items.map((item) => ({
+    ...item,
+    x: (item.x - crop.x) / crop.width,
+    y: (item.y - crop.y) / crop.height,
+    width: item.width / crop.width,
+    height: item.height / crop.height,
   }));
 }
 
@@ -2731,11 +2943,87 @@ function tintLinks(
   ctx.restore();
 }
 
+/**
+ * Redraw a page's saved highlights over the recolouring `recolor` just did —
+ * option 3 of "the trap" in `markup-assessment.md`. A highlighter wash is
+ * translucent paint a shade or two off white, `WHITE_POINT` calls anything
+ * that pale paper, and the ramp above has already flattened every one of them
+ * into the theme's plain background by the time this runs. So the affected
+ * quads are put back from the pristine copy and recoloured a second time,
+ * this time towards `markupWashColor` instead of the background — the same
+ * shape `tintLinks` is, restore-then-reflatten over a clip, generalised to
+ * more than one destination colour because two highlights can disagree.
+ *
+ * Only `/Highlight` runs need this. An underline, a strike-out or a squiggly
+ * draws a solid stroke rather than a wash — well below `WHITE_POINT` on any
+ * page it was worth drawing on — so `recolor`'s own colour-keeping pass
+ * already carries it across a theme correctly, the same way it carries a
+ * plotted curve.
+ */
+function tintMarkup(
+  ctx: CanvasRenderingContext2D,
+  pristine: CanvasImageSource | null,
+  width: number,
+  height: number,
+  regions: MarkupRegion[],
+  theme: Theme,
+): void {
+  const washes = new Map<string, Rect[]>();
+  for (const region of regions) {
+    if (region.style !== "highlight") continue;
+    const wash = markupWashColor(theme, region.color, region.opacity);
+    const rect: Rect = {
+      x: region.x * width,
+      y: region.y * height,
+      w: region.width * width,
+      h: region.height * height,
+    };
+    const rects = washes.get(wash);
+    if (rects) rects.push(rect);
+    else washes.set(wash, [rect]);
+  }
+  if (washes.size === 0) return;
+
+  // Every wash shares one clip and one restore of the untouched page, the
+  // same reason `restoreImages` puts every picture back in a single pass
+  // rather than one `drawImage` per rectangle.
+  ctx.save();
+  ctx.beginPath();
+  for (const rects of washes.values()) {
+    for (const rect of rects) ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  }
+  ctx.clip();
+  if (pristine) ctx.drawImage(pristine, 0, 0, width, height);
+  ctx.restore();
+
+  // Then each colour is flattened towards its own wash, in its own clip —
+  // the ink inside stays the theme's own text colour, unaffected, which is
+  // what keeps the words under a highlight reading exactly like the rest of
+  // the page.
+  for (const [wash, rects] of washes) {
+    ctx.save();
+    ctx.beginPath();
+    for (const rect of rects) ctx.rect(rect.x, rect.y, rect.w, rect.h);
+    ctx.clip();
+    duotone(ctx, width, height, { ...theme, background: wash, recolor: true }, rects);
+    ctx.restore();
+  }
+}
+
 function copyCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
   const copy = document.createElement("canvas");
   copy.width = source.width;
   copy.height = source.height;
-  copy.getContext("2d")?.drawImage(source, 0, 0);
+  const ctx = copy.getContext("2d");
+  ctx?.drawImage(source, 0, 0);
+  // Read back one pixel — load-bearing, not a nicety. At least one WebKit
+  // build leaves this copy lazily backed: a *later* clipped `drawImage` of
+  // it (which is exactly what `tintLinks`, `restoreImages` and `tintMarkup`
+  // all do, to put an untouched rectangle back over a recoloured page) can
+  // silently draw nothing at all, with no error anywhere, unless something
+  // has already forced the copy to materialise. A one-pixel read is the
+  // cheapest such force.
+  ctx?.getImageData(0, 0, 1, 1);
   return copy;
 }
 

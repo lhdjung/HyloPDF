@@ -73,11 +73,30 @@ impl Watching {
             let _ = sender.send(signal);
         }
     }
+
+    /// Tell the watcher that this window just wrote `path` itself — a
+    /// highlight, most likely — so the burst of file-system events that write
+    /// produces is not news. Sent right after the write returns, which is
+    /// well inside the settle window the real burst is collected in, so the
+    /// baseline this sets is what the burst is compared against rather than
+    /// something it races.
+    ///
+    /// Only this window's baseline moves. A second window with the same
+    /// document open did not do this write, its transport is genuinely stale,
+    /// and it still needs the ordinary reload — which is exactly what happens
+    /// when its own entry is left alone to find a real mismatch.
+    pub fn wrote(&self, window: &str, path: &Path) {
+        let signal = Signal::Wrote(window.to_string(), path.to_path_buf());
+        if let Ok(sender) = self.0.lock() {
+            let _ = sender.send(signal);
+        }
+    }
 }
 
 enum Signal {
     Touched(Vec<PathBuf>),
     Follow(String, Option<PathBuf>),
+    Wrote(String, PathBuf),
 }
 
 /// What a whole document looked like: its length, when it was last written,
@@ -152,6 +171,7 @@ fn run(app: AppHandle, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mu
                 Some(Signal::Follow(window, next)) => {
                     follow(watcher, &themes, &mut documents, window, next)
                 }
+                Some(Signal::Wrote(window, path)) => absorb(&mut documents, &window, &path),
                 None => {}
             }
             match receiver.recv_timeout(SETTLE) {
@@ -176,16 +196,37 @@ fn run(app: AppHandle, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mu
             if !touched.iter().any(|path| path == &followed.path) {
                 continue;
             }
-            if let Some(mark) = whole(&followed.path) {
-                if Some(mark) != followed.mark {
-                    followed.mark = Some(mark);
-                    let path = followed.path.to_string_lossy().to_string();
-                    // To that window and no other. A broadcast would tell every
-                    // window that *its* document had been rewritten, and each
-                    // would reopen the one it is holding for no reason.
-                    let _ = app.emit_to(window.as_str(), "document-changed", path);
-                }
+            if changed(followed, whole(&followed.path)) {
+                let path = followed.path.to_string_lossy().to_string();
+                // To that window and no other. A broadcast would tell every
+                // window that *its* document had been rewritten, and each
+                // would reopen the one it is holding for no reason.
+                let _ = app.emit_to(window.as_str(), "document-changed", path);
             }
+        }
+    }
+}
+
+/// Whether a document just settled on a mark worth telling its window about,
+/// updating the baseline either way. Pulled out of `run` so the decision can
+/// be tested without a channel or a real watcher underneath it.
+fn changed(followed: &mut Followed, disk: Option<Mark>) -> bool {
+    let Some(mark) = disk else { return false };
+    if Some(mark) == followed.mark {
+        return false;
+    }
+    followed.mark = Some(mark);
+    true
+}
+
+/// Pull a window's own write out of the next burst before it arrives: read
+/// what the write actually left on disk and make that the baseline right now,
+/// so `changed` above finds nothing new to report when the matching
+/// file-system events turn up.
+fn absorb(held: &mut HashMap<String, Followed>, window: &str, path: &Path) {
+    if let Some(followed) = held.get_mut(window) {
+        if followed.path == path {
+            followed.mark = whole(path);
         }
     }
 }
@@ -443,6 +484,113 @@ mod tests {
 
     fn one() -> String {
         "main".to_string()
+    }
+
+    /// The write door's whole reason for touching this module: a window that
+    /// wrote its own document must not be told its document changed. `absorb`
+    /// is what `write_document` calls right after the write returns, and
+    /// `changed` is the comparison the real burst runs into afterwards.
+    #[test]
+    fn a_windows_own_write_is_absorbed_before_it_is_reported() {
+        let path = scratch("own-write.pdf", b"%PDF-1.7\ntrailer\n%%EOF\n");
+        let dir = path.parent().expect("a parent").to_path_buf();
+        let mut held = HashMap::new();
+        held.insert(
+            one(),
+            Followed {
+                mark: whole(&path),
+                path: path.clone(),
+                dir,
+            },
+        );
+
+        // The write happens; the mark on disk moves.
+        std::fs::write(&path, b"%PDF-1.7\ntrailer\nnow rather longer\n%%EOF\n").expect("rewrite");
+        absorb(&mut held, "main", &path);
+
+        // The burst the write itself caused arrives and finds nothing new.
+        let followed = held.get_mut("main").expect("followed");
+        assert!(
+            !changed(followed, whole(&path)),
+            "an absorbed write was still reported"
+        );
+    }
+
+    /// Without `absorb`, the same rewrite is exactly the case `changed` exists
+    /// to catch — this is the control the test above is a contrast to.
+    #[test]
+    fn an_unabsorbed_write_is_still_reported() {
+        let path = scratch("other-write.pdf", b"%PDF-1.7\ntrailer\n%%EOF\n");
+        let dir = path.parent().expect("a parent").to_path_buf();
+        let mut followed = Followed {
+            mark: whole(&path),
+            path: path.clone(),
+            dir,
+        };
+
+        std::fs::write(&path, b"%PDF-1.7\ntrailer\nnow rather longer\n%%EOF\n").expect("rewrite");
+        assert!(
+            changed(&mut followed, whole(&path)),
+            "a real change went unreported"
+        );
+    }
+
+    /// Two windows, one document: only the window that actually wrote it has
+    /// its baseline moved. The other window's copy is genuinely stale and
+    /// must still hear about it.
+    #[test]
+    fn absorbing_one_windows_write_does_not_silence_the_other() {
+        let path = scratch("shared-write.pdf", b"%PDF-1.7\ntrailer\n%%EOF\n");
+        let dir = path.parent().expect("a parent").to_path_buf();
+        let baseline = whole(&path);
+        let mut held = HashMap::new();
+        held.insert(
+            "main".to_string(),
+            Followed {
+                mark: baseline,
+                path: path.clone(),
+                dir: dir.clone(),
+            },
+        );
+        held.insert(
+            "reader-1".to_string(),
+            Followed {
+                mark: baseline,
+                path: path.clone(),
+                dir,
+            },
+        );
+
+        std::fs::write(&path, b"%PDF-1.7\ntrailer\nnow rather longer\n%%EOF\n").expect("rewrite");
+        absorb(&mut held, "main", &path);
+
+        let disk = whole(&path);
+        assert!(!changed(held.get_mut("main").expect("main"), disk));
+        assert!(changed(held.get_mut("reader-1").expect("reader-1"), disk));
+    }
+
+    /// `absorb` only ever moves the baseline for the window and the path it
+    /// names — a stray signal for a window that has since moved on to a
+    /// different document must not clobber that document's own baseline.
+    #[test]
+    fn absorb_does_nothing_for_a_window_reading_something_else() {
+        let written = scratch("absorbed.pdf", b"%PDF-1.7\ntrailer\n%%EOF\n");
+        let current = scratch("current.pdf", b"%PDF-1.7\nsomething else\n%%EOF\n");
+        let dir = current.parent().expect("a parent").to_path_buf();
+        let baseline = whole(&current);
+        let mut held = HashMap::new();
+        held.insert(
+            "main".to_string(),
+            Followed {
+                mark: baseline,
+                path: current,
+                dir,
+            },
+        );
+
+        absorb(&mut held, "main", &written);
+
+        assert_eq!(held.get("main").expect("still followed").mark, baseline);
     }
 
     /// A different document, though, is a different subject.

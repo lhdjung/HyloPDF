@@ -51,7 +51,7 @@ if (NOTES) {
     ),
     add(
       "<< /Type /Annot /Subtype /Highlight /Rect [54 700 460 726] " +
-        "/QuadPoints [54 726 460 726 54 700 460 700] /C [1 1 0] " +
+        "/QuadPoints [54 726 460 726 54 700 460 700] /C [1 1 0] /CA 0.25 " +
         "/T (A. Reviewer) /Contents (This sentence needs a citation.) >>",
     ),
   );

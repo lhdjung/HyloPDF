@@ -59,6 +59,35 @@ export type Mark = {
   at: number;
 };
 
+/** The PDF spec's own four markup styles. */
+export type HighlightStyle = "highlight" | "underline" | "strikeout" | "squiggly";
+
+/** Coloured markup the reader drew on a passage — the journal's copy, not the
+    document's. See `library.rs`'s `Highlight` for why this is a cache rather
+    than the record: on open, the file wins and this list is rebuilt from
+    what `getAnnotations` reports. */
+export type Highlight = {
+  /** Generated with `crypto.randomUUID` the moment a passage is marked, so a
+      highlight not yet saved into the document still has something to be
+      removed by. */
+  id: string;
+  page: number;
+  /** Four points per run, x then y, run after run, in the page's own PDF
+      coordinate space. */
+  quads: number[];
+  /** Hex, like a theme's colours — read the same careful way, through
+      `parseColor`, never handed to CSS on its own. */
+  color: string;
+  opacity: number;
+  style: HighlightStyle;
+  quote: string;
+  at: number;
+  /** The annotation's object id in the file, once `getAnnotations` has
+      actually read it back out. Absent for a highlight the journal knows
+      about but the file does not yet. */
+  annotation_id: string | null;
+};
+
 export type LibraryEntry = {
   path: string;
   title: string;
@@ -66,6 +95,7 @@ export type LibraryEntry = {
   offset: number;
   opened_at: number;
   marks?: Mark[];
+  highlights?: Highlight[];
 };
 
 export type Bootstrap = {
@@ -363,6 +393,43 @@ export async function toggleMark(
 
 /** Marks, for the browser path. Rust keeps the real ones in `library.toml`. */
 const browserMarks = new Map<string, Mark[]>();
+
+/** Journal one highlight the reader just drew. Returns the document's
+    highlights as they now stand. */
+export async function addHighlight(path: string, highlight: Highlight): Promise<Highlight[]> {
+  if (!hasBackend) {
+    const held = browserHighlights.get(path) ?? [];
+    held.push(highlight);
+    browserHighlights.set(path, held);
+    return [...held];
+  }
+  return invoke<Highlight[]>("add_highlight", { path, highlight });
+}
+
+/** Take a highlight out of the journal, by the id it was added with. */
+export async function removeHighlight(path: string, id: string): Promise<Highlight[]> {
+  if (!hasBackend) {
+    const held = (browserHighlights.get(path) ?? []).filter((h) => h.id !== id);
+    browserHighlights.set(path, held);
+    return [...held];
+  }
+  return invoke<Highlight[]>("remove_highlight", { path, id });
+}
+
+/** Replace a document's journaled highlights with what the file itself says,
+    once it has been read — see `library::set_highlights` for why this
+    discards rather than merges. */
+export async function setHighlights(path: string, highlights: Highlight[]): Promise<void> {
+  if (!hasBackend) {
+    browserHighlights.set(path, [...highlights]);
+    return;
+  }
+  await invoke("set_highlights", { path, highlights });
+}
+
+/** Highlights, for the browser path. Rust keeps the real ones in
+    `library.toml`. */
+const browserHighlights = new Map<string, Highlight[]>();
 
 /** Note what this window is showing, for the next launch. `null` means it is
     showing nothing. Rust keeps one answer per window and writes them together

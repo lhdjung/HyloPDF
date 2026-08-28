@@ -41,6 +41,7 @@ import {
   rememberPosition,
   toggleMark,
   setDocumentTitle,
+  setHighlights,
   setOpenDocument,
   revealDocument,
   saveWindowState,
@@ -62,7 +63,7 @@ import { isEditingTheme, refreshSettingsWindow, showSettingsWindow } from "./set
 import { Sidebar } from "./sidebar";
 import { applyTheme, isDarkTheme, unreadableColors } from "./themes";
 import * as ui from "./ui";
-import { Cancelled, type FitMode, type SpreadMode, Viewer } from "./viewer";
+import { Cancelled, type FitMode, markupOf, type SpreadMode, Viewer } from "./viewer";
 
 if (import.meta.env.DEV && hasBackend) {
   // The webview has no terminal of its own; send what it says to the one
@@ -469,6 +470,7 @@ class App {
       this.showMarks();
       void this.reportFormFields(doc);
       void this.adoptDocumentTitle(path, opened.name);
+      void this.syncMarkup(path, doc);
 
       const start = this.settings.remember_position ? opened : { page: 1, offset: 0 };
       this.viewer.scrollTo(start.page, start.offset);
@@ -1105,6 +1107,32 @@ class App {
       (mark) => this.viewer.jumpTo(mark.page, mark.offset),
       (mark) => void this.toggleMark(mark.page),
     );
+  }
+
+  /* -------------------------------------------------------------- markup */
+
+  /**
+   * Rebuild this document's markup journal from what the file itself says,
+   * the moment it can be read.
+   *
+   * The file is always the authority — see `library::set_highlights` — so
+   * this replaces the journal outright rather than merging into it: a
+   * highlight the file no longer carries must not go on living in
+   * `library.toml` because nothing told it to leave. `markupOf` makes one
+   * trip over the whole document rather than the pages a reader happens to
+   * scroll past, which is what keeps this replacement safe — a page-at-a-time
+   * count would truncate the journal down to whatever had been visited so far.
+   *
+   * No UI reads this yet; see `markup-assessment.md`, step 3. A document
+   * someone else highlighted now has those highlights in its journal, the
+   * moment it is opened.
+   */
+  private async syncMarkup(path: string, doc: PDFDocumentProxy): Promise<void> {
+    const highlights = await markupOf(doc);
+    if (this.path !== path || this.viewer.document !== doc) return;
+    const entry = this.library.find((item) => item.path === path);
+    if (entry) entry.highlights = highlights;
+    void setHighlights(path, highlights).catch(() => {});
   }
 
   /** Select the page being read, and say what was selected — the reader asked

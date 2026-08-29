@@ -92,7 +92,7 @@ fn run_shader(pixels: &[u8], text: Rgb, bg: Rgb, keep_colour: bool) -> Option<Ve
     let width = (pixels.len() / 4) as u32;
     let height = 1u32;
 
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .ok()?;
@@ -100,6 +100,7 @@ fn run_shader(pixels: &[u8], text: Rgb, bg: Rgb, keep_colour: bool) -> Option<Ve
         label: Some("recolor"),
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::default(),
+        experimental_features: wgpu::ExperimentalFeatures::disabled(),
         memory_hints: wgpu::MemoryHints::default(),
         trace: wgpu::Trace::Off,
     }))
@@ -235,7 +236,7 @@ fn run_shader(pixels: &[u8], text: Rgb, bg: Rgb, keep_colour: bool) -> Option<Ve
 
     let slice = readback.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::PollType::Wait).ok()?;
+    device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).ok()?;
     let view = slice.get_mapped_range();
     let mut out = Vec::with_capacity((width * height * 4) as usize);
     for row in 0..height {

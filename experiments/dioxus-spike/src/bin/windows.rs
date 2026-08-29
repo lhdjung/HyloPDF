@@ -32,8 +32,9 @@ fn main() {
         .nth(1)
         .and_then(|n| n.parse().ok());
 
-    let event_loop = blitz_shell::create_default_event_loop::<blitz_shell::BlitzShellEvent>();
-    let mut shell = Shell::new(event_loop.create_proxy());
+    let event_loop = blitz_shell::create_default_event_loop();
+    let (proxy, queue) = blitz_shell::BlitzShellProxy::new(event_loop.create_proxy());
+    let mut shell = Shell::new(proxy, queue);
     let windows = shell.windows();
 
     // One place makes every window, and it counts them, which is what lets a
@@ -59,7 +60,7 @@ fn main() {
         });
     }
 
-    event_loop.run_app(&mut shell).unwrap();
+    event_loop.run_app(shell).unwrap();
     println!("windows: event loop ended");
 }
 
@@ -76,7 +77,7 @@ fn spec(n: u32) -> WindowSpec {
     let at = LogicalPosition::new(origin + step, origin + step);
     let attributes = WindowAttributes::default()
         .with_title(format!("Spike window {n}"))
-        .with_inner_size(LogicalSize::new(520.0, 380.0))
+        .with_surface_size(LogicalSize::new(520.0, 380.0))
         .with_position(at);
 
     WindowSpec::new(VirtualDom::new_with_props(Pane, PaneProps { n }), attributes).at(at)

@@ -40,8 +40,9 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
 
-    let event_loop = blitz_shell::create_default_event_loop::<blitz_shell::BlitzShellEvent>();
-    let mut shell = Shell::new(event_loop.create_proxy());
+    let event_loop = blitz_shell::create_default_event_loop();
+    let (proxy, queue) = blitz_shell::BlitzShellProxy::new(event_loop.create_proxy());
+    let mut shell = Shell::new(proxy, queue);
     shell.trace = false;
     let windows = shell.windows();
 
@@ -49,7 +50,7 @@ fn main() {
         VirtualDom::new(Chrome),
         WindowAttributes::default()
             .with_title("Spike: chrome")
-            .with_inner_size(LogicalSize::new(1000.0, 640.0)),
+            .with_surface_size(LogicalSize::new(1000.0, 640.0)),
     ));
 
     if quit_after > 0 {
@@ -60,7 +61,7 @@ fn main() {
         });
     }
 
-    event_loop.run_app(&mut shell).unwrap();
+    event_loop.run_app(shell).unwrap();
 }
 
 #[component]

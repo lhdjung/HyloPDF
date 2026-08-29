@@ -9,6 +9,14 @@ Everything below was checked against the crates and status pages as they stand
 in August 2026, not from memory. Where a number is an estimate rather than a
 measurement it says so.
 
+**Phase 0 has since been built and run** — `dioxus-spike/`, written up in
+`FINDINGS.md` beside this file. All four gates pass. Where this document and
+that one disagree, that one was measured and this one was reasoned, and the
+paragraphs below have been corrected where it mattered. The largest correction
+is that the custom paint API this was planned against no longer exists: Blitz
+replaced it with `blitz_dom::Widget`, and a page drawn through a widget costs
+no frames when it is not moving.
+
 ---
 
 ## The answer first
@@ -35,10 +43,14 @@ real proposition rather than a fantasy:
 
 And three things that should keep expectations honest:
 
-1. **Blitz is alpha turning beta.** `dioxus-native 0.7.10`, published 30 July
-   2026. Its own status page scores 48% on the WPT `css` subsuite. The 0.3 Beta
-   milestone is dated August 2026 and production readiness is "sometime in
-   2026" by the project's own account.
+1. **Blitz is alpha turning beta.** `dioxus-native 0.8.0-alpha.1`, on a `main`
+   at `0.3.0-beta.2`; the published `0.7.10` predates the Custom Widget API and
+   is not the version to build against. Its own status page scores 48% on the
+   WPT `css` subsuite. The 0.3 Beta milestone is dated August 2026 and
+   production readiness is "sometime in 2026" by the project's own account.
+   The API moves: between `0.7.10` and `main`, custom painting, the window
+   lifecycle and the event queue all changed shape. That is a cost of arriving
+   early, and it is paid in the shell and nowhere else.
 2. **The binary gets two to four times bigger**, not smaller. 6.2MB today;
    12-20MB is the realistic band. The brief permits this and should be held to
    it explicitly.
@@ -152,8 +164,8 @@ it pays off here exactly as advertised.
 serialisation, no `async` needed for the sake of the main thread (though the
 disk writes should stay off it via `tokio`). The window management
 (`hand_over`, `Placements`, `OpenFiles`, `OpenDocuments`, `spawn_window`,
-`tidy_after`, the Dock menu) is rewritten against winit and
-`DioxusNativeApplication::add_window` — see "Multi-window" below.
+`tidy_after`, the Dock menu) is rewritten against winit and a shell of our own
+over `BlitzApplication` — see "Multi-window" below.
 
 Doors that need a new crate rather than a Tauri plugin:
 
@@ -267,7 +279,11 @@ both of which are supported.
 truncated label in the sidebar, the menus and the toolbar. Options: clip and
 accept it, fade with a gradient mask (`mask-image` *is* supported), or measure
 and truncate in Rust with a real "…". The mask route looks best and is arguably
-nicer than an ellipsis.
+nicer than an ellipsis — and Phase 0 confirmed it works, which was not a
+foregone conclusion: `white-space: nowrap` was itself broken on `0.7.10`, so
+the line wrapped instead of overflowing and there was nothing for a mask to
+fade. It is fixed on `main` (a 120px box holds the sentence on one 16px line),
+and the chrome spike's title fades out exactly as intended.
 
 **SVG styling is not supported.** Static SVG renders; CSS applied to it does
 not. `icons.ts` is 33 icons built as path strings styled entirely through CSS —
@@ -329,7 +345,9 @@ which is the one that matters.
 
 ### Things that work and were worth checking
 
-`<canvas>` ✅ with the raw-WGPU-texture API. `clip-path` ✅ (the app clips
+A custom widget drawing into a `wgpu::Texture` ✅ — `blitz_dom::Widget`
+attached to an `<object data=…>`, which is what `use_wgpu` and `<canvas src=…>`
+became. `clip-path` ✅ (the app clips
 pictures and links). `mask-image`/`mask-composite` ✅. `opacity`, `box-shadow`,
 `border-radius`, `z-index`, 2D `transform`, `filter: blur` ✅. Flexbox and grid
 ✅. `@font-face` and variable fonts ✅. `transitions` and `animations` ✅ — the
@@ -341,30 +359,33 @@ to suppress). AccessKit is a first-class feature flag.
 ### Multi-window: supported, but not through `launch()`
 
 The app's whole "Two documents at once" architecture depends on this, so it was
-checked precisely. `dioxus_native::Config` exposes only
-`with_window_attributes` — one window. But `DioxusNativeApplication` is public
-and has:
+checked precisely — and then built. `dioxus_native::Config` exposes only
+`with_window_attributes`, one window, and **`DioxusNativeApplication::add_window`
+does not do what its name suggests**: it pushes onto
+`BlitzApplication::pending_windows`, which is drained when winit says surfaces
+can be created and never again, and the Dioxus half of a window's setup —
+the contexts and `initial_build()` — is done by `launch` for its one window
+only. A window added that way comes up empty and stays empty.
 
-```rust
-pub fn new(proxy: EventLoopProxy<BlitzShellEvent>, config: WindowConfig<DioxusNativeWindowRenderer>) -> Self
-pub fn add_window(&mut self, window_config: WindowConfig<DioxusNativeWindowRenderer>)
-```
+What works, and is what `dioxus-spike/src/shell.rs` does in about three hundred
+lines, is to own `BlitzApplication` directly — its fields are public — and do
+the per-window setup yourself: `View::init`, provide the renderer and window
+contexts into `ScopeId::ROOT`, `initial_build()`, resume, insert into
+`inner.windows`. Each window gets its own `VirtualDom`, its own renderer and
+its own surface, which is exactly the shape the app already has ("A window is a
+whole second reader"). Three windows, one of them asked for from another
+thread, is the spike that passes.
 
-and `blitz_shell::BlitzApplication` underneath it holds
-`windows: HashMap<WindowId, View<Rend>>`. So: build the event loop with
-`create_default_event_loop`, construct the application yourself instead of
-calling `launch`, and add windows through `add_window`. Each window gets its
-own VirtualDom, which is exactly the shape the app already has ("A window is a
-whole second reader").
-
-**This is the highest-risk item on the list and it is Phase 0.** It is a public
-API but it is off the documented path, multi-window has a history of being
-broken on Windows in this project, and the app's window story is elaborate:
-`hand_over`, `Placements` (because a shown window on macOS jumps to the launch
-window's frame), geometry owned by `main`, the restore list, `Exiting`. If
-`add_window` does not hold up on all three platforms, the rewrite is not worth
-doing, because a reader who cannot open two papers side by side has lost the
-thing this app most recently gained.
+**It remains the highest-risk item on the list.** It is off the documented
+path, it is written against public fields rather than a supported API,
+multi-window has a history of being broken on Windows in this project, and the
+app's window story is elaborate: `hand_over`, `Placements` (because a shown
+window on macOS jumps to the launch window's frame — winit still gets the y
+wrong by a title bar, so the position must still be set a second time),
+geometry owned by `main`, the restore list, `Exiting`. It has been shown to
+work on macOS and nowhere else. If it does not hold up on all three platforms,
+the rewrite is not worth doing, because a reader who cannot open two papers
+side by side has lost the thing this app most recently gained.
 
 ---
 
@@ -424,7 +445,18 @@ AccessKit and pdfium; subtract 5.6MB of embedded frontend. The Dioxus docs
 quote 10-15MB for native bundles; with pdfium, 12-20MB is the band to expect
 and 15MB the number to plan against. **This is 2-3× the current binary and the
 brief's goal (2) permits it only as a price for memory.** If Phase 1 does not
-show a large memory win, the trade is not paid for.
+show a large memory win, the trade is not paid for. Phase 0 measured the top
+of that band: the page spike, stripped and `opt-level = "s"`, is **12.4MB plus
+7.2MB of `libpdfium.dylib`**, and it carries no settings, no themes, no
+sidebar and no search.
+
+**And the memory floor is not zero.** An empty window — one widget, one small
+texture, no document — measured **112MB** of RSS, against 182MB for the whole
+of a Tauri reading session today. One page mounted and drawn is 162MB. That is
+the number Phase 1's gate is really against, and it is close enough to the
+thing being replaced that it has to be measured against `vello_hybrid` as well
+as `vello` before anything is concluded. The first Phase 0 pass, on older
+versions of Blitz, wgpu and Vello, measured this floor at half the size.
 
 **The test apparatus.** `npm test` starts a dev server, generates fixtures and
 runs 17 files against a real WebKit through `scripts/ui-harness.mjs`. All of it
@@ -484,8 +516,8 @@ deliverable, not as something that emerges.
 
 | risk | signal | verdict if it fires |
 | --- | --- | --- |
-| `add_window` does not work on all three platforms | Phase 0 spike | **stop** — multi-document is not negotiable |
-| custom paint per mounted page is slow or capped | Phase 0 spike | fall back to one viewport-sized texture we composite into; if that is also bad, **stop** |
+| a shell of our own does not work on all three platforms | Phase 0 spike (passed on macOS; Windows and Linux unrun) | **stop** — multi-document is not negotiable |
+| a widget per mounted page is slow or capped | Phase 0 spike: passed, at 4.1ms a page at 10.1MP — but every widget in the document is painted every frame, so the mounting window is load-bearing | fall back to one viewport-sized texture we composite into; if that is also bad, **stop** |
 | Vello unusable on common Linux hardware | Phase 1 on a VM and an Intel iGPU | ship `vello_hybrid` by default, `vello_cpu` as fallback; if neither is smooth, **stop** |
 | memory win is small | Phase 1 measurement | **stop** — the binary cost is unpaid |
 | text quality worse than the webview (hinting, subpixel) | Phase 1 screenshots side by side | probably livable; the brief cares about the look |
@@ -509,11 +541,13 @@ looks like the app. No PDF, no theme, no settings.
    Windows and Linux. Check that a window placed by hand stays where it was put
    after `show` — the `Placements` bug is a macOS AppKit behaviour and may well
    recur here.
-2. **A page on the screen.** `use_wgpu` with a `CustomPaintSource` that
-   registers a `wgpu::Texture`, filled from a pdfium render. Then twenty of them
-   in a scrolling column, mounted and unmounted. Measure: time per page, GPU
-   memory, and whether one custom paint source per page is a supported shape or
-   a novelty.
+2. **A page on the screen.** A `blitz_dom::Widget` that registers a
+   `wgpu::Texture`, filled from a pdfium render, attached to an `<object>`.
+   Then twenty of them in a scrolling column, mounted and unmounted. Measure:
+   time per page, GPU memory, and whether one widget per page is a supported
+   shape or a novelty. (Answered: it is supported, and every widget is painted
+   every frame whether or not it is on screen — so the mounting window from
+   `viewer.ts` has to be ported before any of this is measured properly.)
 3. **The shader.** Port `recolor`'s luma-to-HSL ramp to WGSL and check it
    against `recolorByPixel` on a fixture page, to the same one-level-in-255
    tolerance `recolor.test.mjs` already uses.
@@ -606,7 +640,7 @@ Phase 0 gate should include asking upstream when it is coming.
 - [Blitz status: CSS](https://blitz.is/status/css), [elements](https://blitz.is/status/elements), [events](https://blitz.is/status/events), [WPT](https://blitz.is/status/wpt)
 - [Blitz — About](https://blitz.is/about) and [the repository](https://github.com/DioxusLabs/blitz)
 - [Blitz roadmap, issue #119](https://github.com/DioxusLabs/blitz/issues/119)
-- [dioxus-native 0.7.10 on docs.rs](https://docs.rs/dioxus-native) and [blitz-shell 0.2.3](https://docs.rs/blitz-shell)
+- [dioxus-native on docs.rs](https://docs.rs/dioxus-native) and [blitz-shell](https://docs.rs/blitz-shell) — but `main` is what Phase 0 builds against; the Custom Widget API is PR [#425](https://github.com/DioxusLabs/blitz/pull/425)
 - [Dioxus: the Native platform](https://mintlify.wiki/DioxusLabs/dioxus/platforms/native) and [the native renderer on DeepWiki](https://deepwiki.com/DioxusLabs/dioxus/5.6-native-renderer-(blitzvello))
 - [Vello](https://github.com/linebender/vello) and [vello_hybrid](https://docs.rs/vello_hybrid)
 - [hayro](https://github.com/LaurenzV/hayro) and [hayro-interpret](https://docs.rs/hayro-interpret)

@@ -9,19 +9,27 @@ license = "MIT OR Apache-2.0"
 # crate that answers questions about a possible replacement for it.
 [workspace]
 
+# Blitz is taken from a clone of `main` rather than from crates.io, because the
+# published `dioxus-native 0.7.10` predates the Custom Widget API — it still
+# has `use_wgpu` and the `<canvas src=…>` custom paint source, which is the
+# path that makes a document animate for ever. See FINDINGS.md.
 [dependencies]
 dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
 dioxus-core = "0.7"
-dioxus-native = "0.7"
-blitz-shell = "0.2"
-blitz-traits = "0.2"
-anyrender = "0.6"
-anyrender_vello = "0.6"
-winit = "0.30"
+dioxus-native = { path = "../../../blitz/packages/dioxus-native", default-features = false, features = ["vello", "system-fonts", "html", "svg"] }
+blitz-shell = { path = "../../../blitz/packages/blitz-shell", default-features = false, features = ["custom-widget"] }
+blitz-traits = { path = "../../../blitz/packages/blitz-traits" }
+blitz-dom = { path = "../../../blitz/packages/blitz-dom", default-features = false, features = ["custom-widget", "system-fonts", "svg"] }
+blitz-html = { path = "../../../blitz/packages/blitz-html" }
+blitz-paint = { path = "../../../blitz/packages/blitz-paint", default-features = false, features = ["custom-widget"] }
+anyrender = "0.13"
+anyrender_vello = "0.14"
+wgpu_context = "0.9"
+wgpu = "29"
+peniko = "0.6"
+winit = "=0.31.0-beta.2"
 webbrowser = "1"
 pdfium-render = { version = "0.9.3", default-features = false, features = ["pdfium_latest", "thread_safe"] }
-blitz-dom = "0.2"
-blitz-html = "0.2"
 
 [profile.release]
 codegen-units = 1

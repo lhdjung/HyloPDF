@@ -3,8 +3,8 @@
 //! `dioxus_native::launch` builds a `DioxusNativeApplication` around a single
 //! `WindowConfig` and hands it to winit. `DioxusNativeApplication::add_window`
 //! exists and is public, but it pushes onto `BlitzApplication::pending_windows`,
-//! which is drained in `resumed()` and nowhere else — and the Dioxus half of
-//! the setup (the renderer context a `use_wgpu` canvas is found through, and
+//! which is drained in `can_create_surfaces()` and nowhere else — and the
+//! Dioxus half of the setup (the renderer and window contexts, and
 //! `initial_build()`) happens only for the *one* window `launch` created. A
 //! second window added that way comes up empty and stays empty.
 //!
@@ -15,22 +15,22 @@
 //! enough to restate; see `nav.rs`.
 //!
 //! A window can only be created from inside a winit callback, because
-//! `event_loop.create_window` wants the `&ActiveEventLoop` that only a
+//! `event_loop.create_window` wants the `&dyn ActiveEventLoop` that only a
 //! callback has. So asking for a window is two things: a `WindowSpec` pushed
-//! onto a queue, and a wake-up sent through the event loop proxy. The spec
-//! carries a `VirtualDom`, which is `!Send`, and the event carries nothing.
+//! onto a queue, and a wake-up sent through the shell proxy. The spec carries
+//! a `VirtualDom`, which is `!Send`, and the event carries nothing.
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::mpsc::Receiver;
 
-use anyrender::WindowRenderer;
-use blitz_shell::{BlitzApplication, BlitzShellEvent, View, WindowConfig};
+use blitz_shell::{BlitzApplication, BlitzShellEvent, BlitzShellProxy, View, WindowConfig};
 use dioxus_core::{provide_context, ScopeId, VirtualDom};
 use dioxus_native::{DioxusDocument, DioxusNativeWindowRenderer, DocumentConfig};
 use winit::application::ApplicationHandler;
 use winit::dpi::Position;
 use winit::event::{StartCause, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
+use winit::event_loop::ActiveEventLoop;
 use winit::window::{WindowAttributes, WindowId};
 
 /// What a window is made of, before it has one.
@@ -68,7 +68,7 @@ impl WindowSpec {
 #[derive(Clone)]
 pub struct Windows {
     queue: Rc<RefCell<Vec<WindowSpec>>>,
-    proxy: EventLoopProxy<BlitzShellEvent>,
+    proxy: BlitzShellProxy,
 }
 
 /// The wake-up. It carries nothing: the spec is in the queue, because a
@@ -86,14 +86,14 @@ struct Quit;
 impl Windows {
     pub fn open(&self, spec: WindowSpec) {
         self.queue.borrow_mut().push(spec);
-        let _ = self.proxy.send_event(BlitzShellEvent::embedder_event(Spawn));
+        self.proxy.send_event(BlitzShellEvent::embedder_event(Spawn));
     }
 
     /// Ask the shell's own factory for the next window. Unlike `open`, this
     /// needs nothing that is `!Send`, so it can be sent from another thread —
     /// which is what the Dock menu item does today.
     pub fn request(&self) {
-        let _ = self.proxy.send_event(BlitzShellEvent::embedder_event(Ask));
+        self.proxy.send_event(BlitzShellEvent::embedder_event(Ask));
     }
 
     /// A handle that can cross threads, carrying only the proxy.
@@ -104,7 +104,7 @@ impl Windows {
     }
 
     pub fn quit(&self) {
-        let _ = self.proxy.send_event(BlitzShellEvent::embedder_event(Quit));
+        self.proxy.send_event(BlitzShellEvent::embedder_event(Quit));
     }
 }
 
@@ -112,38 +112,39 @@ impl Windows {
 /// app, and it cannot carry a `VirtualDom`.
 #[derive(Clone)]
 pub struct Remote {
-    proxy: EventLoopProxy<BlitzShellEvent>,
+    proxy: BlitzShellProxy,
 }
 
 impl Remote {
     pub fn request(&self) {
-        let _ = self.proxy.send_event(BlitzShellEvent::embedder_event(Ask));
+        self.proxy.send_event(BlitzShellEvent::embedder_event(Ask));
     }
 
     pub fn quit(&self) {
-        let _ = self.proxy.send_event(BlitzShellEvent::embedder_event(Quit));
+        self.proxy.send_event(BlitzShellEvent::embedder_event(Quit));
     }
 }
 
 pub struct Shell {
     inner: BlitzApplication<DioxusNativeWindowRenderer>,
-    proxy: EventLoopProxy<BlitzShellEvent>,
+    proxy: BlitzShellProxy,
     windows: Windows,
     /// Where a window comes from when nobody handed one over: one place that
     /// makes them, which is what `spawn_window` is today.
     factory: Option<Box<dyn FnMut() -> WindowSpec>>,
-    /// Whether winit has resumed us yet. A window made before that is left for
-    /// `BlitzApplication::resumed` to bring up; one made after has to be
-    /// brought up here, because nothing else will.
+    /// Whether winit has told us surfaces can be created yet. A window made
+    /// before that is left for `BlitzApplication::can_create_surfaces` to
+    /// bring up; one made after has to be brought up here, because nothing
+    /// else will.
     ///
     /// Resuming a window *twice* is not harmless and cost an afternoon:
-    /// `View::resume` builds a fresh `vello::Renderer`, and every texture a
-    /// custom paint source registered with the old one is orphaned — the next
-    /// frame that hands back a cached texture dies with "Tried to draw an
-    /// invalid empty image ... maybe it was registered to a different
-    /// renderer". `dioxus_native::launch` has the same shape (it inserts its
-    /// window and then calls `inner.resumed()`), which is why the fault shows
-    /// up there too as soon as a source caches anything.
+    /// `View::resume` builds a fresh renderer, and every resource a widget
+    /// registered with the old one is orphaned — the next frame that hands
+    /// back a cached texture dies with "Tried to draw an invalid empty image
+    /// ... maybe it was registered to a different renderer". Blitz's own
+    /// `Widget` trait now has the honest answer to this on the widget's side:
+    /// `destroy_surfaces` is where a cached texture is dropped, and
+    /// `can_create_surfaces` is where it comes back.
     started: bool,
     /// Reported once per window, so that "where did it actually land" is
     /// answerable from the terminal rather than from a ruler on the screen.
@@ -151,9 +152,9 @@ pub struct Shell {
 }
 
 impl Shell {
-    pub fn new(proxy: EventLoopProxy<BlitzShellEvent>) -> Self {
+    pub fn new(proxy: BlitzShellProxy, event_queue: Receiver<BlitzShellEvent>) -> Self {
         Self {
-            inner: BlitzApplication::new(proxy.clone()),
+            inner: BlitzApplication::new(proxy.clone(), event_queue),
             windows: Windows {
                 queue: Rc::new(RefCell::new(Vec::new())),
                 proxy: proxy.clone(),
@@ -175,14 +176,14 @@ impl Shell {
         self.windows.clone()
     }
 
-    fn drain(&mut self, event_loop: &ActiveEventLoop) {
+    fn drain(&mut self, event_loop: &dyn ActiveEventLoop) {
         let specs: Vec<WindowSpec> = self.windows.queue.borrow_mut().drain(..).collect();
         for spec in specs {
             self.open(event_loop, spec);
         }
     }
 
-    fn open(&mut self, event_loop: &ActiveEventLoop, spec: WindowSpec) {
+    fn open(&mut self, event_loop: &dyn ActiveEventLoop, spec: WindowSpec) {
         // One renderer per window: `DioxusNativeWindowRenderer` is an
         // `Rc<RefCell<VelloWindowRenderer>>` over one surface, and a surface
         // belongs to one window.
@@ -202,28 +203,29 @@ impl Shell {
             },
         );
 
-        let config = WindowConfig::with_attributes(
-            Box::new(doc) as _,
-            renderer.clone(),
-            spec.attributes,
-        );
+        let config =
+            WindowConfig::with_attributes(Box::new(doc) as _, renderer.clone(), spec.attributes);
         let mut view = View::init(config, event_loop, &self.proxy);
 
         // The Dioxus half, which `BlitzApplication` knows nothing about.
         let windows = self.windows.clone();
+        let winit_window = std::sync::Arc::clone(&view.window);
+        let shell_provider = view.doc.inner().shell_provider.clone();
         let doc = view.downcast_doc_mut::<DioxusDocument>();
         doc.vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(renderer);
             provide_context(windows);
+            provide_context(winit_window);
+            provide_context(shell_provider);
         });
         doc.initial_build();
 
         if self.started {
+            // A window made after the first `can_create_surfaces` has to be
+            // resumed here; the renderer answers with `ResumeReady`, which
+            // `BlitzApplication` turns into `complete_resume` once the view is
+            // in its map — which is why the insert below happens either way.
             view.resume();
-            if !view.renderer.is_active() {
-                eprintln!("shell: renderer did not come up; window dropped");
-                return;
-            }
         }
 
         if let Some(position) = spec.position {
@@ -246,25 +248,37 @@ impl Shell {
     }
 }
 
-impl ApplicationHandler<BlitzShellEvent> for Shell {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+impl ApplicationHandler for Shell {
+    /// Where a window is actually born. Winit calls this once the platform can
+    /// make surfaces, and again after a `destroy_surfaces`; everything queued
+    /// so far is brought up by `BlitzApplication`, which resumes every window
+    /// it holds.
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.drain(event_loop);
-        // Everything queued so far is brought up here, once.
-        self.inner.resumed(event_loop);
+        self.inner.can_create_surfaces(event_loop);
         self.started = true;
     }
 
-    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+    fn destroy_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.started = false;
+        self.inner.destroy_surfaces(event_loop);
+    }
+
+    fn resumed(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.inner.resumed(event_loop);
+    }
+
+    fn suspended(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.inner.suspended(event_loop);
     }
 
-    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+    fn new_events(&mut self, event_loop: &dyn ActiveEventLoop, cause: StartCause) {
         self.inner.new_events(event_loop, cause);
     }
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
@@ -278,28 +292,33 @@ impl ApplicationHandler<BlitzShellEvent> for Shell {
         self.inner.window_event(event_loop, window_id, event);
     }
 
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: BlitzShellEvent) {
-        if let BlitzShellEvent::Embedder(ref payload) = event {
-            if payload.downcast_ref::<Spawn>().is_some() {
-                self.drain(event_loop);
-                return;
-            }
-            if payload.downcast_ref::<Ask>().is_some() {
-                if let Some(mut factory) = self.factory.take() {
-                    let spec = factory();
-                    self.factory = Some(factory);
-                    self.open(event_loop, spec);
-                } else {
-                    eprintln!("shell: asked for a window with no factory set");
+    /// Blitz's events arrive on a channel now and the proxy only says "there
+    /// is something on it", so the shell drains the same queue the
+    /// application would and takes its own three events out of it.
+    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
+        while let Ok(event) = self.inner.event_queue.try_recv() {
+            if let BlitzShellEvent::Embedder(ref payload) = event {
+                if payload.downcast_ref::<Spawn>().is_some() {
+                    self.drain(event_loop);
+                    continue;
                 }
-                return;
+                if payload.downcast_ref::<Ask>().is_some() {
+                    if let Some(mut factory) = self.factory.take() {
+                        let spec = factory();
+                        self.factory = Some(factory);
+                        self.open(event_loop, spec);
+                    } else {
+                        eprintln!("shell: asked for a window with no factory set");
+                    }
+                    continue;
+                }
+                if payload.downcast_ref::<Quit>().is_some() {
+                    self.inner.windows.clear();
+                    event_loop.exit();
+                    continue;
+                }
             }
-            if payload.downcast_ref::<Quit>().is_some() {
-                self.inner.windows.clear();
-                event_loop.exit();
-                return;
-            }
+            self.inner.handle_blitz_shell_event(event_loop, event);
         }
-        self.inner.user_event(event_loop, event);
     }
 }

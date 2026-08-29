@@ -41,8 +41,11 @@ import {
   quitApp,
   closeWindow,
   newWindow,
+  originalDocument,
   registerBrowserFile,
   rememberPosition,
+  removeHighlight,
+  revertWrite,
   toggleMark,
   setDocumentTitle,
   setHighlights,
@@ -260,11 +263,53 @@ class App {
   private toolbarBeforePresenting = true;
   /** Said once per document: there is no text in this one to search. */
   private saidTextless = false;
-  /** The path `markSelection` just wrote, so the reload its own write causes
-      says "Marked." instead of the ordinary "Reloaded — the document changed
-      on disk." — the reader already knows why, they just asked for it. See
-      `reload`. */
-  private pendingOwnWrite: string | null = null;
+  /** The write in flight, and how to tell `reload` — see `performWrite`. */
+  private pendingOwnWrite: { path: string; settled: () => void } | null = null;
+  /** The most recent write this app made into the open document — a
+      highlight going in, lost markup being put back, or one being taken back
+      out — kept just long enough to offer taking it back. See
+      `undoLastWrite`. `beforeHighlights` is the journal as it stood at the
+      same moment, in every case — a plain "revert" or a fresh "rebuild"
+      alike need it ahead of the write that follows, the same way
+      `restoreMarkup` puts the journal ahead of its own write rather than
+      after: without it, the reload either kind of write causes would find a
+      highlight genuinely gone from the file (or, for a rebuild, wearing a
+      brand new identity pdf.js minted for it) and read that the ordinary way
+      `syncMarkup` reads any highlight missing from a reload — as one an
+      outside rebuild took away — listing it forever as something to offer
+      putting back, or listing it twice over.
+
+      Two shapes, because there are two ways to take a write back:
+      - `"truncate"`: `before`/`after` are the file's length on either side
+        of a write that only ever appended — a mark going in, or markup being
+        restored — so undoing it means cutting the file back to `before`,
+        the only "remove" `saveDocument()` leaves open (`revert_write` in
+        lib.rs). This does not work on a write that *shrank* the file, which
+        a removal always does — there is no earlier, longer version of the
+        current file to cut back to.
+      - `"rebuild"`: what `removeMarkup` leaves behind. `marks` is every
+        highlight this app had written that was still meant to survive,
+        *including* the one just taken out — so undoing the removal is one
+        more rebuild from `.hylopdf-original`, replaying `marks` in full.
+
+      One entry, not a history — a second write replaces it, because only the
+      most recent write is ever named here — and it is thrown away the moment
+      anything else changes the document from under it: see `reload`, where
+      an outside change clears it. */
+  private lastWrite:
+    | { kind: "truncate"; path: string; before: number; after: number; beforeHighlights: Highlight[] }
+    | { kind: "rebuild"; path: string; beforeHighlights: Highlight[]; marks: MarkupMark[] }
+    | null = null;
+  /** The tail of every `reload` a `document-changed` event has caused, so the
+      next one always starts after the last one has actually finished rather
+      than racing it — see `listenForFileChanges`. Two writes close enough
+      together used to open the same race two `viewer.load()`s always can:
+      the second one's `close()` destroys the worker the first is still
+      awaiting, which throws *inside* the first `open()`, is read by its own
+      `catch` as an unreadable document, and clears the reader out of a
+      document that was never anything but slow. Undo turned this from a rare
+      double-mark into an ordinary one click after the last. */
+  private reloadChain: Promise<void> = Promise.resolve();
   /** Where markup on the open document can go, and what has already been
       said about it. Read once per open — see `readMarkupStanding` — and
       reset with the document. */
@@ -287,6 +332,8 @@ class App {
       onError: (message) => ui.notice(message),
       onExternalLink: (url) => void this.openLink(url),
       onNote: (note) => this.showNote(note),
+      onMarkupClick: (page, annotationId, anchor) =>
+        this.showRemoveMarkupPopover(page, annotationId, anchor),
       onPassword: (wrong) => ui.askForPassword(wrong),
     });
     this.sidebar = new Sidebar(
@@ -420,7 +467,9 @@ class App {
       Rust watches both and says when one of them has really changed. */
   private async listenForFileChanges(): Promise<void> {
     await onThemesChanged((themes) => this.themesChanged(themes));
-    await onDocumentChanged((path) => void this.reload(path));
+    await onDocumentChanged((path) => {
+      this.reloadChain = this.reloadChain.then(() => this.reload(path)).catch(() => {});
+    });
   }
 
   /** A theme file was written — by hand, by an LLM, or by this app saving one.
@@ -474,14 +523,54 @@ class App {
     // Our own write lands through this same event — see `write_document` in
     // lib.rs and `writeDocument`'s browser twin — and the reader who just
     // marked a passage does not need to be told the file changed on disk;
-    // `markSelection` already said so.
-    const quiet = this.pendingOwnWrite === path;
+    // `performWrite`'s caller already said so, once this same reload has
+    // actually put the new bytes on screen — see `settled` below.
+    const own = this.pendingOwnWrite?.path === path ? this.pendingOwnWrite : null;
     this.pendingOwnWrite = null;
-    const at = this.viewer.position();
-    await this.open(path);
-    if (this.path !== path) return;
-    this.viewer.scrollTo(at.page, at.offset);
-    if (!quiet) ui.notice("Reloaded — the document changed on disk.");
+    // Something else touched the file — not the write `lastWrite` is
+    // waiting to hear back from — so the boundary it names may no longer be
+    // where it thinks it is. See `undoLastWrite`.
+    if (!own) this.lastWrite = null;
+    try {
+      const at = this.viewer.position();
+      await this.open(path);
+      if (this.path !== path) return;
+      this.viewer.scrollTo(at.page, at.offset);
+      if (!own) ui.notice("Reloaded — the document changed on disk.");
+    } finally {
+      own?.settled();
+    }
+  }
+
+  /**
+   * Write into the open document, and do not return until the reload that
+   * write causes has actually landed — not until `writeDocument` (or
+   * `revertWrite`) itself resolves, which is only "the bytes are on disk".
+   *
+   * The two used to be treated as the same moment, and two writes close
+   * enough together showed why they are not: a second `viewer.load()`
+   * starting while the first is still in flight destroys the worker the
+   * first is awaiting, which the first's own `open()` then reads as an
+   * unreadable document and clears the reader out of — a race that used to
+   * need two marks placed by hand fast enough to hit it, and that "Undo"
+   * beside the very next notice turned into one click after the last. Every
+   * reload is also serialised through `reloadChain` regardless, for the
+   * ordinary case of two writes landing close together without either one
+   * waiting on the other.
+   */
+  private async performWrite(path: string, write: () => Promise<void>): Promise<void> {
+    let settled!: () => void;
+    const done = new Promise<void>((resolve) => {
+      settled = resolve;
+    });
+    this.pendingOwnWrite = { path, settled };
+    try {
+      await write();
+    } catch (error) {
+      if (this.pendingOwnWrite?.settled === settled) this.pendingOwnWrite = null;
+      throw error;
+    }
+    await done;
   }
 
   themeById(id: string): Theme {
@@ -1431,19 +1520,21 @@ class App {
     // would come back as lost, forever, and the button would never go away.
     const restored = new Set(found.map((entry) => entry.highlight.id));
     const entry = this.library.find((item) => item.path === path);
-    if (entry) entry.highlights = (entry.highlights ?? []).filter((held) => !restored.has(held.id));
+    const beforeHighlights = entry?.highlights ?? [];
+    if (entry) entry.highlights = beforeHighlights.filter((held) => !restored.has(held.id));
 
+    const before = this.viewer.fileLength();
     try {
-      this.pendingOwnWrite = path;
-      await writeDocument(path, bytes);
+      await this.performWrite(path, () => writeDocument(path, bytes));
+      this.lastWrite = { kind: "truncate", path, before, after: bytes.byteLength, beforeHighlights };
       ui.notice(
         found.length === lost.length
           ? `Put ${count(found.length, "highlight")} back.`
           : `Put ${found.length} of ${lost.length} back — the rest are not in this document any more.`,
         "done",
+        { label: "Undo", onSelect: () => void this.undoLastWrite() },
       );
     } catch (error) {
-      this.pendingOwnWrite = null;
       ui.notice(messageOf(error));
     }
   }
@@ -1474,6 +1565,7 @@ class App {
       (highlight) => this.viewer.jumpTo(highlight.page),
       () => void this.copyAllMarkup(),
       lost.length > 0 ? { count: lost.length, put: () => void this.restoreMarkup() } : null,
+      (highlight) => void this.removeMarkup(highlight.id),
     );
   }
 
@@ -1570,17 +1662,19 @@ class App {
       return;
     }
     window.getSelection()?.removeAllRanges();
+    const before = this.viewer.fileLength();
+    const beforeHighlights = this.highlights();
     try {
-      this.pendingOwnWrite = path;
-      await writeDocument(path, bytes);
+      await this.performWrite(path, () => writeDocument(path, bytes));
+      this.lastWrite = { kind: "truncate", path, before, after: bytes.byteLength, beforeHighlights };
+      const undo = { label: "Undo", onSelect: () => void this.undoLastWrite() };
       if (this.markup.caution && !this.markup.told) {
         this.markup.told = true;
-        ui.notice(this.markup.caution);
+        ui.notice(this.markup.caution, "plain", undo);
       } else {
-        ui.notice("Marked.");
+        ui.notice("Marked.", "plain", undo);
       }
     } catch (error) {
-      this.pendingOwnWrite = null;
       // A write that fails after everything above said it would work is the
       // one case left, and the markup is not thrown away over it: it goes
       // where the markup on an unwritable document goes, and the reader is
@@ -1589,6 +1683,246 @@ class App {
       this.markup.because = `${messageOf(error)} Markup on it is kept in HyloPDF instead.`;
       await this.journalSelection(path, captured, color, quote);
     }
+  }
+
+  /**
+   * Take back the most recent write this app made into the open document —
+   * the one `lastWrite` is still describing. Two shapes, matching the two
+   * kinds `lastWrite` can name (see its own doc comment): a write that only
+   * ever appended is undone by truncating back to the length it had before;
+   * one that rebuilt the document — `removeMarkup` — is undone by rebuilding
+   * it again, this time keeping everything.
+   */
+  private async undoLastWrite(): Promise<void> {
+    const pending = this.lastWrite;
+    if (!pending || pending.path !== this.path) return;
+    this.lastWrite = null;
+
+    if (pending.kind === "truncate") {
+      // Ahead of the write, the same way `restoreMarkup` puts the journal
+      // ahead of its own write: the revert is about to make the highlight
+      // genuinely gone from the file, and the reload that causes reads any
+      // highlight missing from a reload as one a rebuild took away unless
+      // the journal has already stopped expecting it — see the doc comment
+      // on `lastWrite`.
+      const entry = this.library.find((item) => item.path === pending.path);
+      if (entry) entry.highlights = pending.beforeHighlights;
+      void setHighlights(pending.path, pending.beforeHighlights).catch(() => {});
+      try {
+        await this.performWrite(pending.path, () =>
+          revertWrite(pending.path, pending.after, pending.before),
+        );
+        ui.notice("Undone.", "done");
+      } catch (error) {
+        ui.notice(messageOf(error));
+      }
+      return;
+    }
+
+    await this.rebuildAndWrite(
+      pending.path,
+      pending.beforeHighlights,
+      () => pending.marks,
+      () => ui.notice("Undone.", "done"),
+    );
+  }
+
+  /**
+   * Rebuild the open document from `.hylopdf-original` and write the result
+   * back — the machinery `removeMarkup` and undoing one of its own rebuilds
+   * both stand on.
+   *
+   * `decide` is handed every annotation the backup carries and every
+   * highlight this app's own journal currently claims is in the file, and
+   * returns what the rebuild should end up keeping — or `null` to refuse,
+   * having already said why. It runs *after* the one check this method
+   * always makes itself: that everything actually in the file right now is
+   * accounted for by one of those two lists. Anything that is not means
+   * something besides this app has added markup since the backup was taken,
+   * and rebuilding would lose it for good — so nothing is rebuilt, and
+   * `decide` is never even asked.
+   *
+   * `onWritten` runs once the write has landed, with the bytes and the
+   * file's length beforehand — `removeMarkup` uses it to open a fresh
+   * `lastWrite` of its own; undoing one does not, and just says so.
+   */
+  private async rebuildAndWrite(
+    path: string,
+    beforeHighlights: Highlight[],
+    decide: (originalAnnotations: Highlight[], known: Highlight[]) => MarkupMark[] | null,
+    onWritten: (bytes: Uint8Array, before: number) => void,
+  ): Promise<void> {
+    const doc = this.viewer.document;
+    if (!doc || this.path !== path) return;
+
+    let originalBytes: Uint8Array;
+    try {
+      originalBytes = await originalDocument(path);
+    } catch (error) {
+      ui.notice(messageOf(error));
+      return;
+    }
+    // pdf.js's worker takes ownership of `data` rather than copying it, so
+    // `originalBytes` cannot be trusted to still hold anything once
+    // `loadDetached` has handed it over — a plain copy is what the no-marks
+    // case below falls back to instead.
+    const pristineBytes = originalBytes.slice();
+
+    const detached = await this.viewer.loadDetached(originalBytes);
+    try {
+      const [originalAnnotations, currentAnnotations] = await Promise.all([
+        markupOf(detached),
+        markupOf(doc),
+      ]);
+      if (this.path !== path || this.viewer.document !== doc) return;
+
+      const known = this.highlights().filter((held) => held.annotation_id !== null);
+      const unaccounted = currentAnnotations.filter(
+        (found) =>
+          !originalAnnotations.some((orig) => sameHighlight(found, orig)) &&
+          !known.some((mine) => sameHighlight(found, mine)),
+      );
+      if (unaccounted.length > 0) {
+        ui.notice(
+          "This document carries markup HyloPDF did not add — nothing was changed, to avoid losing it.",
+        );
+        return;
+      }
+
+      const marks = decide(originalAnnotations, known);
+      if (marks === null) return;
+
+      const before = this.viewer.fileLength();
+      let bytes: Uint8Array;
+      try {
+        bytes = (await this.viewer.markQuads(marks, detached)) ?? pristineBytes;
+      } catch (error) {
+        ui.notice(messageOf(error));
+        return;
+      }
+
+      // Ahead of the write, not after — see the same line where a plain
+      // write does this. But unlike one of those, every highlight being kept
+      // comes back as a *new* object once the rebuild lands: `saveDocument()`
+      // cannot edit the one that was there, so `marks` is minted again from
+      // nothing, with an `annotation_id` `sameHighlight` has never seen
+      // before. Leaving old ids in the journal here would make the reload's
+      // own `syncMarkup` read every one of them as "missing" — this app's own
+      // write, mistaken for an outside rebuild that took markup away — and
+      // list it twice: once fresh, once "lost". So the journal ahead of this
+      // write drops every highlight with a real `annotation_id`, not only
+      // the one this call is about, and keeps only what a rebuild cannot
+      // touch — markup that never reached the file. Anything real is put
+      // straight back the moment `syncMarkup` reads the rebuilt file, this
+      // app's own highlights and whatever the backup carried alike.
+      const entry = this.library.find((item) => item.path === path);
+      if (entry) entry.highlights = beforeHighlights.filter((held) => held.annotation_id === null);
+      try {
+        await this.performWrite(path, () => writeDocument(path, bytes));
+        onWritten(bytes, before);
+      } catch (error) {
+        if (entry) entry.highlights = beforeHighlights;
+        ui.notice(messageOf(error));
+      }
+    } finally {
+      await detached.destroy();
+    }
+  }
+
+  /**
+   * Remove one highlight, whether this app added it just now or many writes
+   * ago — `undoLastWrite` above only ever knows the most recent one.
+   *
+   * A highlight the journal holds with no `annotation_id` was never in the
+   * file to begin with — kept beside a document that could not take it, or
+   * left behind when the document was rebuilt — so removing it is a journal
+   * operation and nothing else: `removeHighlight` (api.ts) takes it out and
+   * the file is never touched.
+   *
+   * One this app actually wrote is the case `markup-assessment.md` calls
+   * closed: `saveDocument()` cannot edit or delete an annotation already in
+   * the file, so there is no way to ask pdf.js for just this one back. What
+   * there is instead is `.hylopdf-original` — the file exactly as it stood
+   * before this app ever wrote into it (`originalDocument`) — so removing
+   * highlight *N* of however many this app has added means starting again
+   * from there and replaying every highlight but this one, each exactly the
+   * write it already was (`Viewer.loadDetached` + `markQuads`).
+   *
+   * That is not safe to do blind. If anything besides this app has added
+   * markup since the backup was taken — another program, opened between two
+   * writes of this app's own — the backup does not carry it and the replay
+   * does not know about it, so rebuilding would lose it for good. Every
+   * annotation actually in the file right now is checked against the backup
+   * and against this app's own journal first; if one is accounted for by
+   * neither, nothing is rebuilt and the reader is told why instead.
+   */
+  private async removeMarkup(id: string): Promise<void> {
+    const path = this.path;
+    const doc = this.viewer.document;
+    if (!path || !doc) return;
+    const target = this.highlights().find((held) => held.id === id);
+    if (!target) return;
+
+    if (target.annotation_id === null) {
+      const highlights = await removeHighlight(path, id).catch((error) => {
+        ui.notice(messageOf(error));
+        return null;
+      });
+      if (!highlights || this.path !== path) return;
+      const entry = this.library.find((item) => item.path === path);
+      if (entry) entry.highlights = highlights;
+      this.showHighlights();
+      ui.notice("Removed.", "done");
+      return;
+    }
+
+    const beforeHighlights = this.highlights();
+    // What undoing this removal would replay, were it undone — every
+    // writable highlight `decide` below keeps, `target` included. Filled in
+    // there, where the backup's own annotations are in scope to tell this
+    // app's own writes apart from ones already in it — see the doc comment
+    // on that exclusion inside `decide`.
+    let restoreMarks: MarkupMark[] = [];
+    await this.rebuildAndWrite(
+      path,
+      beforeHighlights,
+      (originalAnnotations, known) => {
+        const writable = (held: Highlight) =>
+          held.style === "highlight" && !originalAnnotations.some((orig) => sameHighlight(orig, held));
+        // Whether the highlight being removed is already in the backup —
+        // which means it predates every write this app has made, whether it
+        // was drawn by another program or is one of this app's own from
+        // before the backup was last relevant. Either way it is not this
+        // app's to take out: it is baked into the backup itself, not
+        // something a replay puts there, so leaving it out of `marks` below
+        // would not remove it — the rebuild would just start from a copy
+        // that already has it.
+        if (!writable(target)) {
+          ui.notice(
+            "This markup was already in the document before HyloPDF touched it, and can't be removed from here.",
+          );
+          return null;
+        }
+        const asMark = (held: Highlight): MarkupMark => ({
+          page: held.page,
+          quads: held.quads,
+          color: held.color,
+          opacity: held.opacity,
+        });
+        restoreMarks = known.filter(writable).map(asMark);
+        // What actually needs replaying: this app's own highlights, minus
+        // the one being removed. Every style but `highlight` is one
+        // `markQuads` can read and never write (see its own doc comment), so
+        // a non-highlight annotation in `known` can only be one already in
+        // the backup — left out for the same reason as `target` above, not
+        // duplicated for it.
+        return known.filter((held) => held.id !== id && writable(held)).map(asMark);
+      },
+      () => {
+        this.lastWrite = { kind: "rebuild", path, beforeHighlights, marks: restoreMarks };
+        ui.notice("Removed.", "done", { label: "Undo", onSelect: () => void this.undoLastWrite() });
+      },
+    );
   }
 
   /**
@@ -1690,6 +2024,14 @@ class App {
     anchor.style.left = `${rect.left}px`;
     anchor.style.top = `${rect.top}px`;
     anchor.style.width = `${rect.width}px`;
+    // Without a height, an empty div collapses to one — its bottom lands on
+    // `rect.top`, not on the bottom of the text it is meant to sit under —
+    // and `ui.showPopover` places the popover from *that* edge, over the
+    // selection rather than below it. The extra few pixels beyond the real
+    // height are the "further away" a swatch a thumb has to reach for wants:
+    // `showPopover`'s own 6px gap measured from the true bottom still read as
+    // touching the last line.
+    anchor.style.height = `${rect.height + 8}px`;
     document.body.append(anchor);
 
     ui.showPopover(anchor, (close) => {
@@ -1710,6 +2052,33 @@ class App {
       return menu;
     });
     anchor.remove();
+  }
+
+  /** Offered when the reader clicks a run of this app's own coloured markup —
+      see `Viewer.renderMarkupHits`. One item, because removing is the one
+      thing there is to do to a mark once it exists; `page` is unused beyond
+      finding the highlight, which is looked up by `annotationId` rather than
+      trusted from the click, in case the file moved under the reader between
+      painting the page and this click landing. */
+  private showRemoveMarkupPopover(page: number, annotationId: string, anchor: HTMLElement): void {
+    const highlight = this.highlights().find(
+      (held) => held.page === page && held.annotation_id === annotationId,
+    );
+    if (!highlight) return;
+    ui.showPopover(anchor, (close) => {
+      const menu = document.createElement("div");
+      const remove = ui.menuItem({
+        label: "Remove mark",
+        icon: "trash",
+        onSelect: () => {
+          close();
+          void this.removeMarkup(highlight.id);
+        },
+      });
+      remove.classList.add("danger");
+      menu.append(remove);
+      return menu;
+    });
   }
 
   /** The six colours the popover offers, in the order the swatches show
@@ -2152,6 +2521,15 @@ class App {
           },
         }),
         ui.menuItem({
+          label: "Highlight the selection",
+          icon: "highlight",
+          note: isMac ? "⌘⇧H" : "Ctrl+Shift+H",
+          onSelect: () => {
+            close();
+            this.showMarkupPopover();
+          },
+        }),
+        ui.menuItem({
           label: "Print…",
           icon: "print",
           note: isMac ? "⌘P" : "Ctrl+P",
@@ -2588,6 +2966,18 @@ class App {
       const editable = target?.closest("input, textarea, [contenteditable='true']");
       const selected = !(window.getSelection()?.isCollapsed ?? true);
       if (!editable && !selected) event.preventDefault();
+    });
+
+    // A selection finished with the mouse gets its colour popover without
+    // being asked for one — the gesture every other reader answers this way,
+    // and the one thing that made `markup` (⌘⇧H) undiscoverable: nothing on
+    // screen ever pointed at it. A selection finished by keyboard still has
+    // only the shortcut and the document menu, because there is no mouseup to
+    // hang this off.
+    el.viewer.addEventListener("mouseup", () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.toString().trim() === "") return;
+      this.showMarkupPopover();
     });
 
     // The two side buttons on a mouse. They are `auxclick`, like the middle

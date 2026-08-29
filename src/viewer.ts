@@ -204,6 +204,7 @@ type Slot = {
   selectionRuns: Map<string, HTMLCanvasElement>;
   linkEl: HTMLDivElement | null;
   noteEl: HTMLDivElement | null;
+  markupEl: HTMLDivElement | null;
   task: RenderTask | null;
   renderedKey: string;
 };
@@ -274,6 +275,11 @@ type MarkupRegion = {
   color: string;
   opacity: number;
   style: HighlightStyle;
+  /** The annotation's object id in the file — `null` for markup a document
+      carries that this app did not itself write and so cannot rebuild away.
+      What `renderMarkupHits` uses to tell a removable run from one that is
+      not. */
+  annotationId: string | null;
 };
 
 /** A note somebody else left in the document: a sticky note, or a comment on
@@ -298,6 +304,9 @@ export type ViewerCallbacks = {
   onExternalLink(url: string): void;
   /** A note in the document, opened by the reader. */
   onNote(note: { by: string; text: string; page: number }): void;
+  /** The reader clicked a run of this app's own coloured markup. `anchor` is
+      the click target itself, there to position whatever is offered over it. */
+  onMarkupClick(page: number, annotationId: string, anchor: HTMLElement): void;
   /** The document is encrypted. Ask for the password, or return null to give
       up; `wrong` is true when the last answer was refused. */
   onPassword(wrong: boolean): Promise<string | null>;
@@ -360,6 +369,13 @@ export class Viewer {
   /** A counter for `markSelection`'s own `annotationStorage` keys. See
       `ANNOTATION_EDITOR_PREFIX`. */
   private markupEditorId = 0;
+  /** How long the open document is on disk, as of the last `load()` — which
+      runs again after every write of this app's own, so this always names the
+      length *before* whatever write is about to happen next. `App.lastWrite`
+      is built from it, and that is the only reason it is kept: undoing a
+      write means truncating the file back to the length it had before that
+      write, and this is where "before" comes from. */
+  private length = 0;
   /** Whether the document that is open asked for a password on the way in.
       Markup is kept beside such a document rather than written into it —
       see `App.markupStanding` for the reasoning, which is about how little
@@ -742,16 +758,20 @@ export class Viewer {
    * the half of `markSelection` that touches pdf.js's annotation storage,
    * given the geometry rather than working it out.
    *
-   * Two callers, and the second is the reason this is its own method:
-   * `App.restoreMarkup` puts markup back into a document that was rebuilt
-   * underneath the reader, where the quads come from re-anchoring a quote
-   * (`findQuote`) and there is no selection anywhere on screen. Every entry
-   * goes into the storage before a single `saveDocument()`, so restoring
-   * thirty highlights is one incremental update and one write rather than
-   * thirty of each.
+   * Three callers now, and the third is why `doc` can be given rather than
+   * always being the one on screen: `App.removeHighlight` rebuilds a document
+   * from its pristine backup (see `loadDetached`) to drop a highlight
+   * `saveDocument()` cannot edit or delete, and every highlight kept from
+   * before has to be replayed into *that* copy, not the one mounted here.
+   * `App.restoreMarkup` is the second caller, and the reason this is its own
+   * method to begin with: it puts markup back into a document that was
+   * rebuilt underneath the reader, where the quads come from re-anchoring a
+   * quote (`findQuote`) and there is no selection anywhere on screen. Every
+   * entry goes into the storage before a single `saveDocument()`, so
+   * restoring thirty highlights is one incremental update and one write
+   * rather than thirty of each.
    */
-  async markQuads(marks: MarkupMark[]): Promise<Uint8Array | null> {
-    const doc = this.doc;
+  async markQuads(marks: MarkupMark[], doc: PDFDocumentProxy | null = this.doc): Promise<Uint8Array | null> {
     if (!doc || marks.length === 0) return null;
 
     let wrote = false;
@@ -795,6 +815,37 @@ export class Viewer {
       wrote = true;
     }
     return wrote ? doc.saveDocument() : null;
+  }
+
+  /** How long the open document is on disk, as of the last `load()`. See the
+      field this reads. */
+  fileLength(): number {
+    return this.length;
+  }
+
+  /**
+   * Load a document from bytes already in memory, rather than from the disk
+   * a window has open — `App.removeHighlight`'s way of getting a fresh,
+   * writable copy of the pristine `.hylopdf-original` backup to replay
+   * highlights into.
+   *
+   * Never mounted, never painted, and the caller's to `destroy()` once
+   * `markQuads` has produced the rebuilt bytes: nothing here touches
+   * `this.doc`, the slots, or any cache the reader is actually looking at,
+   * which is what lets a rebuild happen without the page on screen so much
+   * as flickering.
+   */
+  async loadDetached(bytes: Uint8Array): Promise<PDFDocumentProxy> {
+    const task = getDocument({
+      data: bytes,
+      isOffscreenCanvasSupported: false,
+      cMapUrl: asset("pdfjs/cmaps/"),
+      cMapPacked: true,
+      standardFontDataUrl: asset("pdfjs/standard_fonts/"),
+      iccUrl: asset("pdfjs/iccs/"),
+      wasmUrl: asset("pdfjs/wasm/"),
+    });
+    return task.promise;
   }
 
   /**
@@ -848,6 +899,7 @@ export class Viewer {
   async load(path: string): Promise<PDFDocumentProxy> {
     this.close();
     const length = await openForReading(path);
+    this.length = length;
     const task = getDocument({
       range: new FileRange(path, length),
       rangeChunkSize: RANGE_CHUNK,
@@ -1428,6 +1480,7 @@ export class Viewer {
     if (slot.textEl) this.placeOverlay(slot.textEl, slot.index, box.scale);
     if (slot.linkEl) this.placeOverlay(slot.linkEl, slot.index, box.scale);
     if (slot.noteEl) this.placeOverlay(slot.noteEl, slot.index, box.scale);
+    if (slot.markupEl) this.placeOverlay(slot.markupEl, slot.index, box.scale);
   }
 
   /**
@@ -2255,6 +2308,7 @@ export class Viewer {
       selectionRuns: new Map(),
       linkEl: null,
       noteEl: null,
+      markupEl: null,
       task: null,
       renderedKey: "",
     };
@@ -2550,6 +2604,7 @@ export class Viewer {
       quadPoints?: ArrayLike<number> | null;
       color?: ArrayLike<number> | null;
       opacity?: number;
+      id?: string;
     };
     let annotations: Annotation[];
     try {
@@ -2638,6 +2693,52 @@ export class Viewer {
     slot.noteEl = layer;
   }
 
+  /**
+   * A click target over every run of this app's own coloured markup, so
+   * clicking marked text offers to take the mark out — see `App.removeMarkup`
+   * for what happens next.
+   *
+   * Covers the run exactly rather than an edge strip the way `renderNotes`
+   * does for a passage of text: a note's text lives elsewhere and only its
+   * icon or margin needs a hit area, but a highlight *is* the words underneath
+   * it, and "click the marked text" is the gesture being offered here.
+   * Markup with no `annotationId` — this app's own quads but not yet, or not
+   * ever, written into the file — is not drawn from `getAnnotationsByType` at
+   * all, so there is nothing on the page to attach a hit target to; that case
+   * only ever shows up in the Contents panel.
+   */
+  private renderMarkupHits(slot: Slot): void {
+    if (slot.markupEl) return;
+    const regions = (this.markupCache.get(slot.index) ?? []).filter(
+      (region) => region.annotationId !== null,
+    );
+    if (regions.length === 0) return;
+
+    const layer = document.createElement("div");
+    layer.className = "markup-layer";
+    for (const region of regions) {
+      const id = region.annotationId;
+      if (!id) continue;
+      const hit = document.createElement("button");
+      hit.className = "markup-hit";
+      hit.style.left = `${region.x * 100}%`;
+      hit.style.top = `${region.y * 100}%`;
+      hit.style.width = `${region.width * 100}%`;
+      hit.style.height = `${region.height * 100}%`;
+      hit.setAttribute("aria-label", "Marked passage. Open to remove the mark.");
+      hit.addEventListener("click", (event) => {
+        event.preventDefault();
+        this.callbacks.onMarkupClick(slot.index + 1, id, hit);
+      });
+      layer.append(hit);
+    }
+
+    const box = this.boxes[slot.index];
+    if (box) this.placeOverlay(layer, slot.index, box.scale);
+    slot.el.append(layer);
+    slot.markupEl = layer;
+  }
+
   /** Fetch a page's proxy for its links alone, off the render queue. */
   private async attachLinks(slot: Slot): Promise<void> {
     if (slot.linkEl) return;
@@ -2665,9 +2766,10 @@ export class Viewer {
     const doc = this.doc;
     const links = await this.linksFor(slot.index, page);
     if (this.doc !== doc || this.slots.get(slot.index) !== slot) return;
-    // Before the return below: a page can carry notes and no links, and that
-    // page still has notes.
+    // Before the return below: a page can carry notes or markup and no links,
+    // and that page still has them.
     this.renderNotes(slot);
+    this.renderMarkupHits(slot);
     // Mounting and rendering both ask for the links; whichever gets here first
     // builds them, and the other finds them already up.
     if (slot.linkEl || links.length === 0) return;
@@ -3026,6 +3128,7 @@ function markupRegionsFrom(
     quadPoints?: ArrayLike<number> | null;
     color?: ArrayLike<number> | null;
     opacity?: number;
+    id?: string;
   }[],
   view: PageViewport,
 ): MarkupRegion[] {
@@ -3062,6 +3165,7 @@ function markupRegionsFrom(
         color,
         opacity,
         style,
+        annotationId: annotation.id ?? null,
       });
     }
   }

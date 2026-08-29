@@ -29,10 +29,22 @@
  * Step 6 is the UI this was all for: a "Markup" section in the Contents
  * panel, below the marks, built by `Sidebar.showHighlights` and shown by
  * `App.showHighlights` — a row per highlight, its colour and its quote, a
- * click to jump to its page — and "Copy all as Markdown" in the section's own
- * heading. There is deliberately no way to remove one from here; see the doc
- * comment on `showHighlights` and the corrections above step 6 in
- * `markup-assessment.md` for why. */
+ * click to jump to its page, a `.mark-drop` button to remove it — and "Copy
+ * all as Markdown" in the section's own heading.
+ *
+ * Removal is two different mechanisms wearing one button. `App.undoLastWrite`
+ * truncates the document back to the length it had before the most recent
+ * write, real removal sidestepping `saveDocument()`'s inability to edit or
+ * delete an existing annotation by never asking it to — but only for the one
+ * write `App.lastWrite` is still holding the boundary of, and only while
+ * nothing else has touched the file since. `App.removeMarkup` is the general
+ * case a row's own button calls: any highlight this app ever wrote, at any
+ * point, removed by rebuilding the document from `.hylopdf-original` and
+ * replaying every highlight but that one — refused rather than attempted if
+ * the file currently carries markup neither the backup nor this app's own
+ * journal can account for. Removing the most recent write that way is itself
+ * one more write `App.undoLastWrite` can still take back, byte-truncation and
+ * rebuild both. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -279,7 +291,7 @@ test("selecting text and choosing a colour saves a real highlight into the file"
 
     await app.page
       .waitForFunction(
-        () => (document.getElementById("notice")?.textContent ?? "") === "Marked.",
+        () => (document.getElementById("notice")?.textContent ?? "").startsWith("Marked."),
         null,
         { timeout: 10_000 },
       )
@@ -296,6 +308,216 @@ test("selecting text and choosing a colour saves a real highlight into the file"
     // causes would have cleared it anyway.
     const stillSelected = await app.page.evaluate(() => getSelection()?.toString() ?? "");
     assert.equal(stillSelected, "");
+  } finally {
+    await app.close();
+  }
+});
+
+/** Select a short, known run of text on page one of `BOOK`, the same shape
+ *  the test above selects. */
+async function selectInBook(app, length = 12) {
+  await app.page.waitForSelector("#pages .textLayer span", { timeout: 10_000 });
+  const selected = await app.page.evaluate((length) => {
+    const span = [...document.querySelectorAll("#pages .textLayer span")].find(
+      (candidate) => (candidate.firstChild?.textContent?.length ?? 0) >= length,
+    );
+    const range = document.createRange();
+    range.setStart(span.firstChild, 0);
+    range.setEnd(span.firstChild, length);
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return range.toString();
+  }, length);
+  assert.ok(selected.length > 0, "nothing was selected to mark");
+  return selected;
+}
+
+test("undoing a mark takes it back out of the file, not just out of the list", async () => {
+  const app = await openApp({ pdf: BOOK });
+  try {
+    await selectInBook(app);
+    await app.press(`${MOD}+Shift+KeyH`);
+    await app.page.waitForSelector(".markup-popover .markup-swatch", { timeout: 5_000 });
+    await app.page.click(".markup-popover .markup-swatch >> nth=0");
+
+    const highlights = await waitForJournal(app, BOOK_PATH);
+    assert.equal(highlights.length, 1, "the highlight did not round-trip through the file");
+
+    const undo = await app.page.waitForSelector("#notice .notice-action", { timeout: 10_000 });
+    assert.equal(await undo.textContent(), "Undo");
+    await undo.click();
+
+    await app.page
+      .waitForFunction(
+        () => (document.getElementById("notice")?.textContent ?? "") === "Undone.",
+        null,
+        { timeout: 10_000 },
+      )
+      .catch(() => {});
+
+    // `journalOf` reads what `syncMarkup` rebuilt from the file itself after
+    // the revert's own reload, not a copy this app could have edited without
+    // touching the disk — so an empty journal here is the file having lost
+    // the annotation, the same proof the write test above gives in reverse.
+    let after = highlights;
+    for (let tries = 0; tries < 100 && after.length > 0; tries++) {
+      await app.page.waitForTimeout(100);
+      after = await journalOf(app, BOOK_PATH);
+    }
+    assert.equal(after.length, 0, "the highlight is still in the file after undo");
+  } finally {
+    await app.close();
+  }
+});
+
+test("undo only ever takes back the most recent mark", async () => {
+  const app = await openApp({ pdf: BOOK });
+  try {
+    await selectInBook(app, 12);
+    await app.press(`${MOD}+Shift+KeyH`);
+    await app.page.waitForSelector(".markup-popover .markup-swatch", { timeout: 5_000 });
+    await app.page.click(".markup-popover .markup-swatch >> nth=0");
+    let highlights = await waitForJournal(app, BOOK_PATH);
+    assert.equal(highlights.length, 1);
+    // Not `id` — `markupOf` mints a fresh `crypto.randomUUID()` for every
+    // highlight on every read, so the first one gets a new one of its own the
+    // moment the reload below re-reads the file. The colour is what the file
+    // itself actually carries for it, and is what survives that.
+    const firstColor = highlights[0].color;
+
+    // A second mark elsewhere on the page — the same span, the tail end of it
+    // — replaces the first as the one write undo still names.
+    await selectInBook(app, 20);
+    await app.press(`${MOD}+Shift+KeyH`);
+    await app.page.waitForSelector(".markup-popover .markup-swatch", { timeout: 5_000 });
+    await app.page.click(".markup-popover .markup-swatch >> nth=1");
+    for (let tries = 0; tries < 100 && highlights.length < 2; tries++) {
+      await app.page.waitForTimeout(100);
+      highlights = await journalOf(app, BOOK_PATH);
+    }
+    assert.equal(highlights.length, 2, "the second highlight never reached the file");
+
+    const undo = await app.page.waitForSelector("#notice .notice-action", { timeout: 10_000 });
+    await undo.click();
+    await app.page
+      .waitForFunction(
+        () => (document.getElementById("notice")?.textContent ?? "") === "Undone.",
+        null,
+        { timeout: 10_000 },
+      )
+      .catch(() => {});
+
+    let after = highlights;
+    for (let tries = 0; tries < 100 && after.length !== 1; tries++) {
+      await app.page.waitForTimeout(100);
+      after = await journalOf(app, BOOK_PATH);
+    }
+    assert.equal(after.length, 1, "undo did not stop at the second mark");
+    assert.equal(after[0].color, firstColor, "undo took back the wrong one");
+  } finally {
+    await app.close();
+  }
+});
+
+/* ---------------------------------------------------- removing a highlight */
+
+/** Mark a run of text in `BOOK` with a given palette swatch, and wait for the
+ *  journal to carry the expected number of highlights. */
+async function markAndCount(app, length, swatchIndex, expectedCount) {
+  await selectInBook(app, length);
+  await app.press(`${MOD}+Shift+KeyH`);
+  await app.page.waitForSelector(".markup-popover .markup-swatch", { timeout: 5_000 });
+  await app.page.click(`.markup-popover .markup-swatch >> nth=${swatchIndex}`);
+  let highlights = await journalOf(app, BOOK_PATH);
+  for (let tries = 0; tries < 100 && highlights.length < expectedCount; tries++) {
+    await app.page.waitForTimeout(100);
+    highlights = await journalOf(app, BOOK_PATH);
+  }
+  return highlights;
+}
+
+test("removing a highlight from the Contents panel takes it out of the file, whichever one it is", async () => {
+  const app = await openApp({ pdf: BOOK });
+  try {
+    const first = await markAndCount(app, 8, 0, 1);
+    const firstColor = first[0].color;
+    await markAndCount(app, 20, 1, 2);
+    const third = await markAndCount(app, 32, 2, 3);
+    assert.equal(third.length, 3, "not all three highlights reached the file");
+
+    await app.page.click("#contents");
+    await app.page.waitForSelector(".highlight-row", { timeout: 5_000 });
+    assert.equal(await app.page.locator(".highlight-row").count(), 3);
+
+    // The first one added, not the most recent — this is the case
+    // `undoLastWrite` cannot reach at all.
+    await app.page.locator(".highlight-row .mark-drop").first().click({ force: true });
+    await app.page
+      .waitForFunction(
+        () => (document.getElementById("notice")?.textContent ?? "").startsWith("Removed."),
+        null,
+        { timeout: 10_000 },
+      )
+      .catch(() => {});
+
+    let after = third;
+    for (let tries = 0; tries < 100 && after.length !== 2; tries++) {
+      await app.page.waitForTimeout(100);
+      after = await journalOf(app, BOOK_PATH);
+    }
+    assert.equal(after.length, 2, "the removed highlight is still in the file");
+    assert.ok(
+      !after.some((held) => held.color === firstColor),
+      "the wrong highlight was removed",
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("undoing a removal puts the highlight back, even though it comes back with a new identity", async () => {
+  const app = await openApp({ pdf: BOOK });
+  try {
+    const marked = await markAndCount(app, 8, 3, 1);
+    const color = marked[0].color;
+
+    await app.page.click("#contents");
+    await app.page.waitForSelector(".highlight-row", { timeout: 5_000 });
+    await app.page.locator(".highlight-row .mark-drop").first().click({ force: true });
+    await app.page
+      .waitForFunction(
+        () => (document.getElementById("notice")?.textContent ?? "").startsWith("Removed."),
+        null,
+        { timeout: 10_000 },
+      )
+      .catch(() => {});
+
+    let gone = marked;
+    for (let tries = 0; tries < 100 && gone.length !== 0; tries++) {
+      await app.page.waitForTimeout(100);
+      gone = await journalOf(app, BOOK_PATH);
+    }
+    assert.equal(gone.length, 0, "removal did not take the highlight out of the file");
+
+    const undo = await app.page.waitForSelector("#notice .notice-action", { timeout: 10_000 });
+    await undo.click();
+    await app.page
+      .waitForFunction(
+        () => (document.getElementById("notice")?.textContent ?? "") === "Undone.",
+        null,
+        { timeout: 10_000 },
+      )
+      .catch(() => {});
+
+    let back = gone;
+    for (let tries = 0; tries < 100 && back.length !== 1; tries++) {
+      await app.page.waitForTimeout(100);
+      back = await journalOf(app, BOOK_PATH);
+    }
+    assert.equal(back.length, 1, "undoing the removal did not put it back");
+    assert.equal(back[0].color, color);
+    assert.equal(typeof back[0].annotation_id, "string");
   } finally {
     await app.close();
   }
@@ -503,7 +725,7 @@ test("a signed document is asked about before it is written to, once", async () 
     await app.page.click(".markup-popover .markup-swatch >> nth=1");
     await app.page
       .waitForFunction(
-        () => (document.getElementById("notice")?.textContent ?? "") === "Marked.",
+        () => (document.getElementById("notice")?.textContent ?? "").startsWith("Marked."),
         null,
         { timeout: 15_000 },
       )
@@ -545,7 +767,7 @@ test("markup a rebuilt document lost is offered back, and re-anchored by its wor
     await app.page.click(".markup-popover .markup-swatch >> nth=2");
     await app.page
       .waitForFunction(
-        () => (document.getElementById("notice")?.textContent ?? "") === "Marked.",
+        () => (document.getElementById("notice")?.textContent ?? "").startsWith("Marked."),
         null,
         { timeout: 15_000 },
       )

@@ -213,6 +213,64 @@ impl OpenFiles {
         Ok(length)
     }
 
+    /// Undo the most recent `write` into this document, by truncating it back
+    /// to the length it had before that write.
+    ///
+    /// This works — and does not need pdf.js's cooperation at all — because
+    /// every write here is `saveDocument()`'s own incremental update: the
+    /// bytes before `at_length` are the original file, untouched, and
+    /// everything an annotation added sits after them. Dropping those bytes
+    /// is not an edit to an object in the file, it is the file as it stood
+    /// one write ago, which sidesteps the limit `markup-assessment.md` found
+    /// in `saveDocument()` — that it cannot edit or delete an annotation
+    /// already there — entirely: nothing is ever asked to delete anything,
+    /// the trailing bytes are simply never written back.
+    ///
+    /// `expected_length` is checked first and the whole thing refused if it
+    /// does not match what is on disk right now: if anything else touched the
+    /// file since the write this is meant to undo — a second highlight, a
+    /// recompile — the offset this call was given no longer names the
+    /// boundary the caller thinks it does, and truncating to it would eat
+    /// whatever landed after.
+    fn revert(
+        &self,
+        window: &str,
+        path: &str,
+        expected_length: u64,
+        at_length: u64,
+    ) -> Result<(), String> {
+        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((open, _)) = held.get(window) else {
+            return Err("No document is open.".into());
+        };
+        if open != path {
+            return Err("That is not the document that is open.".into());
+        }
+
+        let target = Path::new(path);
+        let current = std::fs::metadata(target)
+            .map(|meta| meta.len())
+            .map_err(|e| format!("Could not measure {}: {e}", file_name(path)))?;
+        if current != expected_length {
+            return Err(
+                "This document has changed since, so that mark can no longer be undone.".into(),
+            );
+        }
+
+        let mut file =
+            File::open(target).map_err(|e| format!("Could not read {}: {e}", file_name(path)))?;
+        let mut kept = vec![0u8; at_length as usize];
+        file.read_exact(&mut kept)
+            .map_err(|e| format!("Could not read {}: {e}", file_name(path)))?;
+        drop(file);
+
+        atomic_write(target, &kept)?;
+
+        let file = File::open(target).map_err(|e| format!("Could not reopen: {e}"))?;
+        held.insert(window.to_string(), (path.to_string(), file));
+        Ok(())
+    }
+
     fn close(&self, window: &str) {
         let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
         held.remove(window);
@@ -223,6 +281,15 @@ impl OpenFiles {
     fn holds(&self, window: &str) -> bool {
         let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
         held.contains_key(window)
+    }
+
+    /// Whether this window's open document is this one — the same question
+    /// `range` and `write` ask before touching anything, pulled out for
+    /// `original_document`, which reads a file beside it rather than the
+    /// document itself.
+    fn is_open(&self, window: &str, path: &str) -> bool {
+        let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        matches!(held.get(window), Some((open, _)) if open == path)
     }
 }
 
@@ -577,6 +644,48 @@ async fn write_document(
     watching.wrote(window.label(), Path::new(&path));
     let _ = window.emit_to(window.label(), "document-changed", &path);
     Ok(length)
+}
+
+/// Undo the most recent write into this document — see `OpenFiles::revert`
+/// for how truncation stands in for an edit `saveDocument()` cannot make.
+/// Reloads the writing window exactly the way `write_document` does, which is
+/// what puts the highlight that write added back off the page.
+#[tauri::command]
+async fn revert_write(
+    window: WebviewWindow,
+    open: State<'_, OpenFiles>,
+    watching: State<'_, watch::Watching>,
+    path: String,
+    expected_length: u64,
+    at_length: u64,
+) -> Result<(), String> {
+    open.revert(window.label(), &path, expected_length, at_length)?;
+    watching.wrote(window.label(), Path::new(&path));
+    let _ = window.emit_to(window.label(), "document-changed", &path);
+    Ok(())
+}
+
+/// The pristine copy of a document, from before this app ever wrote into it —
+/// see `original_backup_path`. What `App.removeHighlight` rebuilds from:
+/// `saveDocument()` cannot edit or delete an annotation already in the file
+/// (see `markup-assessment.md`), so removing one this app wrote, at any point
+/// rather than only right after writing it, means starting again from the
+/// backup and replaying every highlight still wanted as a fresh write.
+///
+/// Errs when there is no backup — nothing has ever been written into this
+/// document, so there is nothing of this app's own in it to remove either.
+#[tauri::command]
+async fn original_document(
+    window: WebviewWindow,
+    open: State<'_, OpenFiles>,
+    path: String,
+) -> Result<Vec<u8>, String> {
+    if !open.is_open(window.label(), &path) {
+        return Err("That is not the document that is open.".into());
+    }
+    let backup = original_backup_path(Path::new(&path));
+    std::fs::read(&backup)
+        .map_err(|_| "This document has never been marked, so there is nothing to rebuild from.".to_string())
 }
 
 /// What standing this app has to write markup into a document — asked before
@@ -1809,6 +1918,8 @@ pub fn run() {
             open_for_reading,
             read_range,
             write_document,
+            revert_write,
+            original_document,
             document_writability,
             close_document,
             remember_position,
@@ -2219,5 +2330,102 @@ mod tests {
             b"%PDF-1.7\nfirst draft\n%%EOF\n",
             "a later write clobbered the original backup"
         );
+    }
+
+    /// `original_document` reads through `is_open` first — the same door
+    /// `range` and `write` use — so a window naming a document it does not
+    /// have open cannot read the backup beside somebody else's, and the
+    /// backup a first write left behind is exactly the original bytes.
+    #[test]
+    fn is_open_guards_the_backup_the_same_way_writing_does() {
+        let path = scratch_pdf("removable.pdf", b"%PDF-1.7\nfirst draft\n%%EOF\n");
+        let open = OpenFiles::default();
+        assert!(!open.is_open("main", &path.to_string_lossy()));
+
+        open.begin("main", &path.to_string_lossy()).unwrap();
+        assert!(open.is_open("main", &path.to_string_lossy()));
+
+        let elsewhere = scratch_pdf("elsewhere-removable.pdf", b"%PDF-1.7\n%%EOF\n");
+        assert!(!open.is_open("main", &elsewhere.to_string_lossy()));
+
+        open.write(
+            "main",
+            &path.to_string_lossy(),
+            b"%PDF-1.7\nfirst draft\nappended\n%%EOF\n",
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(original_backup_path(&path)).unwrap(),
+            b"%PDF-1.7\nfirst draft\n%%EOF\n"
+        );
+    }
+
+    /// Undoing a write is not an edit to the annotation it added — pdf.js has
+    /// no way to make one — it is truncating the file back to the length it
+    /// had before that write, which is where the write's own incremental
+    /// update began.
+    #[test]
+    fn reverting_a_write_restores_the_bytes_from_before_it() {
+        let original = b"%PDF-1.7\noriginal\n%%EOF\n";
+        let path = scratch_pdf("undo-me.pdf", original);
+        let open = OpenFiles::default();
+        open.begin("main", &path.to_string_lossy()).unwrap();
+
+        let marked = b"%PDF-1.7\noriginal\n%%EOF\nappended highlight";
+        let after = open.write("main", &path.to_string_lossy(), marked).unwrap();
+        assert_eq!(after, marked.len() as u64);
+
+        open.revert(
+            "main",
+            &path.to_string_lossy(),
+            after,
+            original.len() as u64,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+
+        // No staging file left behind by the revert either.
+        let siblings: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(siblings.is_empty(), "a temp file survived the revert");
+
+        // And the handle reads the reverted bytes, not the detached old inode.
+        let read = open
+            .range("main", &path.to_string_lossy(), 0, original.len() as u64)
+            .unwrap();
+        assert_eq!(read, original);
+    }
+
+    /// A revert is refused, rather than acted on, the moment the file no
+    /// longer matches what the caller thinks it is undoing — a second
+    /// highlight since, or a recompile — because the length it was given
+    /// would then cut into bytes that were never the ones this write added.
+    #[test]
+    fn a_revert_is_refused_once_the_file_has_moved_on() {
+        let path = scratch_pdf("moved-on.pdf", b"%PDF-1.7\noriginal\n%%EOF\n");
+        let open = OpenFiles::default();
+        open.begin("main", &path.to_string_lossy()).unwrap();
+
+        let marked = b"%PDF-1.7\noriginal\n%%EOF\nappended highlight";
+        open.write("main", &path.to_string_lossy(), marked).unwrap();
+
+        // A second write lands — from another highlight, or an external
+        // recompile — before the first is undone.
+        let moved_on = b"%PDF-1.7\noriginal\n%%EOF\nappended highlight\nand more";
+        open.write("main", &path.to_string_lossy(), moved_on)
+            .unwrap();
+
+        let err = open
+            .revert("main", &path.to_string_lossy(), marked.len() as u64, 9)
+            .unwrap_err();
+        assert_eq!(
+            err,
+            "This document has changed since, so that mark can no longer be undone."
+        );
+        // Refused, and untouched: still the second write's bytes.
+        assert_eq!(std::fs::read(&path).unwrap(), moved_on);
     }
 }

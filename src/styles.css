@@ -728,6 +728,21 @@ body {
   height: 13px;
 }
 
+/* The trash can that removes a piece of markup, not a bookmark: shown
+   plainly rather than only on hover, because "this row can be deleted" is
+   worth knowing at a glance and a highlight is not a page mark, and red on
+   hover because removing one is not reversible the way most of this app's
+   buttons are. */
+.highlight-row .mark-drop {
+  opacity: 1;
+  color: var(--text-faint);
+}
+
+.highlight-row .mark-drop:hover {
+  background: var(--negative);
+  color: var(--negative-contrast);
+}
+
 /* The document's own coloured markup, below the marks. */
 .highlights {
   padding: 4px 6px 10px;
@@ -917,6 +932,33 @@ body {
 
 .link-layer a:hover {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--link) 45%, transparent);
+}
+
+/* This app's own coloured markup, clickable where it is drawn — see
+   `Viewer.renderMarkupHits`. The colour is already on the page; a hover here
+   only has to say "this comes off," which is why it borrows the same red as
+   the trash button beside it in the Contents panel. */
+.markup-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.markup-hit {
+  position: absolute;
+  display: block;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 3px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.markup-hit:hover,
+.markup-hit:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--negative) 55%, transparent);
 }
 
 /* The way back to the toolbar.
@@ -1190,6 +1232,15 @@ body {
 
 .popover-item.current {
   color: var(--accent);
+}
+
+.popover-item.danger {
+  color: var(--negative);
+}
+
+.popover-item.danger:hover {
+  background: var(--negative);
+  color: var(--negative-contrast);
 }
 
 .popover-item .check {
@@ -1539,6 +1590,24 @@ body {
 .notice-tick {
   display: flex;
   color: var(--positive);
+}
+
+/* A notice that can be taken back — "Undo" beside "Marked." — in the accent
+   colour so it reads as a thing to press rather than more of the sentence. */
+.notice-action {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.notice-action:hover {
+  text-decoration: underline;
 }
 
 .drop-hint {

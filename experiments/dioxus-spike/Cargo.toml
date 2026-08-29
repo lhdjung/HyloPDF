@@ -1,0 +1,33 @@
+[package]
+name = "dioxus-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+
+# Not a member of anything: the app's crate is src-tauri and this is a scratch
+# crate that answers questions about a possible replacement for it.
+[workspace]
+
+[dependencies]
+dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
+dioxus-core = "0.7"
+dioxus-native = "0.7"
+blitz-shell = "0.2"
+blitz-traits = "0.2"
+anyrender = "0.6"
+anyrender_vello = "0.6"
+winit = "0.30"
+webbrowser = "1"
+pdfium-render = { version = "0.9.3", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+blitz-dom = "0.2"
+blitz-html = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+[dev-dependencies]
+pollster = "1.0.1"

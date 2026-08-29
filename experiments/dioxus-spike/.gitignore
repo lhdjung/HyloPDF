@@ -1,0 +1,4 @@
+target/
+# libpdfium, fetched from bblanchon/pdfium-binaries. Not committed: it is 7MB
+# of somebody else's build, and `vendor/README.md` says which one.
+vendor/

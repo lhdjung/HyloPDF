@@ -423,8 +423,11 @@ step was chosen to be testable:
    switches — *done, and it took the results tab of item 3 with it. Half of
    `search.ts` and all of `paintHighlights` turned out to be pdf.js's text
    layer rather than searching*
-5. links, destinations, page labels, the go-to field
-6. spreads, trim, rotation, paged mode, presenting
+5. links, destinations, page labels, the go-to field — *done; the history came
+   with them, because following a cross-reference and typing a page number are
+   the two moves that leave a reader stranded. The page field is a readout that
+   becomes a field, which is Blitz's focus rule and not a preference*
+6. spreads, trim, rotation, paged mode, presenting — *spreads done in Phase 1*
 7. the library: position, open documents, marks, the restore list
 8. the watchers: themes directory, the document being recompiled
 9. multi-window: `hand_over`, placements, the Dock menu, `Exiting`

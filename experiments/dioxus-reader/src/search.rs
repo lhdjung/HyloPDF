@@ -10,7 +10,7 @@
 //! range against a text layer of spans that exist only to be selected. Here a
 //! match is a range of characters and a character already knows its box, so
 //! `items`, `starts`, `position()` and the text layer all go, and what is left
-//! is folding and looking things up. See [`crate::render::CharBox`].
+//! is folding and looking things up. See [`crate::render::Rect`].
 //!
 //! What is ported exactly, because it is right and hard-won:
 //!
@@ -58,7 +58,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use crate::render::{CharBox, PageText};
+use crate::render::{Rect, PageText};
 
 /// Where a search gives up.
 ///
@@ -362,9 +362,9 @@ impl Search {
     /// rectangles in PDF points from the top left of the page.
     ///
     /// This is the whole of what the viewer needs to paint highlights, and it
-    /// is the payoff for [`crate::render::CharBox`]: the app measures a
+    /// is the payoff for [`crate::render::Rect`]: the app measures a
     /// `Range` against a text layer to get here.
-    pub fn quads_on(&self, page: usize) -> Vec<(CharBox, bool)> {
+    pub fn quads_on(&self, page: usize) -> Vec<(Rect, bool)> {
         let Some(indexed) = self.pages.get(&page) else {
             return Vec::new();
         };
@@ -705,7 +705,7 @@ mod tests {
         let boxes = chars
             .iter()
             .enumerate()
-            .map(|(at, _)| CharBox {
+            .map(|(at, _)| Rect {
                 left: at as f64 * 10.0,
                 top: 100.0,
                 width: 10.0,
@@ -855,8 +855,8 @@ mod tests {
         let text = PageText {
             chars: chars("ab"),
             boxes: vec![
-                CharBox { left: 500.0, top: 100.0, width: 10.0, height: 12.0 },
-                CharBox { left: 20.0, top: 130.0, width: 10.0, height: 12.0 },
+                Rect { left: 500.0, top: 100.0, width: 10.0, height: 12.0 },
+                Rect { left: 20.0, top: 130.0, width: 10.0, height: 12.0 },
             ],
         };
         assert_eq!(text.quads(0, 2).len(), 2);

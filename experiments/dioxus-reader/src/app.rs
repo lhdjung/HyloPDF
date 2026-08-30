@@ -53,9 +53,10 @@
 //! than papered over: a scrollbar we would have to draw, and momentum arrives
 //! from the trackpad in the event stream regardless.
 
-use std::sync::Arc;
-
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use dioxus::html::geometry::WheelDelta;
 use dioxus::prelude::*;
@@ -66,7 +67,7 @@ use crate::keymap::{Action, Keymap, Press};
 use crate::layout::{Anchor, Fit, Layout, Size, Spread};
 use crate::page::{Chosen, PageWidget};
 use crate::palette::Palette;
-use crate::render::{CharBox, Heading, PageSource};
+use crate::render::{Heading, Link, PageSource, Rect, Target};
 use crate::search::{Options as Find, Search};
 use crate::sidebar::{Column, Sidebar, Tab};
 use crate::store::Store;
@@ -170,6 +171,12 @@ const LINE: f64 = 60.0;
 /// cannot name.
 const OVERLAP: f64 = 60.0;
 
+/// How many places back a reader can step.
+///
+/// The app's number, and its reasoning: deep enough to walk out of a chain of
+/// cross-references, shallow enough that it is a history rather than a log.
+const HISTORY_LIMIT: usize = 50;
+
 /// How much of the window a match is brought to when the reader is taken to
 /// one: a third down, so there is something above it to read into.
 const REVEAL: f64 = 0.3;
@@ -178,6 +185,52 @@ const REVEAL: f64 = 0.3;
 const ZOOMS: [f64; 13] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0, 3.0, 4.0,
 ];
+
+/// What opening a link outside the document does.
+///
+/// A context rather than a call, for the reason [`Screen`] is one: the thing
+/// it stands for does not exist in a test. `webbrowser::open` is the right
+/// answer in the app and is the *default* here, so a shell that provides
+/// nothing still opens links — but a harness that provides its own can watch
+/// where a link would have gone without a browser window arriving on somebody
+/// else's screen halfway through `cargo test`.
+///
+/// It is the same door `nav.rs` already is for a `<a href>` inside the
+/// chrome; a document's own links do not go through the DOM at all, so they
+/// need their own way out.
+#[derive(Clone)]
+pub struct Away(Rc<dyn Fn(&str)>);
+
+impl PartialEq for Away {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Away {
+    pub fn new(open: impl Fn(&str) + 'static) -> Self {
+        Away(Rc::new(open))
+    }
+
+    /// The default: hand the address to the system, with the same three
+    /// schemes `nav.rs` allows and for the same reason — a `file:` or a
+    /// `javascript:` in somebody's document is not a thing this app opens
+    /// because the document asked.
+    pub fn to_the_system() -> Self {
+        Away::new(|url| {
+            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:")
+            {
+                if let Err(err) = webbrowser::open(url) {
+                    eprintln!("could not open {url}: {err}");
+                }
+            }
+        })
+    }
+
+    pub fn open(&self, url: &str) {
+        (self.0)(url);
+    }
+}
 
 /// A fit mode, spelled the way `settings.toml` spells it. One function rather
 /// than two match arms in two places, because the value written and the value
@@ -230,6 +283,47 @@ pub struct Viewer {
     pub column: Column,
     /// The document's own table of contents, read once when it was opened.
     pub headings: Vec<Heading>,
+    /// What the document calls its own pages, or empty when it calls them 1
+    /// to n — see [`crate::render::PageSource::labels`]. Read once at open,
+    /// like the outline, and for the same reason: it decides what the toolbar
+    /// *says*, and a number that arrives late is a number that was wrong.
+    labels: Vec<String>,
+    /// The links on each page that has been asked about, kept.
+    ///
+    /// **The one piece of state here behind a `RefCell`**, because it is the
+    /// one that has to be filled while the reader is being *read*: a page's
+    /// links are wanted by the render that mounts it, and a render holds a
+    /// `read()` of this whole struct. Filling it from the outside instead
+    /// would mean every method that changes which pages are mounted
+    /// remembering to — `scroll_to`, `resize`, `set_fit`, `zoom`,
+    /// `set_spread`, `go_to_page` — and the failure of forgetting one is a
+    /// page whose cross-references quietly do nothing.
+    ///
+    /// It is not trimmed. A link is a rectangle and a target; a book of four
+    /// hundred pages of mathematics is a few hundred kilobytes of them, which
+    /// is a fiftieth of one page's texture, and the whole point of the caches
+    /// this experiment does keep an eye on is that they hold *pixels*.
+    links: RefCell<HashMap<usize, Rc<Vec<Link>>>>,
+    /// Where the reader has jumped from, and where they came back from.
+    ///
+    /// The distinction the app draws and the reason both lists exist: moving
+    /// *through* a document leaves no trace — scrolling, turning a page,
+    /// stepping through search results — and jumping *across* it does.
+    /// Following a cross-reference, picking a chapter out of the contents and
+    /// typing a page number are the moves that leave a reader stranded, and
+    /// they are exactly the three that go through [`Viewer::jump_to`].
+    past: Vec<Anchor>,
+    future: Vec<Anchor>,
+    /// Whether the reader is typing a page number into the field in the
+    /// toolbar, and what they have typed.
+    ///
+    /// The field shows the current page's label when nobody is typing in it,
+    /// and what has been typed when somebody is. Two states rather than one
+    /// because the app selects the field's contents when it is focused and
+    /// there is no way to say that here — so arriving *empties* it instead,
+    /// which comes to the same thing for anybody who then types.
+    pub typing_page: bool,
+    pub page_typed: String,
     /// The index, the matches, and where the reader is in them. See
     /// [`crate::search`]: it knows nothing about this struct, which is what
     /// lets the whole of it be tested with no document and no window.
@@ -287,6 +381,12 @@ impl Viewer {
             thumb_scroll: 0.0,
             column: Column::default(),
             headings: document.outline(),
+            labels: document.labels(),
+            links: RefCell::new(HashMap::new()),
+            past: Vec::new(),
+            future: Vec::new(),
+            typing_page: false,
+            page_typed: String::new(),
             search: Search::new(),
             find_open: false,
             find_query: String::new(),
@@ -533,10 +633,212 @@ impl Viewer {
     }
 
     /// Go to a page, one-based — what a row in either list does when it is
-    /// clicked.
+    /// clicked, and a *jump*: see [`Viewer::jump_to`].
     pub fn go_to_page(&mut self, page: usize) {
-        let target = self.page_target(page);
+        self.jump_to(page, 0.0);
+    }
+
+    /* ------------------------------------------------------ where you were */
+
+    /// Go somewhere the reader asked to go, remembering where they were.
+    ///
+    /// `jumpTo` in `viewer.ts`, and the distinction it draws is the whole of
+    /// why there is a history at all: the citation on page 12 that lands on
+    /// page 190 is what this exists for, and the twenty keystrokes of
+    /// scrolling that got the reader to page 12 are not.
+    ///
+    /// A jump that lands where the reader already is is not a jump. Without
+    /// that test, pressing Home twice files the first page away as somewhere
+    /// worth returning to, and a page number typed twice fills the history
+    /// with copies of one place.
+    pub fn jump_to(&mut self, page: usize, offset: f64) {
+        let from = self.layout.anchor(self.scroll_top);
+        let to = page.clamp(1, self.pages().max(1));
+        if to == from.page && (offset - from.offset).abs() < 0.01 {
+            let target = self.layout.scroll_target(Anchor { page: to, offset });
+            self.scroll_to(target);
+            return;
+        }
+        self.past.push(from);
+        if self.past.len() > HISTORY_LIMIT {
+            self.past.remove(0);
+        }
+        // A jump made after stepping back throws away what was ahead, which
+        // is what every back button does and what nobody is surprised by.
+        self.future.clear();
+        let target = self.layout.scroll_target(Anchor { page: to, offset });
         self.scroll_to(target);
+    }
+
+    /// Back to where the last jump started, or forward again.
+    ///
+    /// `false` when there is nowhere to go, so that the caller can say so:
+    /// silence at the end of the history is indistinguishable from a key that
+    /// does not work.
+    pub fn go_back(&mut self) -> bool {
+        let Some(place) = self.past.pop() else {
+            return false;
+        };
+        self.future.push(self.layout.anchor(self.scroll_top));
+        let target = self.layout.scroll_target(place);
+        self.scroll_to(target);
+        true
+    }
+
+    pub fn go_forward(&mut self) -> bool {
+        let Some(place) = self.future.pop() else {
+            return false;
+        };
+        self.past.push(self.layout.anchor(self.scroll_top));
+        let target = self.layout.scroll_target(place);
+        self.scroll_to(target);
+        true
+    }
+
+    /* ------------------------------------------------------------- links */
+
+    /// The links on a page, asked for once and kept. See [`Viewer::links`].
+    pub fn links_on(&self, index: usize) -> Rc<Vec<Link>> {
+        if let Some(known) = self.links.borrow().get(&index) {
+            return known.clone();
+        }
+        let links = Rc::new(self.document.links_of(index));
+        self.links.borrow_mut().insert(index, links.clone());
+        links
+    }
+
+    /// The links on a mounted page, as rectangles in CSS pixels from the top
+    /// left of its box — which is the space the page's own overlay is laid
+    /// out in, and the same one [`Viewer::highlights`] answers in.
+    pub fn link_areas(&self, page: usize) -> Vec<(Rect, Target)> {
+        let Some(index) = page.checked_sub(1) else {
+            return Vec::new();
+        };
+        let Some(area) = self.layout.box_of(index) else {
+            return Vec::new();
+        };
+        let scale = area.scale;
+        self.links_on(index)
+            .iter()
+            .map(|link| {
+                (
+                    Rect {
+                        left: link.rect.left * scale,
+                        top: link.rect.top * scale,
+                        width: link.rect.width * scale,
+                        height: link.rect.height * scale,
+                    },
+                    link.target.clone(),
+                )
+            })
+            .collect()
+    }
+
+    /// Follow a link, and say what the window has to do about it.
+    ///
+    /// A place in this document is a jump and is done here. An address is not
+    /// this struct's to open — there is no browser in a `Viewer` and there is
+    /// none in the harness either — so it is handed back, and whoever owns the
+    /// window decides what opening a link means. That is `onExternalLink` in
+    /// `main.ts`, which the app's own comment calls "the only thing allowed to
+    /// decide", one layer further out.
+    pub fn follow(&mut self, target: &Target) -> Option<String> {
+        match target {
+            Target::Place { page, offset } => {
+                self.jump_to(*page, *offset);
+                None
+            }
+            Target::Away(url) => {
+                self.notice = format!("Opened {url}");
+                Some(url.clone())
+            }
+        }
+    }
+
+    /* ------------------------------------------------- what a page is called */
+
+    /// Whether this document numbers its pages its own way.
+    pub fn has_labels(&self) -> bool {
+        !self.labels.is_empty()
+    }
+
+    /// What to call a page, one-based, when showing it to a reader.
+    pub fn label(&self, page: usize) -> String {
+        match self.labels.get(page.wrapping_sub(1)) {
+            Some(label) if !label.is_empty() => label.clone(),
+            _ => page.to_string(),
+        }
+    }
+
+    /// The page a reader means by what they typed.
+    ///
+    /// A label first, because that is what is printed on the page and what an
+    /// index cites; the position in the file second, so that "page 7" still
+    /// finds something in a document whose seventh page is called "vii" — and
+    /// because there is otherwise no way at all to reach a page whose label is
+    /// blank. `pageForLabel` in `viewer.ts`, in that order and for that
+    /// reason.
+    pub fn page_for_label(&self, text: &str) -> Option<usize> {
+        let wanted = text.trim();
+        if wanted.is_empty() {
+            return None;
+        }
+        let folded = wanted.to_lowercase();
+        if let Some(at) = self
+            .labels
+            .iter()
+            .position(|label| label.to_lowercase() == folded)
+        {
+            return Some(at + 1);
+        }
+        let number: usize = wanted.parse().ok()?;
+        (number >= 1 && number <= self.pages()).then_some(number)
+    }
+
+    /// What the field in the toolbar has in it.
+    pub fn page_field(&self) -> String {
+        if self.typing_page {
+            self.page_typed.clone()
+        } else {
+            self.label(self.page())
+        }
+    }
+
+    /// Put the reader in the page field, empty. `focusPageNumber` in
+    /// `main.ts`, which selects the field's contents instead — see
+    /// [`Viewer::typing_page`] for why emptying it is the same gesture here.
+    pub fn open_page_field(&mut self) {
+        self.typing_page = true;
+        self.page_typed.clear();
+    }
+
+    pub fn type_page(&mut self, text: &str) {
+        self.typing_page = true;
+        self.page_typed = text.to_string();
+    }
+
+    /// Go where the field says, or say that it says nowhere.
+    ///
+    /// Either way the field stops being typed in and goes back to naming the
+    /// page the reader is on, which is what the app does by putting the
+    /// current label back into it.
+    pub fn commit_page(&mut self) {
+        let typed = std::mem::take(&mut self.page_typed);
+        self.typing_page = false;
+        if typed.trim().is_empty() {
+            return;
+        }
+        match self.page_for_label(&typed) {
+            Some(page) => self.go_to_page(page),
+            None => {
+                self.notice = format!("There is no page {} in this document", typed.trim());
+            }
+        }
+    }
+
+    pub fn cancel_page(&mut self) {
+        self.typing_page = false;
+        self.page_typed.clear();
     }
 
     /// What a mark on this page would be called: the section it falls in.
@@ -735,7 +1037,7 @@ impl Viewer {
     /// `(rectangle, is the one the reader is on)`. Empty when the find bar is
     /// down, because a highlight that outlives the bar that made it is a mark
     /// on the page nobody asked for.
-    pub fn highlights(&self, page: usize) -> Vec<(CharBox, bool)> {
+    pub fn highlights(&self, page: usize) -> Vec<(Rect, bool)> {
         if !self.find_open {
             return Vec::new();
         }
@@ -749,7 +1051,7 @@ impl Viewer {
             .filter(|(_, current)| self.highlight_all || *current)
             .map(|(quad, current)| {
                 (
-                    CharBox {
+                    Rect {
                         left: quad.left * scale,
                         top: quad.top * scale,
                         width: quad.width * scale,
@@ -924,12 +1226,21 @@ impl Viewer {
 }
 
 /// One mounted page as the `rsx!` block needs it: which page, where its box
-/// is, and what is highlighted on it.
+/// is, and the two overlays that go on top of it.
 ///
-/// A named type because the tuple is six things and clippy is right that six
-/// is too many to read — and because naming it is the only comment the
-/// `boxes` line then needs.
-type Placed = (usize, f64, f64, f64, f64, Vec<(CharBox, bool)>);
+/// A struct rather than a tuple since links joined the highlights and made it
+/// seven things. The tuple was already at clippy's limit and reading the
+/// fourth `f64` in a row off its position was the sort of thing that is
+/// correct until somebody inserts a field.
+struct Placed {
+    index: usize,
+    top: f64,
+    left: f64,
+    width: f64,
+    height: f64,
+    hits: Vec<(Rect, bool)>,
+    links: Vec<(Rect, Target)>,
+}
 
 /// The element that wants the keyboard, as a selector.
 ///
@@ -1018,6 +1329,12 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             // guessed, and it is the one `main.rs` defaults to.
             .unwrap_or_else(|| Screen::fixed(1100.0, 900.0, 1.0))
     });
+    // Where a link out of the document goes. See [`Away`]: the default is the
+    // system browser, and a harness provides its own.
+    let away = use_hook(|| {
+        dioxus_core::try_consume_context::<Away>().unwrap_or_else(Away::to_the_system)
+    });
+
     let resize_from_window = {
         let screen = screen.clone();
         move |mut viewer: Signal<Viewer>| {
@@ -1094,7 +1411,6 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let mounted = held.layout.mounted(held.scroll_top);
     let content_width = held.layout.content_width();
     let content_height = held.layout.content_height();
-    let page = held.page();
     let pages = held.pages();
     let notice = held.notice.clone();
     let sidebar_open = held.sidebar_open;
@@ -1104,6 +1420,8 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let find_options = held.search.options();
     let highlight_all = held.highlight_all;
     let marked = held.store.is_marked(held.page());
+    let page_field = held.page_field();
+    let typing_page = held.typing_page;
     let zoom = match held.layout.fit {
         Fit::Width => "Fit width".to_string(),
         Fit::Page => "Fit page".to_string(),
@@ -1112,15 +1430,14 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let boxes: Vec<Placed> = mounted
         .iter()
         .filter_map(|&index| {
-            held.layout.box_of(index).map(|page| {
-                (
-                    index,
-                    page.top,
-                    page.left,
-                    page.width,
-                    page.height,
-                    held.highlights(index + 1),
-                )
+            held.layout.box_of(index).map(|page| Placed {
+                index,
+                top: page.top,
+                left: page.left,
+                width: page.width,
+                height: page.height,
+                hits: held.highlights(index + 1),
+                links: held.link_areas(index + 1),
             })
         })
         .collect();
@@ -1197,7 +1514,76 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 button { class: "chip zoom-out", onclick: move |_| viewer.write().zoom(false), "−" }
                 button { class: "chip zoom-in", onclick: move |_| viewer.write().zoom(true), "+" }
                 button { class: "chip theme", onclick: move |_| viewer.write().next_theme(), "{theme_name}" }
-                div { class: "pill", "{page} / {pages}" }
+                // The page field, which is a field rather than a readout for
+                // the app's own reason: stepping is fine for nudging and
+                // hopeless for arriving, and a reader with a citation in
+                // front of them has a number to type. What it shows is the
+                // page's *label* — see [`Viewer::label`].
+                div { class: "pill",
+                    // **A readout that becomes a field, rather than a field
+                    // that is always one**, which is where this parts company
+                    // with the app — and it is Blitz's focus rule that decides
+                    // it, not taste. The keyboard is handed back to the
+                    // innermost element asking for it (see
+                    // [`give_keyboard_back`]), so a field that is always in
+                    // the toolbar either always asks — and then every
+                    // keystroke in the reader goes into it — or stops asking
+                    // while still holding the focus, which is the same dead
+                    // keyboard one level along. The find bar has neither
+                    // problem because its field *stops existing* when the bar
+                    // closes, and the focus goes with it. This is that
+                    // mechanism, borrowed.
+                    if typing_page {
+                    input {
+                        class: "page-field",
+                        r#type: "text",
+                        value: "{page_field}",
+                        "aria-label": "Go to page",
+                        "data-keyboard": "goto",
+                        onmounted: move |event| {
+                            let node = event.data();
+                            let task = node.set_focus(true);
+                            spawn(async move { let _ = task.await; });
+                        },
+                        oninput: move |event| {
+                            let typed = event.value();
+                            viewer.write().type_page(&typed);
+                        },
+                        // The same two rules the find field has, and for the
+                        // same two reasons: a plain key typed here would
+                        // otherwise bubble to the root and scroll the
+                        // document, and Blitz applies a keystroke to a focused
+                        // field whatever modifier is held down.
+                        onkeydown: move |event| {
+                            let key = event.key();
+                            let modifiers = event.modifiers();
+                            let plain = !modifiers.meta() && !modifiers.ctrl() && !modifiers.alt();
+                            match key {
+                                Key::Enter => {
+                                    event.stop_propagation();
+                                    viewer.write().commit_page();
+                                }
+                                Key::Escape => {
+                                    event.stop_propagation();
+                                    viewer.write().cancel_page();
+                                }
+                                _ if plain => event.stop_propagation(),
+                                Key::Character(ref typed)
+                                    if matches!(typed.as_str(), "a" | "c" | "v" | "x" | "z") => {}
+                                _ => event.prevent_default(),
+                            }
+                        },
+                    }
+                    } else {
+                    button {
+                        class: "page-now",
+                        "aria-label": "Go to page",
+                        onclick: move |_| viewer.write().open_page_field(),
+                        "{page_field}"
+                    }
+                    }
+                    span { class: "of", "/ {pages}" }
+                }
             }
             // Not a popover and not over anything: the root is a flex column,
             // so the bar is a row in it and the document is what gets shorter.
@@ -1215,7 +1601,14 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                         // the keyboard — and it is inside the one that
                         // otherwise does, which is what makes the rule in
                         // `give_keyboard_back` "the innermost one asking".
-                        "data-keyboard": "find",
+                        //
+                        // Unless the page field is up, which is the one case
+                        // where two of them would ask at once: they are
+                        // siblings rather than one inside the other, so
+                        // "innermost" cannot separate them and would settle it
+                        // by document order — which would hand ⌥⌘G's field to
+                        // the find bar. Two fields never both ask.
+                        "data-keyboard": if typing_page { None } else { Some("find") },
                         onmounted: move |event| {
                             let node = event.data();
                             let task = node.set_focus(true);
@@ -1348,21 +1741,24 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     // reading the screen would check; a scroll offset is a
                     // number with no pixels of its own.
                     "data-scroll": "{scroll_top}",
-                    for (index, top, left, width, height, hits) in boxes {
+                    for placed in boxes {
                         Page {
                             // What `keyFor()` is: the page, the size it is
                             // drawn at, and the theme it is wearing. A change
                             // to any of them is a different node, which is
                             // what gives the old texture back — see `page.rs`.
-                            key: "{index}:{width}x{height}:{theme_name}",
+                            key: "{placed.index}:{placed.width}x{placed.height}:{theme_name}",
                             document: Handle(document.clone()),
                             chosen: chosen.clone(),
-                            index,
-                            top: top - scroll_top,
-                            left,
-                            width,
-                            height,
-                            hits,
+                            index: placed.index,
+                            top: placed.top - scroll_top,
+                            left: placed.left,
+                            width: placed.width,
+                            height: placed.height,
+                            hits: placed.hits,
+                            links: placed.links,
+                            viewer,
+                            away: away.clone(),
                         }
                     }
                 }
@@ -1395,7 +1791,18 @@ fn Page(
     /// PDF points, so it is a `div` over the page in the theme's own
     /// selection colours, and the glyphs underneath it are the ones pdfium
     /// drew.
-    hits: Vec<(CharBox, bool)>,
+    hits: Vec<(Rect, bool)>,
+    /// The document's own links on this page, in the same space as `hits`.
+    ///
+    /// A node each, for the reason the highlights are nodes: there is no text
+    /// layer here to hang an anchor off, and a rectangle is what a link
+    /// actually is in the file.
+    links: Vec<(Rect, Target)>,
+    /// Following a link is a jump, and a jump is the viewer's.
+    viewer: Signal<Viewer>,
+    /// …unless it leads out of the document, which is the window's. See
+    /// [`Away`].
+    away: Away,
 ) -> Element {
     // The widget is handed over the first time the attribute is set, so
     // `use_hook` is what keeps a re-render from building a second one — and
@@ -1431,6 +1838,42 @@ fn Page(
                     key: "{at}",
                     class: if *current { "hit current" } else { "hit" },
                     style: "position: absolute; top: {quad.top}px; left: {quad.left}px; width: {quad.width}px; height: {quad.height}px;",
+                }
+            }
+            for (at, (area, target)) in links.iter().enumerate() {
+                div {
+                    key: "l{at}",
+                    class: "link",
+                    // Deliberately not an `<a href>`, which is the app's own
+                    // decision made again for a different reason. There it is
+                    // that an anchor carrying the address navigates on a
+                    // middle click, which never reaches the click handler, so
+                    // the webview left the app and took the document with it.
+                    // Here it is that an `href` would go through `nav.rs`,
+                    // which is the chrome's door and knows nothing about
+                    // pages: an internal link would find no scheme it allows
+                    // and do nothing at all.
+                    role: "link",
+                    // A name, because the element has no text of its own: it
+                    // is a bare rectangle over printed words, and there is no
+                    // text layer here for it to reach them through. Without
+                    // one a page of cross-references reads as "link, link,
+                    // link" — the app's own finding, and the fix is cheaper
+                    // here because the destination is already resolved.
+                    "aria-label": match target {
+                        Target::Away(url) => url.clone(),
+                        Target::Place { page, .. } => format!("Page {page} of this document"),
+                    },
+                    style: "position: absolute; top: {area.top}px; left: {area.left}px; width: {area.width}px; height: {area.height}px;",
+                    onclick: {
+                        let target = target.clone();
+                        let away = away.clone();
+                        move |_| {
+                            if let Some(url) = viewer.write().follow(&target) {
+                                away.open(&url);
+                            }
+                        }
+                    },
                 }
             }
         }
@@ -1491,6 +1934,21 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
             let page = viewer.read().page();
             viewer.write().mark_page(page);
         }
+        Action::GoToPage => viewer.write().open_page_field(),
+        // Silence would be the wrong answer at the end of the history: the
+        // reader pressed a key and has no way to tell a shortcut that did
+        // nothing from one that is not bound. The app says the same two
+        // sentences.
+        Action::Back => {
+            if !viewer.write().go_back() {
+                viewer.write().notice = "Nowhere further back".to_string();
+            }
+        }
+        Action::Forward => {
+            if !viewer.write().go_forward() {
+                viewer.write().notice = "Nowhere further forward".to_string();
+            }
+        }
         Action::Find => {
             viewer.write().open_find();
         }
@@ -1502,7 +1960,15 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
         // with a complaint about what it did not do is worse than one that
         // does nothing.
         Action::Dismiss => {
-            if viewer.read().find_open {
+            // The page field first, because it is the thing the reader is
+            // most recently inside: pressing Escape while typing a number
+            // means "not that after all", not "close the find bar I opened a
+            // minute ago". Escape typed *into* the field never reaches here —
+            // the field stops it — so this is the case where the field is
+            // open and the pointer took the focus elsewhere.
+            if viewer.read().typing_page {
+                viewer.write().cancel_page();
+            } else if viewer.read().find_open {
                 viewer.write().close_find();
             }
         }

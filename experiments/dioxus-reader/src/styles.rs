@@ -101,10 +101,21 @@ body { margin: 0;
 .chip.on { color: var(--accent); }
 
 .pill {
-  height: 30px; min-width: 74px; padding: 0 12px; border-radius: 9px;
+  height: 30px; min-width: 74px; padding: 0 8px; border-radius: 9px;
   background: var(--sunk); color: var(--muted);
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
 }
+/* The number, typed. The unit is deliberately *not* in the field — the app
+   learned that the hard way: a field reading "16 px" puts the caret wherever
+   the pointer landed, so typing 30 gives "3016 px". Here the "/ 400" sits
+   beside it in a span of its own for the same reason. */
+.page-field, .page-now {
+  width: 44px; height: 24px; padding: 0 4px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text); font-size: 13.5px;
+  text-align: right;
+}
+.page-now:hover { background: var(--hover); }
+.of { color: var(--faint); font-size: 13.5px; }
 
 /* The find bar: a row of the column, so the document is what gets shorter.
    Nothing here is over anything, which is the one place Blitz's missing
@@ -130,6 +141,19 @@ body { margin: 0;
    grey the letters on a dark theme. */
 .hit { background: var(--found); opacity: 0.38; border-radius: 2px; }
 .hit.current { background: var(--found-now); opacity: 0.45; }
+
+/* A link, as the area the document says it is. Nothing is drawn: the colour
+   of a link is the *page's* business and is baked into the bitmap, exactly as
+   `tintLinks` bakes it in the app — a rectangle drawn over the words would be
+   the second thing saying so and the one that could disagree.
+
+   `z-index` is not decoration. Blitz only hit-tests a positioned node ahead
+   of its parent's normal-flow content when it carries a non-zero one, and
+   this has to come out in front of the page's own widget — which is exactly
+   the trap `.sidebar-resize` fell into, one level in. Above `.hit` for the
+   same reason it is above the widget: where a match falls on a
+   cross-reference, following the link is the gesture that meant something. */
+.link { z-index: 2; cursor: pointer; }
 
 /* The toolbar, then the document with the panel beside it, then the notice.
    A row inside the column, which is the whole of what a sidebar is here —

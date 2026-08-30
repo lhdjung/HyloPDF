@@ -60,32 +60,69 @@ pub struct Heading {
     pub page: Option<usize>,
 }
 
-/// One character of a page, and where it sits on it.
+/// A rectangle on a page, in the space everything above the renderer works in.
 ///
-/// **This is the thing pdf.js could not give and the reason the search here is
-/// half the size of the app's.** pdf.js hands over *runs* — a string and a
-/// transform — so `search.ts` has to fold the runs into one string, keep a
-/// `starts[]` saying where each run began, binary-search that to turn an
-/// offset back into a run and an offset inside it, and then hand the pair to
-/// the DOM to be measured against a text layer whose spans exist only to be
-/// selected. Every one of those steps is a place to be wrong, and the app has
-/// a comment at each of them saying which way.
+/// **One rectangle type, three things that are rectangles**: a character's
+/// cell, a match's quad, and the area a link is clicked in. It was `CharBox`
+/// while characters were the only ones, and the name outlived the fact — a
+/// link's hit area is not a character box by any reading, and two rectangle
+/// types would have been the worse answer to that.
 ///
+/// It is in **PDF points with the origin at the top left**, which is
+/// [`crate::layout`]'s space rather than the PDF's own: multiply by a
+/// [`crate::layout::PageBox`]'s `scale` and it is where the thing goes on
+/// screen. pdfium counts from the bottom, and the conversion belongs on the
+/// side that knows the page height rather than in every caller.
+///
+/// **The per-character half of this is the thing pdf.js could not give, and
+/// the reason the search here is half the size of the app's.** pdf.js hands
+/// over *runs* — a string and a transform — so `search.ts` has to fold the
+/// runs into one string, keep a `starts[]` saying where each run began,
+/// binary-search that to turn an offset back into a run and an offset inside
+/// it, and then hand the pair to the DOM to be measured against a text layer
+/// whose spans exist only to be selected. Every one of those steps is a place
+/// to be wrong, and the app has a comment at each of them saying which way.
 /// pdfium answers per character (`FPDFText_GetLooseCharBox`), so a match is a
 /// range of characters and a range of characters is already a list of
 /// rectangles. `starts`, `items`, `position()` and the text layer all go.
-///
-/// The box is in **PDF points with the origin at the top left**, which is
-/// [`crate::layout`]'s space rather than the PDF's own: multiply by a
-/// [`crate::layout::PageBox`]'s `scale` and it is where the highlight goes.
-/// pdfium counts from the bottom, and the conversion belongs on the side that
-/// knows the page height rather than in every caller.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CharBox {
+pub struct Rect {
     pub left: f64,
     pub top: f64,
     pub width: f64,
     pub height: f64,
+}
+
+/// Where one of the document's own links goes.
+///
+/// Two cases and no third, which is the same division `onExternalLink` in
+/// `main.ts` makes and for the same reason: opening a link is either a thing
+/// this window does or a thing the system does, and nothing else in a PDF is
+/// worth following. A `/Launch` action naming a program to run, which the
+/// format also allows, is neither — it is not carried here at all, so it
+/// cannot be followed by accident.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Target {
+    /// Out of the document: an address for the system to open.
+    Away(String),
+    /// Somewhere in this document: a page, one-based, and how far down it as
+    /// a fraction of its height. Zero is the top of the page, which is what a
+    /// destination naming no position means.
+    Place { page: usize, offset: f64 },
+}
+
+/// One of the document's own links: an area on the page, and where it goes.
+///
+/// The area is in the page's own points ([`Rect`]) rather than in fractions
+/// of it, which is where `viewer.ts` keeps them. The app's reason for
+/// fractions is that its link layer is a DOM overlay sized in percentages, so
+/// it survives a zoom without being rebuilt; here the overlay is rebuilt from
+/// the layout on every frame anyway — the page's box *is* the render — so
+/// points are one multiplication away from pixels and a fraction would be two.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Link {
+    pub rect: Rect,
+    pub target: Target,
 }
 
 /// A page's text, and where every character of it is.
@@ -96,7 +133,7 @@ pub struct CharBox {
 #[derive(Clone, Debug, Default)]
 pub struct PageText {
     pub chars: Vec<char>,
-    pub boxes: Vec<CharBox>,
+    pub boxes: Vec<Rect>,
 }
 
 impl PageText {
@@ -114,8 +151,8 @@ impl PageText {
     /// abut rather better than spans do, and the rule still holds — a run is
     /// extended while the next character sits on the same line, and a new one
     /// begins when it does not.
-    pub fn quads(&self, from: usize, to: usize) -> Vec<CharBox> {
-        let mut quads: Vec<CharBox> = Vec::new();
+    pub fn quads(&self, from: usize, to: usize) -> Vec<Rect> {
+        let mut quads: Vec<Rect> = Vec::new();
         for index in from..to.min(self.boxes.len()) {
             let glyph = self.boxes[index];
             // A character with no size is a space pdfium generated rather than
@@ -207,6 +244,34 @@ pub trait PageSource: Send + Sync {
     /// app already needed for a scan nobody put through OCR.
     fn text_of(&self, _index: usize) -> PageText {
         PageText::default()
+    }
+
+    /// The links on one page, in the order the document lists them.
+    ///
+    /// Asked per page and asked late, like the text: a document of typeset
+    /// mathematics has hundreds of cross-references on a page and there is no
+    /// reason to resolve any of them until the page is on screen.
+    ///
+    /// Empty for a renderer that cannot answer, for the reason [`Self::text_of`]
+    /// has a default: a reader over one still reads.
+    fn links_of(&self, _index: usize) -> Vec<Link> {
+        Vec::new()
+    }
+
+    /// What the document calls its own pages, one per page, or empty.
+    ///
+    /// A book's front matter is numbered i, ii, iii and its body starts again
+    /// at 1, so the twelfth page of the file is page xii and page 314 of the
+    /// index is not the 314th thing in the file. A reader typing a number off
+    /// a citation means the printed one.
+    ///
+    /// **Empty means "this document numbers its pages 1 to n"**, which is what
+    /// the great majority do and is the same thing `readLabels` in `viewer.ts`
+    /// decides by dropping a list that merely restates the position. A list
+    /// that says nothing is worse than no list: everything above would carry
+    /// it, look every page up in it, and get back the number it started with.
+    fn labels(&self) -> Vec<String> {
+        Vec::new()
     }
 
     /// What opening the document cost, in milliseconds — the other half of the

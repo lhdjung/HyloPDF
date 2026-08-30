@@ -112,7 +112,7 @@ fn matches_are_painted_on_the_page_and_the_switch_says_how_many() {
     assert_eq!(reader.state().hits, all, "and back");
 }
 
-/// Where a highlight is drawn is the question the whole of `CharBox` exists
+/// Where a highlight is drawn is the question the whole of `Rect` exists
 /// for, so it is asked directly: the rectangle is inside the page it belongs
 /// to, and it is not the whole of it.
 #[test]

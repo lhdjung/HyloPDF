@@ -21,7 +21,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 143 tests, about fifteen seconds
+cargo test                                   # 157 tests, about fifteen seconds
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -36,7 +36,9 @@ see Phase 3 item 2. `j`/`k` and the arrows move a line, `d`/`u` half a screen,
 space and Page Up/Down a screen, Home/End and `g g`/`G` the ends, `h`/`l` and
 the left/right arrows a page, ⌘+ and ⌘− zoom, ⌘0 fit width, ⌘1 actual size,
 ⌘2 fit page, ⌘B the sidebar, ⌘⇧B a mark on the page you are on, ⌘F the find
-bar with ⌘G and ⌘⇧G through the matches and Escape out of it. `s` spreads
+bar with ⌘G and ⌘⇧G through the matches and Escape out of it, `p` or ⌥⌘G the
+page field, ⌘[ and ⌘] back and forward through the places you jumped from.
+`s` spreads
 and `t` the next theme are this experiment's own and are not in the app. Any
 of them can be rebound in `keys.toml`; a key bound to something not built yet
 says so on the notice line. The theme, the zoom, the fit, the spread, the
@@ -454,6 +456,7 @@ thread.
 | `tests/keys.rs` | the keyboard: chords, the table, `keys.toml`, a rebound key, and the dispatch — `tests/keys.test.mjs`, carried across with the port |
 | `tests/sidebar.rs` | the panel: the contents listed and indented, a heading clicked and the one the reader is under, the column's mounting window, a thumbnail with ink on it, the document giving up exactly the panel's width, and a mark made, named, followed, taken off and remembered |
 | `tests/search.rs` | the find bar: opening and closing it, what is typed reaching the scan, the match the reader lands on, stepping and wrapping, a highlight's rectangle on the page, the three switches, the results tab, a key typed into the field not driving the document, and one slice not reading a whole book |
+| `tests/links.rs` | the links: where one is, where following it lands, the two ways a document writes a destination, an address handed to the system, a link that points nowhere; and the history, the labels and the page field |
 | `tests/cost.rs` | the memory assertion |
 | `tests/upstream.rs` | the four faults above, as the smallest thing that shows each |
 | `tests/recolor.rs` | the shader against the reference |
@@ -922,13 +925,144 @@ appearance of the same upstream fault. `give_keyboard_back` also picks the
 the keyboard while the bar is up and hands it back to the root when the bar
 goes: one rule, two elements, and no state anywhere saying which.
 
+### 5. Links, destinations, page labels and the go-to field — done
+
+A cross-reference is a rectangle you can click, a citation's page number is a
+number you can type, and both of them remember where you were so that ⌘[ comes
+back. Four things that look like four features and are one: they are the
+document's own account of where its parts are, and every one of them is a
+*jump*.
+
+**The renderer seam grew its fifth and sixth questions**, `links_of` and
+`labels`, and both are what the assessment's rule asks for — small in, small
+out. Three things about pdfium's answers.
+
+*A destination arrives two ways and a document uses either.* Most links carry
+a `/Dest` on the annotation; one written as a `/GoTo` action carries it under
+`/A`. That is the same fork `read_outline` already had for bookmarks, which is
+the sort of thing worth noticing: it is not a quirk of outlines, it is how the
+format works, and a reader that follows one route finds half the links in the
+wild. `fixture::links_pdf` writes one of each on purpose.
+
+*Where on the page a destination means is one call, not six.*
+`offsetWithin` in `viewer.ts` reads a raw destination array and switches on
+`XYZ`, `FitH` and `FitBH` by name; pdfium's `FPDFDest_GetLocationInPage`
+answers all seven view forms through `PdfDestinationViewSettings`, so the
+whole of it is "is there a y, and is a y what this form means". The 0.95 clamp
+is the app's and is kept for the app's reason: a destination at the very
+bottom of a page scrolls that page out of the window, and the reader lands
+looking at the next one with nothing to say why.
+
+*And a link with neither an action nor a destination is dropped at the
+renderer.* A `/Launch` naming a program, a `/JavaScript`, a `/Dest` that
+resolves to no page: each is a hit area over printed words that does nothing
+when it is clicked, which reads as the app being broken rather than as the
+document being odd. `a_link_that_points_nowhere_is_not_a_link` asks the
+renderer rather than the DOM, because it is a question about the document.
+
+**A link is a node and nothing is drawn**, which is the second half of what
+item 4 found about highlights. In the app, `tintLinks` bakes the link colour
+into the bitmap *and* `renderLinks` lays real anchors over the top in
+percentages of the page — two things, because a canvas cannot be clicked. Here
+the colour is still the page's business (pdfium draws whatever the document
+says, and `recolor` keeps a hue), and the clickable half is a `div` in points
+multiplied by the page's own scale. What goes with it is the whole of the app's
+percentage arithmetic and the comment explaining which fraction is of what:
+the page's box *is* the render here, so points are one multiplication from
+pixels and a fraction would be two.
+
+*It is deliberately not an `<a href>`*, which is the app's own decision made
+again for a different reason. There it is that an anchor carrying the address
+navigates on a middle click, which never reaches the click handler, so the
+webview left the app and took the document with it. Here an `href` would go
+through `nav.rs` — the chrome's door, which knows only http, https and
+mailto — and an internal link would find no scheme it allows and do nothing at
+all. Both ways round, the rule is that one place decides what following a link
+means.
+
+**Where an address goes is a context, not a call.** `Away` is `Screen`'s
+shape: the default is the system browser and is right in the app, and the
+harness provides its own, so `a_link_out_of_the_document_is_handed_to_the_system`
+asserts on the address without a browser window arriving on somebody's screen
+halfway through `cargo test`. A `Viewer` has no browser in it and neither has a
+test.
+
+**The history is fifty places deep and only jumps go in it.** `jumpTo` in
+`viewer.ts`, carried over with the distinction it exists for: scrolling,
+turning a page and stepping through search results move *through* a document
+and leave no trace; following a cross-reference, picking a chapter and typing
+a page number move *across* it. `scrolling_is_not_a_jump` is that sentence as
+a test. The one thing the app does that this had to be told to do as well is
+that a jump landing where the reader already is is not a jump — otherwise
+Escape from the page field, which re-runs the jump with the number already
+there, fills the history with copies of one place.
+
+**And the page field is a readout that becomes a field, which is where this
+parts company with the app.** The app's is always an `<input>`. Here that
+cannot work, and it is Blitz's focus rule that decides it rather than taste:
+the keyboard is handed back to the innermost element asking for it, so a field
+that is always in the toolbar either always asks — and then every keystroke in
+the reader goes into it, and no shortcut works again — or stops asking while
+still holding the focus, which is the same dead keyboard one level along. That
+second one is what the first version did, and the test that caught it is the
+one that presses `j` after Escape.
+
+The find bar has neither problem because its field *stops existing* when the
+bar closes and the focus goes with it. So the page field does the same: a
+button showing the label, an input while it is being typed into, and
+`onmounted` asking for the focus exactly as the find field does. It is the
+fourth appearance of the same upstream fault and the first time the answer was
+to change the interface rather than the shell.
+
+*Two fields must never both ask.* The page field and the find field are
+siblings rather than one inside the other, so "innermost" cannot separate them
+and would settle it by document order — which would hand ⌥⌘G's field to the
+find bar. The find field asks only while the page field is not up. One rule,
+two elements, and no third state saying which.
+
+**Labels are read at open and dropped if they say nothing.** A document that
+numbers its pages 1 to n has said exactly what the position already said, and
+carrying that list means every lookup runs for no reason — the app decides the
+same thing in `readLabels`, and here it is decided in `pdfium.rs`, at the one
+place that reads all of them. What a reader types is read as a label first and
+a position second, which is the order that makes a number off an index find
+what the index meant: in `fixture::links_pdf`, "3" is the label of page six
+*and* the position of page three, and page six is what it opens.
+
+*One consequence for the harness.* `state().page` used to come off a pill
+reading "4 / 400" and now comes off the field, which for a document with
+labels says "vii" and is not a number at all. That is the interface being
+right: a reader in the front matter of a book is on page vii, and nowhere on
+screen says it is also the seventh thing in the file. `state().label` is what
+the field says, and is the assertion to write for a document that numbers its
+own pages.
+
+**One bug fixed on the way, and it was in the fixtures.** `contents_pdf`,
+`prose_pdf` and now `links_pdf` each wrote a temporary file named for the
+*process* and renamed it into place — and `cargo test` runs its tests as
+threads of one process, so two tests wanting a fixture neither had yet wrote
+the same temporary and both renamed it: the first won and the second failed
+with `NotFound` on a file it had just written. It had never fired because no
+two tests had ever raced for the same new fixture. One `written()` now, with a
+counter in the name.
+
+*What is still missing from this item*: nothing follows a link with the
+keyboard, because there is no focus ring to walk and `tabindex` is not honoured
+in Blitz's focus walk (the same fault as item 3's). The links carry
+`role="link"` and a name saying where they go, which is what a screen reader
+needs and what the app had to add for the same reason — a bare rectangle over
+printed words has no text of its own, and a page of them otherwise reads as
+"link, link, link".
+
 ### What is not built
 
-No links, no text layer, no selection, no markup, no settings window, no
-Keyboard page, no watchers, one window — and of the library, only the half the
-marks needed. Two things in the assessment's Phase 1 scope that
-are also still absent: `measureCrop` (trim margins) and paged mode, both of
-which are layout and both of which the ported `Layout` has room for.
+No text layer, no selection, no markup, no settings window, no Keyboard page,
+no watchers, one window — and of the library, only the half the marks and the
+history needed, which is to say `touch` and `toggle_mark` and nothing about
+where you were. Two things in the assessment's Phase 1 scope that are also
+still absent: `measureCrop` (trim margins) and paged mode, both of which are
+layout and both of which the ported `Layout` has room for. Rotation and
+presenting are the rest of item 6.
 
 ---
 
@@ -962,7 +1096,11 @@ which are layout and both of which the ported `Layout` has room for.
   application whose shortcuts live on its own root stops answering them the
   first time anybody clicks anything. See Phase 3 item 3 — and item 4, where
   the same fault turns up a third time because a key can destroy the node that
-  had the focus.
+  had the focus, and item 5, where it turns up a fourth and decided the shape
+  of the page field: an element that stops asking for the keyboard while still
+  holding the focus is the same dead keyboard, and the only reliable way to
+  make it let go is to stop existing. `tabindex` honoured in the focus walk,
+  which is what a browser does, would answer all four.
 - Hit-testing that does not clip on `overflow: hidden`, so a node scrolled far
   out of its container is still clickable where its box says it is, over
   whatever is drawn there. Painting gets this right; only the hit test does

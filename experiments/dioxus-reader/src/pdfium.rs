@@ -13,7 +13,7 @@ use std::time::Instant;
 use pdfium_render::prelude::*;
 
 use crate::layout::Size;
-use crate::render::{Bitmap, CharBox, Heading, PageSource, PageText};
+use crate::render::{Bitmap, Heading, Link, PageSource, PageText, Rect, Target};
 
 /// The lock every call into pdfium is taken behind.
 ///
@@ -76,6 +76,9 @@ pub struct Document {
     /// bookmark tree behind the same lock every other call takes; what it
     /// saves is the sidebar having to be an async component to ask.
     outline: Vec<Heading>,
+    /// What the document calls its own pages, read once beside their sizes,
+    /// and empty when it calls them 1 to n. See [`PageSource::labels`].
+    labels: Vec<String>,
     opened_in: f64,
 }
 
@@ -114,17 +117,22 @@ impl Document {
         let document = pdfium
             .load_pdf_from_file(path, None)
             .map_err(|e| format!("{path}: {e}"))?;
-        let sizes = document
-            .pages()
-            .iter()
-            .map(|page| Size {
+        // One pass, because loading a page is what both of these cost and
+        // `pages().iter()` loads each one. Four hundred pages is a few
+        // milliseconds; asking twice would be twice that for no reason.
+        let mut sizes = Vec::with_capacity(document.pages().len() as usize);
+        let mut labels = Vec::with_capacity(sizes.capacity());
+        for page in document.pages().iter() {
+            sizes.push(Size {
                 width: page.width().value as f64,
                 height: page.height().value as f64,
-            })
-            .collect();
+            });
+            labels.push(page.label().unwrap_or_default().to_string());
+        }
         let outline = read_outline(&document);
         Ok(Document {
             path: path.to_string(),
+            labels: own_numbering(labels),
             sizes,
             outline,
             opened_in: began.elapsed().as_secs_f64() * 1000.0,
@@ -151,6 +159,83 @@ impl PageSource for Document {
 
     fn outline(&self) -> Vec<Heading> {
         self.outline.clone()
+    }
+
+    fn labels(&self) -> Vec<String> {
+        self.labels.clone()
+    }
+
+    /// The links on one page.
+    ///
+    /// Three things about pdfium's answer are worth knowing.
+    ///
+    /// *A link's area comes from the annotation and not from the action.*
+    /// `FPDFLink_GetAnnotRect` is the `/Rect` of the `/Link` annotation, in
+    /// the page's own points counting from the bottom — so the flip is the
+    /// same one [`PageSource::text_of`] does, in the same place, for the same
+    /// reason.
+    ///
+    /// *A destination arrives two ways and a document uses either.* Most
+    /// links carry a `/Dest`, which `destination()` answers; one written as a
+    /// `/GoTo` action carries it under `/A` instead, which is
+    /// `as_local_destination_action`. The bookmark walk below has exactly this
+    /// shape and for exactly this reason.
+    ///
+    /// *And a link with neither is dropped rather than kept as a dead
+    /// rectangle.* A `/Launch` action naming a program, a `/JavaScript`
+    /// action, a `/Dest` that resolves to no page: each of them is a hit area
+    /// over printed words that would do nothing when it was clicked, which
+    /// reads as the app being broken rather than as the document being odd.
+    fn links_of(&self, index: usize) -> Vec<Link> {
+        let _library = library();
+        let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(page) = held.document.pages().get(index as i32) else {
+            return Vec::new();
+        };
+        let height = page.height().value as f64;
+        let mut links = Vec::new();
+        for link in page.links().iter() {
+            let Ok(rect) = link.rect() else { continue };
+            let area = Rect {
+                left: rect.left().value as f64,
+                top: height - rect.top().value as f64,
+                width: (rect.right().value - rect.left().value) as f64,
+                height: (rect.top().value - rect.bottom().value) as f64,
+            };
+            // A link with no area is not a link anybody can click, whatever
+            // it points at.
+            if area.width <= 0.0 || area.height <= 0.0 {
+                continue;
+            }
+            let action = link.action();
+            let away = action
+                .as_ref()
+                .and_then(|action| action.as_uri_action())
+                .and_then(|uri| uri.uri().ok())
+                .filter(|uri| !uri.is_empty());
+            let target = match away {
+                Some(uri) => Target::Away(uri),
+                None => {
+                    let place = link.destination().or_else(|| {
+                        action
+                            .as_ref()?
+                            .as_local_destination_action()?
+                            .destination()
+                            .ok()
+                    });
+                    let Some(place) = place else { continue };
+                    let Ok(page) = place.page_index() else {
+                        continue;
+                    };
+                    Target::Place {
+                        page: page as usize + 1,
+                        offset: offset_within(&place, height),
+                    }
+                }
+            };
+            links.push(Link { rect: area, target });
+        }
+        links
     }
 
     fn opened_in(&self) -> f64 {
@@ -204,13 +289,13 @@ impl PageSource for Document {
             };
             let glyph = character
                 .loose_bounds()
-                .map(|rect| CharBox {
+                .map(|rect| Rect {
                     left: rect.left().value as f64,
                     top: height - rect.top().value as f64,
                     width: (rect.right().value - rect.left().value) as f64,
                     height: (rect.top().value - rect.bottom().value) as f64,
                 })
-                .unwrap_or(CharBox {
+                .unwrap_or(Rect {
                     left: 0.0,
                     top: 0.0,
                     width: 0.0,
@@ -277,6 +362,52 @@ impl PageSource for Document {
             drew_in,
         });
         Ok(())
+    }
+}
+
+/// How far down its page a destination sits, as a fraction of the page's
+/// height.
+///
+/// `offsetWithin` in `viewer.ts`, said in pdfium's own terms: `/XYZ` and the
+/// `Fit*` forms that name a top edge are the ones that say where on the page
+/// they mean, and everything else means the top of it. pdfium answers all of
+/// them through one call, so the six view settings collapse to "is there a y,
+/// and is a y what this form means".
+///
+/// Clamped at 0.95 for the app's reason: a destination at the very bottom of a
+/// page scrolls that page out of the window entirely, and the reader lands
+/// looking at the next one with nothing to say why.
+fn offset_within(destination: &PdfDestination, height: f64) -> f64 {
+    use PdfDestinationViewSettings as View;
+    let top = match destination.view_settings() {
+        Ok(View::SpecificCoordinatesAndZoom(_, Some(y), _)) => y,
+        Ok(View::FitPageHorizontallyToWindow(Some(y))) => y,
+        Ok(View::FitBoundsHorizontallyToWindow(Some(y))) => y,
+        _ => return 0.0,
+    };
+    if height <= 0.0 {
+        return 0.0;
+    }
+    // pdfium counts from the bottom of the page, as it does everywhere else
+    // here.
+    ((height - top.value as f64) / height).clamp(0.0, 0.95)
+}
+
+/// The labels, unless they say nothing.
+///
+/// See [`PageSource::labels`]: a document that labels its pages 1 to n has
+/// said exactly what the position already said, and a list of those is a list
+/// every lookup above would run for no reason. A document with no labels at
+/// all comes back from pdfium as a list of empty strings and is the same case.
+fn own_numbering(labels: Vec<String>) -> Vec<String> {
+    let says_nothing = labels
+        .iter()
+        .enumerate()
+        .all(|(index, label)| label.is_empty() || label == &(index + 1).to_string());
+    if says_nothing {
+        Vec::new()
+    } else {
+        labels
     }
 }
 

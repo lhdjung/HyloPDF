@@ -11,8 +11,11 @@
 //! tests through today. It is behind the `harness` feature, which `cargo test`
 //! turns on and `cargo build` does not, so nothing it needs is in the binary.
 //!
-//! What is not built: no links, no selection, no markup, no settings *window*,
-//! no Keyboard page, no watchers, one window. The sidebar is built —
+//! What is not built: no selection, no markup, no settings *window*, no
+//! Keyboard page, no watchers, one window. The document's own links are built,
+//! with the page labels and the go-to field that belong to the same question —
+//! where a document says its parts are — and the history that following one
+//! needs. The sidebar is built —
 //! [`sidebar`] — with the document's own contents, the reader's marks, a
 //! column of thumbnails and the search results in it. [`search`] is built
 //! too, and it is half the size of the app's because pdfium answers per

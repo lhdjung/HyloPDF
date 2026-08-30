@@ -20,6 +20,7 @@
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A body of PDF objects, numbered from 1, and the file they make.
 struct Pdf {
@@ -75,6 +76,34 @@ impl Pdf {
     }
 }
 
+/// A fixture on disk: built once and reused, and written so that two tests
+/// asking for it at the same moment both get the whole of it.
+///
+/// **Both halves of that are load-bearing, and the second one was wrong.** The
+/// rename is what `atomic_write` does and for its reason — a reader must never
+/// see half a file — but the temporary was named for the *process*, and
+/// `cargo test` runs its tests as threads of one process. Two tests wanting a
+/// fixture neither had yet wrote the same temporary and both renamed it: the
+/// first succeeded, the second failed with `NotFound` on a file it had just
+/// written. A counter is what makes the name a thread's rather than a
+/// process's; the rename itself is already atomic, so whichever lands last
+/// wins and both are the same bytes.
+fn written(name: &str, build: impl FnOnce() -> Vec<u8>) -> String {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let path: PathBuf = std::env::temp_dir().join(name);
+    if !path.is_file() {
+        let bytes = build();
+        let temp = path.with_extension(format!(
+            "{}.{}.part",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temp, &bytes).expect("write the fixture");
+        std::fs::rename(&temp, &path).expect("put the fixture in place");
+    }
+    path.to_string_lossy().into_owned()
+}
+
 /// One line of the table of contents a fixture is asked for: a title, the
 /// page it goes to, and the entries under it.
 pub struct Section {
@@ -127,17 +156,7 @@ pub fn expected_headings() -> Vec<(String, usize, usize)> {
 /// writing it is a millisecond and every test that wants it wants the same
 /// bytes.
 pub fn contents_pdf() -> String {
-    let path: PathBuf = std::env::temp_dir().join("hylopdf-fixture-contents.pdf");
-    if !path.is_file() {
-        let bytes = build(12);
-        // Written beside itself and renamed, for the same reason
-        // `atomic_write` does it: `cargo test` runs in parallel and two tests
-        // wanting this fixture at once must not read half of it.
-        let temp = path.with_extension(format!("{}.part", std::process::id()));
-        std::fs::write(&temp, &bytes).expect("write the fixture");
-        std::fs::rename(&temp, &path).expect("put the fixture in place");
-    }
-    path.to_string_lossy().into_owned()
+    written("hylopdf-fixture-contents.pdf", || build(12))
 }
 
 /// Six pages of prose, written to exercise the *fold* through the renderer
@@ -169,14 +188,7 @@ pub fn contents_pdf() -> String {
 /// same pair of objects a real typesetter emits, and is the reason a
 /// professionally set document does not contain "fi".
 pub fn prose_pdf() -> String {
-    let path: PathBuf = std::env::temp_dir().join("hylopdf-fixture-prose.pdf");
-    if !path.is_file() {
-        let bytes = build_prose();
-        let temp = path.with_extension(format!("{}.part", std::process::id()));
-        std::fs::write(&temp, &bytes).expect("write the fixture");
-        std::fs::rename(&temp, &path).expect("put the fixture in place");
-    }
-    path.to_string_lossy().into_owned()
+    written("hylopdf-fixture-prose.pdf", build_prose)
 }
 
 /// What each page of [`prose_pdf`] says: a list of runs, each naming the font
@@ -286,6 +298,121 @@ fn to_unicode(pdf: &mut Pdf, chars: &str) -> usize {
         cmap.len(),
         cmap
     ))
+}
+
+/// What [`links_pdf`] carries, so that a test can name a link rather than an
+/// index: the page it is on, the area it covers in **top-left points**, and
+/// where it goes.
+pub const LINKS: &[(usize, [f64; 4], &str)] = &[
+    // Page one: one address, one place in this document. Both are written the
+    // ordinary way, with a `/Dest` on the annotation.
+    (1, [72.0, 72.0, 128.0, 20.0], "https://example.com/paper"),
+    (1, [72.0, 122.0, 128.0, 20.0], "page 5"),
+    // Page two: the same thing said the other way, as a `/GoTo` action — which
+    // is the route `link.action()` answers and `link.destination()` does not.
+    (2, [72.0, 72.0, 128.0, 20.0], "page 6"),
+    // And a link that points nowhere at all, which is dropped rather than kept
+    // as a rectangle that does nothing when it is clicked.
+    (3, [72.0, 72.0, 128.0, 20.0], ""),
+];
+
+/// Where the internal link on page one lands, as a fraction of the page.
+///
+/// The destination is `/XYZ null 400 null` on a page 792 points tall, and
+/// pdfium counts from the bottom: 392 points down of 792.
+pub const LINK_OFFSET: f64 = (792.0 - 400.0) / 792.0;
+
+/// What the labelled pages of [`links_pdf`] are called, in order.
+///
+/// Three pages of front matter numbered in lower-case roman, then a body that
+/// starts again at 1 — which is the shape the whole of `label` and
+/// `page_for_label` exists for, and the shape no fixture in the app has.
+pub const LABELS: &[&str] = &["i", "ii", "iii", "1", "2", "3"];
+
+/// Six pages that carry links and number their own pages.
+///
+/// Two documents in one, because they are the same item of the plan and a
+/// second fixture is a second thing to keep true. The links are written three
+/// ways on purpose — see [`LINKS`] — and the labels are the `/PageLabels`
+/// number tree, which is the only way a PDF says what is printed on a page.
+pub fn links_pdf() -> String {
+    written("hylopdf-fixture-links.pdf", build_links)
+}
+
+fn build_links() -> Vec<u8> {
+    const PAGES: usize = 6;
+    let mut pdf = Pdf::new();
+    let catalog = pdf.reserve();
+    let tree = pdf.reserve();
+    let font = pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let page_ids: Vec<usize> = (0..PAGES).map(|_| pdf.reserve()).collect();
+
+    // The annotations, written after the pages are numbered because two of
+    // them name a page. `/Rect` is the PDF's own space, counting from the
+    // bottom, which is where [`LINKS`] stops agreeing with the file.
+    let external = pdf.add(
+        "<< /Type /Annot /Subtype /Link /Rect [72 700 200 720] /Border [0 0 0] \
+         /A << /S /URI /URI (https://example.com/paper) >> >>",
+    );
+    let internal = pdf.add(format!(
+        "<< /Type /Annot /Subtype /Link /Rect [72 650 200 670] /Border [0 0 0] \
+         /Dest [{} 0 R /XYZ null 400 null] >>",
+        page_ids[4],
+    ));
+    let by_action = pdf.add(format!(
+        "<< /Type /Annot /Subtype /Link /Rect [72 700 200 720] /Border [0 0 0] \
+         /A << /S /GoTo /D [{} 0 R /Fit] >> >>",
+        page_ids[5],
+    ));
+    // Neither an action nor a destination: a rectangle that means nothing.
+    let empty = pdf.add(
+        "<< /Type /Annot /Subtype /Link /Rect [72 700 200 720] /Border [0 0 0] >>",
+    );
+
+    for (index, &id) in page_ids.iter().enumerate() {
+        let text = format!("Page {} of the fixture.", index + 1);
+        let stream = format!("BT /F1 18 Tf 72 700 Td ({text}) Tj ET");
+        let content = pdf.add(format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            stream.len(),
+            stream
+        ));
+        let annots = match index {
+            0 => format!(" /Annots [{external} 0 R {internal} 0 R]"),
+            1 => format!(" /Annots [{by_action} 0 R]"),
+            2 => format!(" /Annots [{empty} 0 R]"),
+            _ => String::new(),
+        };
+        pdf.put(
+            id,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 612 792] \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R{annots} >>"
+            ),
+        );
+    }
+    pdf.put(
+        tree,
+        format!(
+            "<< /Type /Pages /Count {PAGES} /Kids [{}] >>",
+            page_ids
+                .iter()
+                .map(|id| format!("{id} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    );
+    // The number tree: pages 0..2 in lower-case roman, then a fresh decimal
+    // run starting at 1. `/St` is where the run starts and is the half a
+    // document usually gets wrong.
+    pdf.put(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R \
+             /PageLabels << /Nums [0 << /S /r >> 3 << /S /D /St 1 >>] >> >>"
+        ),
+    );
+    pdf.bytes()
 }
 
 fn build(pages: usize) -> Vec<u8> {

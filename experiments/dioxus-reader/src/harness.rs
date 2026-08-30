@@ -38,8 +38,10 @@
 //! reader.save_png("/tmp/page.png");
 //! ```
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -54,7 +56,7 @@ use keyboard_types::{Code, Key, Modifiers};
 use peniko::kurbo::Rect;
 use peniko::{Color, Fill};
 
-use crate::app::{Config, Handle, Reader as ReaderComponent, ReaderProps, Screen};
+use crate::app::{Away, Config, Handle, Reader as ReaderComponent, ReaderProps, Screen};
 use crate::page::Chosen;
 use crate::palette;
 use crate::render::{self, PageSource};
@@ -114,8 +116,18 @@ impl Default for Options {
 /// What the interface says about itself, read off the interface.
 #[derive(Clone, Debug, PartialEq)]
 pub struct State {
-    /// The page the reader is on, off the pill in the toolbar.
+    /// The page the reader is on, off the field in the toolbar.
+    ///
+    /// **0 for a document that numbers its pages its own way**, because what
+    /// the field holds is then "vii" and not a number at all — which is the
+    /// interface being right rather than this being wrong: a reader looking at
+    /// the front matter of a book is on page vii, and there is nowhere on
+    /// screen that says it is also the seventh thing in the file. `label` is
+    /// what the field actually says, and is the assertion to write for a
+    /// document with labels.
     pub page: usize,
+    /// What the page field says, verbatim.
+    pub label: String,
     pub pages: usize,
     /// "Fit width", "Fit page", "150%" — whatever the chip says.
     pub zoom: String,
@@ -166,9 +178,17 @@ pub struct Reader {
     width: u32,
     height: u32,
     scale: f64,
+    opened: Rc<RefCell<Vec<String>>>,
 }
 
 impl Reader {
+    /// Every address this reader has handed to the system, in order — see
+    /// [`crate::app::Away`]. Empty unless a link out of the document has been
+    /// followed, and nothing is ever actually opened.
+    pub fn opened(&self) -> Vec<String> {
+        self.opened.borrow().clone()
+    }
+
     /// Open a document with the default options.
     pub fn open(path: &str) -> Self {
         Self::open_with(path, Options::default())
@@ -213,8 +233,17 @@ impl Reader {
         // shell provider is asked for with `try_consume_context`, and without
         // one a page simply does not ask for a frame it is not going to get.
         let (width, height, scale) = (options.width as f64, options.height as f64, options.scale as f64);
+        // Where a link out of the document would have gone, written down
+        // instead of opened. The default is the system browser and is right in
+        // the app; a suite that took it would open a browser window on
+        // whoever is running `cargo test`.
+        let opened: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let recorder = opened.clone();
         vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(Screen::fixed(width, height, scale));
+            provide_context(Away::new(move |url| {
+                recorder.borrow_mut().push(url.to_string());
+            }));
         });
 
         let harness = Harness::from_vdom(
@@ -234,6 +263,7 @@ impl Reader {
             width: options.width,
             height: options.height,
             scale,
+            opened,
         };
         reader.focus_root();
         reader.settle();
@@ -425,16 +455,23 @@ impl Reader {
 
     /// What the interface says about itself.
     pub fn state(&self) -> State {
-        let pill = self.harness.text_content(".pill");
-        let (page, pages) = pill
-            .split_once('/')
-            .map(|(page, pages)| {
-                (
-                    page.trim().parse().unwrap_or(0),
-                    pages.trim().parse().unwrap_or(0),
-                )
-            })
-            .unwrap_or((0, 0));
+        // The page off the field and the count off the span beside it. It was
+        // one string in a pill until the field replaced the readout, and
+        // reading a number out of an `<input>` is reading its editor rather
+        // than its text: an input has no text content at all.
+        let label = match self.harness.query(".page-field") {
+            // Being typed into, and then what it says is what has been typed.
+            Some(_) => self.field(".page-field"),
+            None => self.harness.text_content(".page-now"),
+        };
+        let page = label.trim().parse().unwrap_or(0);
+        let pages = self
+            .harness
+            .text_content(".of")
+            .trim_start_matches('/')
+            .trim()
+            .parse()
+            .unwrap_or(0);
         let mounted = self.numbered(".page", "data-page");
         let thumbs = self.numbered(".thumb", "data-thumb");
         let sidebar_node = self.harness.query(".sidebar");
@@ -455,6 +492,7 @@ impl Reader {
             .unwrap_or(0.0);
         State {
             page,
+            label,
             pages,
             // By class rather than by position. They were read off the first
             // and the last of the chips, which was fine while there were four
@@ -476,21 +514,52 @@ impl Reader {
                 .harness
                 .query(".findbar")
                 .map(|_| self.harness.text_content(".find-count")),
-            query: self
-                .harness
-                .query(".find-field")
-                .map(|node| {
-                    let doc = self.harness.base();
-                    doc.get_node(node)
-                        .and_then(|node| node.element_data())
-                        .and_then(|element| element.text_input_data())
-                        .map(|input| input.editor.raw_text().to_string())
-                        .unwrap_or_default()
-                })
-                .unwrap_or_default(),
+            query: self.field(".find-field"),
             hits: self.harness.query_all(".hit").len(),
             results: self.numbered(".result", "data-result"),
         }
+    }
+
+    /// What is in a text field, which is not in the DOM as text: an input
+    /// holds an editor, and the editor holds the string. Empty when there is
+    /// no such field, which is how "the find bar is not up" reads.
+    fn field(&self, selector: &str) -> String {
+        self.harness
+            .query(selector)
+            .and_then(|node| {
+                let doc = self.harness.base();
+                doc.get_node(node)?
+                    .element_data()?
+                    .text_input_data()
+                    .map(|input| input.editor.raw_text().to_string())
+            })
+            .unwrap_or_default()
+    }
+
+    /// What every node matching `selector` says in one attribute, in document
+    /// order — and an empty string for one that does not carry it.
+    ///
+    /// Public because a test outside this crate cannot walk the DOM itself:
+    /// `blitz-dom` is not one of its dependencies and should not become one
+    /// for the sake of reading an attribute. `tests/links.rs` picks a link out
+    /// of a page by the name it tells a screen reader, which is the only thing
+    /// on it that says where it goes.
+    pub fn attribute_all(&self, selector: &str, attribute: &str) -> Vec<String> {
+        self.harness
+            .query_all(selector)
+            .into_iter()
+            .map(|node| {
+                let doc = self.harness.base();
+                doc.get_node(node)
+                    .and_then(|node| node.attrs())
+                    // By name rather than through `local_name!`, which only
+                    // knows the atoms the HTML spec has: some of these are
+                    // ours.
+                    .and_then(|attrs| attrs.iter().find(|attr| &*attr.name.local == attribute))
+                    .map(|attr| attr.value.to_string())
+                    .unwrap_or_default()
+            })
+            .collect()
     }
 
     /// Every node matching `selector`, as the number its `attribute` carries,
@@ -498,22 +567,9 @@ impl Reader {
     /// document's pages and the sidebar's thumbnails — because neither has
     /// pixels that say which page it is.
     fn numbered(&self, selector: &str, attribute: &str) -> Vec<usize> {
-        self.harness
-            .query_all(selector)
+        self.attribute_all(selector, attribute)
             .into_iter()
-            .filter_map(|node| {
-                let doc = self.harness.base();
-                let node = doc.get_node(node)?;
-                // By name rather than through `local_name!`, which only knows
-                // the atoms the HTML spec has: these are ours.
-                let attrs = node.attrs()?;
-                attrs
-                    .iter()
-                    .find(|attr| &*attr.name.local == attribute)?
-                    .value
-                    .parse()
-                    .ok()
-            })
+            .filter_map(|value| value.parse().ok())
             .collect()
     }
 

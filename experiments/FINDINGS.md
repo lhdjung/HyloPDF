@@ -1,5 +1,15 @@
 # Phase 0: what the four spikes answered
 
+**Phase 1 has since been built and measured** — `dioxus-reader/`, written up in
+`PHASE1.md` beside this file. Where the two disagree, that one is later and was
+measured on a running reader rather than on a spike. The three things it
+changes here: the mounting window and the LRU are ported and the per-page cost
+is settled (25MB and 12ms a page, two pages mounted); `vello_hybrid` was
+measured beside `vello` and is within 3% of it, which closes item 3 below; and
+the 112MB floor this file could not explain is now 105-111MB measured in
+release on the same two binaries, and is the number the whole proposal turns
+on.
+
 `dioxus-assessment.md` names four questions that can kill the Dioxus Native
 experiment, and says to answer them in a scratch crate before writing anything
 that looks like the app. This is that crate, and these are the answers.

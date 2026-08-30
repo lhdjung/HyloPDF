@@ -1,0 +1,38 @@
+[package]
+name = "dioxus-reader"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+
+# Phase 1 of the Dioxus Native experiment: a reader that reads. Not a member of
+# anything, for the same reason `dioxus-spike` is not — the app's crate is
+# `src-tauri` and this is the thing that might one day replace it.
+[workspace]
+
+[dependencies]
+dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
+dioxus-core = "0.7"
+dioxus-native = { path = "../../../blitz/packages/dioxus-native", default-features = false, features = ["vello", "system-fonts", "html", "svg"] }
+blitz-shell = { path = "../../../blitz/packages/blitz-shell", default-features = false, features = ["custom-widget"] }
+blitz-traits = { path = "../../../blitz/packages/blitz-traits" }
+blitz-dom = { path = "../../../blitz/packages/blitz-dom", default-features = false, features = ["custom-widget", "system-fonts", "svg"] }
+blitz-html = { path = "../../../blitz/packages/blitz-html" }
+blitz-paint = { path = "../../../blitz/packages/blitz-paint", default-features = false, features = ["custom-widget"] }
+anyrender = "0.13"
+anyrender_vello = "0.14"
+wgpu_context = "0.9"
+wgpu = "29"
+peniko = "0.6"
+winit = "=0.31.0-beta.2"
+webbrowser = "1"
+pdfium-render = { version = "0.9.3", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+[dev-dependencies]
+pollster = "1.0.1"

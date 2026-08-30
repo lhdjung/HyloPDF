@@ -91,6 +91,13 @@ unsafe impl Send for Open {}
 impl Document {
     pub fn open(path: &str) -> Result<Self, String> {
         let began = Instant::now();
+        // Asked before pdfium is, because pdfium answers it badly: a missing
+        // file comes back as `IoError(Os { code: 2, kind: NotFound, … })`,
+        // which is a Rust type name and a struct in front of the one fact
+        // worth saying. It is also much the commonest way to fail here.
+        if !std::path::Path::new(path).is_file() {
+            return Err(format!("{path}: there is no such file."));
+        }
         let _library = library();
         let pdfium = pdfium()?;
         let document = pdfium

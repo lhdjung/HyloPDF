@@ -16,7 +16,12 @@
 //! *The keyboard is one handler on the root, and that is enough.* Blitz sends
 //! a key to the focused node and falls back to the root element when there is
 //! none, and DOM events bubble — so a `keydown` on the root is the app-level
-//! handler `main.ts` has, including for a page, which cannot be focused. The
+//! handler `main.ts` has, including for a page, which cannot be focused. What
+//! it does with the key is not this file's: an event becomes a chord and a
+//! chord is looked up in [`crate::keymap`], which is `keys.ts` ported, over
+//! `keys.toml`, which is the app's own `keys.rs` mounted. What is left here is
+//! `perform` at the bottom — one arm per action, and the arms that are missing
+//! are the list of what Phase 3 has left to build. The
 //! winit route would be `use_window_event`, and it is closed to us: it takes
 //! its `WindowEventHandlers` out of a context that only `dioxus_native`'s own
 //! application provides, and the type is private, so a shell of our own cannot
@@ -57,6 +62,7 @@ use dioxus::prelude::*;
 use dioxus_native::CustomWidgetAttr;
 use serde_json::json;
 
+use crate::keymap::{Action, Keymap, Press};
 use crate::layout::{Anchor, Fit, Layout, Size, Spread};
 use crate::page::{Chosen, PageWidget};
 use crate::palette::Palette;
@@ -153,6 +159,15 @@ pub const CHROME: f64 = 46.0 + 30.0 + 2.0;
 /// How far one press of an arrow moves the page.
 const LINE: f64 = 60.0;
 
+/// What a screen keeps of itself when a screen is scrolled: the last lines of
+/// the old screen are the first lines of the new one, which is how somebody
+/// reading a paragraph across the join does not lose it. `scrollByViewport` in
+/// `viewer.ts` is the same number, and half a screen is half of *this* rather
+/// than half of the window — otherwise `d` twice and Space once land in two
+/// different places, which is exactly the sort of thing a reader notices and
+/// cannot name.
+const OVERLAP: f64 = 60.0;
+
 /// The zoom ladder, in the app's own steps.
 const ZOOMS: [f64; 13] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0, 3.0, 4.0,
@@ -182,6 +197,12 @@ pub struct Viewer {
     chosen: Chosen,
     /// One line at the bottom of the window, which is `notice()` in `ui.ts`.
     pub notice: String,
+    /// Every key the reader can press, and what it asks for. Built once from
+    /// the defaults with `keys.toml` over the top; see [`crate::keymap`].
+    pub keymap: Keymap,
+    /// The first half of a sequence, waiting to find out what follows it —
+    /// `g`, on its way to `g g`. Empty almost always.
+    pending: String,
     /// Bumped whenever every page has to be drawn again. It is not in the
     /// texture's key — the widget compares sizes and themes itself — but the
     /// components have to be told that something they cannot see has moved.
@@ -193,10 +214,24 @@ impl Viewer {
         let sizes = (0..document.pages())
             .map(|index| document.size_of(index))
             .collect();
+        // The reader's file over the defaults, and its complaints in front of
+        // the keymap's own: `keys.rs` reports the shapes TOML can describe and
+        // this side cannot use, `keymap` reports the chords and the action
+        // names — and to a reader looking at one line at the bottom of a
+        // window they are all just things wrong with `keys.toml`.
+        let file = store.keyboard();
+        let mut keymap = Keymap::build(crate::keymap::this_machine(), &file.bindings);
+        keymap.problems = file
+            .problems
+            .into_iter()
+            .chain(keymap.problems.drain(..))
+            .collect();
         let mut viewer = Viewer {
             layout: Layout::new(sizes),
             scroll_top: 0.0,
             notice: String::new(),
+            keymap,
+            pending: String::new(),
             generation: 0,
             chosen,
             document,
@@ -232,7 +267,16 @@ impl Viewer {
         // A theme naming a colour that cannot be read is the one thing here
         // worth a sentence on the screen, and `store` has already worked out
         // whether there is one.
-        if let Some(said) = self.store.complaint.clone() {
+        // Two things can be wrong with the reader's files at startup and
+        // there is one line to say so in. The theme wins, because it is about
+        // what is on the screen right now; the keyboard's is still there on
+        // the next keystroke that does nothing.
+        if let Some(said) = self
+            .store
+            .complaint
+            .clone()
+            .or_else(|| self.keymap.complaint())
+        {
             self.notice = said;
         }
     }
@@ -288,6 +332,23 @@ impl Viewer {
             Fit::Actual => "Actual size".into(),
         };
         self.store.set(vec![("fit_mode".into(), json!(name_of(fit)))]);
+    }
+
+    /// Actual size, which is a fit mode *and* a zoom of 1.
+    ///
+    /// The pair that never moves alone, and the reason `store.set` takes a
+    /// group: written one at a time, a zoom of 1 lands under a fit mode that
+    /// ignores it and the next run comes back fitted to the width.
+    pub fn actual_size(&mut self) {
+        self.keeping_place(|layout| {
+            layout.fit = Fit::Actual;
+            layout.zoom = 1.0;
+        });
+        self.notice = "Actual size".into();
+        self.store.set(vec![
+            ("zoom".into(), json!(1.0)),
+            ("fit_mode".into(), json!(name_of(Fit::Actual))),
+        ]);
     }
 
     pub fn zoom(&mut self, closer: bool) {
@@ -429,64 +490,41 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         viewer.write().scroll_to(top);
     };
 
-    // Every key the reader can press, in one place. The order of the arms
-    // does not decide which one answers — that was the fault the app's own
-    // keyboard was rewritten to remove — because a key is matched once.
+    // Every key the reader can press is an *action*, and a chord is only a
+    // way of asking for one. What was here before was a `match` on
+    // `event.key()` — which is the shape the app spent a rewrite getting out
+    // of, and it could not express ⌘0 at all: a modifier was something an arm
+    // had to remember to check, so the arms that did not check quietly
+    // answered chords nobody had pressed.
+    //
+    // Now the event is turned into a chord and the chord is looked up. The
+    // table is `keymap.rs` and the file over the top of it is `keys.toml`,
+    // both of them the app's own — see `crate::keymap`. What is left here is
+    // this: work out what was asked for, and do it.
     let on_key = move |event: KeyboardEvent| {
-        let shift = event.modifiers().shift();
-        let screen = viewer.read().layout.viewport.height;
-        let go = move |to: f64| scroll_to(to);
-        let by = move |delta: f64| {
-            let to = viewer.read().scroll_by(delta);
-            go(to);
+        let (press, screen) = {
+            let held = viewer.read();
+            (
+                held.keymap.press(
+                    &event.key(),
+                    event.code(),
+                    event.modifiers(),
+                    &held.pending,
+                ),
+                held.layout.viewport.height,
+            )
         };
-        match event.key() {
-            Key::ArrowDown => by(LINE),
-            Key::ArrowUp => by(-LINE),
-            Key::PageDown => by(screen * 0.92),
-            Key::PageUp => by(-screen * 0.92),
-            Key::Home => go(0.0),
-            Key::End => {
-                let to = viewer.read().layout.max_scroll();
-                go(to);
+        match press {
+            // `g`, on its way to `g g`. A sequence half pressed and then
+            // abandoned is dropped by the next chord that continues nothing,
+            // rather than by a timer: there is no `setTimeout` here, and the
+            // app's 1200ms one is a nicety rather than the behaviour.
+            Press::Wait(prefix) => viewer.write().pending = prefix,
+            Press::Nothing => viewer.write().pending.clear(),
+            Press::Act(action) => {
+                viewer.write().pending.clear();
+                perform(viewer, action, screen);
             }
-            Key::Character(ref pressed) => match pressed.as_str() {
-                " " if shift => by(-screen * 0.92),
-                " " => by(screen * 0.92),
-                "j" => by(LINE),
-                "k" => by(-LINE),
-                "d" => by(screen / 2.0),
-                "u" => by(-screen / 2.0),
-                "n" => {
-                    let to = {
-                        let held = viewer.read();
-                        held.page_target(held.page() + 1)
-                    };
-                    go(to);
-                }
-                "p" => {
-                    let to = {
-                        let held = viewer.read();
-                        held.page_target(held.page().saturating_sub(1).max(1))
-                    };
-                    go(to);
-                }
-                "t" => viewer.write().next_theme(),
-                "0" => viewer.write().set_fit(Fit::Width),
-                "9" => viewer.write().set_fit(Fit::Page),
-                "s" => {
-                    let spread = if viewer.read().layout.spread == Spread::Single {
-                        Spread::Cover
-                    } else {
-                        Spread::Single
-                    };
-                    viewer.write().set_spread(spread);
-                }
-                "+" | "=" => viewer.write().zoom(true),
-                "-" => viewer.write().zoom(false),
-                _ => {}
-            },
-            _ => {}
         }
     };
 
@@ -640,6 +678,70 @@ fn Page(
                 // say why, which is what `display: block` costs to avoid.
                 style: "display: block; width: {width}px; height: {height}px;",
             }
+        }
+    }
+}
+
+/// One handler per action, and a dispatch of about thirty lines — which is
+/// what `main.ts` has, and for the same reason: the table decides *which*
+/// action, so nothing here has to know anything about keys.
+///
+/// **The arms that are missing are the interesting half.** Every action in
+/// the app's table is carried across whether or not this reader can do it, so
+/// a key bound to something unbuilt says so rather than doing nothing —
+/// which turns the keyboard into a live list of what Phase 3 has left. It is
+/// also the honest answer to a reader who presses ⌘F: search is not there
+/// yet, and silence would be indistinguishable from a broken keymap.
+fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
+    fn by(mut viewer: Signal<Viewer>, delta: f64) {
+        let to = viewer.read().scroll_by(delta);
+        viewer.write().scroll_to(to);
+    }
+    fn to(mut viewer: Signal<Viewer>, top: f64) {
+        viewer.write().scroll_to(top);
+    }
+    fn page(mut viewer: Signal<Viewer>, page: usize) {
+        let target = viewer.read().page_target(page);
+        viewer.write().scroll_to(target);
+    }
+
+    match action {
+        Action::ScrollDown => by(viewer, LINE),
+        Action::ScrollUp => by(viewer, -LINE),
+        Action::HalfScreenDown => by(viewer, (screen - OVERLAP) / 2.0),
+        Action::HalfScreenUp => by(viewer, -(screen - OVERLAP) / 2.0),
+        Action::ScreenDown => by(viewer, screen - OVERLAP),
+        Action::ScreenUp => by(viewer, -(screen - OVERLAP)),
+        Action::FirstPage => to(viewer, 0.0),
+        Action::LastPage => {
+            let bottom = viewer.read().layout.max_scroll();
+            to(viewer, bottom);
+        }
+        Action::NextPage => {
+            let next = viewer.read().page() + 1;
+            page(viewer, next);
+        }
+        Action::PreviousPage => {
+            let previous = viewer.read().page().saturating_sub(1).max(1);
+            page(viewer, previous);
+        }
+        Action::ZoomIn => viewer.write().zoom(true),
+        Action::ZoomOut => viewer.write().zoom(false),
+        Action::FitWidth => viewer.write().set_fit(Fit::Width),
+        Action::FitPage => viewer.write().set_fit(Fit::Page),
+        Action::ActualSize => viewer.write().actual_size(),
+        Action::NextTheme => viewer.write().next_theme(),
+        Action::Spread => {
+            let next = if viewer.read().layout.spread == Spread::Single {
+                Spread::Cover
+            } else {
+                Spread::Single
+            };
+            viewer.write().set_spread(next);
+        }
+        not_built => {
+            let said = format!("{} is not built yet", crate::keymap::label(not_built));
+            viewer.write().notice = said;
         }
     }
 }

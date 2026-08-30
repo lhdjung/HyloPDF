@@ -1,9 +1,15 @@
 //! The reader, run.
 //!
 //! ```text
-//! cargo run --release -- book.pdf              # read it
-//! cargo run --release -- book.pdf --measure 60 # read it, and say what it cost
+//! cargo run --release                          # the 400-page fixture
+//! cargo run --release -- ~/paper.pdf           # a document of your own
+//! cargo run --release -- --measure 60          # read it, and say what it cost
 //! ```
+//!
+//! With no path it opens `tests/fixtures/book.pdf` from the app beside it,
+//! which is the document every number in `PROGRESS.md` was taken on. A path
+//! that is not there is said so plainly rather than being handed to pdfium,
+//! which reports it as a Debug-printed `io::Error`.
 //!
 //! `--measure N` scrolls through N screenfuls on its own and prints what the
 //! session cost — pages drawn, milliseconds each, texture resident, RSS. That
@@ -49,22 +55,26 @@ fn main() {
         .position(|arg| arg == "--theme")
         .and_then(|at| args.get(at + 1))
         .and_then(|value| value.parse::<usize>().ok());
-    let path = args
-        .iter()
-        .skip(1)
-        .find(|arg| arg.ends_with(".pdf"))
-        .cloned()
-        .unwrap_or_else(|| {
-            format!(
-                "{}/../../tests/fixtures/book.pdf",
-                env!("CARGO_MANIFEST_DIR")
-            )
-        });
+    let named = args.iter().skip(1).find(|arg| arg.ends_with(".pdf")).cloned();
+    let path = named.clone().unwrap_or_else(|| {
+        format!(
+            "{}/../../tests/fixtures/book.pdf",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    });
 
     let document: Arc<dyn render::PageSource> = match render::open(&path) {
         Ok(document) => document,
         Err(err) => {
             eprintln!("{err}");
+            // The one mistake worth a second sentence, because the documented
+            // invocation used to be `-- book.pdf` and the fixture is not in
+            // the directory cargo is run from.
+            if named.is_some() && !std::path::Path::new(&path).exists() {
+                eprintln!(
+                    "Run it with no path at all to open the 400-page fixture the numbers were taken on."
+                );
+            }
             std::process::exit(1);
         }
     };

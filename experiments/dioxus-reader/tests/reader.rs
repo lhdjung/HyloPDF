@@ -69,12 +69,14 @@ fn the_keys_move_the_reader() {
     reader.press("Home");
     assert_eq!(reader.state().scroll, 0.0);
 
-    // A page at a time, by name.
-    reader.press("n");
+    // A page at a time. Left and right turn pages in every scroll mode,
+    // which is the app's binding and the reason to reach for them rather than
+    // for the keys that move by a screen: landing on the top of a page.
+    reader.press("ArrowRight");
     assert_eq!(reader.state().page, 2);
-    reader.press("n");
+    reader.press("l");
     assert_eq!(reader.state().page, 3);
-    reader.press("p");
+    reader.press("h");
     assert_eq!(reader.state().page, 2);
 }
 
@@ -105,7 +107,7 @@ fn fit_and_zoom_say_what_they_did() {
     let wide = reader.harness.layout_rect(".page");
     assert!((wide.width - 1100.0).abs() < 1.0, "fit width fills it: {wide:?}");
 
-    reader.press("9");
+    reader.press_chord("mod+2");
     assert_eq!(reader.state().zoom, "Fit page");
     let fitted = reader.harness.layout_rect(".page");
     let viewer = reader.harness.layout_rect(".viewer");
@@ -114,12 +116,12 @@ fn fit_and_zoom_say_what_they_did() {
         "a fitted page is on the screen: {fitted:?} in {viewer:?}"
     );
 
-    reader.press("+");
+    reader.press_chord("mod++");
     let closer = reader.state();
     assert!(closer.zoom.ends_with('%'), "{closer:?}");
     assert_eq!(closer.notice, closer.zoom);
     let bigger = reader.harness.layout_rect(".page");
-    reader.press("-");
+    reader.press_chord("mod+-");
     let smaller = reader.harness.layout_rect(".page");
     assert!(smaller.width < bigger.width, "{smaller:?} {bigger:?}");
 }
@@ -131,8 +133,8 @@ fn zooming_keeps_the_reader_where_they_were() {
         reader.wheel_screen();
     }
     let before = reader.state().page;
-    reader.press("+");
-    reader.press("+");
+    reader.press_chord("mod++");
+    reader.press_chord("mod++");
     assert_eq!(reader.state().page, before, "a zoom is not a page turn");
 }
 
@@ -161,7 +163,7 @@ fn a_theme_is_named_where_it_is_changed() {
 #[test]
 fn spreads_put_two_pages_side_by_side() {
     let mut reader = book();
-    reader.press("n");
+    reader.press("ArrowRight");
     reader.press("s");
     let state = reader.state();
     assert!(
@@ -224,8 +226,8 @@ fn what_the_reader_changes_survives_being_closed() {
         assert_eq!(reader.state().theme, "Hylo Light", "a fresh directory");
         reader.press("t");
         reader.press("s");
-        reader.press("+");
-        reader.press("+");
+        reader.press_chord("mod++");
+        reader.press_chord("mod++");
         let state = reader.state();
         assert_ne!(state.theme, "Hylo Light");
         assert!(state.zoom.ends_with('%'), "a zoom, not a fit: {state:?}");

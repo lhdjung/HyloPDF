@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::palette::{self, Palette};
+use crate::keys;
 use crate::settings::{self, Settings};
 use crate::theme;
 
@@ -61,6 +62,10 @@ impl Store {
         // and every shipped file carries a banner saying so.
         theme::install_built_ins(&themes_dir);
         let themes = theme::load_all(&themes_dir);
+        // Once, and then never again: unlike a shipped theme this file is the
+        // reader's from the moment it exists, and every line of the template
+        // is a comment. `keys::install` is the app's own and says why.
+        keys::install(dir);
         let mut store = Store {
             settings: settings::load(dir),
             dir: dir.to_path_buf(),
@@ -71,6 +76,22 @@ impl Store {
         };
         store.complaint = store.unreadable();
         store
+    }
+
+    /// What `keys.toml` says, and the lines of it that were not usable.
+    ///
+    /// Read rather than held, because the one thing that will want it twice
+    /// is a Reload button — the app has one on its Keyboard page, for the
+    /// reason `keys.rs` gives: this directory is written to several times a
+    /// minute while somebody is scrolling, so a watcher over it would be
+    /// answering its own writes.
+    ///
+    /// The bindings are carried across as written. What an action *name*
+    /// means, and whether a chord can be read at all, is
+    /// [`crate::keymap`]'s — which is the same split the app has across its
+    /// bridge, and it did not have to move to get here.
+    pub fn keyboard(&self) -> keys::Keys {
+        keys::load(&self.dir)
     }
 
     pub fn themes(&self) -> &[theme::Theme] {

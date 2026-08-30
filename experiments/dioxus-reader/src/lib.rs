@@ -35,8 +35,15 @@
 //!
 //! Their own tests come with them, and `cargo test` runs them here: eleven
 //! about the settings table, the write race and hand-edited files, six about
-//! themes on disk. Those are not this crate's tests and this crate did not
-//! write them; they are the port working.
+//! themes on disk, five about `keys.toml`. Those are not this crate's tests
+//! and this crate did not write them; they are the port working.
+//!
+//! [`keys`] is the third of them and the most interesting, because its other
+//! half is TypeScript. In the app, `keys.rs` owns the *file* and `keys.ts`
+//! owns the meaning of a line, and the split had to be argued for across a
+//! bridge; here `keys.rs` is mounted unchanged and [`keymap`] is `keys.ts`
+//! ported beside it, so the same seam holds between two Rust modules. Nothing
+//! about it had to move.
 
 pub mod app;
 pub mod config;
@@ -44,6 +51,7 @@ pub mod gpu;
 /// Phase 2, and it is not in the binary: see the `harness` feature.
 #[cfg(feature = "harness")]
 pub mod harness;
+pub mod keymap;
 pub mod layout;
 pub mod nav;
 pub mod page;
@@ -57,6 +65,8 @@ pub mod store;
 pub mod styles;
 
 // The app's own, unchanged. See the module comment above.
+#[path = "../../../src-tauri/src/keys.rs"]
+pub mod keys;
 #[path = "../../../src-tauri/src/settings.rs"]
 pub mod settings;
 #[path = "../../../src-tauri/src/theme.rs"]

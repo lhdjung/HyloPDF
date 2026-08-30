@@ -94,6 +94,10 @@ strip = true
 
 [dev-dependencies]
 pollster = "1.0.1"
+# `tests/keys.rs` reads the app's own `keys.toml` and checks the table against
+# it, which is the drift no type checker can see. An integration test does not
+# inherit the library's dependencies, so it is named again here.
+toml = "0.8"
 # A dev-dependency on itself, which is legal and is the one way to make
 # `cargo test` build the library with a feature that `cargo build` leaves off.
 # Without it the harness would either be in the shipped binary or behind a flag

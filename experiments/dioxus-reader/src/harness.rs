@@ -38,6 +38,7 @@
 //! reader.save_png("/tmp/page.png");
 //! ```
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -49,7 +50,7 @@ use blitz_test_harness::{Harness, HarnessOptions};
 use dioxus::prelude::VirtualDom;
 use dioxus_core::{provide_context, ScopeId};
 use dioxus_native::DioxusDocument;
-use keyboard_types::{Key, Modifiers};
+use keyboard_types::{Code, Key, Modifiers};
 use peniko::kurbo::Rect;
 use peniko::{Color, Fill};
 
@@ -68,6 +69,13 @@ pub struct Options {
     /// A place in the theme list, as `--theme` takes. `None` is whatever the
     /// settings say, which in a fresh directory is Hylo Light.
     pub theme: Option<usize>,
+    /// `keys.toml`, as a table: action name against the keys it should
+    /// answer to. Written into the config directory before the reader opens,
+    /// so what is exercised is the real path — the app's own `keys::load`,
+    /// reading a real file off a real disk — rather than a table handed
+    /// straight to the keymap. `openApp({ keys: … })` in the app's harness is
+    /// the same trick against the browser twin of the same loader.
+    pub keys: BTreeMap<String, Vec<String>>,
     /// Where this reader's settings and themes live.
     ///
     /// **A directory of its own per reader, and that is not fastidiousness.**
@@ -97,6 +105,7 @@ impl Default for Options {
             height: 900,
             scale: 1.0,
             theme: None,
+            keys: BTreeMap::new(),
             config: scratch_config(),
         }
     }
@@ -158,6 +167,7 @@ impl Reader {
     /// The same, over a document already open — which is how a test opens one
     /// document and drives several readers over it.
     pub fn over(document: Arc<dyn PageSource>, options: Options) -> Self {
+        write_keys(&options.config, &options.keys);
         // Corrected in `Viewer::new` during the first render, before anything
         // is painted. See `main.rs`, which does the same.
         let chosen = Chosen::new(palette::FALLBACK);
@@ -243,6 +253,39 @@ impl Reader {
     pub fn press_with(&mut self, key: &str, modifiers: Modifiers) {
         let key = parse_key(key);
         self.harness.press_with(key, modifiers);
+        self.settle();
+    }
+
+    /// Press a chord, written the way `keys.toml` writes one: "mod+0",
+    /// "shift+g", "alt+left", "g".
+    ///
+    /// This is the shape a test wants, because it is the shape the binding it
+    /// is testing is written in — and it keeps the platform out of the test:
+    /// `mod` is ⌘ here and Ctrl on the machine CI runs on, exactly as it is
+    /// for the reader. `MOD` in the app's harness exists for the same reason.
+    pub fn press_chord(&mut self, chord: &str) {
+        let (key, code, modifiers) = spell_out(chord);
+        self.press_coded(key, code, modifiers);
+    }
+
+    /// A keystroke with a *physical key* behind it as well as a character.
+    ///
+    /// The one case that needs it is the one the app found the hard way:
+    /// Option is not a letter on a Mac, so ⌥⌘G arrives as ©, and what makes
+    /// the chord readable is `event.code` still saying `KeyG`. Upstream's
+    /// `key_event` sends `Code::Unidentified`, which is right for typing and
+    /// cannot express this.
+    pub fn press_coded(&mut self, key: Key, code: Code, modifiers: Modifiers) {
+        use blitz_test_harness::key_event;
+        use blitz_traits::events::{KeyState, UiEvent};
+
+        let mut down = key_event(key.clone(), KeyState::Pressed, modifiers);
+        down.code = code;
+        let mut up = key_event(key, KeyState::Released, modifiers);
+        up.code = code;
+        self.harness.dispatch(UiEvent::KeyDown(down));
+        self.harness.dispatch(UiEvent::KeyUp(up));
+        self.harness.pump();
         self.settle();
     }
 
@@ -456,6 +499,81 @@ impl Shot {
             .write_image_data(&self.rgba)
             .unwrap();
     }
+}
+
+/// A chord as `keys.toml` writes it, taken apart into the event a keyboard
+/// would have sent. The inverse of `keymap::parse_chord`, and deliberately in
+/// the harness rather than beside it: nothing the reader ships needs to turn a
+/// chord back into a keystroke.
+fn spell_out(chord: &str) -> (Key, Code, Modifiers) {
+    let mut rest = chord;
+    let mut modifiers = Modifiers::default();
+    while let Some(at) = rest.find('+') {
+        // `+` is a key as well as a separator: `mod++` is a chord whose key
+        // is the plus sign, and there is nothing before the last one to read
+        // as a modifier.
+        let (name, after) = rest.split_at(at);
+        let flag = match name {
+            "mod" => {
+                if crate::keymap::this_machine() {
+                    Modifiers::META
+                } else {
+                    Modifiers::CONTROL
+                }
+            }
+            "ctrl" => Modifiers::CONTROL,
+            "alt" => Modifiers::ALT,
+            "shift" => Modifiers::SHIFT,
+            _ => break,
+        };
+        modifiers |= flag;
+        rest = &after[1..];
+    }
+    let key = match rest {
+        "space" => Key::Character(" ".to_string()),
+        "escape" => Key::Escape,
+        "enter" => Key::Enter,
+        "tab" => Key::Tab,
+        "backspace" => Key::Backspace,
+        "delete" => Key::Delete,
+        "left" => Key::ArrowLeft,
+        "right" => Key::ArrowRight,
+        "up" => Key::ArrowUp,
+        "down" => Key::ArrowDown,
+        "pageup" => Key::PageUp,
+        "pagedown" => Key::PageDown,
+        "home" => Key::Home,
+        "end" => Key::End,
+        one if one.chars().count() == 1 => {
+            // A shifted letter reaches the page as the capital, which is what
+            // `chordsOf` reads: `shift+g` is G and not a shifted g.
+            if modifiers.shift() && one.chars().all(|c| c.is_ascii_lowercase()) {
+                Key::Character(one.to_uppercase())
+            } else {
+                Key::Character(one.to_string())
+            }
+        }
+        named => named
+            .parse()
+            .unwrap_or_else(|_| panic!("no key called {named:?}")),
+    };
+    (key, Code::Unidentified, modifiers)
+}
+
+/// The reader's `keys.toml`, written before the reader reads it. Nothing is
+/// written when there is nothing to say, so the ordinary test gets the
+/// defaults through the same path a fresh install does.
+fn write_keys(dir: &std::path::Path, keys: &BTreeMap<String, Vec<String>>) {
+    if keys.is_empty() {
+        return;
+    }
+    let mut body = String::new();
+    for (action, chords) in keys {
+        let quoted: Vec<String> = chords.iter().map(|c| format!("{c:?}")).collect();
+        body.push_str(&format!("{action} = [{}]\n", quoted.join(", ")));
+    }
+    let _ = std::fs::create_dir_all(dir);
+    std::fs::write(dir.join(crate::keys::FILE), body).expect("keys.toml");
 }
 
 /// "ArrowDown" is a named key and "j" is a character. `keyboard_types` parses

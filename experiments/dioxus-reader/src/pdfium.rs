@@ -15,6 +15,26 @@ use pdfium_render::prelude::*;
 use crate::layout::Size;
 use crate::render::{Bitmap, PageSource};
 
+/// The lock every call into pdfium is taken behind.
+///
+/// **`pdfium-render`'s `thread_safe` feature does not make pdfium thread
+/// safe.** All it does is `unsafe impl Send for Pdfium` and `Sync` beside it,
+/// plus a `Send + Sync` bound on the bindings accessor; nothing in the crate
+/// serialises a call. pdfium itself has process-wide state and no locking, and
+/// two threads inside it abort the process — `SIGABRT`, no panic, no message,
+/// no stack, which is a C++ `CHECK` failing the way `FLOOR.md` describes.
+///
+/// It was invisible while there was one document on one thread. It arrived
+/// with the harness: `cargo test` runs its tests in parallel, four of them
+/// opened four documents, and the whole binary vanished with exit code 134 and
+/// nothing on stderr. So the lock is the library's, not the document's — a
+/// per-document lock is exactly what was there and exactly what does not help.
+static LIBRARY: Mutex<()> = Mutex::new(());
+
+fn library() -> std::sync::MutexGuard<'static, ()> {
+    LIBRARY.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// The one pdfium instance, created on first use and kept for the life of the
 /// process. Leaked deliberately: every document and page borrows from it.
 fn pdfium() -> Result<&'static Pdfium, String> {
@@ -71,6 +91,7 @@ unsafe impl Send for Open {}
 impl Document {
     pub fn open(path: &str) -> Result<Self, String> {
         let began = Instant::now();
+        let _library = library();
         let pdfium = pdfium()?;
         let document = pdfium
             .load_pdf_from_file(path, None)
@@ -114,6 +135,9 @@ impl PageSource for Document {
         height: u32,
         take: &mut dyn FnMut(Bitmap),
     ) -> Result<(), String> {
+        // The library first, then the document — always in that order, which
+        // is what keeps two documents from deadlocking each other.
+        let _library = library();
         let mut held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let held = &mut *held;
         let page = held

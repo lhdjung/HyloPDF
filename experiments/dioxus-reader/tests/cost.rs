@@ -1,0 +1,98 @@
+//! What a reading session costs, asserted rather than observed.
+//!
+//! `FLOOR.md` ends with this on the list: the harness needs a memory
+//! assertion, and `footprint_mb()` is what it should assert on, because "three
+//! copies of every page" is exactly the shape a test catches and a reading
+//! session does not. It cost 96MB and went unnoticed through the whole of
+//! Phase 1.
+//!
+//! Two things about how it is asserted. It is a *growth* bound rather than a
+//! ceiling: what the process costs to start depends on the machine, the
+//! allocator and how many system fonts are installed, and none of that is what
+//! a leak looks like. And it is asserted on the same counter the app reports,
+//! so a number here can be compared with a number from `--measure`.
+//!
+//! This is the CPU path, which is not the one the app ships — a page here is
+//! an `ImageData` on the heap rather than a texture on the GPU. That makes it
+//! the *weaker* test of the two for absolute cost and the stronger one for
+//! leaks, because everything it holds is charged to the process and nothing is
+//! hidden behind a driver.
+
+use dioxus_reader::harness::{Options, Reader};
+use dioxus_reader::stats;
+
+/// A window small enough that the rasteriser is not the slow part.
+fn options() -> Options {
+    Options {
+        width: 700,
+        height: 560,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn reading_a_book_does_not_grow_without_bound() {
+    let (settled, _) = stats::footprint_mb();
+    if settled == 0.0 {
+        // Only macOS answers this without linking against mach. Elsewhere the
+        // counters below are still checked.
+        eprintln!("cost: no footprint on this platform; the counters still stand");
+    }
+
+    let mut reader = Reader::open_with(&Reader::book(), options());
+    // Ten screenfuls to reach a steady state — the first few pages drawn are
+    // where the one-off costs land — and then forty more to see whether it
+    // keeps climbing. Each one draws a page and rasterises a window, both on
+    // the CPU, which is a fifth of a second with the dependencies optimised
+    // and four seconds without: see `[profile.dev.package."*"]`.
+    for _ in 0..10 {
+        reader.wheel_screen();
+        reader.screenshot();
+    }
+    let (warm, _) = stats::footprint_mb();
+    let drawn_warm = stats::get(&stats::DRAWN);
+
+    for _ in 0..40 {
+        reader.wheel_screen();
+        reader.screenshot();
+    }
+    let (after, peak) = stats::footprint_mb();
+    let drawn = stats::get(&stats::DRAWN);
+    eprintln!(
+        "cost: {drawn} pages drawn ({} in the last forty screenfuls), \
+         {warm:.0}MB warm, {after:.0}MB after, {peak:.0}MB peak, \
+         {} mounted holding {:.0}MB",
+        drawn - drawn_warm,
+        stats::get(&stats::MOUNTED),
+        stats::get(&stats::RESIDENT) as f64 / 1e6,
+    );
+
+    assert!(
+        drawn > drawn_warm,
+        "the forty screenfuls drew something: {drawn} against {drawn_warm}"
+    );
+
+    // What is held is the mounting window and nothing else. A page at this
+    // size is 700 × 900-ish × 4 bytes; three of them is the most the layout
+    // ever mounts at once.
+    let mounted = stats::get(&stats::MOUNTED);
+    assert!(
+        mounted <= 4,
+        "the mounting window is a handful of pages: {mounted}"
+    );
+    let resident = stats::get(&stats::RESIDENT) as f64 / 1e6;
+    assert!(
+        resident < 40.0,
+        "and they are all it holds: {resident:.0}MB"
+    );
+
+    if settled > 0.0 {
+        let grew = after - warm;
+        assert!(
+            grew < 60.0,
+            "forty screenfuls after the first ten cost {grew:.0}MB \
+             ({warm:.0} → {after:.0}); a page that is not given back looks \
+             exactly like this"
+        );
+    }
+}

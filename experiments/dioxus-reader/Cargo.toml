@@ -29,6 +29,19 @@ default = ["vello-hybrid"]
 vello = ["dioxus-native/vello"]
 vello-hybrid = ["dioxus-native/vello-hybrid"]
 
+# The headless harness — Phase 2. It pulls in a second renderer (`vello_cpu`),
+# upstream's own test harness and a PNG encoder, none of which belong in a
+# binary whose size is one of the numbers this experiment is judged on. The
+# self dev-dependency below is what turns it on for `cargo test` and leaves it
+# off for `cargo build`.
+harness = [
+    "dep:blitz-test-harness",
+    "dep:anyrender_vello_cpu",
+    "dep:png",
+    "dep:keyboard-types",
+    "blitz-dom/system-fonts",
+]
+
 [dependencies]
 dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
 dioxus-core = "0.7"
@@ -47,6 +60,19 @@ winit = "=0.31.0-beta.2"
 webbrowser = "1"
 pdfium-render = { version = "0.9.3", default-features = false, features = ["pdfium_latest", "thread_safe"] }
 
+# The harness's own, optional. See the `harness` feature above.
+blitz-test-harness = { path = "../../../blitz/packages/blitz-test-harness", optional = true }
+anyrender_vello_cpu = { version = "0.17", optional = true }
+png = { version = "0.18", optional = true }
+keyboard-types = { version = "0.7", optional = true }
+
+# The rasteriser the harness draws through is `vello_cpu`, and an unoptimised
+# `vello_cpu` is about twenty times slower than an optimised one: the memory
+# test went from thirty seconds to under two. Dependencies are optimised even
+# in a debug build; this crate is not, so a panic still names a line.
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 codegen-units = 1
 lto = true
@@ -55,3 +81,12 @@ strip = true
 
 [dev-dependencies]
 pollster = "1.0.1"
+# A dev-dependency on itself, which is legal and is the one way to make
+# `cargo test` build the library with a feature that `cargo build` leaves off.
+# Without it the harness would either be in the shipped binary or behind a flag
+# every test run had to remember.
+dioxus-reader = { path = ".", features = ["harness"] }
+# Named again here so that a test can reach them directly, which only
+# `tests/upstream.rs` does — a minimal reproduction owes nothing to this crate.
+blitz-test-harness = { path = "../../../blitz/packages/blitz-test-harness" }
+dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }

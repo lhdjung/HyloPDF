@@ -50,9 +50,11 @@
 
 use std::sync::Arc;
 
+use std::rc::Rc;
+
 use dioxus::html::geometry::WheelDelta;
 use dioxus::prelude::*;
-use dioxus_native::{use_window, CustomWidgetAttr};
+use dioxus_native::CustomWidgetAttr;
 
 use crate::layout::{Anchor, Fit, Layout, Size, Spread};
 use crate::page::{Chosen, PageWidget};
@@ -70,6 +72,43 @@ pub struct Handle(pub Arc<dyn PageSource>);
 impl PartialEq for Handle {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// How big the window is, asked of whatever knows.
+///
+/// This used to be `use_window()`, which consumes an `Arc<dyn winit::Window>`
+/// from a context — and that is the one thing a headless test cannot provide:
+/// `dyn Window` is thirty-odd methods about a thing that does not exist. So
+/// the component asks for a number instead, the shell answers it out of the
+/// real window, and the harness answers it out of its own viewport. Width and
+/// height in logical pixels, and the scale factor beside them.
+///
+/// It is also the more honest shape. A component reaching into winit is a
+/// component that knows what it is running under, and the whole argument for
+/// keeping the seams narrow — `api.ts` in the app, `render.rs` here — says it
+/// should not.
+#[derive(Clone)]
+pub struct Screen(Rc<dyn Fn() -> (f64, f64, f64)>);
+
+impl PartialEq for Screen {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Screen {
+    pub fn new(size: impl Fn() -> (f64, f64, f64) + 'static) -> Self {
+        Screen(Rc::new(size))
+    }
+
+    /// A window of a fixed size, which is what a test has.
+    pub fn fixed(width: f64, height: f64, scale: f64) -> Self {
+        Screen::new(move || (width, height, scale))
+    }
+
+    pub fn get(&self) -> (f64, f64, f64) {
+        (self.0)()
     }
 }
 
@@ -245,8 +284,6 @@ pub fn Reader(document: Handle, chosen: Chosen, theme: usize) -> Element {
         viewer.set_theme(theme);
         viewer
     });
-    let window = use_window();
-
     // The viewport, taken from the window rather than from the element.
     //
     // `get_client_rect` is the obvious way and it panics: a `MountedData` call
@@ -256,14 +293,18 @@ pub fn Reader(document: Handle, chosen: Chosen, theme: usize) -> Element {
     // chrome above and below the document is a number this file knows. The
     // scroll event carries the real client size, so the first scroll corrects
     // whatever this got wrong.
+    let screen = use_hook(|| {
+        dioxus_core::try_consume_context::<Screen>()
+            // Nothing provided one, which is a shell that forgot rather than a
+            // situation to cope with — so the number is stated rather than
+            // guessed, and it is the one `main.rs` defaults to.
+            .unwrap_or_else(|| Screen::fixed(1100.0, 900.0, 1.0))
+    });
     let resize_from_window = {
-        let window = window.clone();
+        let screen = screen.clone();
         move |mut viewer: Signal<Viewer>| {
-            let size = window.surface_size();
-            let scale = window.scale_factor();
-            let width = size.width as f64 / scale;
-            let height = size.height as f64 / scale - CHROME;
-            viewer.write().resize(width, height.max(120.0));
+            let (width, height, _scale) = screen.get();
+            viewer.write().resize(width, (height - CHROME).max(120.0));
         }
     };
 
@@ -363,10 +404,16 @@ pub fn Reader(document: Handle, chosen: Chosen, theme: usize) -> Element {
     let chosen = chosen.clone();
     drop(held);
 
+    let variables = crate::styles::variables(&wearing);
+
     rsx! {
-        style { {crate::styles::sheet(&wearing)} }
+        // Never rewritten. See `styles.rs`: the theme is on the root as
+        // variables, because a stylesheet that changes while something is
+        // hovered takes Stylo down.
+        style { {crate::styles::SHEET} }
         div {
             class: "root",
+            style: "{variables}",
             tabindex: 0,
             onkeydown: on_key,
             // A key with nothing focused goes to the *root element*, which is
@@ -411,6 +458,12 @@ pub fn Reader(document: Handle, chosen: Chosen, theme: usize) -> Element {
                 div {
                     class: "pages",
                     style: "width: {content_width}px; height: {content_height}px;",
+                    // The one thing the reader can see and the DOM cannot
+                    // say. Everything else the harness asserts on is text in
+                    // the toolbar, which is better because it is what somebody
+                    // reading the screen would check; a scroll offset is a
+                    // number with no pixels of its own.
+                    "data-scroll": "{scroll_top}",
                     for (index, top, left, width, height) in boxes {
                         Page {
                             // What `keyFor()` is: the page, the size it is
@@ -463,6 +516,10 @@ fn Page(
     rsx! {
         div {
             class: "page",
+            // Which page this is. The mounting window is the single most
+            // load-bearing thing in `layout.rs` and it is invisible from
+            // outside without this.
+            "data-page": "{index + 1}",
             style: "position: absolute; top: {top}px; left: {left}px; width: {width}px; height: {height}px;",
             object {
                 "data": widget,

@@ -24,7 +24,7 @@ use blitz_dom::node::ComputedStyles;
 use blitz_dom::Widget;
 use dioxus_native::DeviceHandle;
 use peniko::kurbo::{Affine, Rect};
-use peniko::{Fill, ImageBrush, ImageSampler};
+use peniko::{Blob, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, ImageSampler};
 
 use blitz_traits::shell::ShellProvider;
 
@@ -117,6 +117,34 @@ pub struct PageWidget {
     /// establishing must otherwise stay false: a page is not an animation, but
     /// a page that has just arrived is one frame's worth of one.
     fresh: bool,
+    /// The same page, for a renderer that is not wgpu. See [`Software`].
+    software: Option<Software>,
+}
+
+/// A page drawn for a renderer with no GPU behind it.
+///
+/// Two things want this. The harness is the loud one: `paint_scene` runs a
+/// widget's `paint` with whatever `RenderContext` the scene is being built
+/// for, and a headless test builds it for `vello_cpu`, where
+/// `renderer_specific_context()` has no `DeviceHandle` in it and every page
+/// would otherwise come out blank — a screenshot test that passes because it
+/// photographed nothing. The quiet one is the risk row in the assessment:
+/// `vello_cpu` is the fallback for hardware Vello's compute path will not run
+/// on, and a reader whose pages are the one thing it cannot draw is not a
+/// fallback.
+///
+/// It costs a copy the GPU path does not pay. pdfium writes BGRA into a buffer
+/// it reuses; a `peniko::ImageData` owns its bytes through a `Blob`, and the
+/// recolouring reference works in RGBA — so the page is swizzled and
+/// recoloured into a buffer of its own, one per mounted page. That is the
+/// price of not having a device to hand the bytes to, and it is why this is
+/// the path not taken when there is one.
+struct Software {
+    image: ImageData,
+    width: u32,
+    height: u32,
+    /// What `PageTexture::wears` answers on the other path.
+    theme: Theme,
 }
 
 impl PageWidget {
@@ -136,6 +164,7 @@ impl PageWidget {
             recolorer: None,
             texture: None,
             fresh: false,
+            software: None,
         }
     }
 
@@ -156,6 +185,70 @@ impl PageWidget {
     }
 
 
+
+    /// The same two questions, answered on the CPU. See [`Software`].
+    ///
+    /// The one difference that matters is where the theme goes on: there is no
+    /// pass to re-run over a copy already uploaded, so a theme change is a
+    /// re-render here. That is `keyFor()`'s own answer, and it is what makes
+    /// this path a fallback rather than a design.
+    fn ensure_software(&mut self, width: u32, height: u32) -> Option<()> {
+        let theme = self.chosen.get();
+        if let Some(page) = self.software.as_ref() {
+            if page.width == width && page.height == height && page.theme == theme {
+                return Some(());
+            }
+        }
+
+        let mut pixels: Option<Vec<u8>> = None;
+        let began = Instant::now();
+        let outcome = self
+            .document
+            .render(self.index, width, height, &mut |bitmap| {
+                // BGRA as pdfium wrote it, in RGBA order because that is what
+                // the reference ramp reads — the swizzle the GPU path gets for
+                // free by uploading as `Bgra8Unorm`.
+                let mut rgba = bitmap.bgra.to_vec();
+                for pixel in rgba.chunks_exact_mut(4) {
+                    pixel.swap(0, 2);
+                }
+                if theme.recolor {
+                    crate::recolor::recolor_cpu(
+                        &mut rgba,
+                        theme.text,
+                        theme.background,
+                        theme.keep_colour,
+                    );
+                }
+                pixels = Some(rgba);
+            });
+        let drew = began.elapsed();
+        if let Err(err) = outcome {
+            eprintln!("{err}");
+            return None;
+        }
+        let pixels = pixels?;
+
+        if let Some(old) = self.software.take() {
+            stats::sub(&stats::RESIDENT, (old.width as u64) * (old.height as u64) * 4);
+        }
+        stats::add(&stats::DRAWN, 1);
+        stats::add(&stats::DREW_US, drew.as_micros() as u64);
+        stats::add(&stats::RESIDENT, (width as u64) * (height as u64) * 4);
+        self.software = Some(Software {
+            image: ImageData {
+                data: Blob::new(Arc::new(pixels)),
+                format: ImageFormat::Rgba8,
+                alpha_type: ImageAlphaType::AlphaPremultiplied,
+                width,
+                height,
+            },
+            width,
+            height,
+            theme,
+        });
+        Some(())
+    }
 
     /// Draw the page if it is not already drawn at this size, and put the
     /// theme on it if it is not already wearing it.
@@ -223,15 +316,15 @@ impl Widget for PageWidget {
             stats::sub(&stats::RESIDENT, texture.bytes());
         }
         Recolorer::forget();
-        match render_ctx
+        // No device means this is not wgpu — a headless test or the CPU
+        // fallback — and the page is drawn into a `peniko::ImageData` instead.
+        // See [`Software`].
+        if let Some(device) = render_ctx
             .renderer_specific_context()
             .and_then(|ctx| ctx.downcast::<DeviceHandle>().ok())
         {
-            Some(device) => {
-                self.recolorer = Some(Recolorer::shared(&device));
-                self.device = Some(*device);
-            }
-            None => eprintln!("page: the renderer is not wgpu; nothing can be drawn"),
+            self.recolorer = Some(Recolorer::shared(&device));
+            self.device = Some(*device);
         }
     }
 
@@ -242,6 +335,9 @@ impl Widget for PageWidget {
     fn destroy_surfaces(&mut self) {
         if let Some(texture) = self.texture.take() {
             stats::sub(&stats::RESIDENT, texture.bytes());
+        }
+        if let Some(page) = self.software.take() {
+            stats::sub(&stats::RESIDENT, (page.width as u64) * (page.height as u64) * 4);
         }
         self.device = None;
         self.recolorer = None;
@@ -265,7 +361,7 @@ impl Widget for PageWidget {
         stats::PAINTS.fetch_add(1, Ordering::Relaxed);
 
         let mut scene = Scene::new();
-        if self.device.is_none() {
+        if self.device.is_none() && self.software.is_none() {
             // `complete_resume` calls this for every widget in the document
             // when the renderer comes up; a page mounted later is caught here.
             self.can_create_surfaces(render_ctx);
@@ -275,6 +371,36 @@ impl Widget for PageWidget {
         // passed alongside for whatever wants to know. Multiplying by it again
         // draws every page at twice the size it is shown at.
         let (drawn_width, drawn_height) = Self::drawn_size(width, height);
+
+        // No device means no wgpu behind the scene being built — a headless
+        // test, or the CPU fallback. Everything below the size is the same
+        // question asked of a `peniko::ImageData` instead of a texture, and
+        // none of the frame-ordering dance applies: there is nothing to
+        // register, so there is nothing to register too early.
+        if self.device.is_none() {
+            if self.ensure_software(drawn_width, drawn_height).is_none() {
+                return scene;
+            }
+            let Some(page) = self.software.as_ref() else {
+                return scene;
+            };
+            let stretch = Affine::scale_non_uniform(
+                width as f64 / page.width as f64,
+                height as f64 / page.height as f64,
+            );
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                ImageBrush {
+                    image: &page.image,
+                    sampler: ImageSampler::default(),
+                },
+                Some(stretch),
+                &Rect::from_origin_size((0.0, 0.0), (width as f64, height as f64)),
+            );
+            return scene;
+        }
+
         if self.ensure(render_ctx, drawn_width, drawn_height).is_none() {
             return scene;
         }
@@ -315,6 +441,9 @@ impl Drop for PageWidget {
         // half of `mount()`/`OVERSCAN` that the accounting can see.
         if let Some(texture) = self.texture.take() {
             stats::sub(&stats::RESIDENT, texture.bytes());
+        }
+        if let Some(page) = self.software.take() {
+            stats::sub(&stats::RESIDENT, (page.width as u64) * (page.height as u64) * 4);
         }
         stats::sub(&stats::MOUNTED, 1);
     }

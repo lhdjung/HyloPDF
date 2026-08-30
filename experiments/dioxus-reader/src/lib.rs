@@ -10,9 +10,18 @@
 //! window. Those are Phase 3, and the point of leaving them out is that the
 //! memory and speed numbers this produces are about the thing being proposed
 //! rather than about a half-built app.
+//!
+//! **Phase 2 is here too, and it is [`harness`]** — the reader driven with no
+//! window and no screen, which is what replaces the Playwright harness the
+//! app tests through today. `experiments/PHASE2.md` is the write-up. It is
+//! behind the `harness` feature, which `cargo test` turns on and `cargo build`
+//! does not, so nothing it needs is in the binary.
 
 pub mod app;
 pub mod gpu;
+/// Phase 2, and it is not in the binary: see the `harness` feature.
+#[cfg(feature = "harness")]
+pub mod harness;
 pub mod layout;
 pub mod nav;
 pub mod page;

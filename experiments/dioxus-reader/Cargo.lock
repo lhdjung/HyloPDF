@@ -413,6 +413,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "blitz-test-harness"
+version = "0.3.0-beta.2"
+dependencies = [
+ "blitz-dom",
+ "blitz-html",
+ "blitz-traits",
+ "dioxus-core",
+ "dioxus-native-dom",
+ "keyboard-types 0.7.0",
+ "smol_str",
+]
+
+[[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -1128,16 +1141,21 @@ version = "0.0.0"
 dependencies = [
  "anyrender",
  "anyrender_vello",
+ "anyrender_vello_cpu",
  "blitz-dom",
  "blitz-html",
  "blitz-paint",
  "blitz-shell",
+ "blitz-test-harness",
  "blitz-traits",
  "dioxus",
  "dioxus-core",
  "dioxus-native",
+ "dioxus-reader",
+ "keyboard-types 0.7.0",
  "pdfium-render",
  "peniko",
+ "png",
  "pollster 1.0.1",
  "webbrowser",
  "wgpu",

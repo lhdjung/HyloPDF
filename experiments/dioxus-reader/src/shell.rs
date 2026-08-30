@@ -227,12 +227,29 @@ impl Shell {
         let windows = self.windows.clone();
         let winit_window = std::sync::Arc::clone(&view.window);
         let shell_provider = view.doc.inner().shell_provider.clone();
+        // What `use_window()` was reached for and the only thing it was
+        // reached for. See `Screen` in `app.rs`: a component that asks winit
+        // how big it is cannot be built without winit, and the harness has no
+        // window at all.
+        let screen = {
+            let window = std::sync::Arc::clone(&view.window);
+            crate::app::Screen::new(move || {
+                let size = window.surface_size();
+                let scale = window.scale_factor();
+                (
+                    size.width as f64 / scale,
+                    size.height as f64 / scale,
+                    scale,
+                )
+            })
+        };
         let doc = view.downcast_doc_mut::<DioxusDocument>();
         doc.vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(renderer);
             provide_context(windows);
             provide_context(winit_window);
             provide_context(shell_provider);
+            provide_context(screen);
         });
         doc.initial_build();
 

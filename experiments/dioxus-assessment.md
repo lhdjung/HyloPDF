@@ -9,8 +9,9 @@ Everything below was checked against the crates and status pages as they stand
 in August 2026, not from memory. Where a number is an estimate rather than a
 measurement it says so.
 
-**Phase 0 and Phase 1 have since been built and run** — `dioxus-spike/` and
-`dioxus-reader/`, written up in `FINDINGS.md` and `PHASE1.md` beside this file.
+**Phases 0, 1 and 2 have since been built and run** — `dioxus-spike/` and
+`dioxus-reader/`, written up in `FINDINGS.md`, `PHASE1.md`, `FLOOR.md` and
+`PHASE2.md` beside this file.
 Phase 1's gate came back *mixed*: a third less memory than Tauri (238MB against
 346MB on the same 400-page document), four times faster per page, three times
 the binary, and a fixed ~110MB floor that belongs to an empty Blitz window
@@ -599,12 +600,23 @@ Tauri's 373MB, once the window's cost turned out to be a renderer's fixed
 scratch buffers and the reader's own copying: see `FLOOR.md`, which is also
 where the metric these targets should have been stated in is argued.*
 
-### Phase 2 — the harness, before the app grows (1 week)
+### Phase 2 — the harness, before the app grows (1 week) — **built; see `PHASE2.md`**
 
 Headless `DioxusDocument`, software rasteriser, `press`/`click`/`wheel`/`state`/
 `screenshot`, reference PNGs. Port `search`, `keys`, `theme` and `settings`
 tests to `cargo test`. Do this *before* Phase 3, because the alternative is
 writing 10,000 lines with no net and finding out at the end.
+
+*Built, and it paid for itself on its first run: it found a panic inside Stylo
+on a plain click of the theme button in the shipping reader, and a
+`pdfium-render` feature called `thread_safe` that serialises nothing and aborts
+the process. Two corrections to the paragraph above. Most of the harness turned
+out to be upstream's — `blitz-test-harness` did not exist when this was
+written and does the document, the events and the DOM inspection. And there are
+no reference PNGs: the rasteriser is deterministic and the system fonts it
+draws with are not, so the pixel tests assert measurable properties instead.
+`search`, `keys` and `settings` have nothing to port yet, being Phase 3 items
+1, 2 and 4; what they needed was the surface, and that is what exists.*
 
 ### Phase 3 — parity, in the order the app was built (6-10 weeks)
 

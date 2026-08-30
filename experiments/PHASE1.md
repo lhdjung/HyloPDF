@@ -238,7 +238,8 @@ the thing being proposed rather than about a half-built app. Two things that
 margins) and paged mode, both of which are layout and both of which the ported
 `Layout` has room for.
 
-**The Phase 2 harness has its seed.** `Shell` takes an `Inject(WindowEvent)`
+**The Phase 2 harness has its seed.** *(It grew from a different one; see
+`PHASE2.md`.)* `Shell` takes an `Inject(WindowEvent)`
 embedder event and hands it to the window through `View::handle_winit_event`,
 which is public — so a test can move the pointer, turn the wheel and press a
 key with no OS involvement and the window in the background. `--measure` is
@@ -274,6 +275,11 @@ stands as it was written; item 1 is closed, and item 2 is now next.*
    experiment.
 2. **Phase 2, the harness**, before the app grows — unchanged from the
    assessment, and the injection path already exists.
+   *Built — `PHASE2.md`. It did not need the injection path in the end:
+   `blitz-test-harness` drives a `DioxusDocument` with no window at all, which
+   is a layer below the winit events `--measure` sends. Both are useful — that
+   one is the reader as the machine sees it, this one is the reader as the
+   reader does.*
 3. **Then Phase 3**, which is the long one.
 
 Nothing here argues for stopping. It argues for measuring the floor before

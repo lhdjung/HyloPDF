@@ -275,6 +275,9 @@ of page-sized textures reused rather than a new one per page, which is
    it: it needs a memory assertion, and `footprint_mb()` is what it should
    assert on. A regression like three copies of every page is exactly the shape
    a test catches and a reading session does not.
+   *Built — `PHASE2.md`. The assertion is `tests/cost.rs`, and it is a growth
+   bound rather than a ceiling: ten screenfuls to settle, forty more, and the
+   footprint may not climb across them.*
 5. **Two things to raise upstream, neither blocking.** `BufferSizes` sized from
    the scene rather than from paris-30k, and `PdfBitmap::as_raw_bytes` named as
    the copy it is — a function that looks like a view and allocates 24MB is a

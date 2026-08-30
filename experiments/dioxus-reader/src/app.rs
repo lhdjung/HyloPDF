@@ -212,6 +212,11 @@ pub struct Viewer {
     /// so a reader who reads with the contents open gets them back.
     pub sidebar_open: bool,
     pub sidebar_width: f64,
+    /// The pointer's `client_x` and the panel's width when the edge was
+    /// picked up — everything `drag_sidebar` needs and nothing it has to ask
+    /// the DOM for. `None` outside a drag, which is most of the time and is
+    /// what root's `onmousemove` checks before touching the signal at all.
+    resize_from: Option<(f64, f64)>,
     pub tab: Tab,
     /// Where the thumbnail column has been scrolled to. Ours for the reason
     /// the document's own scroll offset is ours — see the module comment.
@@ -248,6 +253,7 @@ impl Viewer {
             scroll_top: 0.0,
             sidebar_open: false,
             sidebar_width: 252.0,
+            resize_from: None,
             tab: Tab::Contents,
             thumb_scroll: 0.0,
             column: Column::default(),
@@ -397,6 +403,53 @@ impl Viewer {
         self.generation += 1;
         if self.sidebar_open {
             self.reveal_thumb();
+        }
+    }
+
+    /// The panel's edge has been picked up, at this `client_x`.
+    pub fn start_resize_sidebar(&mut self, client_x: f64) {
+        self.resize_from = Some((client_x, self.sidebar_width));
+    }
+
+    /// The pointer has moved to `client_x`. A no-op outside a drag, which is
+    /// what lets `onmousemove` sit on the root and fire on every move in the
+    /// window without a drag costing a render it did not ask for.
+    ///
+    /// **Only the panel's own width moves here — the document does not.**
+    /// `sidebar_width` is in `PageWidget`'s key alongside the page and the
+    /// theme (see `page.rs`), so relaying the document out at every width a
+    /// drag passes through is a fresh pdfium render and texture upload for
+    /// every mounted page, every frame, with nothing to show while either
+    /// runs: exactly the white flicker a reader sees. `.sidebar`'s own width
+    /// is a plain style attribute, so the boundary line still follows the
+    /// pointer — flexbox gives the `.viewer` box the room it has left for
+    /// free — and `finish_resize_sidebar` is the one relayout the drag
+    /// deferred, once, at wherever it landed.
+    pub fn drag_sidebar(&mut self, client_x: f64) {
+        let Some((start_x, start_width)) = self.resize_from else {
+            return;
+        };
+        let width = (start_width + (client_x - start_x))
+            .clamp(crate::sidebar::MIN_WIDTH, crate::sidebar::MAX_WIDTH);
+        self.sidebar_width = width;
+    }
+
+    /// The pointer let go: the one relayout the drag deferred, and the one
+    /// write — same reasoning as `toggle_sidebar`, and there is no debounced
+    /// write to reach for the way `main.ts`'s `setSoon` is for a zoom moving
+    /// under a pinch.
+    pub fn finish_resize_sidebar(&mut self) {
+        if self.resize_from.take().is_some() {
+            let (window_width, height) = (self.window_width, self.layout.viewport.height);
+            self.layout.viewport.width = -1.0;
+            self.resize(window_width, height);
+            // A whole number, because `same_shape` in `settings.rs` holds
+            // `sidebar_width` to the shape its default is — a distance in
+            // pixels — and a drag's arithmetic is not.
+            self.store.set(vec![(
+                "sidebar_width".into(),
+                json!(self.sidebar_width.round() as i64),
+            )]);
         }
     }
 
@@ -795,6 +848,28 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             // `give_keyboard_back`. A click takes the focus away from here
             // and a component cannot take it back.
             "data-keyboard": "reader",
+            // The sidebar's resize handle starts a drag but cannot track it:
+            // dragging widens the panel, which moves the pointer out from
+            // under whatever element it started on. These sit on the root
+            // instead — DOM events bubble, and the root is the one ancestor
+            // that spans the whole window regardless of which side the
+            // pointer ends up over. `drag_sidebar` is a no-op with nothing to
+            // drag, so an ordinary mouse move elsewhere is one `read` and
+            // nothing more — `write` marks the signal dirty on every call
+            // whether or not anything changed, and every move in the window
+            // reaches here.
+            onmousemove: move |event| {
+                if viewer.read().resize_from.is_none() {
+                    return;
+                }
+                let x = event.client_coordinates().x;
+                viewer.write().drag_sidebar(x);
+            },
+            onmouseup: move |_| {
+                if viewer.read().resize_from.is_some() {
+                    viewer.write().finish_resize_sidebar();
+                }
+            },
             div { class: "toolbar",
                 button {
                     // Not `.sidebar`, which is the panel itself: a selector

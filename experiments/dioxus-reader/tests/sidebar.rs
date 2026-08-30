@@ -243,6 +243,98 @@ fn the_document_gets_narrower_when_the_panel_opens() {
 }
 
 #[test]
+fn the_panel_can_be_dragged_wider_and_narrower_and_the_width_survives() {
+    let config;
+    {
+        let mut reader = book();
+        reader.press_chord("mod+b");
+        let start = reader.state().sidebar_width;
+        // Border-box, so one pixel over the setting for the border itself.
+        assert!((start - 252.0).abs() < 2.0, "the shipped default: {start}");
+
+        reader.drag_sidebar_edge(100.0);
+        let wider = reader.state().sidebar_width;
+        assert!(
+            (wider - (start + 100.0)).abs() < 2.0,
+            "widened by exactly what the pointer moved: {start} -> {wider}",
+        );
+
+        // Past `MAX_WIDTH`, which is `sidebar::MAX_WIDTH` and not repeated
+        // here so the test cannot drift from the number that actually
+        // clamps. Not dragged past the harness's own 1100px window: a
+        // pointer that leaves the window stops being tracked at all — real
+        // windows have the same limit, and the window is wide enough that
+        // `MAX_WIDTH` is reached well inside it.
+        reader.drag_sidebar_edge(500.0);
+        assert!(
+            (reader.state().sidebar_width - dioxus_reader::sidebar::MAX_WIDTH).abs() < 2.0,
+            "clamped at the wide end: {}",
+            reader.state().sidebar_width,
+        );
+
+        // And the narrow end, from the other direction: picked up at the
+        // edge's *current* position, which `drag_sidebar_edge` finds itself
+        // rather than assuming where the last drag left it.
+        reader.drag_sidebar_edge(-400.0);
+        assert!(
+            (reader.state().sidebar_width - dioxus_reader::sidebar::MIN_WIDTH).abs() < 2.0,
+            "clamped at the narrow end: {}",
+            reader.state().sidebar_width,
+        );
+
+        reader.drag_sidebar_edge(60.0);
+        config = reader.config.clone();
+    }
+    let width = Reader::open_with(
+        &Reader::book(),
+        Options {
+            config,
+            ..Default::default()
+        },
+    )
+    .state()
+    .sidebar_width;
+    let expected = dioxus_reader::sidebar::MIN_WIDTH + 60.0;
+    assert!(
+        (width - expected).abs() < 2.0,
+        "the dragged width is a setting too: {width}, wanted near {expected}",
+    );
+}
+
+/// `drag_sidebar` moves the panel's own width and nothing else — see its own
+/// doc comment on why. Every pixel a full relayout passed through used to be
+/// a fresh render and texture upload for every mounted page, with a blank
+/// `.page` (white, whatever the theme) to show in between: the flicker a
+/// reader watching the drag actually saw.
+#[test]
+fn the_document_does_not_relayout_until_the_drag_ends() {
+    let mut reader = book();
+    reader.press_chord("mod+b");
+    let before = reader.harness.layout_rect(".page");
+
+    let (x, y) = reader.harness.center_of(".sidebar-resize");
+    reader.harness.mouse_down_at(x, y);
+    reader.harness.move_mouse_to(x + 150.0, y);
+    reader.settle();
+    let mid_drag = reader.harness.layout_rect(".page");
+    assert_eq!(
+        (mid_drag.width, mid_drag.height),
+        (before.width, before.height),
+        "the page does not move while the pointer is still down",
+    );
+
+    reader.harness.mouse_up_at(x + 150.0, y);
+    reader.settle();
+    let after = reader.harness.layout_rect(".page");
+    assert!(
+        after.width < before.width,
+        "and relays out exactly once the pointer lets go: {} -> {}",
+        before.width,
+        after.width,
+    );
+}
+
+#[test]
 fn a_mark_is_a_toggle_and_survives_being_closed() {
     let config;
     let page;

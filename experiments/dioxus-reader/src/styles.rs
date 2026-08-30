@@ -95,9 +95,21 @@ body { margin: 0;
 }
 
 .sidebar {
-  flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
-  background: var(--surface); border-right: 1px solid var(--line);
+  position: relative; flex: 0 0 auto; display: flex; flex-direction: column;
+  min-height: 0; background: var(--surface); border-right: 1px solid var(--line);
 }
+/* Centred on the border rather than beside it, so the grab target is wider
+   than the one line it visually is. */
+.sidebar-resize {
+  /* `z-index` is not decoration here: Blitz only checks a positioned node
+     ahead of its parent's normal-flow content during hit-testing when it
+     carries a non-zero z-index (`pos_z_hoisted_children` in
+     `blitz-dom/src/node/node.rs`) — without it this loses every hit test to
+     `.panel`, which is later in the DOM and just as wide. */
+  position: absolute; top: 0; right: -3px; width: 6px; height: 100%;
+  z-index: 1; cursor: col-resize;
+}
+.sidebar-resize:hover { background: var(--accent); opacity: 0.35; }
 .tabs { display: flex; flex: 0 0 auto; gap: 4px; padding: 8px 8px 6px 8px; }
 .tab {
   flex: 1 1 auto; height: 26px; border: 0; border-radius: 8px;

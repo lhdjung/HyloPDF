@@ -703,10 +703,54 @@ inventing one would mean adding a key to `settings.rs` — the file this crate
 which is what `setDocument` does and is the difference between a panel and an
 empty box.
 
-*What is missing is the panel's third tab and its edge.* Search results are
-item 4. The panel cannot be dragged wider — `sidebar_width` is read and
-honoured and there is no handle to change it with, which needs a pointer drag
-and belongs with the other interface work.
+*What is missing is the panel's third tab.* Search results are item 4.
+
+**The edge can be dragged now, and it found a Blitz trap of its own.**
+`.sidebar-resize` is a 6px strip absolutely positioned over the panel's right
+border; picking it up sets `resize_from` on the `Viewer`, and `app.rs` puts the
+matching `onmousemove`/`onmouseup` on the *root* rather than the handle,
+because widening the panel carries the pointer out from under whatever
+started the drag — root is the one ancestor a bubbling event cannot leave.
+`drag_sidebar` is a no-op without a drag under way, which is what lets that
+handler sit on every mouse move in the window without costing a render it did
+not ask for.
+
+The trap: the handle never received a single mousedown. `hit_inner` in
+`blitz-dom` only checks a positioned descendant *ahead* of its parent's
+normal-flow content when that descendant carries a non-zero `z-index` — that
+is the sole test for `pos_z_hoisted_children`. Without one, an absolutely
+positioned node is still hit-tested in plain DOM order alongside its normal
+siblings, so `.panel` (later in the DOM, and just as wide) won the hit test
+over the handle stacked visually on top of it. `z-index: 1` fixed it; `right:
+-3px` centres the grab target on the border rather than beside it, which
+matters more here than in a browser because there is no cursor-only affordance
+to make up the difference. `tests/sidebar.rs` drags the handle through the
+harness's real `mouse_down_at`/`move_mouse_to`/`mouse_up_at` and
+checks the clamp at both ends and that the width survives being closed —
+though not past the harness's own window edge, which is the same limit a real
+window has without pointer capture: a drag that leaves the window stops being
+tracked, in this app and in an ordinary web page alike.
+
+**And the first working version flickered the whole document white while
+dragging.** `sidebar_width` sits in `PageWidget`'s key beside the page and the
+theme (see `page.rs`), so calling the ordinary `resize()` from `drag_sidebar`
+on every `mousemove` — right, by the pattern everything else here follows —
+meant a new key, and therefore a new widget with no texture yet, for every
+mounted page on every frame of the drag: a fresh pdfium render and upload each
+time, with nothing to show while either ran, which is `.page`'s own CSS
+background (`#ffffff`, unthemed, because the paper colour is baked into the
+bitmap by `recolor()` rather than declared in the stylesheet — see
+`AGENTS.md`, "Recolouring is baked into the bitmap, not applied by CSS"). Fast
+enough dragging read as the document flashing white regardless of theme.
+`drag_sidebar` now moves only `sidebar_width` itself, which is a plain style
+attribute `.sidebar` reads — the boundary line still tracks the pointer
+exactly, because that is flexbox reacting to the width, not a relayout; the
+document's own boxes are untouched until `finish_resize_sidebar` runs the one
+relayout the drag deferred, on release. The same trick `toggle_sidebar` and
+the settings write already used, just applied to the layout as well as the
+write. `the_document_does_not_relayout_until_the_drag_ends` is the regression
+test: the `.page` rect is unchanged through a mousedown and a move with the
+button still down, and only changes once `mouse_up_at` lands.
 
 ### A click cost the reader its keyboard, and had since Phase 1
 

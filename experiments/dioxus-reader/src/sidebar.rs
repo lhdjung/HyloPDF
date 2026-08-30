@@ -252,6 +252,18 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
 
     rsx! {
         div { class: "sidebar", style: "width: {width}px;",
+            // The edge, picked up to widen or narrow the panel. It cannot
+            // track its own drag — widening moves the pointer out from under
+            // it — so `onmousedown` only starts one; `app.rs` puts the
+            // `onmousemove` and `onmouseup` on the root, which is the one
+            // ancestor the pointer cannot leave.
+            div {
+                class: "sidebar-resize",
+                onmousedown: move |event| {
+                    let x = event.client_coordinates().x;
+                    viewer.write().start_resize_sidebar(x);
+                },
+            }
             div { class: "tabs",
                 button {
                     class: if tab == Tab::Contents { "tab on" } else { "tab" },

@@ -129,6 +129,10 @@ pub struct State {
     /// Whether the panel on the left is open, and which tab it is showing —
     /// "contents", "pages", or nothing at all when it is shut.
     pub sidebar: Option<String>,
+    /// The panel's own width, in CSS pixels — 0.0 when it is shut. Read off
+    /// its layout rather than off `sidebar_width` in the state, because a
+    /// drag test is asking what the reader would actually see.
+    pub sidebar_width: f64,
     /// Which thumbnails are in the DOM, one-based and in order: the column's
     /// own mounting window, which is what replaces `THUMB_CACHE`.
     pub thumbs: Vec<usize>,
@@ -332,6 +336,18 @@ impl Reader {
         self.settle();
     }
 
+    /// Pick up the panel's edge and carry it `by` pixels — negative narrows,
+    /// positive widens. Three real events, the same three a pointer sends,
+    /// because `drag_sidebar` reads its distance off the two ends of the
+    /// drag and nothing shorter would exercise that.
+    pub fn drag_sidebar_edge(&mut self, by: f32) {
+        let (x, y) = self.harness.center_of(".sidebar-resize");
+        self.harness.mouse_down_at(x, y);
+        self.harness.move_mouse_to(x + by, y);
+        self.harness.mouse_up_at(x + by, y);
+        self.settle();
+    }
+
     /// What the shell does after a click, done here instead.
     ///
     /// A click clears the focus off the reader and onto `<html>`, and from
@@ -374,13 +390,17 @@ impl Reader {
             .unwrap_or((0, 0));
         let mounted = self.numbered(".page", "data-page");
         let thumbs = self.numbered(".thumb", "data-thumb");
-        let sidebar = self.harness.query(".sidebar").map(|_| {
+        let sidebar_node = self.harness.query(".sidebar");
+        let sidebar = sidebar_node.map(|_| {
             if self.harness.query(".tab.on[data-tab='pages']").is_some() {
                 "pages".to_string()
             } else {
                 "contents".to_string()
             }
         });
+        let sidebar_width = sidebar_node
+            .map(|node| self.harness.layout_rect_of(node).width as f64)
+            .unwrap_or(0.0);
         State {
             page,
             pages,
@@ -398,6 +418,7 @@ impl Reader {
                 .unwrap_or(0.0),
             mounted,
             sidebar,
+            sidebar_width,
             thumbs,
         }
     }

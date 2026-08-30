@@ -171,15 +171,25 @@ impl PageWidget {
             }
         }
 
+        // The page is drawn into the renderer's own buffer and uploaded from
+        // it, inside the borrow — which is why the upload happens in a closure
+        // rather than after the call. See `render::Bitmap`.
         let began = Instant::now();
-        let bitmap = match self.document.render(self.index, width, height) {
-            Ok(bitmap) => bitmap,
-            Err(err) => {
-                eprintln!("{err}");
-                return None;
-            }
-        };
-        let drew = began.elapsed();
+        let mut uploaded_texture = None;
+        let mut uploaded = std::time::Duration::ZERO;
+        let outcome = self
+            .document
+            .render(self.index, width, height, &mut |bitmap| {
+                let began = Instant::now();
+                uploaded_texture = recolorer.upload(ctx, &bitmap, &theme);
+                uploaded = began.elapsed();
+            });
+        let drew = began.elapsed() - uploaded;
+        if let Err(err) = outcome {
+            eprintln!("{err}");
+            return None;
+        }
+        let texture = uploaded_texture?;
 
         // The old texture, if there is one, is dropped without being
         // unregistered — see the note above the struct. It is the widget's
@@ -187,10 +197,6 @@ impl PageWidget {
         if let Some(old) = self.texture.take() {
             stats::sub(&stats::RESIDENT, old.bytes());
         }
-
-        let began = Instant::now();
-        let texture = recolorer.upload(ctx, &bitmap, &theme)?;
-        let uploaded = began.elapsed();
 
         stats::add(&stats::DRAWN, 1);
         stats::add(&stats::DREW_US, drew.as_micros() as u64);

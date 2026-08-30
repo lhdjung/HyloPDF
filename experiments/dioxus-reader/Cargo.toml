@@ -10,10 +10,29 @@ license = "MIT OR Apache-2.0"
 # `src-tauri` and this is the thing that might one day replace it.
 [workspace]
 
+# Which renderer Blitz composites through, and it is the single largest
+# decision in this crate's memory.
+#
+# `vello` is the full compute pipeline. Before it draws anything it allocates
+# 173MB of scratch buffers whose sizes are hand-picked constants in
+# `vello_encoding` — "hand picked to accommodate the vello test scenes as well
+# as paris-30k", with a comment saying they should be derived from the scene
+# and are not. A page of a PDF and a toolbar is not paris-30k.
+#
+# `vello-hybrid` splits the work CPU/GPU and allocates none of it: an empty
+# window is 18.8MB against 208MB. It is upstream's default and it is ours.
+#
+# A build-time choice rather than a runtime one because
+# `DioxusNativeWindowRenderer` picks its inner renderer with `cfg_if`.
+[features]
+default = ["vello-hybrid"]
+vello = ["dioxus-native/vello"]
+vello-hybrid = ["dioxus-native/vello-hybrid"]
+
 [dependencies]
 dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
 dioxus-core = "0.7"
-dioxus-native = { path = "../../../blitz/packages/dioxus-native", default-features = false, features = ["vello", "system-fonts", "html", "svg"] }
+dioxus-native = { path = "../../../blitz/packages/dioxus-native", default-features = false, features = ["system-fonts", "html", "svg"] }
 blitz-shell = { path = "../../../blitz/packages/blitz-shell", default-features = false, features = ["custom-widget"] }
 blitz-traits = { path = "../../../blitz/packages/blitz-traits" }
 blitz-dom = { path = "../../../blitz/packages/blitz-dom", default-features = false, features = ["custom-widget", "system-fonts", "svg"] }

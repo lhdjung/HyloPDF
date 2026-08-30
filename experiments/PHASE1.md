@@ -1,5 +1,17 @@
 # Phase 1: a reader that reads
 
+**The question this file ends on has been answered — `FLOOR.md`, beside this
+one, and it changes the numbers below.** Two things in particular. *Every
+memory figure here is `ps -o rss`, which on macOS does not see GPU memory*, so
+the table understates by up to three times and the `vello`/`vello_hybrid`
+comparison at the bottom of "The gate" is wrong rather than imprecise — the
+real difference is 208MB against 19MB. And *the ~110MB floor this file could
+not explain was never Blitz's*: 173MB of it is a scene-independent constant in
+`vello`'s buffer sizing, and 96MB of it was this crate making three copies of
+every page it drew. With `vello_hybrid` and a page buffer that is reused, the
+same reading session is **144MB against Tauri's 373MB**, measured the same way.
+Read `FLOOR.md` before acting on anything below.
+
 `dioxus-assessment.md` is the plan, `FINDINGS.md` is what Phase 0's four spikes
 answered, and this is Phase 1: **open a document, scroll it, fit it, zoom it,
 put a theme on it** — with the layout ported from `viewer.ts` rather than
@@ -96,6 +108,13 @@ belongs to the stack rather than to the app.**
 is not the answer either**: 228MB idle and 230MB after sixty screenfuls,
 against 234MB and 238MB. Three per cent, and pages draw correctly through both.
 That closes item 3 on Phase 0's list.
+
+*It did not close it, and this paragraph is the reason `FLOOR.md` exists.*
+Those are resident sizes, and a GPU buffer is charged to a process's physical
+footprint rather than to its resident size — so the one measurement taken to
+decide between two renderers was taken in the one unit that cannot see the
+difference between them. As footprint: **208MB against 18.8MB** on an empty
+window. `vello_hybrid` is the default now.
 
 So the honest summary of the gate: **the per-page architecture is vindicated
 and the floor is not.** The binary is three times the size, the memory is two
@@ -239,6 +258,9 @@ supposed to buy, and the reason is a fixed ~200MB floor that is nothing to do
 with PDFs.
 
 Three ways forward, in the order I would take them:
+
+*Done, and the answer is in `FLOOR.md`: none of it was Blitz's. The list below
+stands as it was written; item 1 is closed, and item 2 is now next.*
 
 1. **Find out what the 110MB is made of** — the two spike binaries above make
    this a small, bounded question, because they reach it with none of this

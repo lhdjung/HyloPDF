@@ -44,6 +44,13 @@ pub fn get(counter: &AtomicU64) -> u64 {
 /// Read from the platform rather than counted, because the counters above are
 /// exactly the numbers that cannot see a leak they do not know about — which
 /// is how the thumbnail column stayed invisible in the app's own accounting.
+///
+/// **This is not what a Mac means by memory, and Phase 1's table was wrong to
+/// stop here.** A GPU buffer is charged to the process's *physical footprint*
+/// and only partly to its resident size, so a renderer that allocates 173MB of
+/// scratch on the device moves this number by single megabytes. See
+/// [`footprint_mb`], which is what Activity Monitor shows and what the kernel
+/// charges against a memory limit.
 pub fn rss_mb() -> f64 {
     #[cfg(unix)]
     {
@@ -62,12 +69,56 @@ pub fn rss_mb() -> f64 {
     0.0
 }
 
+/// This process's physical footprint and its peak, in megabytes.
+///
+/// The number GPU allocations actually land in. `vmmap --summary` is the only
+/// thing that reports it without linking against mach; it costs a few hundred
+/// milliseconds, so it is read where a session is summarised and never in a
+/// frame.
+#[cfg(target_os = "macos")]
+pub fn footprint_mb() -> (f64, f64) {
+    let pid = std::process::id().to_string();
+    let Ok(out) = std::process::Command::new("vmmap")
+        .args(["--summary", &pid])
+        .output()
+    else {
+        return (0.0, 0.0);
+    };
+    let (mut settled, mut peak) = (0.0, 0.0);
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Some((label, value)) = line.split_once(':') else {
+            continue;
+        };
+        // "227.3M", "1.8G", "996K" — vmmap's own spelling.
+        let text = value.trim();
+        let (number, scale) = match text.chars().last() {
+            Some('K') => (&text[..text.len() - 1], 1.0 / 1024.0),
+            Some('M') => (&text[..text.len() - 1], 1.0),
+            Some('G') => (&text[..text.len() - 1], 1024.0),
+            _ => (text, 1.0 / (1024.0 * 1024.0)),
+        };
+        let parsed = number.trim().parse::<f64>().unwrap_or(0.0) * scale;
+        match label.trim() {
+            "Physical footprint" => settled = parsed,
+            "Physical footprint (peak)" => peak = parsed,
+            _ => {}
+        }
+    }
+    (settled, peak)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn footprint_mb() -> (f64, f64) {
+    (0.0, 0.0)
+}
+
 /// One line describing where the session stands.
 pub fn line() -> String {
     let drawn = get(&DRAWN).max(1);
+    let footprint = footprint_mb();
     format!(
         "{} mounted | {} drawn, {:.1}ms each, {:.1}ms uploading | {} recoloured in place | \
-         {:.0}MB of texture | {:.0}MB resident | {} paints",
+         {:.0}MB of texture | {:.0}MB resident, {:.0}MB footprint (peak {:.0}MB) | {} paints",
         get(&MOUNTED),
         get(&DRAWN),
         get(&DREW_US) as f64 / 1000.0 / drawn as f64,
@@ -75,6 +126,8 @@ pub fn line() -> String {
         get(&REPAINTED),
         get(&RESIDENT) as f64 / 1e6,
         rss_mb(),
+        footprint.0,
+        footprint.1,
         get(&PAINTS),
     )
 }

@@ -14,8 +14,14 @@ measurement it says so.
 Phase 1's gate came back *mixed*: a third less memory than Tauri (238MB against
 346MB on the same 400-page document), four times faster per page, three times
 the binary, and a fixed ~110MB floor that belongs to an empty Blitz window
-rather than to anything this app does. Read `PHASE1.md` before acting on the
-targets below. All four gates pass. Where this document and
+rather than to anything this app does. **That floor has since been taken apart
+— `FLOOR.md` — and none of it belonged to Blitz.** 173MB was a
+scene-independent constant in `vello`'s buffer sizing, which `vello_hybrid`
+does not have, and 96MB was Phase 1's own reader copying every page three times
+on its way to the GPU. Measured as physical footprint rather than resident size,
+which is the only unit that sees GPU memory, the same reading session is
+**144MB against Tauri's 373MB** — so the gate below is met, not missed. Read
+`FLOOR.md` first, then `PHASE1.md`. All four gates pass. Where this document and
 that one disagree, that one was measured and this one was reasoned, and the
 paragraphs below have been corrected where it mattered. The largest correction
 is that the custom paint API this was planned against no longer exists: Blitz
@@ -586,9 +592,12 @@ per page in flight, GPU textures capped by the same LRU that caps canvases
 today — not predictions. **If the number lands near 300MB, the experiment has
 failed and the binary cost buys nothing.**
 
-*It landed at 238MB, and the shape of it was not what this paragraph expected:
-the pages cost almost nothing and the window costs almost everything. See "The
-gate" in `PHASE1.md`.*
+*It landed at 238MB resident, and the shape of it was not what this paragraph
+expected: the pages cost almost nothing and the window costs almost everything.
+See "The gate" in `PHASE1.md`. Then it landed at 144MB of footprint against
+Tauri's 373MB, once the window's cost turned out to be a renderer's fixed
+scratch buffers and the reader's own copying: see `FLOOR.md`, which is also
+where the metric these targets should have been stated in is argued.*
 
 ### Phase 2 — the harness, before the app grows (1 week)
 

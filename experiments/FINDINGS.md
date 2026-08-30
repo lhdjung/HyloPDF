@@ -1,5 +1,13 @@
 # Phase 0: what the four spikes answered
 
+**Every memory figure in this file is `ps -o rss`, which on macOS does not see
+GPU memory.** `FLOOR.md` is the correction and it is large: the 112MB floor
+below is 227MB by the measure that counts, 173MB of it is a constant in
+`vello`'s buffer sizing rather than anything Blitz does, and through
+`vello_hybrid` the same window is 18.8MB. Item 3 of "What this changes about
+the plan" at the foot of this file asked for exactly that comparison; it was
+made in `PHASE1.md` in the wrong unit and remade in `FLOOR.md` in the right one.
+
 **Phase 1 has since been built and measured** — `dioxus-reader/`, written up in
 `PHASE1.md` beside this file. Where the two disagree, that one is later and was
 measured on a running reader rather than on a spike. The three things it

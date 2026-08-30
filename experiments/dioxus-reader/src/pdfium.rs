@@ -50,6 +50,18 @@ pub struct Document {
 
 struct Open {
     document: PdfDocument<'static>,
+    /// The one buffer every page is drawn into.
+    ///
+    /// pdfium will make its own if asked (`render_with_config`), and then
+    /// `as_raw_bytes()` copies it into a `Vec` — two allocations of 24MB per
+    /// page at the sizes this app draws at, freed immediately and *not* handed
+    /// back by the allocator. `PdfBitmap::from_bytes` renders into a buffer we
+    /// own instead, so a document scrolled from end to end allocates once.
+    ///
+    /// It lives behind the same lock as the document because pdfium is not
+    /// thread safe and every render is already serialised through it — so
+    /// "one buffer" and "one page drawn at a time" are the same statement.
+    scratch: Vec<u8>,
 }
 
 // pdfium is not thread safe and everything here is behind the lock; the
@@ -74,7 +86,10 @@ impl Document {
         Ok(Document {
             sizes,
             opened_in: began.elapsed().as_secs_f64() * 1000.0,
-            inner: Mutex::new(Open { document }),
+            inner: Mutex::new(Open {
+                document,
+                scratch: Vec::new(),
+            }),
         })
     }
 }
@@ -92,24 +107,57 @@ impl PageSource for Document {
         self.opened_in
     }
 
-    fn render(&self, index: usize, width: u32, height: u32) -> Result<Bitmap, String> {
-        let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+    fn render(
+        &self,
+        index: usize,
+        width: u32,
+        height: u32,
+        take: &mut dyn FnMut(Bitmap),
+    ) -> Result<(), String> {
+        let mut held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let held = &mut *held;
         let page = held
             .document
             .pages()
             .get(index as i32)
             .map_err(|e| format!("page {index}: {e}"))?;
+
+        // A row can be wider than the pixels in it; ask rather than assume.
+        // (For BGRA it works out at exactly four bytes a pixel, because the
+        // stride is rounded up to a multiple of four and it is already one.)
+        let wanted = PdfBitmap::bytes_required_for_size_and_format(
+            width as i32,
+            height as i32,
+            PdfBitmapFormat::BGRA,
+        );
+        if held.scratch.len() != wanted {
+            // Only when the size actually changes — which is a zoom or a
+            // window resize, not a page turn.
+            held.scratch.clear();
+            held.scratch.resize(wanted, 0);
+        }
+        let mut bitmap =
+            PdfBitmap::from_bytes(
+                width as i32,
+                height as i32,
+                PdfBitmapFormat::BGRA,
+                &mut held.scratch,
+            )
+                .map_err(|e| format!("page {index}: {e}"))?;
+
         let config = PdfRenderConfig::new().set_target_size(width as i32, height as i32);
         let began = Instant::now();
-        let bitmap = page
-            .render_with_config(&config)
+        page.render_into_bitmap_with_config(&mut bitmap, &config)
             .map_err(|e| format!("page {index}: {e}"))?;
         let drew_in = began.elapsed().as_secs_f64() * 1000.0;
-        Ok(Bitmap {
-            width: bitmap.width() as u32,
-            height: bitmap.height() as u32,
-            bgra: bitmap.as_raw_bytes().to_vec(),
+        drop(bitmap);
+
+        take(Bitmap {
+            width,
+            height,
+            bgra: &held.scratch,
             drew_in,
-        })
+        });
+        Ok(())
     }
 }

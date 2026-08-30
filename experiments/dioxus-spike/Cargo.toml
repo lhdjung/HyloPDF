@@ -24,11 +24,13 @@ blitz-html = { path = "../../../blitz/packages/blitz-html" }
 blitz-paint = { path = "../../../blitz/packages/blitz-paint", default-features = false, features = ["custom-widget"] }
 anyrender = "0.13"
 anyrender_vello = "0.14"
+anyrender_vello_hybrid = "0.10"
 wgpu_context = "0.9"
 wgpu = "29"
 peniko = "0.6"
 winit = "=0.31.0-beta.2"
 webbrowser = "1"
+pollster = "1.0.1"
 pdfium-render = { version = "0.9.3", default-features = false, features = ["pdfium_latest", "thread_safe"] }
 
 [profile.release]

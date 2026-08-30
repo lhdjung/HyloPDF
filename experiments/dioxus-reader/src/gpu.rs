@@ -155,7 +155,7 @@ impl Recolorer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &bitmap.bgra,
+            bitmap.bgra,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bitmap.width * 4),
@@ -189,6 +189,14 @@ impl Recolorer {
         };
         self.paint(&mut page, &source, theme);
         // The source has been read; the GPU keeps only what is shown.
+        //
+        // Keeping it and reusing it for the next page was tried, on the theory
+        // that a 24MB texture per page drawn is what piles up during a scroll.
+        // It is not: the pile is the *themed* textures, which wgpu cannot free
+        // until the submission that read them has retired, and holding a
+        // source costs a permanent 24MB for no measurable saving. Measured:
+        // 144MB idle without it, 169MB with, and the same 177-228MB of
+        // graphics memory mid-scroll either way.
         drop(source);
         Some(page)
     }

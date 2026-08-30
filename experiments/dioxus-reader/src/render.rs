@@ -7,9 +7,11 @@
 //! the only file that imports pdf.js, and it is what would make `hayro` a
 //! swap rather than a rewrite when it grows text extraction.
 //!
-//! Phase 1 needed two of those questions and Phase 3's sidebar adds the
-//! third. The rest are named here and not declared, because a trait method
-//! with no caller is a guess about what the caller will want.
+//! Phase 1 needed two of those questions, Phase 3's sidebar added the third
+//! and its search the fourth — a page's text, and where every character of it
+//! sits. The rest are named here and not declared,
+//! because a trait method with no caller is a guess about what the caller
+//! will want.
 
 use std::sync::Arc;
 
@@ -58,6 +60,105 @@ pub struct Heading {
     pub page: Option<usize>,
 }
 
+/// One character of a page, and where it sits on it.
+///
+/// **This is the thing pdf.js could not give and the reason the search here is
+/// half the size of the app's.** pdf.js hands over *runs* — a string and a
+/// transform — so `search.ts` has to fold the runs into one string, keep a
+/// `starts[]` saying where each run began, binary-search that to turn an
+/// offset back into a run and an offset inside it, and then hand the pair to
+/// the DOM to be measured against a text layer whose spans exist only to be
+/// selected. Every one of those steps is a place to be wrong, and the app has
+/// a comment at each of them saying which way.
+///
+/// pdfium answers per character (`FPDFText_GetLooseCharBox`), so a match is a
+/// range of characters and a range of characters is already a list of
+/// rectangles. `starts`, `items`, `position()` and the text layer all go.
+///
+/// The box is in **PDF points with the origin at the top left**, which is
+/// [`crate::layout`]'s space rather than the PDF's own: multiply by a
+/// [`crate::layout::PageBox`]'s `scale` and it is where the highlight goes.
+/// pdfium counts from the bottom, and the conversion belongs on the side that
+/// knows the page height rather than in every caller.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CharBox {
+    pub left: f64,
+    pub top: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// A page's text, and where every character of it is.
+///
+/// `chars` and `boxes` are the same length and are indexed together — which is
+/// the whole of the data structure, and is why `search.rs` can be about
+/// searching.
+#[derive(Clone, Debug, Default)]
+pub struct PageText {
+    pub chars: Vec<char>,
+    pub boxes: Vec<CharBox>,
+}
+
+impl PageText {
+    pub fn is_empty(&self) -> bool {
+        self.chars.is_empty()
+    }
+
+    /// The characters `from..to` as rectangles, one per line rather than one
+    /// per character.
+    ///
+    /// A match is drawn as a few boxes and not as ninety, and the join is done
+    /// here because it is the same question `joinRuns` in `viewer.ts` answers
+    /// for the same reason: pdf.js's spans do not abut, so the gaps between
+    /// them show as white rules through a highlighted sentence. Characters
+    /// abut rather better than spans do, and the rule still holds — a run is
+    /// extended while the next character sits on the same line, and a new one
+    /// begins when it does not.
+    pub fn quads(&self, from: usize, to: usize) -> Vec<CharBox> {
+        let mut quads: Vec<CharBox> = Vec::new();
+        for index in from..to.min(self.boxes.len()) {
+            let glyph = self.boxes[index];
+            // A character with no size is a space pdfium generated rather than
+            // one the printer drew, and it would otherwise stretch a run to
+            // the far edge of the page.
+            if glyph.width <= 0.0 || glyph.height <= 0.0 {
+                continue;
+            }
+            match quads.last_mut() {
+                // The same line, if the two overlap vertically by most of
+                // their height — which is a looser test than "the same top",
+                // because a line of type is full of characters that sit a
+                // fraction high or low.
+                Some(run)
+                    if overlap(run.top, run.height, glyph.top, glyph.height) > 0.5
+                        && glyph.left + glyph.width > run.left
+                        && glyph.left < run.left + run.width + glyph.height =>
+                {
+                    let right = (run.left + run.width).max(glyph.left + glyph.width);
+                    let bottom = (run.top + run.height).max(glyph.top + glyph.height);
+                    run.left = run.left.min(glyph.left);
+                    run.top = run.top.min(glyph.top);
+                    run.width = right - run.left;
+                    run.height = bottom - run.top;
+                }
+                _ => quads.push(glyph),
+            }
+        }
+        quads
+    }
+}
+
+/// How much of the shorter of two vertical spans the two share, as a fraction.
+fn overlap(top: f64, height: f64, other_top: f64, other_height: f64) -> f64 {
+    let shared = (top + height).min(other_top + other_height) - top.max(other_top);
+    let shortest = height.min(other_height);
+    if shortest <= 0.0 {
+        0.0
+    } else {
+        (shared / shortest).max(0.0)
+    }
+}
+
 /// What a document is, to everything above it.
 pub trait PageSource: Send + Sync {
     fn pages(&self) -> usize;
@@ -93,6 +194,19 @@ pub trait PageSource: Send + Sync {
     /// says so in as many words rather than showing an empty column.
     fn outline(&self) -> Vec<Heading> {
         Vec::new()
+    }
+
+    /// A page's text, and where every character of it sits.
+    ///
+    /// Empty for a page with nothing on it, and empty for a *renderer* that
+    /// cannot answer — which is not hypothetical: hayro, the pure-Rust
+    /// renderer the assessment names as the one to watch, has no text
+    /// extraction at all. So this has a default, and a reader over a renderer
+    /// with no text in it finds nothing rather than failing to build. What
+    /// says so on the screen is [`crate::search::State::textless`], which the
+    /// app already needed for a scan nobody put through OCR.
+    fn text_of(&self, _index: usize) -> PageText {
+        PageText::default()
     }
 
     /// What opening the document cost, in milliseconds — the other half of the

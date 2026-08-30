@@ -11,10 +11,13 @@
 //! tests through today. It is behind the `harness` feature, which `cargo test`
 //! turns on and `cargo build` does not, so nothing it needs is in the binary.
 //!
-//! What is not built: no search, no links, no text layer, no selection, no
-//! markup, no settings *window*, no Keyboard page, no watchers, one window.
-//! The sidebar is built — [`sidebar`] — with the document's own contents, the
-//! reader's marks and a column of thumbnails in it.
+//! What is not built: no links, no selection, no markup, no settings *window*,
+//! no Keyboard page, no watchers, one window. The sidebar is built —
+//! [`sidebar`] — with the document's own contents, the reader's marks, a
+//! column of thumbnails and the search results in it. [`search`] is built
+//! too, and it is half the size of the app's because pdfium answers per
+//! character: there is no text layer here and nothing measuring a DOM range
+//! against one.
 //!
 //! # The app's own modules, compiled here unchanged
 //!
@@ -71,6 +74,7 @@ pub mod palette;
 pub mod pdfium;
 pub mod recolor;
 pub mod render;
+pub mod search;
 pub mod shell;
 pub mod sidebar;
 pub mod stats;

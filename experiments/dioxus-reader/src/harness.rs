@@ -136,6 +136,21 @@ pub struct State {
     /// Which thumbnails are in the DOM, one-based and in order: the column's
     /// own mounting window, which is what replaces `THUMB_CACHE`.
     pub thumbs: Vec<usize>,
+    /// What the find bar says beside the field — "3 of 12", "None",
+    /// "Searching…" — or `None` when the bar is not up.
+    ///
+    /// Off the interface, like everything else here: it is the sentence
+    /// somebody searching would read, not a field of the `Search`.
+    pub find: Option<String>,
+    /// What is in the field.
+    pub query: String,
+    /// How many match rectangles are painted over the mounted pages. Not the
+    /// number of matches — that is in `find` — but the number the reader can
+    /// actually see, which is what "Highlight all" changes and the only thing
+    /// that says the highlighting reached the page.
+    pub hits: usize,
+    /// Which results the list is showing, by their place in the whole list.
+    pub results: Vec<usize>,
 }
 
 /// A reader with no window, driven by hand.
@@ -263,6 +278,7 @@ impl Reader {
     pub fn press_with(&mut self, key: &str, modifiers: Modifiers) {
         let key = parse_key(key);
         self.harness.press_with(key, modifiers);
+        self.give_keyboard_back();
         self.settle();
     }
 
@@ -296,7 +312,38 @@ impl Reader {
         self.harness.dispatch(UiEvent::KeyDown(down));
         self.harness.dispatch(UiEvent::KeyUp(up));
         self.harness.pump();
+        self.give_keyboard_back();
         self.settle();
+    }
+
+    /// Type into whatever has the keyboard, one character at a time, the way
+    /// somebody typing does — so the reader sees an `input` event per letter
+    /// and starts a scan per letter, which is the shape the slicing exists
+    /// for and the shape a test should exercise.
+    pub fn type_text(&mut self, text: &str) {
+        self.harness.type_text(text);
+        self.settle();
+    }
+
+
+
+    /// Read pages until the scan has finished, or until it plainly is not
+    /// going to.
+    ///
+    /// **The scan is a task and a task is polled by whoever drives the
+    /// document**, which in the real app is the event loop being woken and
+    /// here is `pump()`. So a test that wants the whole document searched
+    /// pumps until the bar stops saying so — the same "wait for the
+    /// condition, not for the clock" rule the app's own harness spent a day
+    /// learning, with the clock replaced by a turn of the loop.
+    pub fn scan_out(&mut self) {
+        for _ in 0..4000 {
+            let said = self.state().find.unwrap_or_default();
+            if !said.ends_with('…') && said != "Searching…" {
+                return;
+            }
+            self.harness.pump();
+        }
     }
 
     /// Turn the wheel over the document. Positive reads forwards, which is the
@@ -348,7 +395,7 @@ impl Reader {
         self.settle();
     }
 
-    /// What the shell does after a click, done here instead.
+    /// What the shell does after a click *and after a key*, done here instead.
     ///
     /// A click clears the focus off the reader and onto `<html>`, and from
     /// then on every shortcut goes somewhere no component can hear — see
@@ -392,11 +439,16 @@ impl Reader {
         let thumbs = self.numbered(".thumb", "data-thumb");
         let sidebar_node = self.harness.query(".sidebar");
         let sidebar = sidebar_node.map(|_| {
-            if self.harness.query(".tab.on[data-tab='pages']").is_some() {
-                "pages".to_string()
-            } else {
-                "contents".to_string()
+            for name in ["pages", "results"] {
+                if self
+                    .harness
+                    .query(&format!(".tab.on[data-tab='{name}']"))
+                    .is_some()
+                {
+                    return name.to_string();
+                }
             }
+            "contents".to_string()
         });
         let sidebar_width = sidebar_node
             .map(|node| self.harness.layout_rect_of(node).width as f64)
@@ -420,6 +472,24 @@ impl Reader {
             sidebar,
             sidebar_width,
             thumbs,
+            find: self
+                .harness
+                .query(".findbar")
+                .map(|_| self.harness.text_content(".find-count")),
+            query: self
+                .harness
+                .query(".find-field")
+                .map(|node| {
+                    let doc = self.harness.base();
+                    doc.get_node(node)
+                        .and_then(|node| node.element_data())
+                        .and_then(|element| element.text_input_data())
+                        .map(|input| input.editor.raw_text().to_string())
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default(),
+            hits: self.harness.query_all(".hit").len(),
+            results: self.numbered(".result", "data-result"),
         }
     }
 

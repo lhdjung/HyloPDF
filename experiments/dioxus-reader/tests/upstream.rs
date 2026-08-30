@@ -1,10 +1,10 @@
-//! Three faults that belong to somebody else, kept as the smallest thing that
+//! Four faults that belong to somebody else, kept as the smallest thing that
 //! shows each — to be sent upstream, and to say so the day any is fixed.
 //!
-//! Two of them run with the suite, because each catches the thing it is about
-//! and therefore *passes while the bug is there*: the day one fails is the day
-//! the workaround it names can go. The third aborts the process rather than
-//! panicking, which is not something to do to a test run, so it is
+//! Three of them run with the suite, because each catches the thing it is
+//! about and therefore *passes while the bug is there*: the day one fails is
+//! the day the workaround it names can go. The fourth aborts the process
+//! rather than panicking, which is not something to do to a test run, so it is
 //! `#[ignore]`d:
 //!
 //! ```text
@@ -141,6 +141,60 @@ fn a_click_clears_the_focus_and_a_component_cannot_restore_it() {
     );
     // And where it went is above everything the application owns.
     assert_eq!(focused, harness.query("html"));
+}
+
+/// **Hit-testing does not clip on `overflow: hidden`.**
+///
+/// A node scrolled far out of its container is still hit-tested where its box
+/// says it is — over whatever else happens to be drawn there. *Painting* gets
+/// this right: the same node is clipped and cannot be seen. So the failure is
+/// a click that lands on something invisible, which is as hard to see as it
+/// sounds.
+///
+/// In the reader this was the find bar. A page is absolutely positioned at
+/// `top: box - scroll`, so with the document scrolled it starts at a large
+/// negative offset and its box covers the toolbar and the find bar above it.
+/// Clicking "Done" at the top of a document worked and clicking it anywhere
+/// else did nothing at all, which is the worst way round.
+///
+/// The workaround is `position: relative` and a `z-index` on every row of the
+/// window that is not the document — the same trap and the same fix as
+/// `pos_z_hoisted_children` in item 3 of Phase 3, one level out. See
+/// `styles.rs`.
+#[test]
+fn a_node_scrolled_out_of_its_container_is_still_hit_tested_there() {
+    #[component]
+    fn Overflowing() -> Element {
+        rsx! {
+            style { "
+                .bar {{ position: absolute; top: 0; left: 0;
+                        width: 200px; height: 40px; background: #cccccc; }}
+                .clip {{ position: absolute; top: 40px; left: 0;
+                         width: 200px; height: 100px; overflow: hidden; }}
+                .far {{ position: absolute; top: -300px; left: 0;
+                        width: 200px; height: 400px; background: #888888; }}
+            " }
+            div { class: "bar" }
+            div { class: "clip",
+                div { class: "far" }
+            }
+        }
+    }
+
+    let mut harness = Harness::from_component(Overflowing);
+    harness.pump();
+    let bar = harness.node(".bar");
+    let far = harness.node(".far");
+    // A point in the middle of the bar. `.far` is scrolled 300px above its
+    // container and is clipped out of sight there, so nothing of it is drawn
+    // over the bar.
+    let hit = harness.hit(100.0, 20.0).map(|hit| hit.node_id);
+    assert_ne!(
+        hit,
+        Some(bar),
+        "this is fixed upstream: hit-testing clips, and the `z-index` on every    row of the reader's window can go",
+    );
+    assert_eq!(hit, Some(far), "and what it landed on is the clipped node");
 }
 
 /// **`pdfium-render`'s `thread_safe` feature does not serialise anything.**

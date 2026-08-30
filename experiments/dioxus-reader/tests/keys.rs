@@ -448,9 +448,9 @@ fn the_keys_a_vim_shaped_reader_reaches_for() {
 #[test]
 fn a_key_bound_to_something_unbuilt_says_so() {
     let mut reader = Reader::open(&Reader::book());
-    reader.press_chord("mod+f");
+    reader.press_chord("mod+p");
     assert_eq!(
         reader.state().notice,
-        format!("{} is not built yet", label(Action::Find))
+        format!("{} is not built yet", label(Action::Print))
     );
 }

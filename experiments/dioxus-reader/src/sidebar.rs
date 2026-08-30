@@ -1,5 +1,6 @@
 //! The panel on the left: the document's own table of contents, the pages the
-//! reader has pinned, and a column of thumbnails.
+//! reader has pinned, a column of thumbnails, and — while the find bar is up —
+//! the search results.
 //!
 //! `sidebar.ts` is 699 lines and about half of them are memory management:
 //! `THUMB_CACHE`, `drawn`, `tasks`, `flights`, `trim()`, `forget(release)`,
@@ -42,31 +43,16 @@ use crate::page::{Chosen, PageWidget};
 
 /// What the panel can be showing.
 ///
-/// Two, where the app has three: its third is the search results, and search
-/// is the next item of Phase 3. The tab appears with it.
+/// Three, as the app has: Contents, Pages, and — only while the find bar is
+/// up — Results. The third comes and goes with the bar rather than sitting
+/// there empty, which is why `sidebar_width`'s default is wide enough for
+/// three words and why the panel has to be able to fall back to one of the
+/// other two when it goes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
     Contents,
     Pages,
-}
-
-impl Tab {
-    /// The word `settings.toml` holds, so that the tab the reader left the
-    /// panel on is the tab it opens on. One function rather than two match
-    /// arms in two places, for the reason `name_of` in `app.rs` is one.
-    pub fn name(self) -> &'static str {
-        match self {
-            Tab::Contents => "contents",
-            Tab::Pages => "pages",
-        }
-    }
-
-    pub fn from_name(name: &str) -> Tab {
-        match name {
-            "pages" => Tab::Pages,
-            _ => Tab::Contents,
-        }
-    }
+    Results,
 }
 
 /// How narrow and how wide the panel may be dragged. The app's own numbers,
@@ -243,6 +229,17 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
     let thumb_scroll = held.thumb_scroll;
     let panel_height = held.layout.viewport.height;
     let mounted = column.mounted(thumb_scroll, panel_height);
+    // The third tab is here only while the find bar is: a Results tab with
+    // nothing behind it is a tab that answers a question nobody asked.
+    let searching = held.find_open;
+    let results = if searching {
+        held.search.results(crate::search::RESULT_LIMIT)
+    } else {
+        Vec::new()
+    };
+    let result_at = held.search.state().at;
+    let result_total = held.search.state().total;
+    let scanning = held.search.state().scanning;
     drop(held);
 
     let rows: Vec<(usize, f64, f64)> = mounted
@@ -277,8 +274,64 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                     onclick: move |_| viewer.write().show_tab(Tab::Pages),
                     "Pages"
                 }
+                if searching {
+                    button {
+                        class: if tab == Tab::Results { "tab on" } else { "tab" },
+                        "data-tab": "results",
+                        onclick: move |_| viewer.write().show_tab(Tab::Results),
+                        "Results"
+                    }
+                }
             }
-            if tab == Tab::Contents {
+            if tab == Tab::Results {
+                div { class: "panel results",
+                    if results.is_empty() {
+                        p { class: "sidebar-empty",
+                            if scanning { "Searching…" } else { "No matches." }
+                        }
+                    } else {
+                        // The count is above the list rather than in it,
+                        // because a list that is longer than it says is a
+                        // list somebody scrolls to the end of to find out.
+                        p { class: "results-count",
+                            if result_total > results.len() {
+                                "{results.len()} of {result_total} matches"
+                            } else if result_total == 1 {
+                                "1 match"
+                            } else {
+                                "{result_total} matches"
+                            }
+                        }
+                        for result in results.iter() {
+                            {
+                                let at = result.at;
+                                let current = result_at == Some(at);
+                                let (page, before, hit, after) = (
+                                    result.page,
+                                    result.before.clone(),
+                                    result.hit.clone(),
+                                    result.after.clone(),
+                                );
+                                rsx! {
+                                    button {
+                                        key: "{at}",
+                                        class: if current { "result current" } else { "result" },
+                                        "data-result": "{at}",
+                                        "data-page": "{page}",
+                                        onclick: move |_| viewer.write().go_to_result(at),
+                                        span { class: "result-page", "{page}" }
+                                        span { class: "result-line",
+                                            span { class: "result-before", "{before}" }
+                                            span { class: "result-hit", "{hit}" }
+                                            span { class: "result-after", "{after}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if tab == Tab::Contents {
                 div { class: "panel contents",
                     // The reader's own marks, above the document's contents.
                     // Above rather than beside, and for the reason

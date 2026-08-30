@@ -66,7 +66,8 @@ use crate::keymap::{Action, Keymap, Press};
 use crate::layout::{Anchor, Fit, Layout, Size, Spread};
 use crate::page::{Chosen, PageWidget};
 use crate::palette::Palette;
-use crate::render::{Heading, PageSource};
+use crate::render::{CharBox, Heading, PageSource};
+use crate::search::{Options as Find, Search};
 use crate::sidebar::{Column, Sidebar, Tab};
 use crate::store::Store;
 
@@ -169,6 +170,10 @@ const LINE: f64 = 60.0;
 /// cannot name.
 const OVERLAP: f64 = 60.0;
 
+/// How much of the window a match is brought to when the reader is taken to
+/// one: a third down, so there is something above it to read into.
+const REVEAL: f64 = 0.3;
+
 /// The zoom ladder, in the app's own steps.
 const ZOOMS: [f64; 13] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0, 3.0, 4.0,
@@ -225,6 +230,30 @@ pub struct Viewer {
     pub column: Column,
     /// The document's own table of contents, read once when it was opened.
     pub headings: Vec<Heading>,
+    /// The index, the matches, and where the reader is in them. See
+    /// [`crate::search`]: it knows nothing about this struct, which is what
+    /// lets the whole of it be tested with no document and no window.
+    pub search: Search,
+    /// Whether the find bar is up. The index is put down when it goes — see
+    /// [`Search::forget`] — so this is a memory decision as well as a
+    /// visible one.
+    pub find_open: bool,
+    /// What is in the field, which is not the same as what has been searched
+    /// for: the field is ahead of the scan by however long a keystroke takes
+    /// to reach it.
+    pub find_query: String,
+    /// Whether every match is painted or only the one the reader is on. The
+    /// third search switch, and the one that changes nothing about what is
+    /// found — which is why it lives here and not in [`crate::search`].
+    pub highlight_all: bool,
+    /// Which scan is running. A keystroke starts a new one and the task
+    /// driving the old one stops at its next slice, which is what `run` in
+    /// `search.ts` does with the same two lines.
+    scan: u64,
+    /// Whether this search has already taken the reader to its first match.
+    /// Once, and only for the first result to arrive — after that the reader
+    /// is moved by asking, not by the scan catching up.
+    revealed: bool,
     /// How wide the window is, which is not how wide the document is: the
     /// panel takes its share first. Kept because opening the panel has to
     /// relay out against the same window.
@@ -258,6 +287,12 @@ impl Viewer {
             thumb_scroll: 0.0,
             column: Column::default(),
             headings: document.outline(),
+            search: Search::new(),
+            find_open: false,
+            find_query: String::new(),
+            highlight_all: true,
+            scan: 0,
+            revealed: false,
             window_width: 0.0,
             notice: String::new(),
             keymap,
@@ -300,6 +335,15 @@ impl Viewer {
         };
         self.layout.gap = self.store.number("page_gap");
         self.sidebar_open = self.store.flag("show_sidebar");
+        // Where a match is looked for is a way of reading rather than a
+        // property of a document, so these outlive the find bar they are set
+        // from and the session they were set in — which is the comment
+        // `settings.rs` already carries above the three of them.
+        self.highlight_all = self.store.flag("search_highlight_all");
+        self.search.set_options(Find {
+            match_case: self.store.flag("search_match_case"),
+            whole_words: self.store.flag("search_whole_words"),
+        });
         self.sidebar_width = self
             .store
             .number("sidebar_width")
@@ -526,6 +570,224 @@ impl Viewer {
         }
     }
 
+    /* ------------------------------------------------------- the search */
+
+    /// Put the find bar up. Nothing is searched for until something is typed.
+    pub fn open_find(&mut self) {
+        self.find_open = true;
+        if self.sidebar_open && !self.search.query().is_empty() {
+            self.tab = Tab::Results;
+        }
+    }
+
+    /// Take the find bar down, and the index with it.
+    ///
+    /// **The index goes when the bar does**, which is the app's policy and its
+    /// reasoning: every page ever scanned is kept, so a long book costs tens
+    /// of megabytes for as long as it is open — a fair trade while somebody is
+    /// searching and no trade at all once they have stopped. Reopening rescans
+    /// and that is under half a second. See [`Search::forget`].
+    pub fn close_find(&mut self) {
+        self.find_open = false;
+        self.find_query.clear();
+        self.search.forget();
+        self.scan += 1;
+        if self.tab == Tab::Results {
+            self.tab = if self.headings.is_empty() {
+                Tab::Pages
+            } else {
+                Tab::Contents
+            };
+        }
+    }
+
+    /// Look for what is in the field. Returns the token of the scan it
+    /// started, or `None` when there is nothing to scan — which is what the
+    /// caller needs to know before spawning a task to drive it.
+    pub fn find(&mut self, query: &str) -> Option<u64> {
+        self.find_query = query.to_string();
+        self.scan += 1;
+        self.revealed = false;
+        let (page, pages) = (self.page(), self.pages());
+        if !self.search.find(query, page, pages) {
+            return None;
+        }
+        if self.sidebar_open {
+            self.tab = Tab::Results;
+        }
+        Some(self.scan)
+    }
+
+    /// Read pages until the slice is up. Returns whether there is more to do.
+    ///
+    /// The whole of the streaming, and it is here rather than in
+    /// [`crate::search`] because it is the only part that needs a clock and a
+    /// document. A slice is [`crate::search::SLICE_MS`] and the reason there
+    /// is one at all is a book, not a page: pdfium reads a page of the
+    /// 400-page fixture in 0.18ms and a page of a 376-page book of typeset
+    /// mathematics in 1.3ms, so the cost worth hiding is the 498ms the whole
+    /// of that book takes rather than anything a single page does.
+    pub fn scan_slice(&mut self, token: u64) -> bool {
+        if token != self.scan {
+            return false;
+        }
+        let began = std::time::Instant::now();
+        while let Some(page) = self.search.wants() {
+            let document = self.document.clone();
+            self.search.feed(page, || document.text_of(page - 1));
+            if began.elapsed().as_secs_f64() * 1000.0 > crate::search::SLICE_MS {
+                break;
+            }
+        }
+        self.search.publish();
+        // The first result to arrive is the one the reader is taken to, and
+        // only the first: after that they are moved by asking rather than by
+        // the scan catching up with them somewhere else in the book.
+        if !self.revealed && self.search.current().is_some() {
+            self.revealed = true;
+            self.reveal_match();
+        }
+        self.search.wants().is_some()
+    }
+
+    /// Move to the next match, or the one before, and go there.
+    pub fn step_match(&mut self, forwards: bool) {
+        if self.search.matches().is_empty() {
+            self.notice = if self.search.state().textless {
+                "There is no text in this document to search".into()
+            } else {
+                "No matches".into()
+            };
+            return;
+        }
+        self.search.step(forwards);
+        self.reveal_match();
+    }
+
+    /// Go to one result by its place in the list — a row of the Results tab.
+    pub fn go_to_result(&mut self, at: usize) {
+        self.search.go_to(at);
+        self.reveal_match();
+    }
+
+    /// Bring the match the reader is on into view.
+    ///
+    /// A match is a range of characters and a character knows its box, so this
+    /// is arithmetic: the top of the page, plus where on the page the match
+    /// is, less a third of a screen so that there is something above it to
+    /// read into. The app measures a DOM range against a text layer to reach
+    /// the same number.
+    pub fn reveal_match(&mut self) {
+        let Some(hit) = self.search.current() else {
+            return;
+        };
+        let Some(page) = self.layout.box_of(hit.page - 1) else {
+            // Paged mode leaves `boxes` full of holes, and a match on a page
+            // that is not laid out is a page to go to rather than a place on
+            // one.
+            let target = self.page_target(hit.page);
+            self.scroll_to(target);
+            return;
+        };
+        let top = self
+            .search
+            .quads_on(hit.page)
+            .into_iter()
+            .filter(|(_, current)| *current)
+            .map(|(quad, _)| quad.top)
+            .fold(f64::INFINITY, f64::min);
+        let target = if top.is_finite() {
+            page.top + top * page.scale - self.layout.viewport.height * REVEAL
+        } else {
+            // A match nothing drew — pdfium generates characters the printer
+            // never put on the page — is still on a page.
+            page.top
+        };
+        self.scroll_to(target);
+    }
+
+    /// Change one of the two switches that decide what is found, and look
+    /// again with it.
+    ///
+    /// The extracted text stays: only the fold and the boundary test depend on
+    /// these, so a rescan after this asks the renderer for nothing — which is
+    /// what `changing_the_case_setting_does_not_go_back_to_the_renderer` in
+    /// `search.rs` holds it to.
+    pub fn set_find_options(&mut self, options: Find) -> Option<u64> {
+        self.search.set_options(options);
+        self.store.set(vec![
+            ("search_match_case".into(), json!(options.match_case)),
+            ("search_whole_words".into(), json!(options.whole_words)),
+        ]);
+        let query = self.find_query.clone();
+        self.find(&query)
+    }
+
+    /// Paint every match, or only the one the reader is on.
+    pub fn toggle_highlight_all(&mut self) {
+        self.highlight_all = !self.highlight_all;
+        self.store
+            .set(vec![("search_highlight_all".into(), json!(self.highlight_all))]);
+    }
+
+    /// What to paint over one page, in CSS pixels from its top left.
+    ///
+    /// `(rectangle, is the one the reader is on)`. Empty when the find bar is
+    /// down, because a highlight that outlives the bar that made it is a mark
+    /// on the page nobody asked for.
+    pub fn highlights(&self, page: usize) -> Vec<(CharBox, bool)> {
+        if !self.find_open {
+            return Vec::new();
+        }
+        let Some(box_of) = self.layout.box_of(page - 1) else {
+            return Vec::new();
+        };
+        let scale = box_of.scale;
+        self.search
+            .quads_on(page)
+            .into_iter()
+            .filter(|(_, current)| self.highlight_all || *current)
+            .map(|(quad, current)| {
+                (
+                    CharBox {
+                        left: quad.left * scale,
+                        top: quad.top * scale,
+                        width: quad.width * scale,
+                        height: quad.height * scale,
+                    },
+                    current,
+                )
+            })
+            .collect()
+    }
+
+    /// What the find bar says beside the field: where the reader is in the
+    /// matches, or why there are none.
+    pub fn find_count(&self) -> String {
+        let state = self.search.state();
+        if state.query.trim().is_empty() {
+            return String::new();
+        }
+        if state.total == 0 {
+            return if state.scanning {
+                "Searching…".into()
+            } else if state.textless {
+                "No text to search".into()
+            } else {
+                "None".into()
+            };
+        }
+        let at = state.at.map(|at| at + 1).unwrap_or(0);
+        let more = if state.capped {
+            "+"
+        } else if state.scanning {
+            "…"
+        } else {
+            ""
+        };
+        format!("{at} of {}{more}", state.total)
+    }
+
     /// Relay out around the page the reader is on, which is what every change
     /// of fit, zoom or spread has to do.
     fn keeping_place(&mut self, change: impl FnOnce(&mut Layout)) {
@@ -661,6 +923,14 @@ impl Viewer {
     }
 }
 
+/// One mounted page as the `rsx!` block needs it: which page, where its box
+/// is, and what is highlighted on it.
+///
+/// A named type because the tuple is six things and clippy is right that six
+/// is too many to read — and because naming it is the only comment the
+/// `boxes` line then needs.
+type Placed = (usize, f64, f64, f64, f64, Vec<(CharBox, bool)>);
+
 /// The element that wants the keyboard, as a selector.
 ///
 /// **A click takes the focus away from the reader, and the reader cannot take
@@ -695,7 +965,18 @@ pub const KEYBOARD: &str = "[data-keyboard]";
 /// is one — and focus that lands anywhere else is focus nobody wanted, which
 /// is what a click on a button leaves behind.
 pub fn give_keyboard_back(doc: &mut blitz_dom::BaseDocument) {
-    let Ok(Some(wants)) = doc.query_selector(KEYBOARD) else {
+    // **The innermost element that asks for it wins**, which is why this is
+    // `query_selector_all` and takes the last. The reader's root always asks;
+    // the find bar's field asks as well while it is up, and it is a
+    // descendant, so it comes later in document order. Without that rule a
+    // click on "Match case" would hand the keyboard back to the root and the
+    // next thing typed would scroll the document instead of changing the
+    // query — which is the same complaint as the bug this whole function
+    // exists for, one level in.
+    let Ok(wants) = doc.query_selector_all(KEYBOARD) else {
+        return;
+    };
+    let Some(wants) = wants.last().copied() else {
         return;
     };
     if let Some(focused) = doc.get_focussed_node_id() {
@@ -792,6 +1073,20 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         }
     };
 
+    // What drives a scan: a task per search, stopped by its token going stale.
+    // There is no timer and no `setTimeout` — a slice yields to the event
+    // loop, is woken by dioxus's own scheduler, and comes back on the next
+    // turn. See `Breathe` at the bottom of this file.
+    let scan = move |token: Option<u64>| {
+        let Some(token) = token else { return };
+        let mut viewer = viewer;
+        spawn(async move {
+            while viewer.write().scan_slice(token) {
+                Breathe::once().await;
+            }
+        });
+    };
+
     let held = viewer.read();
     let scroll_top = held.scroll_top;
     let wearing = held.palette();
@@ -803,18 +1098,30 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let pages = held.pages();
     let notice = held.notice.clone();
     let sidebar_open = held.sidebar_open;
+    let find_open = held.find_open;
+    let find_query = held.find_query.clone();
+    let find_count = held.find_count();
+    let find_options = held.search.options();
+    let highlight_all = held.highlight_all;
     let marked = held.store.is_marked(held.page());
     let zoom = match held.layout.fit {
         Fit::Width => "Fit width".to_string(),
         Fit::Page => "Fit page".to_string(),
         Fit::Actual => format!("{:.0}%", held.layout.zoom * 100.0),
     };
-    let boxes: Vec<(usize, f64, f64, f64, f64)> = mounted
+    let boxes: Vec<Placed> = mounted
         .iter()
         .filter_map(|&index| {
-            held.layout
-                .box_of(index)
-                .map(|page| (index, page.top, page.left, page.width, page.height))
+            held.layout.box_of(index).map(|page| {
+                (
+                    index,
+                    page.top,
+                    page.left,
+                    page.width,
+                    page.height,
+                    held.highlights(index + 1),
+                )
+            })
         })
         .collect();
     let document = held.document.clone();
@@ -892,6 +1199,119 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 button { class: "chip theme", onclick: move |_| viewer.write().next_theme(), "{theme_name}" }
                 div { class: "pill", "{page} / {pages}" }
             }
+            // Not a popover and not over anything: the root is a flex column,
+            // so the bar is a row in it and the document is what gets shorter.
+            // In the app it is `position: fixed` with a list of the places the
+            // pointer may go without dismissing it; here there is nothing to
+            // dismiss it from.
+            if find_open {
+                div { class: "findbar",
+                    input {
+                        class: "find-field",
+                        r#type: "text",
+                        value: "{find_query}",
+                        placeholder: "Search this document",
+                        // While the bar is up, this is the element that wants
+                        // the keyboard — and it is inside the one that
+                        // otherwise does, which is what makes the rule in
+                        // `give_keyboard_back` "the innermost one asking".
+                        "data-keyboard": "find",
+                        onmounted: move |event| {
+                            let node = event.data();
+                            let task = node.set_focus(true);
+                            spawn(async move { let _ = task.await; });
+                        },
+                        oninput: move |event| {
+                            let typed = event.value();
+                            let token = viewer.write().find(&typed);
+                            scan(token);
+                        },
+                        // Every key typed here also bubbles to the root, and
+                        // the root turns keys into actions — so without this,
+                        // typing "just" into the field scrolls the document
+                        // four times on the way. What the field lets past is
+                        // a chord with a modifier on it: ⌘+ still zooms while
+                        // somebody is searching, exactly as it does in the
+                        // app.
+                        onkeydown: move |event| {
+                            let key = event.key();
+                            let modifiers = event.modifiers();
+                            let plain = !modifiers.meta() && !modifiers.ctrl() && !modifiers.alt();
+                            match key {
+                                // Enter is the find bar's own, and is not in
+                                // `keys.toml`: it means "the next one" here
+                                // and nothing anywhere else.
+                                Key::Enter => {
+                                    event.stop_propagation();
+                                    viewer.write().step_match(!modifiers.shift());
+                                }
+                                Key::Escape => {
+                                    event.stop_propagation();
+                                    viewer.write().close_find();
+                                }
+                                _ if plain => event.stop_propagation(),
+                                // A chord with a modifier on it is not
+                                // typing — and Blitz applies the keystroke to
+                                // a focused field whatever is held down, so
+                                // ⌘G stepped to the next match *and* put a
+                                // "g" in the query, which started a search
+                                // for something nobody typed. What the field
+                                // keeps is what a text field owns; everything
+                                // else is prevented here and answered on the
+                                // root, where the keymap is.
+                                Key::Character(ref typed)
+                                    if matches!(typed.as_str(), "a" | "c" | "v" | "x" | "z") => {}
+                                _ => event.prevent_default(),
+                            }
+                        },
+                    }
+                    div { class: "find-count", "{find_count}" }
+                    button {
+                        class: "chip find-previous",
+                        "aria-label": "Previous match",
+                        onclick: move |_| viewer.write().step_match(false),
+                        "‹"
+                    }
+                    button {
+                        class: "chip find-next",
+                        "aria-label": "Next match",
+                        onclick: move |_| viewer.write().step_match(true),
+                        "›"
+                    }
+                    button {
+                        class: if find_options.match_case { "chip find-case on" } else { "chip find-case" },
+                        onclick: move |_| {
+                            let token = viewer.write().set_find_options(crate::search::Options {
+                                match_case: !find_options.match_case,
+                                whole_words: find_options.whole_words,
+                            });
+                            scan(token);
+                        },
+                        "Match case"
+                    }
+                    button {
+                        class: if find_options.whole_words { "chip find-words on" } else { "chip find-words" },
+                        onclick: move |_| {
+                            let token = viewer.write().set_find_options(crate::search::Options {
+                                match_case: find_options.match_case,
+                                whole_words: !find_options.whole_words,
+                            });
+                            scan(token);
+                        },
+                        "Whole words"
+                    }
+                    button {
+                        class: if highlight_all { "chip find-all on" } else { "chip find-all" },
+                        onclick: move |_| viewer.write().toggle_highlight_all(),
+                        "Highlight all"
+                    }
+                    button {
+                        class: "chip find-close",
+                        onclick: move |_| viewer.write().close_find(),
+                        "Done"
+                    }
+                }
+            }
             div { class: "body",
             if sidebar_open {
                 Sidebar {
@@ -928,7 +1348,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     // reading the screen would check; a scroll offset is a
                     // number with no pixels of its own.
                     "data-scroll": "{scroll_top}",
-                    for (index, top, left, width, height) in boxes {
+                    for (index, top, left, width, height, hits) in boxes {
                         Page {
                             // What `keyFor()` is: the page, the size it is
                             // drawn at, and the theme it is wearing. A change
@@ -942,6 +1362,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             left,
                             width,
                             height,
+                            hits,
                         }
                     }
                 }
@@ -962,6 +1383,19 @@ fn Page(
     left: f64,
     width: f64,
     height: f64,
+    /// Where the matches on this page are, in CSS pixels from its top left,
+    /// and which of them the reader is on.
+    ///
+    /// **These are nodes, not pixels, and that is the whole of the port.**
+    /// `paintSelection` and the highlight painting in `viewer.ts` copy the
+    /// page canvas, run the copy through a luminance ramp and lay it back
+    /// down, because a `::selection` colour puts pdf.js's text layer on
+    /// screen and a page's bold type comes back regular. There is no text
+    /// layer here and nothing to put on screen: a match is a rectangle in
+    /// PDF points, so it is a `div` over the page in the theme's own
+    /// selection colours, and the glyphs underneath it are the ones pdfium
+    /// drew.
+    hits: Vec<(CharBox, bool)>,
 ) -> Element {
     // The widget is handed over the first time the attribute is set, so
     // `use_hook` is what keeps a re-render from building a second one — and
@@ -992,6 +1426,13 @@ fn Page(
                 // say why, which is what `display: block` costs to avoid.
                 style: "display: block; width: {width}px; height: {height}px;",
             }
+            for (at, (quad, current)) in hits.iter().enumerate() {
+                div {
+                    key: "{at}",
+                    class: if *current { "hit current" } else { "hit" },
+                    style: "position: absolute; top: {quad.top}px; left: {quad.left}px; width: {quad.width}px; height: {quad.height}px;",
+                }
+            }
         }
     }
 }
@@ -1004,7 +1445,7 @@ fn Page(
 /// the app's table is carried across whether or not this reader can do it, so
 /// a key bound to something unbuilt says so rather than doing nothing —
 /// which turns the keyboard into a live list of what Phase 3 has left. It is
-/// also the honest answer to a reader who presses ⌘F: search is not there
+/// also the honest answer to a reader who presses ⌘P: printing is not there
 /// yet, and silence would be indistinguishable from a broken keymap.
 fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
     fn by(mut viewer: Signal<Viewer>, delta: f64) {
@@ -1050,6 +1491,21 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
             let page = viewer.read().page();
             viewer.write().mark_page(page);
         }
+        Action::Find => {
+            viewer.write().open_find();
+        }
+        Action::FindNext => viewer.write().step_match(true),
+        Action::FindPrevious => viewer.write().step_match(false),
+        // Escape, which in the app leaves full screen and stops presenting as
+        // well. There is neither here yet, so it is the find bar's way out and
+        // says nothing when there is nothing to close — a key that answers
+        // with a complaint about what it did not do is worse than one that
+        // does nothing.
+        Action::Dismiss => {
+            if viewer.read().find_open {
+                viewer.write().close_find();
+            }
+        }
         Action::Spread => {
             let next = if viewer.read().layout.spread == Spread::Single {
                 Spread::Cover
@@ -1062,5 +1518,39 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
             let said = format!("{} is not built yet", crate::keymap::label(not_built));
             viewer.write().notice = said;
         }
+    }
+}
+
+/// One turn of the event loop, awaited.
+///
+/// `breathe()` in `search.ts` is `setTimeout(resolve, 0)` and this is the same
+/// thing said in Rust: wake the task immediately and return `Pending`, so the
+/// scheduler puts it back in the queue and whoever is driving the document —
+/// the shell in the real app, `pump()` in the harness — gets a turn first.
+///
+/// It is a macrotask there and a wake here for the same reason: awaiting a
+/// promise alone would keep the browser out of the loop, and returning
+/// `Ready` alone would keep the window out of it.
+struct Breathe(bool);
+
+impl Breathe {
+    fn once() -> Breathe {
+        Breathe(false)
+    }
+}
+
+impl std::future::Future for Breathe {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        if self.0 {
+            return std::task::Poll::Ready(());
+        }
+        self.0 = true;
+        cx.waker().wake_by_ref();
+        std::task::Poll::Pending
     }
 }

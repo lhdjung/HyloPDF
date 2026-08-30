@@ -50,6 +50,16 @@ pub fn variables(theme: &Palette) -> String {
         // The ground the pages stand on, a shade away from the chrome so that
         // the paper has an edge without needing a border.
         hex(mix(theme.background, theme.text, 0.13)),
+    ) + &format!(
+        // What a match is painted in. The theme's own selection colours,
+        // because a found word and a selected word are the same statement —
+        // *this part of the page is the part you asked about* — and a theme
+        // that has thought about one has thought about the other. The
+        // current match is the accent, so that stepping through matches is
+        // visible without reading the count.
+        " --found: {}; --found-now: {};",
+        hex(theme.selection_area),
+        hex(theme.accent),
     )
 }
 
@@ -61,6 +71,17 @@ body { margin: 0;
 
 .root { display: flex; flex-direction: column; height: 100vh;
   background: var(--paper); color: var(--text); }
+
+/* Every row of the window that is not the document carries `z-index`, and it
+   is not decoration. Blitz paints by the rules — `.viewer` has
+   `overflow: hidden` and a page scrolled past the top is clipped, which the
+   screenshots show — but it **hit-tests without clipping**: a page whose box
+   starts at -2789px is still hit-tested where its box is, which is over the
+   toolbar and the find bar. So clicking "Done" in the find bar, with the
+   document scrolled at all, landed on the page behind it and did nothing.
+   `position: relative` and a `z-index` put these back in front, which is the
+   same trap and the same fix as `.sidebar-resize` below, one level out. */
+.toolbar, .findbar, .notice, .sidebar { position: relative; z-index: 1; }
 
 .toolbar {
   display: flex; align-items: center; gap: 8px;
@@ -85,6 +106,31 @@ body { margin: 0;
   display: flex; align-items: center; justify-content: center;
 }
 
+/* The find bar: a row of the column, so the document is what gets shorter.
+   Nothing here is over anything, which is the one place Blitz's missing
+   `position: fixed` made the layout simpler rather than harder. */
+.findbar {
+  display: flex; align-items: center; gap: 6px;
+  height: 40px; flex: 0 0 auto; padding: 0 12px;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.find-field {
+  flex: 0 1 320px; height: 28px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--paper); color: var(--text); font-size: 13.5px;
+}
+.find-count { flex: 0 0 auto; min-width: 96px; color: var(--faint); }
+.chip.find-previous, .chip.find-next { min-width: 30px; padding: 0 8px; }
+
+/* A match, as a rectangle over the page. Behind the ink rather than over it:
+   `mix-blend-mode` is out (see `AGENTS.md`, and Blitz has none), and an
+   opaque box over a word hides the word. Blitz composites the widget's
+   texture and this on top of it, so the alpha is what keeps the type
+   readable — 0.38 is where a highlight is plainly there on paper and does not
+   grey the letters on a dark theme. */
+.hit { background: var(--found); opacity: 0.38; border-radius: 2px; }
+.hit.current { background: var(--found-now); opacity: 0.45; }
+
 /* The toolbar, then the document with the panel beside it, then the notice.
    A row inside the column, which is the whole of what a sidebar is here —
    there is nothing floating over anything. */
@@ -95,7 +141,7 @@ body { margin: 0;
 }
 
 .sidebar {
-  position: relative; flex: 0 0 auto; display: flex; flex-direction: column;
+  flex: 0 0 auto; display: flex; flex-direction: column;
   min-height: 0; background: var(--surface); border-right: 1px solid var(--line);
 }
 /* Centred on the border rather than beside it, so the grab target is wider
@@ -130,6 +176,30 @@ body { margin: 0;
 }
 .outline-item:hover { background: var(--hover); color: var(--text); }
 .outline-item.current { color: var(--accent); }
+
+/* The results list. A row is two lines' worth of text on one line, cut off at
+   the end rather than wrapped: what places a match is the words in front of
+   it, and the sentence behind it is there to be recognised, not read. */
+.results { padding: 4px 8px 8px 8px; overflow: scroll; scrollbar-width: thin; }
+.results-count { margin: 2px 4px 6px 4px; color: var(--faint); }
+.result {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  border: 0; border-radius: 7px; padding: 5px 6px; margin-bottom: 1px;
+  background: transparent; text-align: left; font-size: 13px;
+  white-space: nowrap; overflow: hidden;
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+.result:hover { background: var(--hover); }
+.result.current { background: var(--sunk); }
+.result-page { flex: 0 0 auto; color: var(--faint); font-size: 12px; }
+.result-line { flex: 1 1 auto; color: var(--muted); }
+/* `pre`, because the space either side of the match is the whole difference
+   between a line that reads as a sentence and "A**needle**in the first page":
+   HTML collapses whitespace at the edge of an inline run, and these two runs
+   are cut out of the document precisely at those edges. `results()` keeps a
+   single space there deliberately — see `search.rs`. */
+.result-before, .result-after { white-space: pre; }
+.result-hit { color: var(--text); font-weight: 600; }
 
 .marks { padding: 4px 8px 8px 8px; border-bottom: 1px solid var(--line); }
 .marks-title { margin: 2px 4px 6px 4px; color: var(--faint); }

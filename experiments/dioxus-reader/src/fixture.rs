@@ -140,6 +140,154 @@ pub fn contents_pdf() -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// Six pages of prose, written to exercise the *fold* through the renderer
+/// rather than in isolation.
+///
+/// `search.rs` tests `fold` directly and that is the right place for it, but
+/// it proves nothing about what pdfium actually reports — and building this
+/// found that two of the three answers are not what the app sees:
+///
+/// * **A ligature comes back already split.** pdfium hands over "f" and "i",
+///   with a box each, whatever the font says. See the `/Differences` font
+///   below.
+/// * **An accent comes back precomposed**, U+00E9 rather than "e" and a
+///   combining mark, so the fold's decompose-and-drop is what makes "resume"
+///   find "résumé". As it is in the app.
+/// * **A soft hyphen comes back as a soft hyphen** — but only if the document
+///   says so in a `/ToUnicode` map. Written as the byte 0255 in
+///   WinAnsiEncoding it is an ordinary hyphen, because that is what the
+///   encoding says code 0255 is, which took a probe to notice and is the
+///   reason there is a third font here.
+///
+/// Two things about the file. Everything above ASCII is written as a PDF octal
+/// escape — `\351` for é, `\255` for the soft hyphen — because the bytes in a
+/// PDF string are the font's codes rather than UTF-8, and writing the
+/// character in the Rust source would put two bytes where the document wants
+/// one. And the ligature has a font of its own: `/fi` is not in
+/// WinAnsiEncoding, so it takes an `/Encoding` with a `/Differences` array to
+/// name the glyph and a `/ToUnicode` map to say what it means — which is the
+/// same pair of objects a real typesetter emits, and is the reason a
+/// professionally set document does not contain "fi".
+pub fn prose_pdf() -> String {
+    let path: PathBuf = std::env::temp_dir().join("hylopdf-fixture-prose.pdf");
+    if !path.is_file() {
+        let bytes = build_prose();
+        let temp = path.with_extension(format!("{}.part", std::process::id()));
+        std::fs::write(&temp, &bytes).expect("write the fixture");
+        std::fs::rename(&temp, &path).expect("put the fixture in place");
+    }
+    path.to_string_lossy().into_owned()
+}
+
+/// What each page of [`prose_pdf`] says: a list of runs, each naming the font
+/// it is set in.
+///
+/// `F1` is Helvetica in WinAnsiEncoding and is everything ordinary. `F2` and
+/// `F3` exist for one character each, and which of them a character needs is
+/// the interesting part — see [`prose_pdf`].
+pub const PROSE: &[&[(&str, &str)]] = &[
+    &[("F1", "A needle in the first page.")],
+    &[("F1", "Nothing to look for on this one.")],
+    &[("F1", "The needle again, and a needle beside it.")],
+    &[("F1", "Type "), ("F2", r"\001nd"), ("F1", " to find it.")],
+    &[("F1", r"Her r\351sum\351 is filed on this page.")],
+    &[
+        ("F1", "The word typo"),
+        ("F3", r"\002"),
+        ("F1", "graphy broke across a line."),
+    ],
+];
+
+fn build_prose() -> Vec<u8> {
+    let mut pdf = Pdf::new();
+    let catalog = pdf.reserve();
+    let tree = pdf.reserve();
+    let plain = pdf.add(
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    );
+    // The ligature: one glyph, named in a `/Differences` array, drawn by one
+    // byte in the content stream.
+    //
+    // **And pdfium hands it back as two characters, "f" and "i", with a box
+    // each** — with a `/ToUnicode` saying U+FB01 and without one alike, which
+    // was worth finding out rather than assuming. So on this renderer the
+    // ligature half of `fold` has nothing to do, where on pdf.js it is the
+    // difference between finding "find" in a typeset book and not. The fold
+    // keeps it: it is the app's own tested behaviour, hayro will not do
+    // pdfium's normalising for us, and a document can carry U+FB01 by other
+    // routes. What this page tests is the claim a reader would make — that
+    // searching for "find" finds a word set with a ligature — which is true
+    // here for a different reason than it is true in the app.
+    let ligature = pdf.add(
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+         /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding \
+         /Differences [1 /fi] >> >>",
+    );
+    // The soft hyphen, which needs a map for the opposite reason: in
+    // WinAnsiEncoding the code 0255 *is* `hyphen`, so writing the byte gets an
+    // ordinary hyphen back and the fold has nothing to do. A `/ToUnicode`
+    // saying U+00AD is how a document actually carries one, and is what a
+    // typesetter breaking a word across a line emits.
+    let map = to_unicode(&mut pdf, "1 beginbfchar <02> <00ad> endbfchar");
+    let soft = pdf.add(format!(
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+         /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding \
+         /Differences [2 /hyphen] >> /ToUnicode {map} 0 R >>"
+    ));
+
+    let page_ids: Vec<usize> = PROSE.iter().map(|_| pdf.reserve()).collect();
+    for (index, &id) in page_ids.iter().enumerate() {
+        let mut stream = String::from("BT 18 Tf 72 700 Td");
+        for (font, text) in PROSE[index] {
+            stream.push_str(&format!(" /{font} 18 Tf ({text}) Tj"));
+        }
+        stream.push_str(" ET");
+        let content = pdf.add(format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            stream.len(),
+            stream
+        ));
+        pdf.put(
+            id,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 612 792] \
+                 /Resources << /Font << /F1 {plain} 0 R /F2 {ligature} 0 R \
+                 /F3 {soft} 0 R >> >> /Contents {content} 0 R >>"
+            ),
+        );
+    }
+    pdf.put(
+        tree,
+        format!(
+            "<< /Type /Pages /Count {} /Kids [{}] >>",
+            page_ids.len(),
+            page_ids
+                .iter()
+                .map(|id| format!("{id} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    );
+    pdf.put(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    pdf.bytes()
+}
+
+/// A `/ToUnicode` CMap around one `beginbfchar` block.
+fn to_unicode(pdf: &mut Pdf, chars: &str) -> usize {
+    let cmap = format!(
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n\
+         /CMapName /Custom def /CMapType 2 def\n\
+         1 begincodespacerange <00> <ff> endcodespacerange\n\
+         {chars}\n\
+         endcmap CMapName currentdict /CMap defineresource pop end end"
+    );
+    pdf.add(format!(
+        "<< /Length {} >>\nstream\n{}\nendstream",
+        cmap.len(),
+        cmap
+    ))
+}
+
 fn build(pages: usize) -> Vec<u8> {
     let mut pdf = Pdf::new();
     let catalog = pdf.reserve();

@@ -13,7 +13,7 @@ use std::time::Instant;
 use pdfium_render::prelude::*;
 
 use crate::layout::Size;
-use crate::render::{Bitmap, Heading, PageSource};
+use crate::render::{Bitmap, CharBox, Heading, PageSource, PageText};
 
 /// The lock every call into pdfium is taken behind.
 ///
@@ -155,6 +155,71 @@ impl PageSource for Document {
 
     fn opened_in(&self) -> f64 {
         self.opened_in
+    }
+
+    /// One page's characters and where each of them sits.
+    ///
+    /// Three things about this are pdfium's and are worth knowing before
+    /// changing it.
+    ///
+    /// *`loose_bounds`, not `tight_bounds`.* The tight box is the glyph's own
+    /// outline, so a highlight drawn from it clips the ascenders and descenders
+    /// of the very words it is meant to mark, and a lower-case run comes out
+    /// half the height of the line it is on. The loose box is the character's
+    /// cell — the line's height, the advance's width — which is what a reader
+    /// means by "highlight this".
+    ///
+    /// *A character can have no box at all.* pdfium generates spaces and line
+    /// breaks that the printer never drew, and asking one for its bounds fails
+    /// rather than returning nothing. Those characters are in the text — they
+    /// are what makes two words two words — so they are kept, with a box of no
+    /// size, and [`PageText::quads`] is what skips them.
+    ///
+    /// *And this is one FFI call per character.* At a couple of thousand
+    /// characters a page it is the cost of the whole feature; see
+    /// `search.rs` for what that measures at and what the reader does about
+    /// it.
+    fn text_of(&self, index: usize) -> PageText {
+        let _library = library();
+        let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(page) = held.document.pages().get(index as i32) else {
+            return PageText::default();
+        };
+        // pdfium counts from the bottom of the page and the layout counts from
+        // the top, so the flip happens here, where the page height is already
+        // in hand.
+        let height = page.height().value as f64;
+        let text = page.text();
+        let Ok(text) = text else {
+            return PageText::default();
+        };
+        let chars = text.chars();
+        let mut out = PageText {
+            chars: Vec::with_capacity(chars.len()),
+            boxes: Vec::with_capacity(chars.len()),
+        };
+        for character in chars.iter() {
+            let Some(value) = character.unicode_char() else {
+                continue;
+            };
+            let glyph = character
+                .loose_bounds()
+                .map(|rect| CharBox {
+                    left: rect.left().value as f64,
+                    top: height - rect.top().value as f64,
+                    width: (rect.right().value - rect.left().value) as f64,
+                    height: (rect.top().value - rect.bottom().value) as f64,
+                })
+                .unwrap_or(CharBox {
+                    left: 0.0,
+                    top: 0.0,
+                    width: 0.0,
+                    height: 0.0,
+                });
+            out.chars.push(value);
+            out.boxes.push(glyph);
+        }
+        out
     }
 
     fn render(

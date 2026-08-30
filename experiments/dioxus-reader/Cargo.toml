@@ -68,6 +68,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"   # the app's version, so the modules mounted from it compile against what they were written against
 
+# What `fold` in `search.rs` needs, and the whole of what it needs: NFKD, one
+# character at a time. `search.ts` reaches for `String.prototype.normalize`,
+# which the platform already carries; a Rust binary has to bring the tables
+# with it, and these are 100KB of them.
+unicode-normalization = "0.1"
+
 # The harness's own, optional. See the `harness` feature above.
 blitz-test-harness = { path = "../../../blitz/packages/blitz-test-harness", optional = true }
 anyrender_vello_cpu = { version = "0.17", optional = true }

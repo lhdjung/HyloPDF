@@ -7,9 +7,12 @@ opened by correcting the one before, which is three quarters of a document to
 read before reaching a true sentence. They are in git at `d2b0370` if the
 working is ever wanted.
 
-**The experiment is passing its gates and is not blocked on anything
-upstream.** Three upstream faults were found and all three are worked around
-in this tree, with a test each that will fail the day they are fixed.
+**The experiment is passing its gates, and the one thing it is now blocked on
+upstream is IME** — see the end of this file: the find bar built in Phase 3
+item 4 cannot take composed input, because Blitz has no composition events,
+and that is a decision rather than something to work around. Four upstream
+*faults* were found and all four are worked around in this tree, with a test
+each that will fail the day they are fixed.
 
 ```
 cd dioxus-reader
@@ -18,7 +21,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 108 tests, about fifteen seconds
+cargo test                                   # 143 tests, about fifteen seconds
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -32,7 +35,8 @@ Debug-printed `io::Error`. Both halves of that are fixed.)
 see Phase 3 item 2. `j`/`k` and the arrows move a line, `d`/`u` half a screen,
 space and Page Up/Down a screen, Home/End and `g g`/`G` the ends, `h`/`l` and
 the left/right arrows a page, ⌘+ and ⌘− zoom, ⌘0 fit width, ⌘1 actual size,
-⌘2 fit page, ⌘B the sidebar, ⌘⇧B a mark on the page you are on. `s` spreads
+⌘2 fit page, ⌘B the sidebar, ⌘⇧B a mark on the page you are on, ⌘F the find
+bar with ⌘G and ⌘⇧G through the matches and Escape out of it. `s` spreads
 and `t` the next theme are this experiment's own and are not in the app. Any
 of them can be rebound in `keys.toml`; a key bound to something not built yet
 says so on the notice line. The theme, the zoom, the fit, the spread, the
@@ -57,6 +61,8 @@ RSS" below.
 | pages resident while reading | canvas + proxy + worker copy | 2, at 23MB |
 | binary | 6.2MB | 12MB + 7.2MB pdfium |
 | the sidebar open, thumbnails and all | measured with it shut | +24MB |
+| the whole document indexed for a search | tens of MB, given back with the bar | 15MB, given back with the bar |
+| …and reading it to build that index | pdf.js: mostly worker | **62ms for 400 pages** |
 
 The Tauri column is the installed app on the same document measured the same
 way, summed over its four processes. **The assessment's Phase 1 gate — under
@@ -447,12 +453,14 @@ thread.
 | `tests/paint.rs` | the pixels: a page where the layout puts it, ink on it, a recolouring theme reaching the page and the chrome, the ink surviving the theme, the picture changing when you scroll |
 | `tests/keys.rs` | the keyboard: chords, the table, `keys.toml`, a rebound key, and the dispatch — `tests/keys.test.mjs`, carried across with the port |
 | `tests/sidebar.rs` | the panel: the contents listed and indented, a heading clicked and the one the reader is under, the column's mounting window, a thumbnail with ink on it, the document giving up exactly the panel's width, and a mark made, named, followed, taken off and remembered |
+| `tests/search.rs` | the find bar: opening and closing it, what is typed reaching the scan, the match the reader lands on, stepping and wrapping, a highlight's rectangle on the page, the three switches, the results tab, a key typed into the field not driving the document, and one slice not reading a whole book |
 | `tests/cost.rs` | the memory assertion |
-| `tests/upstream.rs` | the three faults above, as the smallest thing that shows each |
+| `tests/upstream.rs` | the four faults above, as the smallest thing that shows each |
 | `tests/recolor.rs` | the shader against the reference |
 | `src/layout.rs` | eleven tests on the ported layout |
 | `src/theme.rs`, `src/settings.rs`, `src/keys.rs`, `src/library.rs` | thirty, and they are the app's own — see Phase 3 |
 | `src/sidebar.rs` | four on the thumbnail column's geometry |
+| `src/search.rs` | eighteen: the fold, the origin map, whole words, the scan order, stepping, the cap, and the quads a match becomes |
 | `src/store.rs`, `src/palette.rs` | the layer between them and the reader |
 
 **And it is asked of the thumbnail column too**, in the same test rather than
@@ -598,9 +606,10 @@ asks it directly.
 cannot do**, because the point is that `keys.toml` means the same thing on
 both sides: a table missing half its rows would report the other half as
 things HyloPDF cannot do, in the reader's own file. What is not built says so
-on the notice line — "Search this document is not built yet" — which turns the
+on the notice line — "Print — handed to a program that prints is not built
+yet" — which turns the
 keyboard into a live list of what Phase 3 has left, and is a better answer than
-silence to somebody pressing ⌘F.
+silence to somebody pressing ⌘P.
 
 Two actions are this experiment's and are in a list of their own so that the
 app's table stays exactly the app's: `t` for the next theme and `s` for
@@ -703,7 +712,9 @@ inventing one would mean adding a key to `settings.rs` — the file this crate
 which is what `setDocument` does and is the difference between a panel and an
 empty box.
 
-*What is missing is the panel's third tab.* Search results are item 4.
+*And the panel's third tab arrived with item 4*, which is why the tab list can
+change: Results is there while the find bar is and gone when it is not, and
+the panel has to be able to fall back to one of the other two.
 
 **The edge can be dragged now, and it found a Blitz trap of its own.**
 `.sidebar-resize` is a 6px strip absolutely positioned over the panel's right
@@ -775,7 +786,9 @@ reader's root — and whoever owns the window hands it back after a click:
 `shell.rs` in the real app, and the harness for a window that does not exist,
 in the same one line through the same function. The policy is that focus
 landing *inside* the reader belongs to whatever took it, which is what makes
-this survive the find bar's field arriving in item 4. `tests/upstream.rs` has
+this survived the find bar's field arriving in item 4 — with one addition,
+which is that the innermost element asking for the keyboard is the one that
+gets it. `tests/upstream.rs` has
 the twenty-line reproduction and `tests/reader.rs` the regression.
 
 It is the third upstream fault this experiment has found and the second that
@@ -783,11 +796,137 @@ It is the third upstream fault this experiment has found and the second that
 that walk, which is what a browser does, or a `set_focus` that queues instead
 of borrowing.
 
+### 4. Search — done, and it is half the size it is in the app
+
+⌘F opens a bar under the toolbar, typing searches, ⌘G and ⌘⇧G walk the
+matches, Escape closes it, and the panel grows a third tab listing the results
+with a line of the document either side of each. "Match case", "Whole words"
+and "Highlight all" are the app's three switches and the app's three settings,
+so they outlive the bar and the session.
+
+**`search.ts` is 540 lines and `search.rs` is 600 before its tests, and the
+difference is not Rust — it is that pdfium answers per character.** pdf.js
+hands over *runs*, a string and a transform, and a run is not where a word is:
+so the app joins the runs into one string, keeps a `starts[]` saying where each
+began, binary-searches that to turn a match back into a run and an offset
+inside it, hands the pair to the DOM as a `Range`, and measures the range
+against a text layer of spans that exist only to be selected. `FPDFText_GetLooseCharBox` makes a match a
+range of characters and a range of characters a list of rectangles, so
+`items`, `starts`, `position()` and the text layer are all simply absent —
+along with the four comments in `viewer.ts` explaining which way round each of
+them goes.
+
+**And a highlight is a node rather than pixels.** `paintSelection` and
+`paintHighlights` copy the page canvas, run the copy through the luminance
+ramp and lay it back over the line, because giving `::selection` a colour puts
+pdf.js's text layer on screen and a page's bold type comes back regular, its
+mathematics comes back as boxes, and every letter shifts. There is no text
+layer here and nothing to put on screen: a match is a rectangle in PDF points,
+so it is a `div` over the page in the theme's own selection colours and the
+glyphs under it are the ones pdfium drew. `.hit` is two lines of CSS.
+
+**What is ported exactly is `fold`**, because it is the app's most heavily
+tested function and every line of it is a fact about typography rather than
+about JavaScript: ligatures split, accents decomposed and their marks dropped,
+soft hyphens taken out, case optional and the other three not offered as
+choices because nobody types a soft hyphen on purpose. One thing came *out* on
+the way — `search.ts` iterates its input by code point deliberately, with a
+comment, because indexing a JavaScript string walks UTF-16 code units and
+`normalize` on half a character does nothing, so a document set in
+mathematical bold could not be searched with the letters on the keyboard. A
+`Vec<char>` cannot be half a character and the bug cannot be written.
+
+*The fold is also tested through the renderer and not only in isolation*, and
+that found two things worth knowing, both in `fixture::prose_pdf`:
+
+- **pdfium splits ligatures itself.** A `/fi` glyph named in a `/Differences`
+  array comes back as "f" and "i" with a box each — with a `/ToUnicode` saying
+  U+FB01 and without one alike. So on this renderer the ligature half of the
+  fold has nothing to do, where on pdf.js it is the difference between finding
+  "find" in a typeset book and not. It stays: it is the app's own tested
+  behaviour, hayro will not do pdfium's normalising for us, and a document can
+  carry U+FB01 by other routes.
+- **A soft hyphen is only a soft hyphen if the document says so.** Written as
+  the byte 0255 under WinAnsiEncoding it is an ordinary hyphen, because that
+  is what the encoding says code 0255 *is* — so the fixture needs a
+  `/ToUnicode` to produce the case the fold exists for. That took a probe to
+  notice and would have made a passing test that proved nothing.
+
+An accent, meanwhile, arrives precomposed, exactly as it does in the app, and
+"resume" finds "résumé" because of the fold and for no other reason.
+
+**The scan is sliced, and the reason has changed.** In the app the streaming
+is there because pdf.js is slow *per page* and because every flush makes the
+browser lay out the text layer again — a single letter in a long article turned
+typing into a slideshow. Here a page costs 0.18ms in the 400-page fixture and
+1.3ms in a 376-page book of typeset mathematics: 62ms and 498ms for the whole
+document. A page is nothing; half a second is still half a second, and a window
+that stops answering for it while somebody is typing is precisely what "fast
+with no lags" is about. So there are still slices, at 8ms each, and
+`one_slice_of_the_scan_does_not_read_the_whole_book` counts them.
+
+*What a slice yields to is dioxus's scheduler, not a timer.* `breathe()` in
+`search.ts` is `setTimeout(resolve, 0)`; here it is a future that wakes itself
+and returns `Pending`, so `poll_tasks` puts it back in the queue, sees the
+signal the slice just wrote, and hands the turn to whoever is driving the
+document — the event loop in the real app, `pump()` in the harness. There is
+no clock anywhere in it.
+
+**The index costs about seventy bytes a character and goes when the bar
+does** — 15MB for the 400-page fixture, measured. That is the app's own trade
+in the app's own words, "a fair trade while the find bar is up and no trade at
+all once it is closed", and it is settled the same way. Two notes for whoever
+wants it smaller: the boxes are half of it and could be dropped for a page
+with no match on it, and the footprint does not *fall* when the index is put
+down — the allocator keeps the blocks and the next thing that needs memory
+uses them, which is the same macOS behaviour Phase 1 spent a day on.
+
+Measured on one machine in one sitting, the same document idle, before and
+after: 225MB and 200MB. The search costs nothing when the bar is down, and the
+difference between those two numbers is the machine rather than the change.
+The binary went from 12,653,968 bytes to 12,819,488 — **162KB**, most of it
+`unicode-normalization`'s NFKD tables, which is what a Rust binary pays for
+what `String.prototype.normalize` gives a webview for free.
+
+#### Two more Blitz traps, and both of them are about the find bar
+
+**A focused text field takes a chord as typing, whatever is held down.** ⌘G
+stepped to the next match *and* put a "g" in the query, which started a search
+for something nobody typed — and because the answer arrived a slice later, it
+looked like the search losing its results rather than like a keystroke going
+to two places. Blitz dispatches `keydown` to the field and bubbles it to the
+root, and then applies its own default action to the field regardless of the
+modifiers. So the field's handler stops propagation for anything plain (or
+"just" typed into it would scroll the document four times on the way) and
+calls `prevent_default` for anything modified — except `a`, `c`, `v`, `x` and
+`z`, which are what a text field owns. That is the same shape as the app's
+find bar handing arrows and Home back to a focused field, arrived at from the
+other direction.
+
+**And hit-testing does not clip on overflow.** `.viewer` has `overflow:
+hidden` and Blitz *paints* correctly — a page scrolled past the top is clipped,
+which the screenshots show — but a page whose box starts at −2789px is still
+hit-tested where its box says it is, which is over the toolbar and the find
+bar. So clicking "Done" with the document scrolled at all landed on the page
+behind it and did nothing, and clicking it at the top of a document worked
+perfectly, which is the worst way round. Every row of the window that is not
+the document now carries `position: relative` and a `z-index`, which is the
+same trap and the same fix as `.sidebar-resize` in item 3, one level out.
+
+*And the keyboard handback grew to cover keys.* `shell.rs` gave the focus back
+to the reader after a click; a key can take the focused node away with it —
+Escape closes the find bar and the field it was typed into stops existing —
+after which every shortcut in the reader is dead again, which is the third
+appearance of the same upstream fault. `give_keyboard_back` also picks the
+*innermost* element that asks for it now, which is what lets the field keep
+the keyboard while the bar is up and hands it back to the root when the bar
+goes: one rule, two elements, and no state anywhere saying which.
+
 ### What is not built
 
-No search, no links, no text layer, no selection, no markup, no settings
-window, no Keyboard page, no watchers, one window — and of the library, only
-the half the marks needed. Two things in the assessment's Phase 1 scope that
+No links, no text layer, no selection, no markup, no settings window, no
+Keyboard page, no watchers, one window — and of the library, only the half the
+marks needed. Two things in the assessment's Phase 1 scope that
 are also still absent: `measureCrop` (trim margins) and paged mode, both of
 which are layout and both of which the ported `Layout` has room for.
 
@@ -809,7 +948,7 @@ which are layout and both of which the ported `Layout` has room for.
    than the page's and cannot be tested here at all, exactly as the app's own
    harness says of the same list.
 
-## Three things worth raising upstream, none blocking
+## Five things worth raising upstream, and only the last is blocking
 
 - `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
   comment in the source already says it should be. A tenth of every one of
@@ -821,4 +960,16 @@ which are layout and both of which the ported `Layout` has room for.
 - A click clearing the focus onto `<html>`, with no way for a component to take
   it back. Either half alone is defensible, but together they mean an
   application whose shortcuts live on its own root stops answering them the
-  first time anybody clicks anything. See Phase 3 item 3.
+  first time anybody clicks anything. See Phase 3 item 3 — and item 4, where
+  the same fault turns up a third time because a key can destroy the node that
+  had the focus.
+- Hit-testing that does not clip on `overflow: hidden`, so a node scrolled far
+  out of its container is still clickable where its box says it is, over
+  whatever is drawn there. Painting gets this right; only the hit test does
+  not. See Phase 3 item 4.
+
+**And the blocking one is IME**, which is not a fault but an absence: there
+are no composition events, so the find field this phase built cannot take
+composed input and a reader writing CJK cannot search. It is the one item on
+either of these lists that a decision has to be made about rather than worked
+around, and the assessment says so too.

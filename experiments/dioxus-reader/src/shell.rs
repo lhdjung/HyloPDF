@@ -342,15 +342,20 @@ impl ApplicationHandler for Shell {
         // that asks for the focus panics from inside an event handler. See
         // `app::KEYBOARD`, which is the whole account, and `harness.rs`,
         // which does this same one line for a window that does not exist.
-        let clicked = matches!(
+        // A key as well as a click, because a key can take the focused node
+        // away with it: Escape closes the find bar, the field it was typed
+        // into stops existing, and the focus goes with it — after which every
+        // shortcut in the reader is dead again, which is the same failure one
+        // level along.
+        let moved_focus = matches!(
             event,
             WindowEvent::PointerButton {
                 state: ElementState::Released,
                 ..
-            }
+            } | WindowEvent::KeyboardInput { .. }
         );
         self.inner.window_event(event_loop, window_id, event);
-        if clicked {
+        if moved_focus {
             if let Some(view) = self.inner.windows.get_mut(&window_id) {
                 crate::app::give_keyboard_back(&mut view.doc.inner_mut());
                 view.request_redraw();

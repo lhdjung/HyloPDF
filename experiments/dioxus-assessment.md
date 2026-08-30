@@ -158,15 +158,15 @@ Doors that need a crate rather than a Tauri plugin:
 
 | file | lines | fate |
 | --- | ---: | --- |
-| `viewer.ts` | 3,674 | the layout math, `boxes[]`, `rows()`, the LRU, the binary searches, `measureCrop`, `keyFor` — all ports to Rust nearly line for line. **The layout half is done.** `paintSelection`, `tintLinks`, `restoreImages` and most of `recolor` **delete**, replaced by a shader and real glyph rects. |
+| `viewer.ts` | 3,674 | the layout math, `boxes[]`, `rows()`, the LRU, the binary searches, `measureCrop`, `keyFor` — all ports to Rust nearly line for line. **The layout half is done, and so is the highlight half**: `paintHighlights` is `div`s over the page at the character boxes pdfium reports, which is two lines of CSS. `paintSelection`, `tintLinks`, `restoreImages` and most of `recolor` **delete**, replaced by a shader and real glyph rects. |
 | `main.ts` | 3,539 | Dioxus components + signals. The `App` object is a `Store`. |
 | `api.ts` | 898 | **deletes.** There is no bridge to be the only door to. |
 | `themes.ts` | 835 | the derived shades stay (as `palette.rs`, done); the recolouring half becomes WGSL (done). `parseColor`/`readColor` stay and stay strict (done). |
 | `ui.ts` | 813 | menus, switches, modal, notice line → components. The stepper's two load-bearing behaviours (no unit in the field, arriving selects) must be re-earned. |
 | `settings.ts` | 801 | the settings window → a second Dioxus window |
-| `sidebar.ts` | 699 | contents / marks / thumbnails / results → components — **done but for the results tab** (`sidebar.rs`, 516 with its tests), and the thumbnail LRU does *not* stay: a thumbnail belongs to its row and the mounting window is the cache |
+| `sidebar.ts` | 699 | contents / marks / thumbnails / results → components — **done** (`sidebar.rs`, 600 with its tests), and the thumbnail LRU does *not* stay: a thumbnail belongs to its row and the mounting window is the cache |
 | `keys.ts` | 677 | the action table and `chordsOf` port to Rust against `keyboard-types` — **done** (`keymap.rs`, 640 lines), and `isMac` becomes a parameter rather than a module constant compiled twice |
-| `search.ts` | 540 | `fold` ports to Rust (`unicode-normalization`); a straight translation, and the most heavily tested function in the app |
+| `search.ts` | 540 | **done** (`search.rs`). `fold` is a straight translation and needed one thing *removed*, the code-point iteration JavaScript forces. The rest is much smaller than this line expected: pdfium answers per character, so the runs, `starts[]`, `position()` and the text layer all go, and a highlight is a `div` rather than a repainted strip of canvas |
 | `icons.ts` | 86 | needs a genuinely different design — see SVG below |
 | `styles.css` | 2,129 | mostly survives; see the gap list |
 
@@ -416,11 +416,13 @@ step was chosen to be testable:
    *done but for the Keyboard page, which is a settings window; `keys.rs` is
    mounted from the app like `theme.rs`, and `keys.ts` is ported as
    `keymap.rs`*
-3. sidebar: contents, thumbnails with their LRU, marks — *done; the LRU
-   turned out to be unnecessary, and `library.rs` came across for the marks.
-   The results tab waits on item 4 and the drag handle on the interface work*
+3. sidebar: contents, thumbnails with their LRU, marks — *done, results tab
+   and all; the LRU turned out to be unnecessary, and `library.rs` came across
+   for the marks*
 4. search: `fold`, the index, match stepping, the find bar and its three
-   switches
+   switches — *done, and it took the results tab of item 3 with it. Half of
+   `search.ts` and all of `paintHighlights` turned out to be pdf.js's text
+   layer rather than searching*
 5. links, destinations, page labels, the go-to field
 6. spreads, trim, rotation, paged mode, presenting
 7. the library: position, open documents, marks, the restore list
@@ -451,9 +453,11 @@ is that the binary matters more, the alternative is to stop and spend the same
 weeks reducing memory inside the current architecture — where the last such
 pass took 2521MB to 327MB, so there may well be more to find.
 
-**2. IME.** No composed input in the search field until Blitz has composition
-events. If HyloPDF is meant for readers writing CJK, that is a blocker, and
-asking upstream when it is coming is the cheapest thing on this list.
+**2. IME**, and it stopped being hypothetical with Phase 3 item 4: the search
+field is built, and somebody composing CJK cannot type into it. There will be
+no composed input there until Blitz has composition events. If HyloPDF is
+meant for readers writing CJK that is a blocker, and asking upstream when it
+is coming is the cheapest thing on this list.
 
 ## Sources
 

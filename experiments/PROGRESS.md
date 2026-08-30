@@ -8,23 +8,35 @@ read before reaching a true sentence. They are in git at `d2b0370` if the
 working is ever wanted.
 
 **The experiment is passing its gates and is not blocked on anything
-upstream.** Two upstream faults were found and both are worked around in this
-tree, with a test each that will fail the day they are fixed.
+upstream.** Three upstream faults were found and all three are worked around
+in this tree, with a test each that will fail the day they are fixed.
 
 ```
 cd dioxus-reader
-cargo run --release -- book.pdf              # read it
-cargo run --release -- book.pdf --theme 4    # …in the fifth theme in the list
-cargo run --release -- book.pdf --measure 60 # read it, and say what it cost
-cargo run --release -- book.pdf --quit 5     # open, sit still, report, close
-cargo test                                   # 55 tests, about nine seconds
+cargo run --release                          # the 400-page fixture
+cargo run --release -- ~/paper.pdf           # a document of your own
+cargo run --release -- --theme 4             # …in the fifth theme in the list
+cargo run --release -- --measure 60          # read it, and say what it cost
+cargo run --release -- --quit 5              # open, sit still, report, close
+cargo test                                   # 108 tests, about fifteen seconds
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
-Wheel scrolls. `j`/`k` and the arrows move a line, `d`/`u` half a screen, space
-and Page Up/Down a screen, Home/End the ends, `n`/`p` a page, `+`/`-` zoom, `0`
-fit width, `9` fit page, `s` spreads, `t` the next theme. The theme, the zoom,
-the fit and the spread are still there the next time it opens.
+With no path it opens the app's own `tests/fixtures/book.pdf`, which is the
+document every number below was taken on. (It used to be documented as
+`-- book.pdf`, which is a path relative to wherever cargo was run from and was
+therefore usually not there — and pdfium reports a missing file as a
+Debug-printed `io::Error`. Both halves of that are fixed.)
+
+**The keys are the app's own**, because `keys.ts` and `keys.toml` are ported —
+see Phase 3 item 2. `j`/`k` and the arrows move a line, `d`/`u` half a screen,
+space and Page Up/Down a screen, Home/End and `g g`/`G` the ends, `h`/`l` and
+the left/right arrows a page, ⌘+ and ⌘− zoom, ⌘0 fit width, ⌘1 actual size,
+⌘2 fit page, ⌘B the sidebar, ⌘⇧B a mark on the page you are on. `s` spreads
+and `t` the next theme are this experiment's own and are not in the app. Any
+of them can be rebound in `keys.toml`; a key bound to something not built yet
+says so on the notice line. The theme, the zoom, the fit, the spread, the
+sidebar and the marks are all still there the next time it opens.
 
 ## The numbers
 
@@ -44,11 +56,20 @@ RSS" below.
 | opening a 400-page document | ~2 orders slower (worker start) | 30-150ms |
 | pages resident while reading | canvas + proxy + worker copy | 2, at 23MB |
 | binary | 6.2MB | 12MB + 7.2MB pdfium |
+| the sidebar open, thumbnails and all | measured with it shut | +24MB |
 
 The Tauri column is the installed app on the same document measured the same
 way, summed over its four processes. **The assessment's Phase 1 gate — under
 150MB against 346MB — is met**: 144MB against 373MB, a factor of 2.6, for
 twice the binary. That is the trade the brief's goal 2 permits, and it is paid.
+
+**The sidebar row is the app's own warning answered.** `AGENTS.md` says its
+memory table was taken with the panel shut, and that the thumbnail column is
+where a fourth leak would hide next. Here the column is four thumbnails at
+1.2ms each and 12MB of texture, the whole panel costs 123MB → 147MB of
+footprint on the same document, and it does not grow: fifty screenfuls of
+column end where ten of them did. See Phase 3 item 3 — there is no thumbnail
+cache, because the mounting window is one.
 
 What is *not* measured: Windows, Linux, and any document but this one. A
 scanned volume is the shape most likely to behave differently.
@@ -424,12 +445,19 @@ thread.
 | --- | --- |
 | `tests/reader.rs` | the interface: opening, the wheel, ten keys, the mounting window, fit and zoom, keeping your place through a zoom, the toolbar, spreads, a window of another size, the whole theme list, and settings surviving a restart |
 | `tests/paint.rs` | the pixels: a page where the layout puts it, ink on it, a recolouring theme reaching the page and the chrome, the ink surviving the theme, the picture changing when you scroll |
+| `tests/keys.rs` | the keyboard: chords, the table, `keys.toml`, a rebound key, and the dispatch — `tests/keys.test.mjs`, carried across with the port |
+| `tests/sidebar.rs` | the panel: the contents listed and indented, a heading clicked and the one the reader is under, the column's mounting window, a thumbnail with ink on it, the document giving up exactly the panel's width, and a mark made, named, followed, taken off and remembered |
 | `tests/cost.rs` | the memory assertion |
-| `tests/upstream.rs` | the two faults above, as the smallest thing that shows each |
+| `tests/upstream.rs` | the three faults above, as the smallest thing that shows each |
 | `tests/recolor.rs` | the shader against the reference |
 | `src/layout.rs` | eleven tests on the ported layout |
-| `src/theme.rs`, `src/settings.rs` | seventeen, and they are the app's own — see Phase 3 |
+| `src/theme.rs`, `src/settings.rs`, `src/keys.rs`, `src/library.rs` | thirty, and they are the app's own — see Phase 3 |
+| `src/sidebar.rs` | four on the thumbnail column's geometry |
 | `src/store.rs`, `src/palette.rs` | the layer between them and the reader |
+
+**And it is asked of the thumbnail column too**, in the same test rather than
+a second one, because the counters are the process's and two tests running at
+once would each be reading the other's pages.
 
 **The memory test is a growth bound, not a ceiling.** What a process costs to
 start depends on the machine, the allocator and how many fonts are installed,
@@ -524,15 +552,200 @@ check and does not exist here.
 asked; the app moved these off the main thread because `remember_position`
 fires on every pause in a scroll, and nothing here does that until the library
 lands (item 7). And there is no settings *window* and no theme editor — those
-are interface, and the next item is the one that makes an interface possible.
+are interface, and an interface is what the items after the keyboard are for.
+The keyboard itself is done — item 2 below — and the settings window is now the
+oldest thing outstanding on this list.
+
+### 2. The keyboard — done, and it took a file with it
+
+The reader answered eleven keys through a `match` on `event.key()`. That is
+the shape the app spent a rewrite getting out of, and it had already started
+failing here in the way the app's version did: a modifier was something an arm
+had to *remember* to check, so `+` answered ⌘+ and ⌥+ alike, and ⌘0 could not
+be expressed at all. It is now the app's own table, and a chord is looked up
+rather than matched.
+
+**`src/keys.rs` is the app's, mounted like `theme.rs` and `settings.rs` beside
+it, and `src/keymap.rs` is `keys.ts` in Rust.** That is the third module to go
+across untouched and the most interesting of them, because *its other half is
+TypeScript*. In the app the split is argued for at length — `keys.rs` owns the
+file, `keys.ts` owns the meaning of a line, and validating in Rust as well
+would have meant the same parser written twice — and the argument reads as
+though the bridge is what forced it. It is not: with both halves in Rust and
+no bridge between them, the same split is still the right one, and **nothing
+about it had to change**. `keys.rs` compiles here with no edit, its five tests
+run unmodified, and the template it installs is the app's `keys.toml`.
+
+What the port cost: 700 lines of `keys.ts` became 640 of `keymap.rs`, and two
+things got smaller on the way.
+
+*`isMac` became a parameter.* In the app it is a module-level constant
+imported from `api.ts`, so asking `parseChord` what it would say on Windows
+means compiling the module a second time with the constant substituted — which
+is what `tests/keys.test.mjs` does, and why the app carries
+`HYLOPDF_PLATFORM=other` to lie to `navigator.platform` for the tests that
+cannot. Here `mac` is an argument, both platforms are two calls, and the
+environment variable has nothing left to do.
+
+*The dispatch came out of the handler.* `wireKeyboard` decides what a
+keystroke means while reading and writing four fields of the `App` object, so
+the sequence logic — `g`, then what follows it — can only be tested by pressing
+keys at a browser. `Keymap::resolve` is that logic as a function of the chords
+and what is pending, and `a_pending_prefix_is_continued_dropped_or_used_on_its_own`
+asks it directly.
+
+**Every action in the app's table is carried, including the ones this reader
+cannot do**, because the point is that `keys.toml` means the same thing on
+both sides: a table missing half its rows would report the other half as
+things HyloPDF cannot do, in the reader's own file. What is not built says so
+on the notice line — "Search this document is not built yet" — which turns the
+keyboard into a live list of what Phase 3 has left, and is a better answer than
+silence to somebody pressing ⌘F.
+
+Two actions are this experiment's and are in a list of their own so that the
+app's table stays exactly the app's: `t` for the next theme and `s` for
+spreads, both of which exist only because there are no menus yet. The test that
+holds the table against the shipped `keys.toml` asserts they are *not* in it.
+
+*One number moved.* Half a screen is now half of what a screen scrolls rather
+than half of the window: the app's `scrollByViewport` keeps 60px of the old
+screen on the new one, and `d` twice landing somewhere Space once does not is
+the sort of thing a reader notices and cannot name.
+
+*The harness grew two things, both small.* `Options.keys` writes a real
+`keys.toml` into the reader's config directory before it opens, so what a test
+exercises is the app's own loader reading a real file — `openApp({ keys: … })`
+does the same against the browser twin. And `press_chord("mod+0")` presses a
+chord written the way the binding under test is written, which keeps the
+platform out of the test exactly as `MOD` does in the app's harness.
+
+*What is still missing is the Keyboard page*, which is where the problems
+belong: `keys.toml` is reported in one line at the bottom of the window here,
+and the app shows the whole list beside the keys it is about. That is a
+settings window, which is item 1's other half and waits on the same interface
+work.
+
+### 3. The sidebar — done, and it lost half its code on the way
+
+The document's own table of contents, the pages the reader has pinned, and a
+column of thumbnails. ⌘B opens it, ⌘⇧B marks the page — both the app's own
+bindings, out of the table ported in item 2. Whether the panel is open is a
+setting and the marks are the library, so both are there again next time.
+
+**`sidebar.ts` is 699 lines and about half of them are memory management.**
+`THUMB_CACHE`, `drawn`, `tasks`, `flights`, `trim()`, `forget(release)`,
+`isVisible()` and an `IntersectionObserver` to drive them. `src/sidebar.rs` is
+516 lines including its own tests and its comments, and none of that is in
+it, because **the thumbnail cache is the mounting window**. A thumbnail in the app is a `<canvas>` that
+lives as long as the column does, so drawing one is a commitment and the cap
+is what bounds it; here it is a `PageWidget` on a node, so it lives as long as
+the node does, and the node exists only while its row is in view. Scrolling
+away gives the texture back through `Drop`. There is nothing to trim because
+nothing accumulates.
+
+That is the same rule `mount()` and `OVERSCAN` already apply to the document,
+applied to the column — and it is not a saving so much as the only design
+available, because of what Phase 0 found: every widget in the document is
+painted every frame whether it is on screen or not. An unmounted row is not
+tidiness, it is the difference between a column that costs nothing and one
+that costs four hundred pdfium renders.
+
+What the app buys with `THUMB_CACHE` is that scrolling back a little does not
+redraw. Measured, that is not worth a cache here: a thumbnail is 1.2ms against
+a page's 2.9ms at a fiftieth of the pixels, and the number that made the app's
+cache necessary — a megabyte a canvas, nine hundred of them held for the life
+of the document — cannot arise from a design where the picture belongs to the
+row. **The whole panel costs 24MB**, and the memory test now scrolls the
+column as well as the document, which is `AGENTS.md`'s own warning about where
+a fourth leak would hide, answered.
+
+*A thumbnail wears the theme for free*, which the app's could not: it is the
+same widget reading the same `Chosen`, so the column and the page cannot
+disagree about what theme is on. The app's `redrawVisible` had to cancel a
+render in flight to avoid starting a second one into the same canvas, and had
+a bug there for a long time.
+
+**`library.rs` is the fourth of the app's modules mounted by `#[path]`**, and
+it came across for the marks: a pin in a page has to be somewhere the next run
+can read it. Eight more of the app's own tests run here unmodified. Only
+`touch` and `toggle_mark` are called — where you were, what was open in each
+window and the markup journal are the items of Phase 3 that are about those
+things — and, as with the other three, nothing in it had to change.
+
+*A mark is named for the section it falls in*, which is `sectionFor` in
+`sidebar.ts` and is the reason the outline is read at open rather than when
+the panel is first shown: "A section" is worth a great deal more than "Page 4"
+to somebody looking at a list of their own marks a week later.
+
+**The renderer seam grew its third and fourth questions**, both of which
+`render.rs` had named and not declared since Phase 1: `outline()` and
+`path()`. The outline comes out of pdfium's bookmark tree flattened into rows
+with a depth, which is what `buildOutline` walks a tree to produce anyway. Two
+things about that walk are worth keeping: `iter_direct_children` already walks
+the sibling chain under a node, so following siblings *as well* lists every
+entry but the first of its level twice — which is exactly what the first
+version did; and a malformed document can point a bookmark at its own
+ancestor, so the walk is capped at 20,000 rows and sixteen levels rather than
+finding that out by running out of memory.
+
+**And there is a fixture written in Rust now.** `src/fixture.rs` writes a
+twelve-page document carrying a three-level table of contents, because the app
+has no fixture with an outline in it and adding one to `make-pdf.mjs` would
+mean `cargo test` needed Node — which is the opposite of what "run this suite
+on three platforms" is asking for. `Reader::book()` still points at the app's
+own 400-page fixture, deliberately: it is the document every number above was
+taken on.
+
+*One thing about the panel is a decision rather than a port.* Which tab is
+showing is not remembered, because the app has no setting for it either and
+inventing one would mean adding a key to `settings.rs` — the file this crate
+*mounts* rather than edits. A document with no contents opens on the pages,
+which is what `setDocument` does and is the difference between a panel and an
+empty box.
+
+*What is missing is the panel's third tab and its edge.* Search results are
+item 4. The panel cannot be dragged wider — `sidebar_width` is read and
+honoured and there is no handle to change it with, which needs a pointer drag
+and belongs with the other interface work.
+
+### A click cost the reader its keyboard, and had since Phase 1
+
+Found by the first test that pressed a key *after* clicking something, which
+is the whole reason this item's tests are worth their length.
+
+Blitz clears the focus when a click lands on nothing it knows how to focus —
+it walks up from the target looking for a text input, a checkbox, a radio, a
+summary, a label or a link, and a plain `<button>` is on none of those lists.
+A key with nothing focused goes to `<html>`, which is above anything a
+component can put a handler on. So from the first click on any chip, tab or
+row, every shortcut in this reader did nothing at all.
+
+**And the page cannot answer it.** `MountedData::set_focus` takes `doc_mut()`
+the moment it is called, and every place a component can call it from is
+already inside a borrow of the document — including a task spawned from one,
+which is polled inside that same borrow. It panics with "RefCell already
+borrowed" from a stack naming neither.
+
+So the element that wants the keyboard says so — `data-keyboard` on the
+reader's root — and whoever owns the window hands it back after a click:
+`shell.rs` in the real app, and the harness for a window that does not exist,
+in the same one line through the same function. The policy is that focus
+landing *inside* the reader belongs to whatever took it, which is what makes
+this survive the find bar's field arriving in item 4. `tests/upstream.rs` has
+the twenty-line reproduction and `tests/reader.rs` the regression.
+
+It is the third upstream fault this experiment has found and the second that
+`shell.rs` pays for. What would end it is either blitz honouring `tabindex` in
+that walk, which is what a browser does, or a `set_focus` that queues instead
+of borrowing.
 
 ### What is not built
 
-No sidebar, no search, no outline, no links, no text layer, no selection, no
-markup, no settings window, no library, no watchers, one window. Two things in
-the assessment's Phase 1 scope that are also still absent: `measureCrop` (trim
-margins) and paged mode, both of which are layout and both of which the ported
-`Layout` has room for.
+No search, no links, no text layer, no selection, no markup, no settings
+window, no Keyboard page, no watchers, one window — and of the library, only
+the half the marks needed. Two things in the assessment's Phase 1 scope that
+are also still absent: `measureCrop` (trim margins) and paged mode, both of
+which are layout and both of which the ported `Layout` has room for.
 
 ---
 
@@ -552,7 +765,7 @@ margins) and paged mode, both of which are layout and both of which the ported
    than the page's and cannot be tested here at all, exactly as the app's own
    harness says of the same list.
 
-## Two things worth raising upstream, neither blocking
+## Three things worth raising upstream, none blocking
 
 - `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
   comment in the source already says it should be. A tenth of every one of
@@ -561,3 +774,7 @@ margins) and paged mode, both of which are layout and both of which the ported
 - `PdfBitmap::as_raw_bytes` named as the copy it is. A function that looks like
   a view and allocates 24MB is a trap anybody using `pdfium-render` for a
   reader will fall into.
+- A click clearing the focus onto `<html>`, with no way for a component to take
+  it back. Either half alone is defensible, but together they mean an
+  application whose shortcuts live on its own root stops answering them the
+  first time anybody clicks anything. See Phase 3 item 3.

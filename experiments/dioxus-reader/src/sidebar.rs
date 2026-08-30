@@ -1,0 +1,516 @@
+//! The panel on the left: the document's own table of contents, the pages the
+//! reader has pinned, and a column of thumbnails.
+//!
+//! `sidebar.ts` is 699 lines and about half of them are memory management:
+//! `THUMB_CACHE`, `drawn`, `tasks`, `flights`, `trim()`, `forget(release)`,
+//! `isVisible()` and an `IntersectionObserver` to drive them. That half is not
+//! here, and its absence is the finding rather than an omission.
+//!
+//! **The thumbnail cache is the mounting window.** A thumbnail in the app is a
+//! `<canvas>` that lives for as long as the column does, so drawing one is a
+//! commitment and the cap exists to bound it. Here a thumbnail is a
+//! [`crate::page::PageWidget`] on a node, so it lives exactly as long as the
+//! node does, and the node exists only while the row is in view — the same
+//! rule `mount()` and `OVERSCAN` apply to the document itself, applied to the
+//! column. Scrolling away gives the texture back through `Drop`, and there is
+//! nothing to trim because nothing accumulates.
+//!
+//! What the app buys with `THUMB_CACHE` is that scrolling back a little does
+//! not redraw. The measurement says that is not worth a cache here: a page at
+//! the size the document is read at is 3.2ms, and a thumbnail is a fiftieth of
+//! the pixels. The one number that made the app's cache necessary — a canvas
+//! at a megabyte apiece, nine hundred of them held for the life of the
+//! document — cannot arise from a design where the picture belongs to the row.
+//!
+//! Two things follow from that and are worth stating, because both were
+//! surprises in Phase 0. Every widget in the document is painted every frame
+//! whether it is on screen or not, so an unmounted row is not merely tidy, it
+//! is the difference between a column that costs nothing and one that costs
+//! four hundred pdfium renders. And a thumbnail wears the theme for free: it
+//! is the same widget reading the same [`crate::page::Chosen`], so the column
+//! and the page cannot disagree about what theme is on — which is a bug the
+//! app had (`redrawVisible` starting a second render into a canvas that
+//! already had one) and this cannot have.
+
+use dioxus::html::geometry::WheelDelta;
+use dioxus::prelude::*;
+use dioxus_native::CustomWidgetAttr;
+
+use crate::app::{Handle, Viewer};
+use crate::layout::Size;
+use crate::page::{Chosen, PageWidget};
+
+/// What the panel can be showing.
+///
+/// Two, where the app has three: its third is the search results, and search
+/// is the next item of Phase 3. The tab appears with it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tab {
+    Contents,
+    Pages,
+}
+
+impl Tab {
+    /// The word `settings.toml` holds, so that the tab the reader left the
+    /// panel on is the tab it opens on. One function rather than two match
+    /// arms in two places, for the reason `name_of` in `app.rs` is one.
+    pub fn name(self) -> &'static str {
+        match self {
+            Tab::Contents => "contents",
+            Tab::Pages => "pages",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Tab {
+        match name {
+            "pages" => Tab::Pages,
+            _ => Tab::Contents,
+        }
+    }
+}
+
+/// How narrow and how wide the panel may be dragged. The app's own numbers,
+/// and its default of 252 sits between them.
+pub const MIN_WIDTH: f64 = 160.0;
+pub const MAX_WIDTH: f64 = 480.0;
+
+/// What is left for a picture once the column has its padding, and the space
+/// under one for its page number.
+pub const PAD: f64 = 10.0;
+const LABEL: f64 = 18.0;
+const GAP: f64 = 10.0;
+
+/// How much of a screen of thumbnails is kept mounted either side of the one
+/// being looked at. `OVERSCAN` in `layout.rs` is 0.6 of a viewport and does
+/// the same job for the document; this is smaller because a row is cheap to
+/// draw and there are a great many of them in a screen.
+const OVERSCAN: f64 = 0.4;
+
+/// Where every thumbnail sits in the column.
+///
+/// The document's layout in miniature, and deliberately not the same code:
+/// `Layout` is about fit modes, spreads, zoom and a page gap in CSS pixels,
+/// and a column of thumbnails has none of those. What it does share is the
+/// shape that matters — positions worked out once and binary-searched, rather
+/// than a walk over four hundred rows on every frame of a scroll.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Column {
+    /// How wide a picture is drawn, in CSS pixels.
+    pub width: f64,
+    /// The top of each row, in order.
+    tops: Vec<f64>,
+    /// How tall each picture is. The row is this plus [`LABEL`].
+    heights: Vec<f64>,
+    total: f64,
+}
+
+impl Column {
+    /// Lay a column of `sizes` out for a panel this wide.
+    pub fn new(sizes: &[Size], panel_width: f64) -> Column {
+        let width = (panel_width - PAD * 2.0).max(40.0);
+        let mut tops = Vec::with_capacity(sizes.len());
+        let mut heights = Vec::with_capacity(sizes.len());
+        let mut y = PAD;
+        for size in sizes {
+            // A page with no height in it is a document being awkward rather
+            // than a row that should be zero pixels tall.
+            let ratio = if size.width > 0.0 {
+                size.height / size.width
+            } else {
+                1.414
+            };
+            let height = (width * ratio).max(1.0);
+            tops.push(y);
+            heights.push(height);
+            y += height + LABEL + GAP;
+        }
+        Column {
+            width,
+            tops,
+            heights,
+            total: y - GAP + PAD,
+        }
+    }
+
+    pub fn pages(&self) -> usize {
+        self.tops.len()
+    }
+
+    pub fn total(&self) -> f64 {
+        self.total
+    }
+
+    /// The top of a row and the height of its picture, by zero-based index.
+    pub fn row(&self, index: usize) -> Option<(f64, f64)> {
+        Some((*self.tops.get(index)?, self.heights[index]))
+    }
+
+    pub fn max_scroll(&self, height: f64) -> f64 {
+        (self.total - height).max(0.0)
+    }
+
+    /// Which rows are in the DOM: everything in view, plus [`OVERSCAN`] of a
+    /// panel either side of it. Zero-based, in order.
+    ///
+    /// The band is asked for by binary search rather than by scanning, for the
+    /// same reason `first_box_ending_after` is a binary search: this runs on
+    /// every frame of a scroll and a book has as many rows as it has pages.
+    pub fn mounted(&self, scroll: f64, height: f64) -> Vec<usize> {
+        if self.tops.is_empty() {
+            return Vec::new();
+        }
+        let margin = height * OVERSCAN;
+        let top = scroll - margin;
+        let bottom = scroll + height + margin;
+        let first = self.first_row_ending_after(top);
+        let mut mounted = Vec::new();
+        for index in first..self.tops.len() {
+            if self.tops[index] > bottom {
+                break;
+            }
+            mounted.push(index);
+        }
+        mounted
+    }
+
+    /// The first row whose bottom edge is below `y`.
+    fn first_row_ending_after(&self, y: f64) -> usize {
+        let (mut low, mut high) = (0usize, self.tops.len());
+        while low < high {
+            let middle = (low + high) / 2;
+            if self.tops[middle] + self.heights[middle] + LABEL < y {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        low.min(self.tops.len().saturating_sub(1))
+    }
+
+    /// Where to scroll the column so that a page is on screen — and `None`
+    /// when it already is.
+    ///
+    /// Returning nothing when there is nothing to do is the whole behaviour:
+    /// the column follows the document as it is read, and a column that
+    /// re-centred on every page turn would take a reader who had scrolled it
+    /// somewhere else straight back. `revealCurrentThumb` in `sidebar.ts`
+    /// asks the same question of two rectangles.
+    pub fn reveal(&self, index: usize, scroll: f64, height: f64) -> Option<f64> {
+        let (top, picture) = self.row(index)?;
+        let bottom = top + picture + LABEL;
+        if top >= scroll && bottom <= scroll + height {
+            return None;
+        }
+        // Centred, which is what the app asks the browser for, and clamped.
+        let wanted = top - (height - (bottom - top)) / 2.0;
+        Some(wanted.clamp(0.0, self.max_scroll(height)))
+    }
+}
+
+/// The panel itself.
+///
+/// It takes the whole `Viewer` signal rather than fifteen props, which the
+/// reader's other components do not need to and this one does: it draws four
+/// lists that are each a different slice of the same state and changes six
+/// things about it. Passing them one at a time would be the same coupling
+/// written out longer.
+#[component]
+pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> Element {
+    let held = viewer.read();
+    let tab = held.tab;
+    let width = held.sidebar_width;
+    let page = held.page();
+    let theme_name = held.theme_name();
+    let headings = held.headings.clone();
+    let marks: Vec<(usize, String)> = held
+        .store
+        .marks()
+        .iter()
+        .map(|mark| {
+            let page = mark.page as usize;
+            let title = if mark.title.is_empty() {
+                format!("Page {page}")
+            } else {
+                mark.title.clone()
+            };
+            (page, title)
+        })
+        .collect();
+    let column = held.column.clone();
+    // Worked out once rather than per row: the answer is the same for every
+    // one of them, and a document's outline can be long.
+    let current_heading = heading_for(&headings, page);
+    let thumb_scroll = held.thumb_scroll;
+    let panel_height = held.layout.viewport.height;
+    let mounted = column.mounted(thumb_scroll, panel_height);
+    drop(held);
+
+    let rows: Vec<(usize, f64, f64)> = mounted
+        .iter()
+        .filter_map(|&index| column.row(index).map(|(top, height)| (index, top, height)))
+        .collect();
+
+    rsx! {
+        div { class: "sidebar", style: "width: {width}px;",
+            div { class: "tabs",
+                button {
+                    class: if tab == Tab::Contents { "tab on" } else { "tab" },
+                    "data-tab": "contents",
+                    onclick: move |_| viewer.write().show_tab(Tab::Contents),
+                    "Contents"
+                }
+                button {
+                    class: if tab == Tab::Pages { "tab on" } else { "tab" },
+                    "data-tab": "pages",
+                    onclick: move |_| viewer.write().show_tab(Tab::Pages),
+                    "Pages"
+                }
+            }
+            if tab == Tab::Contents {
+                div { class: "panel contents",
+                    // The reader's own marks, above the document's contents.
+                    // Above rather than beside, and for the reason
+                    // `showMarks` gives: there are never many, and a section
+                    // of four over a chapter list of two hundred is the right
+                    // way round.
+                    if !marks.is_empty() {
+                        div { class: "marks",
+                            p { class: "marks-title", "Marked" }
+                            for (marked, title) in marks {
+                                div { class: "mark",
+                                    button {
+                                        class: "mark-go",
+                                        onclick: move |_| viewer.write().go_to_page(marked),
+                                        "{title}"
+                                    }
+                                    button {
+                                        class: "mark-drop",
+                                        "aria-label": "Remove the mark on page {marked}",
+                                        onclick: move |_| { viewer.write().mark_page(marked); },
+                                        "×"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if headings.is_empty() {
+                        p { class: "sidebar-empty", "This document has no table of contents." }
+                    } else {
+                        for (at, heading) in headings.iter().enumerate() {
+                            {
+                                let indent = 8.0 + heading.depth as f64 * 14.0;
+                                let target = heading.page;
+                                let current = current_heading == Some(at);
+                                let title = heading.title.clone();
+                                rsx! {
+                                    button {
+                                        key: "{at}",
+                                        class: if current { "outline-item current" } else { "outline-item" },
+                                        style: "padding-left: {indent}px;",
+                                        "data-page": "{target.unwrap_or(0)}",
+                                        onclick: move |_| {
+                                            if let Some(page) = target {
+                                                viewer.write().go_to_page(page);
+                                            }
+                                        },
+                                        "{title}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                div {
+                    // Not `.pages`, which is the document's own container and
+                    // is what the harness reads the scroll offset off. Two
+                    // nodes answering one selector is a test that silently
+                    // asks the wrong one.
+                    class: "panel thumb-column",
+                    "data-thumb-scroll": "{thumb_scroll}",
+                    onwheel: move |event| {
+                        let delta = -match event.delta() {
+                            WheelDelta::Pixels(delta) => delta.y,
+                            WheelDelta::Lines(delta) => delta.y * 60.0,
+                            WheelDelta::Pages(delta) => delta.y * panel_height,
+                        };
+                        viewer.write().scroll_thumbs(delta);
+                    },
+                    div {
+                        class: "thumbs",
+                        style: "height: {column.total()}px;",
+                        for (index, top, height) in rows {
+                            Thumb {
+                                // What `keyFor()` is, in miniature: the page,
+                                // the size it is drawn at, and the theme. See
+                                // `page.rs` — the key is what gives the old
+                                // texture back.
+                                key: "{index}:{column.width}x{height}:{theme_name}",
+                                document: Handle(document.0.clone()),
+                                chosen: chosen.clone(),
+                                viewer,
+                                index,
+                                top: top - thumb_scroll,
+                                left: PAD,
+                                width: column.width,
+                                height,
+                                current: index + 1 == page,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Which heading the reader is under: the last one at or before this page.
+///
+/// `setPage` in `sidebar.ts` walks the list for the same answer, and
+/// `sectionFor` walks it again to name a mark. One function, asked twice.
+pub fn heading_for(headings: &[crate::render::Heading], page: usize) -> Option<usize> {
+    let mut best: Option<(usize, usize)> = None;
+    for (at, heading) in headings.iter().enumerate() {
+        let Some(target) = heading.page else { continue };
+        if target <= page && best.is_none_or(|(_, best)| target >= best) {
+            best = Some((at, target));
+        }
+    }
+    best.map(|(at, _)| at)
+}
+
+/// One thumbnail, in its place.
+#[component]
+fn Thumb(
+    document: Handle,
+    chosen: Chosen,
+    mut viewer: Signal<Viewer>,
+    index: usize,
+    top: f64,
+    left: f64,
+    width: f64,
+    height: f64,
+    current: bool,
+) -> Element {
+    // The same write-once attribute the document's pages use, for the same
+    // reason: a widget is handed to Blitz once and cannot be given new props,
+    // so `use_hook` is what keeps a row that merely moved from building a
+    // second one.
+    let widget = use_hook(|| {
+        let shell = dioxus_core::try_consume_context::<
+            std::sync::Arc<dyn blitz_traits::shell::ShellProvider>,
+        >();
+        CustomWidgetAttr::new(PageWidget::new(
+            document.0.clone(),
+            index,
+            chosen.clone(),
+            shell,
+        ))
+    });
+    let number = index + 1;
+
+    rsx! {
+        button {
+            class: if current { "thumb current" } else { "thumb" },
+            "data-thumb": "{number}",
+            style: "position: absolute; top: {top}px; left: {left}px; width: {width}px;",
+            onclick: move |_| viewer.write().go_to_page(number),
+            div {
+                class: "thumb-picture",
+                style: "width: {width}px; height: {height}px;",
+                object {
+                    "data": widget,
+                    // A widget laid out at 0×0 is a blank window with nothing
+                    // to say why, which is what `display: block` costs to
+                    // avoid. See `page.rs`.
+                    style: "display: block; width: {width}px; height: {height}px;",
+                }
+            }
+            span { class: "thumb-number", "{number}" }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sizes(pages: usize) -> Vec<Size> {
+        (0..pages)
+            .map(|_| Size {
+                width: 612.0,
+                height: 792.0,
+            })
+            .collect()
+    }
+
+    /// The band that is mounted holds every row in view and nothing far from
+    /// it — which is the whole of what replaces `THUMB_CACHE`, and so the one
+    /// property in this file worth asserting directly.
+    #[test]
+    fn the_mounted_band_covers_the_view_and_stops() {
+        let column = Column::new(&sizes(400), 252.0);
+        let height = 800.0;
+        for scroll in [0.0, 1_000.0, 40_000.0, column.max_scroll(height)] {
+            let mounted = column.mounted(scroll, height);
+            assert!(!mounted.is_empty(), "nothing mounted at {scroll}");
+            // Every row that is actually in view is in the band.
+            for index in 0..column.pages() {
+                let (top, picture) = column.row(index).expect("a row");
+                let visible = top < scroll + height && top + picture > scroll;
+                if visible {
+                    assert!(mounted.contains(&index), "row {index} is in view at {scroll}");
+                }
+            }
+            // And nothing more than a screen of overscan either side of it.
+            let reach = height * (1.0 + OVERSCAN * 2.0) + 200.0;
+            for &index in &mounted {
+                let (top, picture) = column.row(index).expect("a row");
+                assert!(
+                    top + picture > scroll - reach && top < scroll + reach,
+                    "row {index} is nowhere near the view at {scroll}",
+                );
+            }
+            // Contiguous and in order, which is what makes it a band.
+            assert!(mounted.windows(2).all(|pair| pair[1] == pair[0] + 1));
+        }
+    }
+
+    /// A column of four hundred rows mounts a few tens of them, whatever the
+    /// document is. This is the memory claim in the module comment, stated as
+    /// a number.
+    #[test]
+    fn a_long_document_mounts_a_screenful() {
+        let column = Column::new(&sizes(400), 252.0);
+        let mounted = column.mounted(20_000.0, 800.0);
+        assert!(mounted.len() < 20, "{} rows mounted", mounted.len());
+    }
+
+    /// The column follows the document only when it has to.
+    #[test]
+    fn revealing_a_row_already_in_view_does_nothing() {
+        let column = Column::new(&sizes(50), 252.0);
+        let height = 800.0;
+        assert_eq!(column.reveal(0, 0.0, height), None);
+        let far = column.reveal(40, 0.0, height).expect("row 40 is not in view");
+        assert!(far > 0.0 && far <= column.max_scroll(height));
+        // And once it is there, it stays.
+        assert_eq!(column.reveal(40, far, height), None);
+    }
+
+    /// A page with nothing in it does not take the column apart, which a
+    /// document being awkward is entitled to try.
+    #[test]
+    fn a_page_of_no_size_still_gets_a_row() {
+        let column = Column::new(
+            &[Size {
+                width: 0.0,
+                height: 0.0,
+            }],
+            252.0,
+        );
+        let (_, height) = column.row(0).expect("a row");
+        assert!(height > 0.0);
+        assert!(column.total() > 0.0);
+    }
+}

@@ -27,8 +27,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use crate::palette::{self, Palette};
 use crate::keys;
+use crate::library::{self, Mark};
+use crate::palette::{self, Palette};
 use crate::settings::{self, Settings};
 use crate::theme;
 
@@ -44,6 +45,16 @@ pub struct Store {
     /// Colours a theme names that the renderer cannot read, if any — raised
     /// once, as the app's `unreadableColors` notice is.
     pub complaint: Option<String>,
+    /// The document this reader has open, as the library names one: the path,
+    /// as given. Empty until [`Store::opened`] is called, which is what puts
+    /// the document into `library.toml` and is the only reason a mark has
+    /// anywhere to go.
+    file: String,
+    /// The pins in that document, kept in memory so that drawing the sidebar
+    /// is not a read of a file per frame. The file is still the record —
+    /// every change here is written through, and the write is what the next
+    /// run reads.
+    marks: Vec<Mark>,
 }
 
 impl Store {
@@ -73,6 +84,8 @@ impl Store {
             themes,
             for_now: None,
             complaint: None,
+            file: String::new(),
+            marks: Vec::new(),
         };
         store.complaint = store.unreadable();
         store
@@ -191,6 +204,83 @@ impl Store {
             theme.name,
             bad.join(" and "),
         ))
+    }
+
+    /* ------------------------------------------------------- the library */
+
+    /// Say which document this reader has open, and read back what is already
+    /// known about it.
+    ///
+    /// `touch` is the app's own, and it does two things at once: it moves the
+    /// document to the front of the recently-read list, and it *makes an
+    /// entry* if there is none. The second is why this is called on open and
+    /// not left until somebody marks a page — `toggle_mark` refuses a
+    /// document that is not in the library, which is the right answer to a
+    /// stale path and the wrong one to a document that was opened a moment
+    /// ago.
+    ///
+    /// The title is the file's own name here. The app asks the document what
+    /// it calls itself (`set_document_title`), and that is Phase 3's item
+    /// about labels rather than this one.
+    pub fn opened(&mut self, path: &str) {
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_secs() as i64)
+            .unwrap_or(0);
+        self.file = path.to_string();
+        match library::touch(&self.dir, path, &name, now) {
+            Ok(library) => {
+                self.marks = library
+                    .files
+                    .iter()
+                    .find(|entry| entry.path == path)
+                    .map(|entry| entry.marks.clone())
+                    .unwrap_or_default();
+            }
+            // A library that cannot be written is a reader who loses their
+            // marks at the end of the session, which is worth a line at the
+            // bottom of the window and is not worth refusing to open a
+            // document over.
+            Err(refused) => self.complaint = Some(refused),
+        }
+    }
+
+    /// The pages the reader has put a pin in, by page number, in page order.
+    pub fn marks(&self) -> &[Mark] {
+        &self.marks
+    }
+
+    pub fn is_marked(&self, page: usize) -> bool {
+        self.marks.iter().any(|mark| mark.page as usize == page)
+    }
+
+    /// Put a pin in a page, or take it out again — the same gesture doing the
+    /// same thing, which is what makes the feature work without ids. Answers
+    /// whether the page is marked now.
+    ///
+    /// `title` is what the row in the sidebar says. The app names a mark for
+    /// the section it falls in, which it reads off the outline it has already
+    /// walked; that is the caller's to work out, because the outline belongs
+    /// to the document and this belongs to the disk.
+    pub fn toggle_mark(&mut self, page: usize, title: &str) -> bool {
+        if self.file.is_empty() {
+            return false;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_secs() as i64)
+            .unwrap_or(0);
+        match library::toggle_mark(&self.dir, &self.file, page as u32, 0.0, title, now) {
+            Ok((marked, marks)) => {
+                self.marks = marks;
+                marked
+            }
+            Err(_) => false,
+        }
     }
 
     /// Change settings and write them down.

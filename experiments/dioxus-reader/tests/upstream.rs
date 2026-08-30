@@ -1,9 +1,9 @@
-//! Two faults that belong to somebody else, kept as the smallest thing that
-//! shows each — to be sent upstream, and to say so the day either is fixed.
+//! Three faults that belong to somebody else, kept as the smallest thing that
+//! shows each — to be sent upstream, and to say so the day any is fixed.
 //!
-//! The first runs with the suite, because it catches the panic it is about and
-//! therefore *passes while the bug is there*: the day it fails is the day the
-//! workaround it names can go. The second aborts the process rather than
+//! Two of them run with the suite, because each catches the thing it is about
+//! and therefore *passes while the bug is there*: the day one fails is the day
+//! the workaround it names can go. The third aborts the process rather than
 //! panicking, which is not something to do to a test run, so it is
 //! `#[ignore]`d:
 //!
@@ -82,6 +82,65 @@ fn a_stylesheet_that_changes_under_a_hovered_node() {
         "no panic: this is fixed upstream, and `styles.rs` can stop working \
          around it"
     );
+}
+
+/// **A click takes the keyboard away, and the page cannot take it back.**
+///
+/// Two halves, and each is defensible on its own:
+///
+/// *Blitz clears the focus on a click that lands on nothing it knows how to
+/// focus.* `handle_pointerup` walks up from the target looking for a text
+/// input, a checkbox, a radio, a summary, a label or a link, and clears the
+/// focus outright when it finds none. A plain `<button>` is not on that list,
+/// so clicking one takes the focus off whatever had it.
+///
+/// *And a key with nothing focused goes to the root element*, which is
+/// `<html>` — above anything a component can put a handler on, because events
+/// bubble upwards. So an application whose shortcuts live on its own root
+/// stops answering any of them from the first click onwards.
+///
+/// The way out ought to be `MountedData::set_focus`, and it is not: it takes
+/// `doc_mut()` the moment it is called, and every place a component can call
+/// it from is already inside a borrow of the document — a DOM event handler,
+/// a mounted handler, and a task spawned from either, which is polled inside
+/// that same borrow. It panics with "RefCell already borrowed".
+///
+/// So the fix has to come from outside the page: `shell.rs` gives the
+/// keyboard back after a click, and the harness does the same for a window
+/// that does not exist. What would end that is either a focusable root —
+/// blitz honouring `tabindex` in that walk, which is what a browser does — or
+/// a `set_focus` that queues rather than borrowing.
+///
+/// Against `blitz-dom 0.3.0-beta.2`.
+#[test]
+fn a_click_clears_the_focus_and_a_component_cannot_restore_it() {
+    #[component]
+    fn Buttons() -> Element {
+        rsx! {
+            div {
+                class: "root",
+                tabindex: 0,
+                onkeydown: move |_| {},
+                button { class: "chip", onclick: move |_| {}, "press me" }
+            }
+        }
+    }
+
+    let mut harness = Harness::from_component(Buttons);
+    let root = harness.node(".root");
+    harness.base_mut().set_focus_to(root);
+    harness.pump();
+    assert_eq!(harness.focused(), Some(root), "the page has the keyboard");
+
+    harness.click(".chip");
+    let focused = harness.focused();
+    assert_ne!(
+        focused,
+        Some(root),
+        "this is fixed upstream: a click no longer costs the page its          keyboard, and `shell.rs` can stop giving it back",
+    );
+    // And where it went is above everything the application owns.
+    assert_eq!(focused, harness.query("html"));
 }
 
 /// **`pdfium-render`'s `thread_safe` feature does not serialise anything.**

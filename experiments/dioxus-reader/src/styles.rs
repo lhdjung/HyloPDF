@@ -85,9 +85,71 @@ body { margin: 0;
   display: flex; align-items: center; justify-content: center;
 }
 
+/* The toolbar, then the document with the panel beside it, then the notice.
+   A row inside the column, which is the whole of what a sidebar is here —
+   there is nothing floating over anything. */
+.body { flex: 1 1 auto; display: flex; flex-direction: row; min-height: 0; }
+
 .viewer {
   flex: 1 1 auto; overflow: hidden; background: var(--ground);
 }
+
+.sidebar {
+  flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
+  background: var(--surface); border-right: 1px solid var(--line);
+}
+.tabs { display: flex; flex: 0 0 auto; gap: 4px; padding: 8px 8px 6px 8px; }
+.tab {
+  flex: 1 1 auto; height: 26px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); font-size: 13px; font-weight: 500;
+}
+.tab:hover { background: var(--hover); color: var(--text); }
+.tab.on { background: var(--sunk); color: var(--text); }
+
+.panel { flex: 1 1 auto; overflow: hidden; min-height: 0; }
+.thumb-column { position: relative; }
+.sidebar-empty { margin: 10px 12px; color: var(--faint); }
+
+.outline-item {
+  display: block; width: 100%; height: 26px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--muted); text-align: left;
+  font-size: 13px; white-space: nowrap; overflow: hidden;
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+.outline-item:hover { background: var(--hover); color: var(--text); }
+.outline-item.current { color: var(--accent); }
+
+.marks { padding: 4px 8px 8px 8px; border-bottom: 1px solid var(--line); }
+.marks-title { margin: 2px 4px 6px 4px; color: var(--faint); }
+.mark { display: flex; align-items: center; gap: 4px; }
+.mark-go {
+  /* `display: block` as well as `text-align`, because a button is laid out as
+     a centring flex box by the user-agent sheet and the alignment inside it is
+     the flex box's rather than the text's — which is why `.outline-item`, which
+     says the same two things, comes out left-aligned and this did not. */
+  display: block;
+  flex: 1 1 auto; height: 26px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text); text-align: left; font-size: 13px;
+  white-space: nowrap; overflow: hidden;
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+.mark-go:hover { background: var(--hover); }
+.mark-drop {
+  flex: 0 0 auto; width: 22px; height: 22px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--faint);
+}
+.mark-drop:hover { background: var(--hover); color: var(--text); }
+
+/* The column takes its shape from the pictures in it, and only the rows near
+   the view are here at all — see `sidebar.rs`. */
+.thumbs { position: relative; width: 100%; }
+.thumb {
+  border: 0; background: transparent; padding: 0;
+  display: flex; flex-direction: column; align-items: center;
+}
+.thumb-picture { background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.16); }
+.thumb-number { height: 18px; color: var(--faint); font-size: 12px; }
+.thumb.current .thumb-number { color: var(--accent); }
 /* The document: one box the size of the whole thing, with the pages placed in
    it. Blitz has no `position: static`, so an absolutely positioned node is
    placed against its immediate parent — which is exactly what this wants. */

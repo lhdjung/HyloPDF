@@ -11,9 +11,10 @@
 //! tests through today. It is behind the `harness` feature, which `cargo test`
 //! turns on and `cargo build` does not, so nothing it needs is in the binary.
 //!
-//! What is not built: no sidebar, no search, no outline, no links, no text
-//! layer, no selection, no markup, no settings *window*, no library, no
-//! watchers, one window.
+//! What is not built: no search, no links, no text layer, no selection, no
+//! markup, no settings *window*, no Keyboard page, no watchers, one window.
+//! The sidebar is built — [`sidebar`] — with the document's own contents, the
+//! reader's marks and a column of thumbnails in it.
 //!
 //! # The app's own modules, compiled here unchanged
 //!
@@ -35,8 +36,9 @@
 //!
 //! Their own tests come with them, and `cargo test` runs them here: eleven
 //! about the settings table, the write race and hand-edited files, six about
-//! themes on disk, five about `keys.toml`. Those are not this crate's tests
-//! and this crate did not write them; they are the port working.
+//! themes on disk, five about `keys.toml`, eight about the library. Those are
+//! not this crate's tests and this crate did not write them; they are the port
+//! working.
 //!
 //! [`keys`] is the third of them and the most interesting, because its other
 //! half is TypeScript. In the app, `keys.rs` owns the *file* and `keys.ts`
@@ -44,10 +46,20 @@
 //! bridge; here `keys.rs` is mounted unchanged and [`keymap`] is `keys.ts`
 //! ported beside it, so the same seam holds between two Rust modules. Nothing
 //! about it had to move.
+//!
+//! [`library`] is the fourth, and it came across for the sidebar's sake: a
+//! mark is a pin in a page and the pins have to be somewhere the next run can
+//! read them. Only the half the sidebar needs is called — `touch` and
+//! `toggle_mark` — and the rest of what the file already does (where you
+//! were, what was open in each window, the markup journal) waits for the
+//! items of Phase 3 that are about those things. It needed no change either.
 
 pub mod app;
 pub mod config;
 pub mod gpu;
+/// Documents written by hand for the tests. Not in the binary either.
+#[cfg(feature = "harness")]
+pub mod fixture;
 /// Phase 2, and it is not in the binary: see the `harness` feature.
 #[cfg(feature = "harness")]
 pub mod harness;
@@ -60,6 +72,7 @@ pub mod pdfium;
 pub mod recolor;
 pub mod render;
 pub mod shell;
+pub mod sidebar;
 pub mod stats;
 pub mod store;
 pub mod styles;
@@ -67,6 +80,8 @@ pub mod styles;
 // The app's own, unchanged. See the module comment above.
 #[path = "../../../src-tauri/src/keys.rs"]
 pub mod keys;
+#[path = "../../../src-tauri/src/library.rs"]
+pub mod library;
 #[path = "../../../src-tauri/src/settings.rs"]
 pub mod settings;
 #[path = "../../../src-tauri/src/theme.rs"]

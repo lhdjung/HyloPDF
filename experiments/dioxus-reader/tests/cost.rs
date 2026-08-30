@@ -96,4 +96,56 @@ fn reading_a_book_does_not_grow_without_bound() {
              exactly like this"
         );
     }
+
+    // ---------------------------------------------------------- the column
+    //
+    // The same question of the thumbnail column, and it is the same test
+    // rather than a second one because these counters are the process's: two
+    // test functions running at once would each be reading the other's
+    // pages.
+    //
+    // `AGENTS.md` says the app's memory table was measured with the sidebar
+    // shut, and warns in as many words that "if you are measuring, open the
+    // Pages tab and scroll it, because that is where a fourth leak would hide
+    // next" — the column there drew a thumbnail for every page it passed and
+    // gave none of them back. Here a thumbnail belongs to its row and a row
+    // is unmounted the moment it leaves the band, so scrolling four hundred
+    // pages of column should cost what a screenful of it costs.
+    reader.press_chord("mod+b");
+    // book.pdf has no table of contents, so the panel opens on the pages.
+    assert_eq!(reader.state().sidebar.as_deref(), Some("pages"));
+    for _ in 0..10 {
+        reader.wheel_over(".panel.thumb-column", 2_000.0);
+        reader.screenshot();
+    }
+    let (column_warm, _) = stats::footprint_mb();
+    for _ in 0..40 {
+        reader.wheel_over(".panel.thumb-column", 2_000.0);
+        reader.screenshot();
+    }
+    let (column_after, _) = stats::footprint_mb();
+    let thumbs = reader.state().thumbs.len();
+    let held = stats::get(&stats::RESIDENT) as f64 / 1e6;
+    eprintln!(
+        "cost: {thumbs} thumbnails mounted, {} pages and thumbnails in all, \
+         holding {held:.0}MB, {column_warm:.0} → {column_after:.0}MB",
+        stats::get(&stats::MOUNTED),
+    );
+
+    assert!(
+        (1..=24).contains(&thumbs),
+        "the column is a window, not a list: {thumbs} thumbnails"
+    );
+    assert!(
+        held < 40.0,
+        "and what it holds does not grow with the book: {held:.0}MB"
+    );
+    if settled > 0.0 {
+        let grew = column_after - column_warm;
+        assert!(
+            grew < 60.0,
+            "forty screenfuls of column after the first ten cost {grew:.0}MB \
+             ({column_warm:.0} → {column_after:.0})"
+        );
+    }
 }

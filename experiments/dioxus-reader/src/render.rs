@@ -7,9 +7,9 @@
 //! the only file that imports pdf.js, and it is what would make `hayro` a
 //! swap rather than a rewrite when it grows text extraction.
 //!
-//! Phase 1 needs two of those questions. The rest are named here and not
-//! declared, because a trait method with no caller is a guess about what the
-//! caller will want.
+//! Phase 1 needed two of those questions and Phase 3's sidebar adds the
+//! third. The rest are named here and not declared, because a trait method
+//! with no caller is a guess about what the caller will want.
 
 use std::sync::Arc;
 
@@ -40,6 +40,24 @@ pub struct Bitmap<'a> {
     pub drew_in: f64,
 }
 
+/// One line of a document's own table of contents.
+///
+/// Flat, with a depth, rather than a tree of children — which is what
+/// `buildOutline` in `sidebar.ts` walks a tree to produce, and it produces
+/// exactly this: a row, indented by its depth, that goes to a page. Nothing
+/// above this ever asks an entry for its children, so the tree is flattened
+/// where it is read rather than carried up to be flattened again.
+///
+/// `page` is one-based, and `None` for an entry whose destination the
+/// document does not actually resolve — a broken outline is common enough
+/// that it is a row you cannot click rather than a row that is not there.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Heading {
+    pub title: String,
+    pub depth: usize,
+    pub page: Option<usize>,
+}
+
 /// What a document is, to everything above it.
 pub trait PageSource: Send + Sync {
     fn pages(&self) -> usize;
@@ -57,6 +75,26 @@ pub trait PageSource: Send + Sync {
         height: u32,
         take: &mut dyn FnMut(Bitmap) ,
     ) -> Result<(), String>;
+    /// Where the document was opened from.
+    ///
+    /// Not a rendering question, and it is here because it is the only thing
+    /// that identifies one document from another for anything that has to
+    /// write it down — the library keys its entries by path, and the reader
+    /// asks the document rather than being told twice. Empty for a document
+    /// that came from nowhere in particular, which nothing here produces yet
+    /// and a document handed over as bytes one day would.
+    fn path(&self) -> &str {
+        ""
+    }
+
+    /// The document's own table of contents, in reading order, flattened.
+    ///
+    /// Empty when there is none, which is most documents — and the sidebar
+    /// says so in as many words rather than showing an empty column.
+    fn outline(&self) -> Vec<Heading> {
+        Vec::new()
+    }
+
     /// What opening the document cost, in milliseconds — the other half of the
     /// comparison with pdf.js, which spends most of a document open starting
     /// its worker.

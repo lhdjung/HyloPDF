@@ -66,7 +66,8 @@ use crate::keymap::{Action, Keymap, Press};
 use crate::layout::{Anchor, Fit, Layout, Size, Spread};
 use crate::page::{Chosen, PageWidget};
 use crate::palette::Palette;
-use crate::render::PageSource;
+use crate::render::{Heading, PageSource};
+use crate::sidebar::{Column, Sidebar, Tab};
 use crate::store::Store;
 
 /// An open document, wrapped so that it can be a component's prop.
@@ -207,6 +208,22 @@ pub struct Viewer {
     /// texture's key — the widget compares sizes and themes itself — but the
     /// components have to be told that something they cannot see has moved.
     pub generation: u64,
+    /// The panel on the left, and what it is showing. All three are settings,
+    /// so a reader who reads with the contents open gets them back.
+    pub sidebar_open: bool,
+    pub sidebar_width: f64,
+    pub tab: Tab,
+    /// Where the thumbnail column has been scrolled to. Ours for the reason
+    /// the document's own scroll offset is ours — see the module comment.
+    pub thumb_scroll: f64,
+    /// Where every thumbnail sits, for the panel at its current width.
+    pub column: Column,
+    /// The document's own table of contents, read once when it was opened.
+    pub headings: Vec<Heading>,
+    /// How wide the window is, which is not how wide the document is: the
+    /// panel takes its share first. Kept because opening the panel has to
+    /// relay out against the same window.
+    window_width: f64,
 }
 
 impl Viewer {
@@ -229,6 +246,13 @@ impl Viewer {
         let mut viewer = Viewer {
             layout: Layout::new(sizes),
             scroll_top: 0.0,
+            sidebar_open: false,
+            sidebar_width: 252.0,
+            tab: Tab::Contents,
+            thumb_scroll: 0.0,
+            column: Column::default(),
+            headings: document.outline(),
+            window_width: 0.0,
             notice: String::new(),
             keymap,
             pending: String::new(),
@@ -237,6 +261,13 @@ impl Viewer {
             document,
             store,
         };
+        // The document goes into `library.toml` before anything is restored,
+        // because that is what gives a mark somewhere to live — see
+        // `Store::opened`.
+        let path = viewer.document.path().to_string();
+        if !path.is_empty() {
+            viewer.store.opened(&path);
+        }
         viewer.restore();
         viewer
     }
@@ -262,6 +293,21 @@ impl Viewer {
             _ => Spread::Single,
         };
         self.layout.gap = self.store.number("page_gap");
+        self.sidebar_open = self.store.flag("show_sidebar");
+        self.sidebar_width = self
+            .store
+            .number("sidebar_width")
+            .clamp(crate::sidebar::MIN_WIDTH, crate::sidebar::MAX_WIDTH);
+        // Which tab is showing is not a setting — the app has none either,
+        // and inventing one here would mean adding a key to the app's own
+        // `settings.rs`, which is the file this crate mounts rather than
+        // edits. A document with no contents opens on the pages, which is
+        // what `setDocument` does and is the difference between a panel and
+        // an empty box.
+        if self.headings.is_empty() {
+            self.tab = Tab::Pages;
+        }
+        self.relay_column();
         self.layout.relayout();
         self.chosen.set(self.store.palette());
         // A theme naming a colour that cannot be read is the one thing here
@@ -302,7 +348,13 @@ impl Viewer {
     /// The window changed size, or the sidebar did. Everything below the
     /// layout is a function of this, so it is the one entry point that both
     /// relays out and puts the reader back where they were.
+    ///
+    /// The width handed in is the *window's*; what the document gets is that
+    /// minus the panel, which is why opening the sidebar is a resize and not
+    /// merely something appearing beside the page.
     pub fn resize(&mut self, width: f64, height: f64) {
+        self.window_width = width;
+        let width = self.document_width();
         if (self.layout.viewport.width - width).abs() < 0.5
             && (self.layout.viewport.height - height).abs() < 0.5
         {
@@ -312,6 +364,113 @@ impl Viewer {
         self.layout.viewport = Size { width, height };
         self.layout.relayout();
         self.scroll_top = self.layout.scroll_target(anchor);
+        // The column is laid out for a panel of a width and clamped against a
+        // panel of a height, and this is where both of those move.
+        self.relay_column();
+        self.reveal_thumb();
+    }
+
+    /// How much of the window the document has: everything the panel is not
+    /// standing on.
+    fn document_width(&self) -> f64 {
+        let panel = if self.sidebar_open {
+            self.sidebar_width
+        } else {
+            0.0
+        };
+        (self.window_width - panel).max(120.0)
+    }
+
+    /* ------------------------------------------------------- the sidebar */
+
+    /// Open or shut the panel, and remember which.
+    pub fn toggle_sidebar(&mut self) {
+        self.sidebar_open = !self.sidebar_open;
+        self.store
+            .set(vec![("show_sidebar".into(), json!(self.sidebar_open))]);
+        // The document is now a different width, and the reader should be
+        // looking at the same words afterwards — which is exactly what
+        // `resize` promises, so this goes through it rather than around it.
+        let (width, height) = (self.window_width, self.layout.viewport.height);
+        self.layout.viewport.width = -1.0;
+        self.resize(width, height);
+        self.generation += 1;
+        if self.sidebar_open {
+            self.reveal_thumb();
+        }
+    }
+
+    pub fn show_tab(&mut self, tab: Tab) {
+        self.tab = tab;
+        if tab == Tab::Pages {
+            self.reveal_thumb();
+        }
+    }
+
+    /// Lay the thumbnail column out for the panel as it stands.
+    fn relay_column(&mut self) {
+        let sizes: Vec<Size> = (0..self.layout.pages())
+            .map(|index| self.layout.size_of(index))
+            .collect();
+        self.column = Column::new(&sizes, self.sidebar_width);
+        self.thumb_scroll = self
+            .thumb_scroll
+            .clamp(0.0, self.column.max_scroll(self.layout.viewport.height));
+    }
+
+    pub fn scroll_thumbs(&mut self, delta: f64) {
+        let height = self.layout.viewport.height;
+        self.thumb_scroll = (self.thumb_scroll + delta).clamp(0.0, self.column.max_scroll(height));
+    }
+
+    /// Bring the page the reader is on into the column, if it is not there
+    /// already. See `Column::reveal`: doing nothing is most of the behaviour.
+    fn reveal_thumb(&mut self) {
+        if !self.sidebar_open || self.tab != Tab::Pages {
+            return;
+        }
+        let height = self.layout.viewport.height;
+        if let Some(to) = self.column.reveal(self.page() - 1, self.thumb_scroll, height) {
+            self.thumb_scroll = to;
+        }
+    }
+
+    /// Go to a page, one-based — what a row in either list does when it is
+    /// clicked.
+    pub fn go_to_page(&mut self, page: usize) {
+        let target = self.page_target(page);
+        self.scroll_to(target);
+    }
+
+    /// What a mark on this page would be called: the section it falls in.
+    ///
+    /// `sectionFor` in `sidebar.ts`, and for its reason — a mark named for
+    /// the chapter it sits in is worth a great deal more than one named
+    /// "Page 214", and the outline has already been walked.
+    pub fn section_for(&self, page: usize) -> String {
+        crate::sidebar::heading_for(&self.headings, page)
+            .map(|at| self.headings[at].title.clone())
+            .unwrap_or_default()
+    }
+
+    /// Put a pin in a page or take it out — the same gesture doing the same
+    /// thing, which is what `toggle_mark` is.
+    pub fn mark_page(&mut self, page: usize) {
+        let title = self.section_for(page);
+        let marked = self.store.toggle_mark(page, &title);
+        self.notice = if marked {
+            format!("Marked page {page}")
+        } else {
+            format!("Took the mark off page {page}")
+        };
+        // The panel opens on the pages when a document has no contents, and a
+        // document with a mark in it has something to show there after all —
+        // which is the rule `showMarks` follows, and the reason it is that
+        // narrow: taking the reader off the thumbnails they were looking at,
+        // for a list they can see is there, is the panel arguing.
+        if marked && self.sidebar_open && self.tab == Tab::Pages && self.headings.is_empty() {
+            self.tab = Tab::Contents;
+        }
     }
 
     /// Relay out around the page the reader is on, which is what every change
@@ -435,6 +594,9 @@ impl Viewer {
             return false;
         }
         self.scroll_top = to;
+        // The column follows the document, and only when it has to — see
+        // `Column::reveal`. `setPage` in `sidebar.ts` is this call.
+        self.reveal_thumb();
         true
     }
 
@@ -444,6 +606,55 @@ impl Viewer {
             offset: 0.0,
         })
     }
+}
+
+/// The element that wants the keyboard, as a selector.
+///
+/// **A click takes the focus away from the reader, and the reader cannot take
+/// it back.** Blitz walks up from whatever was clicked looking for something
+/// it knows how to focus — a text input, a checkbox, a summary, a link — and
+/// a plain `<button>` is not on that list, so the focus ends up on `<html>`.
+/// A key with nothing focused goes to `<html>` too, which is above anything a
+/// component can put a handler on, so from the first click onwards every
+/// shortcut in this reader did nothing. It was invisible for two phases
+/// because no test had ever pressed a key *after* clicking something.
+///
+/// And it cannot be answered from inside the reader. The one way to ask for
+/// the focus is `MountedData::set_focus`, which takes `doc_mut()` the moment
+/// it is called — and every place a component could call it from is already
+/// inside a borrow of the document, including a task spawned from one, which
+/// is polled inside that borrow as well. It panics with "RefCell already
+/// borrowed" from a stack naming neither.
+///
+/// So the element that wants the keyboard says so, and whoever owns the
+/// window hands it back: `shell.rs` after a click in the real app, and the
+/// harness after a synthesised one. That is the same division the app makes —
+/// `reclaimKeyboard()` in `main.ts` is the window's answer to the same
+/// problem, because a full-screen change costs the page its keyboard there in
+/// exactly this way.
+pub const KEYBOARD: &str = "[data-keyboard]";
+
+/// Give the keyboard back to the element that asked for it, unless something
+/// inside it has taken the focus.
+///
+/// The condition is the whole of the policy: focus that lands *inside* the
+/// reader belongs to whatever took it — a field in the find bar, when there
+/// is one — and focus that lands anywhere else is focus nobody wanted, which
+/// is what a click on a button leaves behind.
+pub fn give_keyboard_back(doc: &mut blitz_dom::BaseDocument) {
+    let Ok(Some(wants)) = doc.query_selector(KEYBOARD) else {
+        return;
+    };
+    if let Some(focused) = doc.get_focussed_node_id() {
+        let mut node = Some(focused);
+        while let Some(id) = node {
+            if id == wants {
+                return;
+            }
+            node = doc.get_node(id).and_then(|node| node.parent);
+        }
+    }
+    doc.set_focus_to(wants);
 }
 
 /// The whole window.
@@ -538,6 +749,8 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let page = held.page();
     let pages = held.pages();
     let notice = held.notice.clone();
+    let sidebar_open = held.sidebar_open;
+    let marked = held.store.is_marked(held.page());
     let zoom = match held.layout.fit {
         Fit::Width => "Fit width".to_string(),
         Fit::Page => "Fit page".to_string(),
@@ -578,14 +791,39 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     let _ = task.await;
                 });
             },
+            // And says so, for whoever owns the window: see [`KEYBOARD`] and
+            // `give_keyboard_back`. A click takes the focus away from here
+            // and a component cannot take it back.
+            "data-keyboard": "reader",
             div { class: "toolbar",
+                button {
+                    // Not `.sidebar`, which is the panel itself: a selector
+                    // that matches the button *and* the thing the button
+                    // opens is a test that cannot tell them apart.
+                    class: if sidebar_open { "chip contents on" } else { "chip contents" },
+                    onclick: move |_| viewer.write().toggle_sidebar(),
+                    "Contents"
+                }
                 div { class: "title", "{pages} pages" }
                 div { class: "spacer" }
-                button { class: "chip", onclick: move |_| viewer.write().set_fit(Fit::Width), "{zoom}" }
-                button { class: "chip", onclick: move |_| viewer.write().zoom(false), "−" }
-                button { class: "chip", onclick: move |_| viewer.write().zoom(true), "+" }
-                button { class: "chip", onclick: move |_| viewer.write().next_theme(), "{theme_name}" }
+                button {
+                    class: if marked { "chip mark on" } else { "chip mark" },
+                    onclick: move |_| { let page = viewer.read().page(); viewer.write().mark_page(page); },
+                    if marked { "Marked" } else { "Mark" }
+                }
+                button { class: "chip fit", onclick: move |_| viewer.write().set_fit(Fit::Width), "{zoom}" }
+                button { class: "chip zoom-out", onclick: move |_| viewer.write().zoom(false), "−" }
+                button { class: "chip zoom-in", onclick: move |_| viewer.write().zoom(true), "+" }
+                button { class: "chip theme", onclick: move |_| viewer.write().next_theme(), "{theme_name}" }
                 div { class: "pill", "{page} / {pages}" }
+            }
+            div { class: "body",
+            if sidebar_open {
+                Sidebar {
+                    viewer,
+                    document: Handle(document.clone()),
+                    chosen: chosen.clone(),
+                }
             }
             div {
                 class: "viewer",
@@ -632,6 +870,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                         }
                     }
                 }
+            }
             }
             div { class: "notice", "{notice}" }
         }
@@ -731,6 +970,11 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
         Action::FitPage => viewer.write().set_fit(Fit::Page),
         Action::ActualSize => viewer.write().actual_size(),
         Action::NextTheme => viewer.write().next_theme(),
+        Action::Sidebar => viewer.write().toggle_sidebar(),
+        Action::Mark => {
+            let page = viewer.read().page();
+            viewer.write().mark_page(page);
+        }
         Action::Spread => {
             let next = if viewer.read().layout.spread == Spread::Single {
                 Spread::Cover

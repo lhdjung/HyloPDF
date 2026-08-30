@@ -13,7 +13,7 @@ use std::time::Instant;
 use pdfium_render::prelude::*;
 
 use crate::layout::Size;
-use crate::render::{Bitmap, PageSource};
+use crate::render::{Bitmap, Heading, PageSource};
 
 /// The lock every call into pdfium is taken behind.
 ///
@@ -64,7 +64,18 @@ fn library_dir() -> String {
 
 pub struct Document {
     inner: Mutex<Open>,
+    path: String,
     sizes: Vec<Size>,
+    /// The document's own table of contents, read once when it is opened.
+    ///
+    /// Read at open rather than on demand, unlike everything else here, and
+    /// for the reason the app reads it at open too: it is the one question
+    /// whose answer decides what the sidebar *is* — a column of chapters or a
+    /// sentence saying there are none — and a document of four hundred pages
+    /// has an outline of tens of lines. What it costs is a walk of the
+    /// bookmark tree behind the same lock every other call takes; what it
+    /// saves is the sidebar having to be an async component to ask.
+    outline: Vec<Heading>,
     opened_in: f64,
 }
 
@@ -111,8 +122,11 @@ impl Document {
                 height: page.height().value as f64,
             })
             .collect();
+        let outline = read_outline(&document);
         Ok(Document {
+            path: path.to_string(),
             sizes,
+            outline,
             opened_in: began.elapsed().as_secs_f64() * 1000.0,
             inner: Mutex::new(Open {
                 document,
@@ -129,6 +143,14 @@ impl PageSource for Document {
 
     fn size_of(&self, index: usize) -> Size {
         self.sizes[index]
+    }
+
+    fn path(&self) -> &str {
+        &self.path
+    }
+
+    fn outline(&self) -> Vec<Heading> {
+        self.outline.clone()
     }
 
     fn opened_in(&self) -> f64 {
@@ -191,4 +213,84 @@ impl PageSource for Document {
         });
         Ok(())
     }
+}
+
+/// The bookmark tree, flattened into the rows the sidebar draws.
+///
+/// Walked by hand rather than through `iter_all_descendants`, because the one
+/// thing a row needs beyond its title and its page is how far to indent it,
+/// and an iterator that flattens the tree has already thrown the depth away.
+///
+/// Three things it refuses. A bookmark with no title is skipped, because a
+/// row with nothing written on it is a row nobody can aim at — `sidebar.ts`
+/// writes "Untitled" instead, which is a worse answer to the same question
+/// and one this reader does not have to repeat. A destination that does not
+/// resolve leaves `page` at `None` rather than dropping the row, because the
+/// heading is still the document's own account of itself. And the walk stops
+/// at `LIMIT` entries and `DEPTH` levels: a malformed document can point a
+/// bookmark's child or its next sibling at its own ancestor, and a table of
+/// contents is not the place to find that out by running out of memory.
+fn read_outline(document: &PdfDocument<'static>) -> Vec<Heading> {
+    /// As many rows as anybody will ever scroll through, and few enough that
+    /// a cycle cannot cost anything.
+    const LIMIT: usize = 20_000;
+    /// The PDF specification sets no limit on nesting and no real document
+    /// goes past a handful.
+    const DEPTH: usize = 16;
+
+    let bookmarks = document.bookmarks();
+    // `root()` is the *first top-level bookmark*, not a node above them all,
+    // so the top level of the outline is that bookmark and its siblings.
+    let mut top = Vec::new();
+    let mut next = bookmarks.root();
+    while let Some(bookmark) = next {
+        next = bookmark.next_sibling();
+        top.push(bookmark);
+        if top.len() >= LIMIT {
+            break;
+        }
+    }
+
+    let mut headings = Vec::new();
+    // Depth-first. Children are pushed in reverse so that popping them comes
+    // back to reading order, and the level above is pushed in reverse for the
+    // same reason.
+    let mut stack: Vec<_> = top.into_iter().rev().map(|node| (node, 0usize)).collect();
+    while let Some((bookmark, depth)) = stack.pop() {
+        if headings.len() >= LIMIT {
+            break;
+        }
+        let title = bookmark.title().unwrap_or_default().trim().to_string();
+        // A destination of its own first, then the one its action carries:
+        // most bookmarks have the first, and a bookmark written as a GoTo
+        // action has only the second.
+        let action = bookmark.action();
+        let page = bookmark
+            .destination()
+            .and_then(|destination| destination.page_index().ok())
+            .or_else(|| {
+                action
+                    .as_ref()?
+                    .as_local_destination_action()?
+                    .destination()
+                    .ok()?
+                    .page_index()
+                    .ok()
+            })
+            .map(|index| index as usize + 1);
+        if !title.is_empty() {
+            headings.push(Heading { title, depth, page });
+        }
+        // Only children, never siblings: `iter_direct_children` already walks
+        // the sibling chain under a node, so following a sibling here as well
+        // is how every entry but the first of its level gets listed twice —
+        // which is exactly what the first version of this did.
+        if depth + 1 < DEPTH {
+            let children: Vec<_> = bookmark.iter_direct_children().collect();
+            for child in children.into_iter().rev() {
+                stack.push((child, depth + 1));
+            }
+        }
+    }
+    headings
 }

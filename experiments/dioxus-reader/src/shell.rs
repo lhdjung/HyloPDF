@@ -29,7 +29,7 @@ use dioxus_core::{provide_context, ScopeId, VirtualDom};
 use dioxus_native::{DioxusDocument, DioxusNativeWindowRenderer, DocumentConfig};
 use winit::application::ApplicationHandler;
 use winit::dpi::Position;
-use winit::event::{StartCause, WindowEvent};
+use winit::event::{ElementState, StartCause, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{WindowAttributes, WindowId};
 
@@ -335,7 +335,27 @@ impl ApplicationHandler for Shell {
                 self.inner.windows.len()
             );
         }
+        // A click clears the focus off the page, and from that moment every
+        // keyboard shortcut goes to `<html>`, which is above anything a
+        // component can put a handler on. Giving it back belongs to whoever
+        // owns the window because a component cannot do it — the one call
+        // that asks for the focus panics from inside an event handler. See
+        // `app::KEYBOARD`, which is the whole account, and `harness.rs`,
+        // which does this same one line for a window that does not exist.
+        let clicked = matches!(
+            event,
+            WindowEvent::PointerButton {
+                state: ElementState::Released,
+                ..
+            }
+        );
         self.inner.window_event(event_loop, window_id, event);
+        if clicked {
+            if let Some(view) = self.inner.windows.get_mut(&window_id) {
+                crate::app::give_keyboard_back(&mut view.doc.inner_mut());
+                view.request_redraw();
+            }
+        }
     }
 
     /// Blitz's events arrive on a channel now and the proxy only says "there

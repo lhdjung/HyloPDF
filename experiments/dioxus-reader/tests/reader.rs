@@ -141,13 +141,36 @@ fn zooming_keeps_the_reader_where_they_were() {
 #[test]
 fn the_toolbar_is_clickable() {
     let mut reader = book();
-    // The chips, in the order they are in the toolbar: fit, out, in, theme.
-    reader.click_nth(".chip", 2);
+    // By what each chip is rather than by where it sits: the toolbar grew two
+    // more when the sidebar arrived, and a chip addressed by its position is
+    // a test that quietly starts clicking something else.
+    reader.click(".chip.zoom-in");
     assert!(reader.state().zoom.ends_with('%'));
-    reader.click_nth(".chip", 0);
+    reader.click(".chip.fit");
     assert_eq!(reader.state().zoom, "Fit width");
-    reader.click_nth(".chip", 3);
+    reader.click(".chip.theme");
     assert_eq!(reader.state().theme, "Hylo Dark");
+}
+
+/// **A click used to cost the reader its keyboard**, and nothing said so for
+/// two phases because no test had ever pressed a key after clicking
+/// something. Blitz clears the focus when a click lands on nothing it knows
+/// how to focus — a `<button>` is not on that list — and a key with nothing
+/// focused goes to `<html>`, which is above every handler this app can put
+/// anywhere. See `app::KEYBOARD`: the window is what gives it back, because a
+/// component cannot.
+#[test]
+fn a_click_does_not_cost_the_reader_its_keyboard() {
+    let mut reader = book();
+    reader.click(".chip.zoom-in");
+    let after = reader.state();
+    reader.press("j");
+    assert!(
+        reader.state().scroll > after.scroll,
+        "a key still moves the document after a click",
+    );
+    reader.press("t");
+    assert_eq!(reader.state().theme, "Hylo Dark", "…and still acts on it");
 }
 
 #[test]

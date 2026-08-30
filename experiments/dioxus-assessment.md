@@ -126,8 +126,8 @@ theme component.
 | --- | ---: | --- |
 | `settings.rs` | 502 | **none. Built — mounted by `#[path]`, tests and all** |
 | `theme.rs` | 463 | **none. Built — same, with `build.rs` and the fourteen `themes/*.toml` shared rather than copied** |
-| `library.rs` | 601 | expected none |
-| `keys.rs` | 215 | expected none |
+| `library.rs` | 601 | **none. Built — mounted by `#[path]`, its eight tests with it; only `touch` and `toggle_mark` are called so far** |
+| `keys.rs` | 215 | **none. Built — mounted by `#[path]`, its five tests and its `keys.toml` template with it** |
 | `watch.rs` | 668 | `emit_to(window, …)` becomes an `EventLoopProxy::send_event` |
 
 The `atomic_write`, the per-file locks, `whole()`, the settle window, the
@@ -164,8 +164,8 @@ Doors that need a crate rather than a Tauri plugin:
 | `themes.ts` | 835 | the derived shades stay (as `palette.rs`, done); the recolouring half becomes WGSL (done). `parseColor`/`readColor` stay and stay strict (done). |
 | `ui.ts` | 813 | menus, switches, modal, notice line → components. The stepper's two load-bearing behaviours (no unit in the field, arriving selects) must be re-earned. |
 | `settings.ts` | 801 | the settings window → a second Dioxus window |
-| `sidebar.ts` | 699 | contents / marks / thumbnails / results → components; the thumbnail LRU stays |
-| `keys.ts` | 677 | the action table and `chordsOf` port to Rust against `keyboard-types` |
+| `sidebar.ts` | 699 | contents / marks / thumbnails / results → components — **done but for the results tab** (`sidebar.rs`, 516 with its tests), and the thumbnail LRU does *not* stay: a thumbnail belongs to its row and the mounting window is the cache |
+| `keys.ts` | 677 | the action table and `chordsOf` port to Rust against `keyboard-types` — **done** (`keymap.rs`, 640 lines), and `isMac` becomes a parameter rather than a module constant compiled twice |
 | `search.ts` | 540 | `fold` ports to Rust (`unicode-normalization`); a straight translation, and the most heavily tested function in the app |
 | `icons.ts` | 86 | needs a genuinely different design — see SVG below |
 | `styles.css` | 2,129 | mostly survives; see the gap list |
@@ -410,9 +410,15 @@ order of the existing commit history, which is a reasonable order because each
 step was chosen to be testable:
 
 1. themes, settings, the settings window, the theme editor — *themes and
-   settings done; the two windows are interface and wait on item 2*
-2. the keyboard: the action table, chords, `keys.toml`, the Keyboard page
-3. sidebar: contents, thumbnails with their LRU, marks
+   settings done; the two windows are interface and are now the oldest thing
+   outstanding here*
+2. the keyboard: the action table, chords, `keys.toml`, the Keyboard page —
+   *done but for the Keyboard page, which is a settings window; `keys.rs` is
+   mounted from the app like `theme.rs`, and `keys.ts` is ported as
+   `keymap.rs`*
+3. sidebar: contents, thumbnails with their LRU, marks — *done; the LRU
+   turned out to be unnecessary, and `library.rs` came across for the marks.
+   The results tab waits on item 4 and the drag handle on the interface work*
 4. search: `fold`, the index, match stepping, the find bar and its three
    switches
 5. links, destinations, page labels, the go-to field

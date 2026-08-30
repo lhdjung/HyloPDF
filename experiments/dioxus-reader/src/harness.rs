@@ -126,6 +126,12 @@ pub struct State {
     /// Which pages are in the DOM, one-based and in order. This is the
     /// mounting window, observed from outside.
     pub mounted: Vec<usize>,
+    /// Whether the panel on the left is open, and which tab it is showing —
+    /// "contents", "pages", or nothing at all when it is shut.
+    pub sidebar: Option<String>,
+    /// Which thumbnails are in the DOM, one-based and in order: the column's
+    /// own mounting window, which is what replaces `THUMB_CACHE`.
+    pub thumbs: Vec<usize>,
 }
 
 /// A reader with no window, driven by hand.
@@ -297,6 +303,14 @@ impl Reader {
         self.settle();
     }
 
+    /// Turn the wheel over something in particular — the thumbnail column,
+    /// which scrolls on its own and is not where the middle of the window is.
+    pub fn wheel_over(&mut self, selector: &str, by: f64) {
+        let (x, y) = self.harness.center_of(selector);
+        self.harness.wheel_at(x, y, 0.0, -by);
+        self.settle();
+    }
+
     /// One screenful, which is what a reader means by turning the wheel.
     pub fn wheel_screen(&mut self) {
         let screen = self.height as f64 - crate::app::CHROME;
@@ -306,7 +320,29 @@ impl Reader {
     /// Click the first element matching a CSS selector — ".chip", ".pill".
     pub fn click(&mut self, selector: &str) {
         self.harness.click(selector);
+        self.give_keyboard_back();
         self.settle();
+    }
+
+    /// Click a point in the window, which is what a test does when the thing
+    /// to be clicked is the seventh row of a list rather than a selector.
+    pub fn click_at(&mut self, x: f32, y: f32) {
+        self.harness.click_at(x, y);
+        self.give_keyboard_back();
+        self.settle();
+    }
+
+    /// What the shell does after a click, done here instead.
+    ///
+    /// A click clears the focus off the reader and onto `<html>`, and from
+    /// then on every shortcut goes somewhere no component can hear — see
+    /// [`crate::app::KEYBOARD`], which is the whole account of it. The real
+    /// window answers this in `shell.rs`; a harness has no window, so it
+    /// answers it here, in the same one line and through the same function.
+    /// The same trick and the same reason as `focus_root` above.
+    fn give_keyboard_back(&mut self) {
+        crate::app::give_keyboard_back(&mut self.harness.doc.inner_mut());
+        self.harness.pump();
     }
 
     /// The nth element matching a selector, clicked. The toolbar is four chips
@@ -320,6 +356,7 @@ impl Reader {
         let rect = self.harness.layout_rect_of(*node);
         let (x, y) = rect.center();
         self.harness.click_at(x, y);
+        self.give_keyboard_back();
         self.settle();
     }
 
@@ -335,38 +372,24 @@ impl Reader {
                 )
             })
             .unwrap_or((0, 0));
-        let chips = self.harness.query_all(".chip");
-        let text_of = |nth: usize| {
-            chips
-                .get(nth)
-                .and_then(|node| self.harness.base().get_node(*node).map(|n| n.text_content()))
-                .unwrap_or_default()
-        };
-        let mounted = self
-            .harness
-            .query_all(".page")
-            .into_iter()
-            .filter_map(|node| {
-                let doc = self.harness.base();
-                let node = doc.get_node(node)?;
-                // By name rather than through `local_name!`, which only knows
-                // the atoms the HTML spec has: `data-page` is ours.
-                let attrs = node.attrs()?;
-                attrs
-                    .iter()
-                    .find(|attr| &*attr.name.local == "data-page")?
-                    .value
-                    .parse()
-                    .ok()
-            })
-            .collect();
+        let mounted = self.numbered(".page", "data-page");
+        let thumbs = self.numbered(".thumb", "data-thumb");
+        let sidebar = self.harness.query(".sidebar").map(|_| {
+            if self.harness.query(".tab.on[data-tab='pages']").is_some() {
+                "pages".to_string()
+            } else {
+                "contents".to_string()
+            }
+        });
         State {
             page,
             pages,
-            // The first chip is the fit mode and the last is the theme; see
-            // the toolbar in `app.rs`.
-            zoom: text_of(0),
-            theme: text_of(3),
+            // By class rather than by position. They were read off the first
+            // and the last of the chips, which was fine while there were four
+            // and wrong the moment the sidebar added two more — and wrong
+            // silently, because a chip is a chip.
+            zoom: self.harness.text_content(".chip.fit"),
+            theme: self.harness.text_content(".chip.theme"),
             notice: self.harness.text_content(".notice"),
             scroll: self
                 .harness
@@ -374,7 +397,33 @@ impl Reader {
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(0.0),
             mounted,
+            sidebar,
+            thumbs,
         }
+    }
+
+    /// Every node matching `selector`, as the number its `attribute` carries,
+    /// in document order. The two mounting windows are read this way — the
+    /// document's pages and the sidebar's thumbnails — because neither has
+    /// pixels that say which page it is.
+    fn numbered(&self, selector: &str, attribute: &str) -> Vec<usize> {
+        self.harness
+            .query_all(selector)
+            .into_iter()
+            .filter_map(|node| {
+                let doc = self.harness.base();
+                let node = doc.get_node(node)?;
+                // By name rather than through `local_name!`, which only knows
+                // the atoms the HTML spec has: these are ours.
+                let attrs = node.attrs()?;
+                attrs
+                    .iter()
+                    .find(|attr| &*attr.name.local == attribute)?
+                    .value
+                    .parse()
+                    .ok()
+            })
+            .collect()
     }
 
     /// The window, rasterised. RGBA8, `width * height * 4` bytes, top row
@@ -469,6 +518,32 @@ impl Shot {
 
     /// The mean colour of a rectangle, which is how "this page got darker" is
     /// asked without caring which pixel did it.
+    /// The first column of a band that has anything drawn on it, as an x in
+    /// device pixels — and `None` for a band that is all one colour.
+    ///
+    /// What "anything" means is: unlike the band's own top-left pixel, which
+    /// is the ground it is drawn on. That is how a reader tells an indent
+    /// from a flush row, and it is the only way to measure one here: the rows
+    /// are the width of the panel whatever their depth, so the indent is
+    /// padding and the box does not move.
+    pub fn leftmost_ink(&self, rect: (u32, u32, u32, u32)) -> Option<u32> {
+        let (x0, y0, x1, y1) = rect;
+        let ground = self.at(x0, y0);
+        for x in x0..x1.min(self.width) {
+            for y in y0..y1.min(self.height) {
+                let pixel = self.at(x, y);
+                let far = (0..3)
+                    .map(|c| (pixel[c] as i32 - ground[c] as i32).abs())
+                    .max()
+                    .unwrap_or(0);
+                if far > 12 {
+                    return Some(x);
+                }
+            }
+        }
+        None
+    }
+
     pub fn mean(&self, rect: (u32, u32, u32, u32)) -> [f64; 3] {
         let (x0, y0, x1, y1) = rect;
         let mut total = [0f64; 3];

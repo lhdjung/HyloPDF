@@ -20,7 +20,7 @@
 //! winit route would be `use_window_event`, and it is closed to us: it takes
 //! its `WindowEventHandlers` out of a context that only `dioxus_native`'s own
 //! application provides, and the type is private, so a shell of our own cannot
-//! provide one. That is a third thing on the list `FINDINGS.md` keeps of what
+//! provide one. That is a third thing on the list `PROGRESS.md` keeps of what
 //! owning the window costs.
 //!
 //! *A page is a `<div>` with an `<object>` in it*, absolutely positioned
@@ -44,7 +44,7 @@
 //! pages are placed against it. That is what `viewer.ts` does in all but the
 //! last step anyway — it computes every position itself and lets the browser
 //! hold one number. What is lost is the scrollbar and the platform's own
-//! fling, which is a real loss and is written down in `FINDINGS.md` rather
+//! fling, which is a real loss and is written down in `PROGRESS.md` rather
 //! than papered over: a scrollbar we would have to draw, and momentum arrives
 //! from the trackpad in the event stream regardless.
 
@@ -55,11 +55,13 @@ use std::rc::Rc;
 use dioxus::html::geometry::WheelDelta;
 use dioxus::prelude::*;
 use dioxus_native::CustomWidgetAttr;
+use serde_json::json;
 
 use crate::layout::{Anchor, Fit, Layout, Size, Spread};
 use crate::page::{Chosen, PageWidget};
+use crate::palette::Palette;
 use crate::render::PageSource;
-use crate::theme::{Theme, THEMES};
+use crate::store::Store;
 
 /// An open document, wrapped so that it can be a component's prop.
 ///
@@ -72,6 +74,36 @@ pub struct Handle(pub Arc<dyn PageSource>);
 impl PartialEq for Handle {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// Where the reader's settings and themes live, and what to wear for this run.
+///
+/// A path rather than an open [`Store`], because a component's props have to
+/// be `Clone` and `PartialEq` and a settings table is neither — and because
+/// the store is this window's, made where the window's state is made.
+#[derive(Clone, PartialEq)]
+pub struct Config {
+    pub dir: std::path::PathBuf,
+    /// `--theme N`, which chooses for this run without writing it down.
+    pub theme: Option<usize>,
+}
+
+impl Config {
+    /// The reader's own directory. See [`crate::config::config_dir`]: it is
+    /// deliberately not the installed app's.
+    pub fn here() -> Config {
+        Config {
+            dir: crate::config::config_dir(),
+            theme: None,
+        }
+    }
+
+    pub fn at(dir: impl Into<std::path::PathBuf>) -> Config {
+        Config {
+            dir: dir.into(),
+            theme: None,
+        }
     }
 }
 
@@ -126,12 +158,27 @@ const ZOOMS: [f64; 13] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0, 3.0, 4.0,
 ];
 
+/// A fit mode, spelled the way `settings.toml` spells it. One function rather
+/// than two match arms in two places, because the value written and the value
+/// read back have to be the same word and nothing else checks that they are.
+fn name_of(fit: Fit) -> &'static str {
+    match fit {
+        Fit::Width => "width",
+        Fit::Page => "page",
+        Fit::Actual => "actual",
+    }
+}
+
 /// Everything the reader is looking at, and everything that changes it.
 pub struct Viewer {
     pub document: Arc<dyn PageSource>,
     pub layout: Layout,
     pub scroll_top: f64,
-    pub theme: usize,
+    /// The settings table and the themes, which is everything this reader
+    /// remembers between runs. It is not a signal and does not need to be:
+    /// every change to it goes through a method here, and this whole struct
+    /// is behind one.
+    pub store: Store,
     chosen: Chosen,
     /// One line at the bottom of the window, which is `notice()` in `ui.ts`.
     pub notice: String,
@@ -142,18 +189,51 @@ pub struct Viewer {
 }
 
 impl Viewer {
-    pub fn new(document: Arc<dyn PageSource>, chosen: Chosen) -> Self {
+    pub fn new(document: Arc<dyn PageSource>, chosen: Chosen, store: Store) -> Self {
         let sizes = (0..document.pages())
             .map(|index| document.size_of(index))
             .collect();
-        Viewer {
+        let mut viewer = Viewer {
             layout: Layout::new(sizes),
             scroll_top: 0.0,
-            theme: 0,
             notice: String::new(),
             generation: 0,
             chosen,
             document,
+            store,
+        };
+        viewer.restore();
+        viewer
+    }
+
+    /// Put back what the last run left, which is the brief's first promise
+    /// about settings: they survive, and they are independent of each other.
+    ///
+    /// Read once, at the start, and then never again — the settings table is
+    /// this window's copy from here on, which is the same thing the app says
+    /// about two windows and a setting changed in one of them.
+    fn restore(&mut self) {
+        self.layout.fit = match self.store.text("fit_mode").as_str() {
+            "page" => Fit::Page,
+            "actual" => Fit::Actual,
+            _ => Fit::Width,
+        };
+        // A zoom out of the range the ladder covers is a zoom nothing can step
+        // away from, and `settings.rs` only promises the value is a number.
+        self.layout.zoom = self.store.number("zoom").clamp(ZOOMS[0], ZOOMS[ZOOMS.len() - 1]);
+        self.layout.spread = match self.store.text("spread_mode").as_str() {
+            "two" => Spread::Two,
+            "cover" => Spread::Cover,
+            _ => Spread::Single,
+        };
+        self.layout.gap = self.store.number("page_gap");
+        self.layout.relayout();
+        self.chosen.set(self.store.palette());
+        // A theme naming a colour that cannot be read is the one thing here
+        // worth a sentence on the screen, and `store` has already worked out
+        // whether there is one.
+        if let Some(said) = self.store.complaint.clone() {
+            self.notice = said;
         }
     }
 
@@ -165,8 +245,14 @@ impl Viewer {
         self.layout.pages()
     }
 
-    pub fn theme(&self) -> Theme {
-        THEMES[self.theme]
+    /// The theme in use, as colours. The name beside it is the theme's, and
+    /// the toolbar shows that rather than this.
+    pub fn palette(&self) -> Palette {
+        self.store.palette()
+    }
+
+    pub fn theme_name(&self) -> String {
+        self.store.theme().name.clone()
     }
 
     /// The window changed size, or the sidebar did. Everything below the
@@ -201,6 +287,7 @@ impl Viewer {
             Fit::Page => "Fit page".into(),
             Fit::Actual => "Actual size".into(),
         };
+        self.store.set(vec![("fit_mode".into(), json!(name_of(fit)))]);
     }
 
     pub fn zoom(&mut self, closer: bool) {
@@ -229,27 +316,50 @@ impl Viewer {
             layout.zoom = next;
         });
         self.notice = format!("{:.0}%", next * 100.0);
+        // The pair that never moves alone, and the reason `set` takes a group:
+        // a zoom without the fit mode it left comes back as a fit width that
+        // ignores it.
+        self.store.set(vec![
+            ("zoom".into(), json!(next)),
+            ("fit_mode".into(), json!(name_of(Fit::Actual))),
+        ]);
     }
 
     pub fn set_spread(&mut self, spread: Spread) {
         self.keeping_place(|layout| layout.spread = spread);
+        self.store.set(vec![(
+            "spread_mode".into(),
+            json!(match spread {
+                Spread::Single => "single",
+                Spread::Two => "two",
+                Spread::Cover => "cover",
+            }),
+        )]);
     }
 
-    pub fn set_theme(&mut self, theme: usize) {
-        self.theme = theme.min(THEMES.len() - 1);
-        self.chosen.set(self.theme());
-        self.generation += 1;
-    }
-
-    pub fn toggle_theme(&mut self) {
-        self.theme = (self.theme + 1) % THEMES.len();
+    /// Wear the theme at `index` in the list, and remember it.
+    pub fn set_theme(&mut self, index: usize) {
+        let name = self.store.wear(index);
+        if name.is_empty() {
+            return;
+        }
         // Every mounted page reads this on its next paint, and the next paint
         // is the frame this change causes. A page already on the GPU is
         // recoloured by a compute pass over it rather than drawn again, which
         // is the whole difference from `keyFor()` carrying the theme.
-        self.chosen.set(self.theme());
-        self.notice = self.theme().name.to_string();
+        self.chosen.set(self.store.palette());
+        self.notice = self.store.complaint.clone().unwrap_or(name);
         self.generation += 1;
+    }
+
+    /// The next theme in the list, which is what `t` is bound to.
+    ///
+    /// Fourteen themes is too many to cycle through in the real app and this
+    /// is not the real app's gesture — the menu is Phase 3's — but it is the
+    /// one keystroke that proves the whole list is loaded and wearable.
+    pub fn next_theme(&mut self) {
+        let next = (self.store.theme_index() + 1) % self.store.themes().len().max(1);
+        self.set_theme(next);
     }
 
     /// Where the reader would end up, clamped, in CSS pixels.
@@ -278,11 +388,13 @@ impl Viewer {
 /// The whole window.
 ///
 #[component]
-pub fn Reader(document: Handle, chosen: Chosen, theme: usize) -> Element {
+pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let mut viewer = use_signal(|| {
-        let mut viewer = Viewer::new(document.0.clone(), chosen.clone());
-        viewer.set_theme(theme);
-        viewer
+        let mut store = Store::at(&config.dir);
+        if let Some(index) = config.theme {
+            store.wear_for_now(index);
+        }
+        Viewer::new(document.0.clone(), chosen.clone(), store)
     });
     // The viewport, taken from the window rather than from the element.
     //
@@ -359,7 +471,7 @@ pub fn Reader(document: Handle, chosen: Chosen, theme: usize) -> Element {
                     };
                     go(to);
                 }
-                "t" => viewer.write().toggle_theme(),
+                "t" => viewer.write().next_theme(),
                 "0" => viewer.write().set_fit(Fit::Width),
                 "9" => viewer.write().set_fit(Fit::Page),
                 "s" => {
@@ -380,7 +492,8 @@ pub fn Reader(document: Handle, chosen: Chosen, theme: usize) -> Element {
 
     let held = viewer.read();
     let scroll_top = held.scroll_top;
-    let wearing = held.theme();
+    let wearing = held.palette();
+    let theme_name = held.theme_name();
     let mounted = held.layout.mounted(held.scroll_top);
     let content_width = held.layout.content_width();
     let content_height = held.layout.content_height();
@@ -433,7 +546,7 @@ pub fn Reader(document: Handle, chosen: Chosen, theme: usize) -> Element {
                 button { class: "chip", onclick: move |_| viewer.write().set_fit(Fit::Width), "{zoom}" }
                 button { class: "chip", onclick: move |_| viewer.write().zoom(false), "−" }
                 button { class: "chip", onclick: move |_| viewer.write().zoom(true), "+" }
-                button { class: "chip", onclick: move |_| viewer.write().toggle_theme(), "{wearing.name}" }
+                button { class: "chip", onclick: move |_| viewer.write().next_theme(), "{theme_name}" }
                 div { class: "pill", "{page} / {pages}" }
             }
             div {
@@ -470,7 +583,7 @@ pub fn Reader(document: Handle, chosen: Chosen, theme: usize) -> Element {
                             // drawn at, and the theme it is wearing. A change
                             // to any of them is a different node, which is
                             // what gives the old texture back — see `page.rs`.
-                            key: "{index}:{width}x{height}:{wearing.name}",
+                            key: "{index}:{width}x{height}:{theme_name}",
                             document: Handle(document.clone()),
                             chosen: chosen.clone(),
                             index,

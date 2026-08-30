@@ -1,7 +1,8 @@
 //! What a reading session costs, asserted rather than observed.
 //!
-//! `FLOOR.md` ends with this on the list: the harness needs a memory
-//! assertion, and `footprint_mb()` is what it should assert on, because "three
+//! Taking the floor apart ended with this on the list — see `PROGRESS.md`:
+//! the harness needs a memory assertion, and `footprint_mb()` is what it
+//! should assert on, because "three
 //! copies of every page" is exactly the shape a test catches and a reading
 //! session does not. It cost 96MB and went unnoticed through the whole of
 //! Phase 1.

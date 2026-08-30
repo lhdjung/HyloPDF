@@ -1,8 +1,9 @@
 //! What the floor is made of.
 //!
-//! `PHASE1.md` ends on one number and one question. The number is that an
-//! empty Blitz window costs about 110MB resident on this machine — as much as
-//! the whole of Tauri's app process — and the question is what that is. This
+//! Phase 1 ended on one number and one question — see "The floor" in
+//! `PROGRESS.md`. The number is that an empty Blitz window costs about 110MB
+//! resident on this machine, as much as the whole of Tauri's app process, and
+//! the question is what that is made of. This
 //! binary answers it by building the stack one layer at a time and measuring
 //! after each, so that the cost lands on the layer that incurs it rather than
 //! on the app that happens to be on top.

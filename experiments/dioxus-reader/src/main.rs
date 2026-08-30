@@ -15,11 +15,11 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 use dioxus_native::{LogicalSize, WindowAttributes};
-use dioxus_reader::app::{Handle, Reader, ReaderProps};
-use dioxus_reader::page::Chosen;
-use dioxus_reader::shell::{Remote, Shell, WindowSpec};
-use dioxus_reader::theme::THEMES;
+use dioxus_reader::app::{Config, Handle, Reader, ReaderProps};
 use dioxus_reader::app::CHROME;
+use dioxus_reader::page::Chosen;
+use dioxus_reader::palette;
+use dioxus_reader::shell::{Remote, Shell, WindowSpec};
 use dioxus_reader::{render, stats};
 
 fn main() {
@@ -41,7 +41,14 @@ fn main() {
     // asking for two of them.
     let window_width = flag("--width", 1100) as f64;
     let window_height = flag("--height", 900) as f64;
-    let theme = flag("--theme", 0).min(THEMES.len() - 1);
+    // `--theme N` is a place in the theme list, and the list is fourteen long
+    // rather than two now: it is read out of the app's own `themes/` files,
+    // through the app's own loader. Absent means whatever the last run wore.
+    let theme = args
+        .iter()
+        .position(|arg| arg == "--theme")
+        .and_then(|at| args.get(at + 1))
+        .and_then(|value| value.parse::<usize>().ok());
     let path = args
         .iter()
         .skip(1)
@@ -74,7 +81,16 @@ fn main() {
     shell.trace = false;
     let windows = shell.windows();
 
-    let chosen = Chosen::new(THEMES[theme]);
+    // Black on white until the reader's own theme is read, which happens in
+    // `Viewer::new` during the first render — before anything is painted, so
+    // this is never seen. It is deliberately not any theme's colours: a
+    // half-applied theme is harder to diagnose than one that plainly did not
+    // load.
+    let chosen = Chosen::new(palette::FALLBACK);
+    let config = Config {
+        theme,
+        ..Config::here()
+    };
     let attributes = WindowAttributes::default()
         .with_title("HyloPDF")
         .with_surface_size(LogicalSize::new(window_width, window_height));
@@ -83,7 +99,7 @@ fn main() {
         ReaderProps {
             document: Handle(document),
             chosen,
-            theme,
+            config,
         },
     );
     windows.open(WindowSpec::new(vdom, attributes));

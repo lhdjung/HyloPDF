@@ -32,7 +32,7 @@ use crate::gpu::{PageTexture, Recolorer};
 use crate::layout::MAX_PIXELS;
 use crate::render::PageSource;
 use crate::stats;
-use crate::theme::Theme;
+use crate::palette::Palette;
 
 /// What every page needs to know and none of them owns: which theme is on.
 ///
@@ -42,7 +42,7 @@ use crate::theme::Theme;
 /// the theme change causes anyway.
 #[derive(Clone)]
 pub struct Chosen {
-    theme: Rc<Cell<Theme>>,
+    theme: Rc<Cell<Palette>>,
 }
 
 impl PartialEq for Chosen {
@@ -52,17 +52,17 @@ impl PartialEq for Chosen {
 }
 
 impl Chosen {
-    pub fn new(theme: Theme) -> Self {
+    pub fn new(theme: Palette) -> Self {
         Chosen {
             theme: Rc::new(Cell::new(theme)),
         }
     }
 
-    pub fn get(&self) -> Theme {
+    pub fn get(&self) -> Palette {
         self.theme.get()
     }
 
-    pub fn set(&self, theme: Theme) {
+    pub fn set(&self, theme: Palette) {
         self.theme.set(theme);
     }
 }
@@ -144,7 +144,7 @@ struct Software {
     width: u32,
     height: u32,
     /// What `PageTexture::wears` answers on the other path.
-    theme: Theme,
+    theme: Palette,
 }
 
 impl PageWidget {

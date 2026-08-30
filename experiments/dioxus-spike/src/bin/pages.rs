@@ -211,7 +211,7 @@ fn report() -> bool {
 /// moments — the renderer came up, the renderer went away, draw yourself — and
 /// the fourth is the one that matters: `requires_redraw`, which says whether
 /// the document has to keep painting on this widget's account. A page does
-/// not, so it says no, and that is the whole of the fix that `FINDINGS.md`
+/// not, so it says no, and that is the whole of the fix that `PROGRESS.md`
 /// thought would have to be made to Blitz.
 struct PageWidget {
     document: Rc<Document>,

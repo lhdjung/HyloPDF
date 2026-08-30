@@ -38,6 +38,8 @@
 //! reader.save_png("/tmp/page.png");
 //! ```
 
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyrender::PaintScene;
@@ -51,10 +53,10 @@ use keyboard_types::{Key, Modifiers};
 use peniko::kurbo::Rect;
 use peniko::{Color, Fill};
 
-use crate::app::{Handle, Reader as ReaderComponent, ReaderProps, Screen};
+use crate::app::{Config, Handle, Reader as ReaderComponent, ReaderProps, Screen};
 use crate::page::Chosen;
+use crate::palette;
 use crate::render::{self, PageSource};
-use crate::theme::THEMES;
 
 /// How the reader is opened. The defaults are a window a book is comfortable
 /// in, at a density of one — a test wants the same pixels on every machine,
@@ -63,8 +65,29 @@ pub struct Options {
     pub width: u32,
     pub height: u32,
     pub scale: f32,
-    /// An index into [`THEMES`], as `--theme` takes.
-    pub theme: usize,
+    /// A place in the theme list, as `--theme` takes. `None` is whatever the
+    /// settings say, which in a fresh directory is Hylo Light.
+    pub theme: Option<usize>,
+    /// Where this reader's settings and themes live.
+    ///
+    /// **A directory of its own per reader, and that is not fastidiousness.**
+    /// `cargo test` runs test functions in parallel and every one of them
+    /// changes settings — a theme, a zoom, a fit mode — so a shared directory
+    /// would have tests writing over each other's table and reading back
+    /// somebody else's answer, intermittently and by timing. It is also what
+    /// keeps a test run away from the reader's own settings, which are in the
+    /// directory the real binary uses.
+    pub config: PathBuf,
+}
+
+/// A directory nothing else in this process is using.
+fn scratch_config() -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    std::env::temp_dir().join(format!(
+        "hylopdf-harness-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ))
 }
 
 impl Default for Options {
@@ -73,7 +96,8 @@ impl Default for Options {
             width: 1100,
             height: 900,
             scale: 1.0,
-            theme: 0,
+            theme: None,
+            config: scratch_config(),
         }
     }
 }
@@ -101,6 +125,10 @@ pub struct Reader {
     /// Kept because the harness borrows nothing of it and a test may want to
     /// ask the document a question the interface does not answer.
     pub document: Arc<dyn PageSource>,
+    /// The settings directory this reader was given, so that a test can open
+    /// a second reader on the same one and check that something was
+    /// remembered.
+    pub config: PathBuf,
     width: u32,
     height: u32,
     scale: f64,
@@ -113,7 +141,7 @@ impl Reader {
     }
 
     /// The fixture the app's own test suite generates: 400 pages of plain
-    /// text. It is the document every memory number in `FLOOR.md` was taken
+    /// text. It is the document every memory number in `PROGRESS.md` was taken
     /// on, which is the reason to reach for it here too.
     pub fn book() -> String {
         format!(
@@ -130,14 +158,19 @@ impl Reader {
     /// The same, over a document already open — which is how a test opens one
     /// document and drives several readers over it.
     pub fn over(document: Arc<dyn PageSource>, options: Options) -> Self {
-        let theme = options.theme.min(THEMES.len() - 1);
-        let chosen = Chosen::new(THEMES[theme]);
+        // Corrected in `Viewer::new` during the first render, before anything
+        // is painted. See `main.rs`, which does the same.
+        let chosen = Chosen::new(palette::FALLBACK);
+        let config = Config {
+            dir: options.config.clone(),
+            theme: options.theme,
+        };
         let vdom = VirtualDom::new_with_props(
             ReaderComponent,
             ReaderProps {
                 document: Handle(document.clone()),
                 chosen,
-                theme,
+                config,
             },
         );
         // What the shell provides out of the winit window, provided out of the
@@ -162,6 +195,7 @@ impl Reader {
         let mut reader = Reader {
             harness,
             document,
+            config: options.config,
             width: options.width,
             height: options.height,
             scale,

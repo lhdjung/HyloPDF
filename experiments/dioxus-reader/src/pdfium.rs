@@ -22,7 +22,7 @@ use crate::render::{Bitmap, PageSource};
 /// plus a `Send + Sync` bound on the bindings accessor; nothing in the crate
 /// serialises a call. pdfium itself has process-wide state and no locking, and
 /// two threads inside it abort the process — `SIGABRT`, no panic, no message,
-/// no stack, which is a C++ `CHECK` failing the way `FLOOR.md` describes.
+/// no stack, which is a C++ `CHECK` failing the way `PROGRESS.md` describes.
 ///
 /// It was invisible while there was one document on one thread. It arrived
 /// with the harness: `cargo test` runs its tests in parallel, four of them

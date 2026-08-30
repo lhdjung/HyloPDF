@@ -16,7 +16,7 @@
 //! that changes the theme panicked in `stylo`, from a stack with nothing of
 //! this app in it, while pressing `t` for the same action was fine — the
 //! difference being only that a click leaves the pointer on a button.
-//! `tests/reader.rs` found it on its first run. See `PHASE2.md`; it is an
+//! `tests/reader.rs` found it on its first run. See `PROGRESS.md`; it is an
 //! upstream fault and this is not merely a way around it, because a theme
 //! change now re-resolves the variables instead of re-parsing the sheet.
 //!
@@ -26,14 +26,14 @@
 //! with `scrollbar-width: thin`), and `text-overflow: ellipsis` (a `mask-image`
 //! fade, which is arguably better and was checked in Phase 0).
 
-use crate::theme::{mix, Theme};
+use crate::palette::{mix, Palette};
 
 /// The theme, as the declarations that go in the root's `style` attribute.
 ///
 /// Every shade the chrome uses is derived from the five colours a theme names,
 /// which is the claim `applyTheme` makes in the app and the reason a five-line
 /// theme file is enough.
-pub fn variables(theme: &Theme) -> String {
+pub fn variables(theme: &Palette) -> String {
     let hex = |colour: [u8; 3]| format!("#{:02x}{:02x}{:02x}", colour[0], colour[1], colour[2]);
     format!(
         "--text: {}; --paper: {}; --accent: {}; --surface: {}; --line: {}; \

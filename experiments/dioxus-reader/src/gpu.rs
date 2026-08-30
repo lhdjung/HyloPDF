@@ -27,7 +27,7 @@ use dioxus_native::DeviceHandle;
 
 use crate::recolor::SHADER;
 use crate::render::Bitmap;
-use crate::theme::Theme;
+use crate::palette::Palette;
 
 /// A page on the GPU: one texture, wearing the theme.
 ///
@@ -47,7 +47,7 @@ pub struct PageTexture {
     painted: wgpu::Texture,
     id: ResourceId,
     /// The theme the painted copy was made with, or `None` while it is stale.
-    themed: Option<Theme>,
+    themed: Option<Palette>,
     pub width: u32,
     pub height: u32,
 }
@@ -66,7 +66,7 @@ impl PageTexture {
         self.width == width && self.height == height
     }
 
-    pub fn wears(&self, theme: &Theme) -> bool {
+    pub fn wears(&self, theme: &Palette) -> bool {
         self.themed.as_ref() == Some(theme)
     }
 }
@@ -129,7 +129,7 @@ impl Recolorer {
         &self,
         ctx: &mut dyn RenderContext,
         bitmap: &Bitmap,
-        theme: &Theme,
+        theme: &Palette,
     ) -> Option<PageTexture> {
         let extent = wgpu::Extent3d {
             width: bitmap.width,
@@ -202,7 +202,7 @@ impl Recolorer {
     }
 
     /// Run the ramp from the page as drawn onto the page as shown.
-    fn paint(&self, page: &mut PageTexture, source: &wgpu::Texture, theme: &Theme) {
+    fn paint(&self, page: &mut PageTexture, source: &wgpu::Texture, theme: &Palette) {
         // Two vec4s and nothing else, so that there is one possible layout
         // rather than a std140 rule to be right about: `w` on the ink carries
         // whether a pixel keeps a colour of its own, `w` on the paper carries

@@ -8,12 +8,26 @@
 //!
 //! The assertions are about measurable properties rather than about a
 //! reference PNG, and that is a decision rather than a shortcut — see
-//! `PHASE2.md`. A reference image is only as portable as the fonts that went
+//! `PROGRESS.md`. A reference image is only as portable as the fonts that went
 //! into it, and the toolbar is drawn in whatever `ui-sans-serif` resolves to
 //! on the machine.
 
 use dioxus_reader::harness::{Options, Reader};
-use dioxus_reader::theme::THEMES;
+use dioxus_reader::palette;
+use dioxus_reader::theme;
+
+/// Hylo Dark, as the app's own theme file defines it. The list is fourteen
+/// long now and read off the app's `themes/` directory, so a test that wants
+/// *the dark one* asks for it by id rather than by a place in an array.
+fn hylo_dark() -> (usize, palette::Palette) {
+    let index = theme::BUILT_IN
+        .iter()
+        .position(|(id, _)| *id == theme::DEFAULT_DARK)
+        .expect("Hylo Dark ships");
+    let parsed: theme::Theme =
+        toml::from_str(theme::BUILT_IN[index].1).expect("Hylo Dark parses");
+    (index, palette::resolve(&parsed, true))
+}
 
 /// The rectangle a page occupies, in device pixels, pulled in a little so
 /// that a shadow or a rounding does not land in the sample.
@@ -77,7 +91,7 @@ fn a_recolouring_theme_reaches_the_page() {
         let mut reader = Reader::open_with(
             &Reader::book(),
             Options {
-                theme: 1,
+                theme: Some(hylo_dark().0),
                 ..Default::default()
             },
         );
@@ -89,7 +103,7 @@ fn a_recolouring_theme_reaches_the_page() {
         dark[0] < 80.0,
         "and a dark one is not — the recolouring is on the pixels, not on the CSS: {dark:?}"
     );
-    assert!(THEMES[1].recolor, "…which is what Hylo Dark asks for");
+    assert!(hylo_dark().1.recolor, "…which is what Hylo Dark asks for");
 }
 
 #[test]
@@ -100,7 +114,7 @@ fn the_ink_survives_the_theme() {
     let mut reader = Reader::open_with(
         &Reader::book(),
         Options {
-            theme: 1,
+            theme: Some(hylo_dark().0),
             ..Default::default()
         },
     );
@@ -123,13 +137,13 @@ fn the_theme_reaches_the_chrome_too() {
     let mut reader = Reader::open_with(
         &Reader::book(),
         Options {
-            theme: 1,
+            theme: Some(hylo_dark().0),
             ..Default::default()
         },
     );
     let shot = reader.screenshot();
     let bar = shot.mean((0, 0, 1100, 40));
-    let paper = THEMES[1].background;
+    let paper = hylo_dark().1.background;
     for channel in 0..3 {
         assert!(
             (bar[channel] - paper[channel] as f64).abs() < 24.0,

@@ -2,7 +2,7 @@
 //!
 //! Nothing here is the app. Each binary answers one question from
 //! `ai-markdown/dioxus-assessment.md`, and the answers are written down in
-//! `FINDINGS.md` beside them.
+//! `PROGRESS.md` beside them.
 
 pub mod nav;
 pub mod pdf;

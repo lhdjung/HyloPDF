@@ -195,3 +195,81 @@ fn the_window_can_be_a_different_size() {
         "fit width fits the window it is given: {page:?}"
     );
 }
+
+/// **Everything the reader changes is still there the next time.** This is the
+/// brief's first promise about settings and the first thing Phase 3 owed it:
+/// a theme, a zoom and a spread chosen by hand, a reader closed, a reader
+/// opened on the same settings directory, and the same document as it was
+/// left.
+///
+/// It is driven entirely through the interface — keys pressed, answers read
+/// off the toolbar — because that is the half that was never wired up before
+/// and the half a unit test on `Store` cannot see.
+#[test]
+fn what_the_reader_changes_survives_being_closed() {
+    let config = std::env::temp_dir().join(format!("hylopdf-restart-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&config);
+    let open = || {
+        Reader::open_with(
+            &Reader::book(),
+            Options {
+                config: config.clone(),
+                ..Default::default()
+            },
+        )
+    };
+
+    let (theme, zoom) = {
+        let mut reader = open();
+        assert_eq!(reader.state().theme, "Hylo Light", "a fresh directory");
+        reader.press("t");
+        reader.press("s");
+        reader.press("+");
+        reader.press("+");
+        let state = reader.state();
+        assert_ne!(state.theme, "Hylo Light");
+        assert!(state.zoom.ends_with('%'), "a zoom, not a fit: {state:?}");
+        (state.theme, state.zoom)
+    };
+
+    let reopened = open().state();
+    assert_eq!(reopened.theme, theme, "the theme came back");
+    assert_eq!(reopened.zoom, zoom, "and the zoom it was left at");
+    // The spread is read off the file rather than off the screen, because at
+    // 200% one page is as much as the window holds and the interface has no
+    // readout for it yet. `spreads_put_two_pages_side_by_side` above is what
+    // says the setting does anything.
+    let written = std::fs::read_to_string(config.join("settings.toml")).expect("settings.toml");
+    assert!(written.contains("spread_mode = \"cover\""), "{written}");
+    // And it is a settings file a person could open, which is the promise the
+    // format is for.
+    assert!(written.starts_with("# HyloPDF settings"), "{written}");
+
+    let _ = std::fs::remove_dir_all(&config);
+}
+
+/// The theme list is the app's own fourteen files, not two hard-coded ones —
+/// which is what makes `t` a poor gesture and a menu Phase 3's next item, and
+/// is worth asserting because the reader is the only place the whole chain
+/// (`build.rs` → `install_built_ins` → `load_all` → `resolve`) is exercised
+/// end to end.
+#[test]
+fn the_whole_shipped_theme_set_is_wearable() {
+    let mut reader = book();
+    let mut seen = vec![reader.state().theme];
+    for _ in 1..dioxus_reader::theme::BUILT_IN.len() {
+        reader.press("t");
+        seen.push(reader.state().theme);
+    }
+    assert!(seen.len() >= 14, "{seen:?}");
+    assert!(seen.contains(&"Hylo Dark".to_string()), "{seen:?}");
+    assert!(seen.contains(&"Nord".to_string()), "{seen:?}");
+    let mut sorted = seen.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), seen.len(), "each one once: {seen:?}");
+
+    // And round, back to where it started.
+    reader.press("t");
+    assert_eq!(reader.state().theme, seen[0]);
+}

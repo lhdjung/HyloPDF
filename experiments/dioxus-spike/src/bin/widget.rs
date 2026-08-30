@@ -1,6 +1,6 @@
 //! The smallest custom widget there is, through `dioxus_native::launch`.
 //!
-//! A control for the page spike, and the demonstration of the thing `FINDINGS.md`
+//! A control for the page spike, and the demonstration of the thing `PROGRESS.md`
 //! originally wanted a patch to Blitz for. It draws one flat colour into a
 //! texture and prints a line every time it is painted. What to look for: the
 //! lines *stop*. Under the `<canvas src=…>` custom paint source this replaces,

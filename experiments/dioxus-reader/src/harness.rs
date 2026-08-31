@@ -91,6 +91,18 @@ pub struct Options {
     /// Written through the app's own [`crate::settings::set_many`], so what a
     /// test exercises is the real loader reading a real file.
     pub settings: Vec<(String, serde_json::Value)>,
+    /// Whether the real watcher runs behind this reader — the app's own
+    /// `watch.rs`, on a thread, over the themes directory and the document.
+    ///
+    /// **Off by default, and a test should think before turning it on.** The
+    /// watcher thread cannot be stopped (see [`crate::app::Config::watch`]),
+    /// so every reader that starts one leaves one behind for the rest of the
+    /// run, and what it then reports arrives at the speed of the file system
+    /// rather than of the test. The deterministic way to test what the reader
+    /// *does* about news is [`Reader::deliver`], which posts the same news
+    /// the watcher would; this is for the one test that has to prove the
+    /// watcher is really wired to it.
+    pub watch: bool,
     /// Where this reader's settings and themes live.
     ///
     /// **A directory of its own per reader, and that is not fastidiousness.**
@@ -122,6 +134,7 @@ impl Default for Options {
             theme: None,
             keys: BTreeMap::new(),
             settings: Vec::new(),
+            watch: false,
             config: scratch_config(),
         }
     }
@@ -196,9 +209,70 @@ pub struct Reader {
     height: u32,
     scale: f64,
     opened: Rc<RefCell<Vec<String>>>,
+    /// The mailbox the reader's watch task listens on. See [`Reader::deliver`].
+    post: crate::emit::Post,
 }
 
 impl Reader {
+    /// Tell this reader that something on the disk changed, exactly as the
+    /// watcher would.
+    ///
+    /// The news is the news `watch.rs` emits, in the shape it emits it —
+    /// `themes-changed` with the whole set, `document-changed` with a path —
+    /// so what is being tested is the reader's half of a real wire and not a
+    /// method called directly. What it skips is the file system: a test that
+    /// wants the *watcher* tested asks for `watch: true` and writes a file.
+    ///
+    /// Pumps afterwards, because the task is woken rather than run: the wake
+    /// marks it ready and the next turn of the loop is what runs it.
+    pub fn deliver(&mut self, news: crate::emit::News) {
+        self.post.send(news);
+        self.settle();
+    }
+
+    /// The whole theme set, again — what a saved theme file causes.
+    pub fn themes_changed(&mut self, themes: &[crate::theme::Theme]) {
+        self.deliver(crate::emit::News {
+            event: "themes-changed".into(),
+            target: None,
+            payload: serde_json::to_value(themes).expect("themes are serialisable"),
+        });
+    }
+
+    /// The open document was rewritten — what a recompile causes.
+    pub fn document_changed(&mut self, path: &str) {
+        self.deliver(crate::emit::News {
+            event: "document-changed".into(),
+            target: Some(crate::app::WINDOW.into()),
+            payload: serde_json::Value::String(path.to_string()),
+        });
+    }
+
+    /// Turn the loop until `ready` says so, or until it plainly is not going
+    /// to — with a real clock, because the thing being waited for is a real
+    /// file system.
+    ///
+    /// The only test that needs this is the one with the real watcher behind
+    /// it: `notify` reports when the platform tells it to, and the app's own
+    /// `SETTLE` and `STEADY` are a quarter of a second between them. Every
+    /// other test in this suite waits for a turn of the loop and no longer.
+    ///
+    /// Answers whether it happened, so that a test that gives up says what
+    /// the reader was stuck on rather than that a timer went off.
+    pub fn wait_until(&mut self, seconds: f64, ready: impl Fn(&mut Reader) -> bool) -> bool {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds);
+        loop {
+            if ready(self) {
+                return true;
+            }
+            if std::time::Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            self.settle();
+        }
+    }
+
     /// Every address this reader has handed to the system, in order — see
     /// [`crate::app::Away`]. Empty unless a link out of the document has been
     /// followed, and nothing is ever actually opened.
@@ -243,7 +317,11 @@ impl Reader {
         let config = Config {
             dir: options.config.clone(),
             theme: options.theme,
+            watch: options.watch,
         };
+        // The mailbox the reader listens on, made here so that a test can put
+        // news in it. With `watch` off this is the only thing that ever does.
+        let post = crate::emit::Post::new();
         let vdom = VirtualDom::new_with_props(
             ReaderComponent,
             ReaderProps {
@@ -267,7 +345,9 @@ impl Reader {
         // whoever is running `cargo test`.
         let opened: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let recorder = opened.clone();
+        let posting = post.clone();
         vdom.in_scope(ScopeId::ROOT, move || {
+            provide_context(posting);
             provide_context(Screen::fixed(width, height, scale));
             provide_context(Away::new(move |url| {
                 recorder.borrow_mut().push(url.to_string());
@@ -292,6 +372,7 @@ impl Reader {
             height: options.height,
             scale,
             opened,
+            post,
         };
         reader.focus_root();
         reader.settle();

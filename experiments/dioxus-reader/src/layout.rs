@@ -239,6 +239,24 @@ impl Layout {
         self.sizes.len()
     }
 
+    /// The same layout over a different document.
+    ///
+    /// What a recompile leaves behind: the paper has been rewritten and every
+    /// page in it may be a different shape or gone altogether, while the fit,
+    /// the zoom, the spread, the rotation and the window are the reader's and
+    /// have not changed at all. Rebuilding the whole [`Layout`] would take
+    /// those with it, so the sizes are replaced and everything else stays.
+    ///
+    /// `current` is clamped, because a draft that lost its last chapter is
+    /// exactly the case this has to survive: paged mode lays out `current`
+    /// and nothing else, so a page number past the end is a window with
+    /// nothing in it.
+    pub fn replace_sizes(&mut self, sizes: Vec<Size>) {
+        self.sizes = sizes;
+        self.current = self.current.clamp(1, self.sizes.len().max(1));
+        self.relayout();
+    }
+
     /// A page's size as the document has it, before anything is done to it.
     pub fn size_of(&self, index: usize) -> Size {
         self.sizes[index]

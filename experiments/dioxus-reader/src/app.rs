@@ -96,6 +96,19 @@ pub struct Config {
     pub dir: std::path::PathBuf,
     /// `--theme N`, which chooses for this run without writing it down.
     pub theme: Option<usize>,
+    /// Whether to watch the themes directory and the open document for
+    /// changes made by somebody else — see [`crate::watch`], which is the
+    /// app's own file mounted here.
+    ///
+    /// **On in the binary and off in the harness, and the reason is a
+    /// thread.** `Watching` has no way to stop: the sender the notify
+    /// callback holds keeps the receiver alive, so the thread outlives the
+    /// handle. One per process is nothing and one per test is a hundred
+    /// threads and a hundred file-system watches on a `cargo test`. So a test
+    /// posts news into the mailbox itself, which is the deterministic thing
+    /// to do anyway, and the one test that wants the real watcher asks for
+    /// it.
+    pub watch: bool,
 }
 
 impl Config {
@@ -105,6 +118,7 @@ impl Config {
         Config {
             dir: crate::config::config_dir(),
             theme: None,
+            watch: true,
         }
     }
 
@@ -112,6 +126,7 @@ impl Config {
         Config {
             dir: dir.into(),
             theme: None,
+            watch: false,
         }
     }
 }
@@ -373,6 +388,17 @@ pub struct Viewer {
     /// relayouts on the way to the first frame would record page one over the
     /// place being restored.
     place: Option<Anchor>,
+    /// Which draft of the document this is.
+    ///
+    /// **In the page's key, and it is the only thing that could be.** A page
+    /// keeps its texture for as long as its key does not move — the page
+    /// number, the size, the theme, the view — and a recompile changes none
+    /// of those while changing every pixel. `generation` cannot do it: it is
+    /// bumped by opening the sidebar, which must not throw a texture away.
+    /// So a document replaced under the reader is a new number here, every
+    /// mounted page is a new node, and Blitz releases the old textures
+    /// between frames the way it does for a zoom.
+    edition: u64,
 }
 
 impl Viewer {
@@ -417,6 +443,7 @@ impl Viewer {
             trimming: false,
             window_width: 0.0,
             place: None,
+            edition: 0,
             notice: String::new(),
             keymap,
             pending: String::new(),
@@ -1439,6 +1466,124 @@ impl Viewer {
         self.generation += 1;
     }
 
+    /* ------------------------------------- what changed on the disk */
+
+    /// A theme file was written — by hand, by an LLM, or by this app.
+    ///
+    /// `themesChanged` in `main.ts`, and the whole of it: the set is replaced
+    /// and whatever is in use is put back on from the new files, so that
+    /// editing a theme in an editor beside the reader shows up in the reader.
+    /// Nothing is written down — nobody chose a theme here, and an editor
+    /// saving every few seconds must not be a rewrite of `settings.toml`
+    /// every few seconds.
+    ///
+    /// A theme whose file has *gone* takes the reader somewhere else rather
+    /// than leaving the colours of something that no longer exists on screen,
+    /// and that one *is* remembered, because it is a choice being made on the
+    /// reader's behalf and the next run has to know what it was.
+    ///
+    /// The app has a third case here and this crate does not have it yet: a
+    /// theme being composed in the editor window is the live theme and has no
+    /// id, so every save in the themes directory reads as "the theme you are
+    /// reading in has been deleted". `isEditingTheme()` is the guard, the
+    /// settings window is item 1's other half, and this is a line to come
+    /// back to when it lands.
+    pub fn themes_changed(&mut self, themes: Vec<crate::theme::Theme>) {
+        let before = self.store.theme().clone();
+        self.store.set_themes(themes);
+        let still_there = self
+            .store
+            .themes()
+            .iter()
+            .any(|theme| theme.id == before.id);
+        if still_there {
+            // Unconditional, as the app's is: a theme that came back
+            // unchanged costs one comparison in the widget and nothing else.
+            self.chosen.set(self.store.palette());
+            self.notice = self.store.complaint.clone().unwrap_or_default();
+        } else if let Some(index) = self.store.replacement_for(&before) {
+            let name = self.store.wear(index);
+            self.chosen.set(self.store.palette());
+            self.notice = format!("{} is gone. Now reading in {name}.", before.name);
+        }
+        self.generation += 1;
+    }
+
+    /// The open document was rewritten underneath the reader.
+    ///
+    /// A paper being recompiled by LaTeX is the case this exists for, and the
+    /// reader is meant to stay exactly where they were reading. Where that is
+    /// comes off the layout rather than out of the library, for the reason
+    /// `main.ts` gives: the library has the last position *written down*, and
+    /// this is the one moment the two can differ by a whole scroll.
+    ///
+    /// What has to go is everything read out of the old file — the outline,
+    /// the labels, the links, the search index, the crop — and everything
+    /// that points into it, which is the history. What stays is everything
+    /// that is the reader's: the fit, the zoom, the spread, the rotation, the
+    /// panel, the theme.
+    ///
+    /// Answers the token of the scan it restarted, when the find bar was up:
+    /// the matches were positions in a document that no longer exists, and
+    /// looking again is what somebody with the bar open is asking for. `None`
+    /// when there is nothing to scan, which is [`Viewer::find`]'s convention
+    /// and the same reason for it — a task is the caller's to spawn.
+    pub fn document_changed(&mut self, path: &str) -> Option<u64> {
+        if path != self.document.path() {
+            return None;
+        }
+        let at = self.layout.anchor(self.scroll_top);
+        let reopened = match crate::render::open(path) {
+            Ok(document) => document,
+            // A compiler that is still writing is what `whole()` in `watch.rs`
+            // is there to rule out, so this is the genuinely broken file —
+            // and the document already open is the better thing to be looking
+            // at than an empty window.
+            Err(refused) => {
+                self.notice =
+                    format!("The document changed on disk and could not be read: {refused}");
+                return None;
+            }
+        };
+        self.document = reopened;
+        self.headings = self.document.outline();
+        self.labels = self.document.labels();
+        self.links.borrow_mut().clear();
+        self.past.clear();
+        self.future.clear();
+        let sizes = (0..self.document.pages())
+            .map(|index| self.document.size_of(index))
+            .collect();
+        self.layout.replace_sizes(sizes);
+        if self.trimming {
+            // Measured again rather than kept: the margins are a fact about
+            // the file, and this is a different file.
+            self.measure_crop();
+        }
+        self.edition += 1;
+        self.generation += 1;
+        // Clamped by `go_to`, so a draft that lost its last chapter lands on
+        // the end of what is left rather than nowhere.
+        self.go_to(at);
+        let restarted = if self.find_open {
+            let query = self.find_query.clone();
+            self.search.forget();
+            self.find(&query)
+        } else {
+            None
+        };
+        let renamed = self.store.renamed(&self.document.title());
+        self.notice = if renamed {
+            format!(
+                "Reloaded — the document changed on disk. Now called {}.",
+                self.store.title()
+            )
+        } else {
+            "Reloaded — the document changed on disk.".into()
+        };
+        restarted
+    }
+
     /// The next theme in the list, which is what `t` is bound to.
     ///
     /// Fourteen themes is too many to cycle through in the real app and this
@@ -1658,11 +1803,71 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         });
     };
 
+    // Two files the reader is looking at are not the reader's to change: the
+    // themes, and the document. Both are watched on the Rust side — by the
+    // app's own `watch.rs`, mounted here — and both arrive as news in a
+    // mailbox. See `crate::tauri`, which is how a file that says `use
+    // tauri::…` compiles in a crate that has no Tauri in it.
+    //
+    // **The task is the whole of the wiring on this side.** It waits on the
+    // mailbox, which is a real wait: the watcher thread wakes it, the wake
+    // marks the task ready, and dioxus's own waker takes it from there to the
+    // window. Nothing polls, and in the harness the same wake makes the next
+    // `pump()` run it, which is what lets this be tested with no thread and
+    // no window at all.
+    let watching = use_hook(|| {
+        let post = dioxus_core::try_consume_context::<crate::emit::Post>().unwrap_or_default();
+        let held = config.watch.then(|| {
+            let held = viewer.read();
+            let (themes, path) = (
+                held.store.themes_dir().to_path_buf(),
+                held.document.path().to_string(),
+            );
+            drop(held);
+            let watching = crate::watch::start(crate::emit::AppHandle::new(post.clone()), themes);
+            if !path.is_empty() {
+                watching.document(WINDOW, Some(&path));
+            }
+            watching
+        });
+        let listening = post.clone();
+        spawn(async move {
+            loop {
+                let news = listening.next().await;
+                match news.event.as_str() {
+                    "themes-changed" => {
+                        if let Ok(themes) = serde_json::from_value(news.payload) {
+                            viewer.write().themes_changed(themes);
+                        }
+                    }
+                    "document-changed" => {
+                        let path = news.payload.as_str().unwrap_or_default().to_string();
+                        let restarted = viewer.write().document_changed(&path);
+                        scan(restarted);
+                    }
+                    // Nothing else is emitted, and an unknown event is a
+                    // version of this crate that has not caught up rather
+                    // than something to report.
+                    _ => {}
+                }
+            }
+        });
+        // Held for the life of the reader. Dropping it stops nothing — see
+        // `Config::watch` — but this is where it will be asked to.
+        Rc::new(held)
+    });
+    // Read so that the handle is plainly alive rather than plainly unused.
+    let _ = watching.is_some();
+
     let held = viewer.read();
     let scroll_top = held.scroll_top;
     let wearing = held.palette();
     let theme_name = held.theme_name();
     let title = held.store.title().to_string();
+    // Which draft of the document is being drawn — in every page's key, so
+    // that a recompile replaces the nodes and the textures with them. See
+    // `Viewer::edition`.
+    let edition = held.edition;
     let mounted = held.layout.mounted(held.scroll_top);
     let content_width = held.layout.content_width();
     let content_height = held.layout.content_height();
@@ -2026,7 +2231,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             // drawn at, and the theme it is wearing. A change
                             // to any of them is a different node, which is
                             // what gives the old texture back — see `page.rs`.
-                            key: "{placed.index}:{placed.width}x{placed.height}:{theme_name}:{view_key}",
+                            key: "{placed.index}:{placed.width}x{placed.height}:{theme_name}:{view_key}:{edition}",
                             document: Handle(document.clone()),
                             chosen: chosen.clone(),
                             index: placed.index,
@@ -2048,6 +2253,14 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         }
     }
 }
+
+/// What this window is called when something is emitted to it by name.
+///
+/// One window and one label, which is `main` for the same reason the app's
+/// launch window is: it is the window the geometry and the restore list
+/// belong to. `watch.rs` keys its followed documents by this, and item 9 is
+/// where a second one appears.
+pub const WINDOW: &str = "main";
 
 /// One page, in its place.
 #[component]

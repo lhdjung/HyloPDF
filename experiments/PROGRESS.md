@@ -21,7 +21,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 191 tests, about a minute and a half
+cargo test                                   # 213 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -49,6 +49,11 @@ of them can be rebound in `keys.toml`; a key bound to something not built yet
 says so on the notice line. The theme, the zoom, the fit, the spread, the
 sidebar, the trim, the marks and **the page you had got to** are all still
 there the next time it opens.
+
+**Two of the files it reads are watched.** A theme edited in an editor beside
+the reader is worn as soon as it is saved, and a paper recompiled by LaTeX
+underneath it is reopened at the page you were on. Both are the app's own
+`watch.rs`, compiled here unchanged — see Phase 3 item 8.
 
 **Two things are settings and nothing else.** Trimming the margins is the
 chip marked Trim in the toolbar — the app puts it in a menu, and there are no
@@ -489,11 +494,12 @@ thread.
 | `tests/view.rs` | the margins measured off a sample and taken away, the page turned, a link that turns with it, and the two together |
 | `tests/paged.rs` | one page at a time: what is laid out, what a page turn is, the ends of the document, and every chord in the keymap failing to leave the mode |
 | `tests/library.rs` | where you were, kept and put back; the switch that turns it off; the page remembered in paged mode; what a document calls itself and when that is not a name; what was open, and what has been deleted |
+| `tests/watch.rs` | what changes on the disk: a theme edited and a theme deleted, a document recompiled and one that got shorter, news about somebody else's document, a rebuild that renames the paper — and one test with a real watcher and a real file behind it |
 | `tests/cost.rs` | the memory assertion |
 | `tests/upstream.rs` | the four faults above, as the smallest thing that shows each |
 | `tests/recolor.rs` | the shader against the reference |
 | `src/layout.rs` | fourteen tests on the ported layout, three of them on the turn, the crop and where a rectangle lands under both |
-| `src/theme.rs`, `src/settings.rs`, `src/keys.rs`, `src/library.rs` | thirty, and they are the app's own — see Phase 3 |
+| `src/theme.rs`, `src/settings.rs`, `src/keys.rs`, `src/library.rs`, `src/watch.rs` | forty-four, and they are the app's own — see Phase 3 |
 | `src/sidebar.rs` | four on the thumbnail column's geometry |
 | `src/crop.rs` | seven: the ink box, the padding, the clamp, the refusals, and the sample |
 | `src/search.rs` | eighteen: the fold, the origin map, whole words, the scan order, stepping, the cap, and the quads a match becomes |
@@ -1276,12 +1282,153 @@ is what the day there is a start screen needs.
 costs nothing at one write per pause, and would be the first thing to look at
 if the recents list ever grew a thumbnail.
 
+### 8. The watchers — done, and the app's file was mounted rather than ported
+
+The themes directory and the open document are the two files this reader is
+looking at that are not its own. A theme is TOML precisely so that somebody —
+or something asked on their behalf — can open it in an editor, and until this
+item an edit was seen at the next launch. A document is very often a paper
+being recompiled by LaTeX under the reader, and reopening it by hand to see the
+new draft is the same poor way round.
+
+**`watch.rs` is the fifth of the app's modules to be mounted, and the
+assessment said it would be the first to need a change.** It listed the file
+under "survives nearly unchanged" with one line against it: "`emit_to(window,
+…)` becomes an `EventLoopProxy::send_event`". That was nearly right, and the
+"nearly" is the interesting half — the change is real and it is on *this* side
+of the file rather than in it. Not one line of `watch.rs` was touched.
+
+What made that possible is that the Tauri in it is two names. The file opens
+`use tauri::{AppHandle, Emitter};`, calls `app.emit` twice, and is otherwise
+about the disk from top to bottom: a change is a burst and not an event, a
+theme reload is decided by comparing the themes rather than by something having
+moved, a document is not believed until it ends the way a PDF ends, and the
+watch goes on the *directory* because a compiler replaces a file by renaming
+another one over it. So this crate supplies the two names. `extern crate self
+as tauri;` in `lib.rs` puts the crate in its own extern prelude under that
+name, `AppHandle` and `Emitter` are re-exported at its root, and `src/emit.rs`
+is where they actually live — about a hundred and thirty lines, most of it
+comment.
+
+*The obvious version of the trick is a module called `tauri`, and it does not
+work.* A `use` path anchored on a bare identifier is looked up in the extern
+prelude and not among the crate root's modules; the compiler says so and helpfully
+suggests `crate::tauri::…`, which is the one thing that cannot be written here,
+because what is being avoided is editing the file.
+
+*What the signatures cost.* They are Tauri's, because a shim taking a nicer
+argument would be a shim the app's file does not compile against — which is
+the whole of what is being tested. `Emitter::emit` therefore wants `S:
+Serialize`, so the fourteen themes arrive as a `serde_json::Value` and are
+deserialised on the other side. That is the bridge's serialisation surviving in
+a build with no bridge, it is the only place in this crate that still does it,
+and it happens when somebody saves a theme file. A `watch.rs` genuinely
+rewritten for this crate would hand the vector over; this one is not rewritten,
+and that is the point.
+
+**Fourteen tests came with the file**, which is the fifth time that has
+happened and is beginning to be the strongest single argument in this
+experiment: the burst settling, a document that is only half written, a rewrite
+of the same length inside one tick of a coarse clock, a window's own write
+absorbed before it is reported, two windows sharing one folder. None of them
+needed a line of change, and one of them — `a_second_window_reading_the_same_folder_keeps_the_watch`
+— is about a situation this crate cannot have yet.
+
+**The wire, on this side, is a waker.** The watcher is a thread and the reader
+is a Dioxus task, so what is needed between them is not a channel but a way for
+a thread to say "poll me" to a task it cannot see. `Post` in `emit.rs` is a
+mailbox with a `Waker` in it, and the chain it starts already existed: waking
+the task marks it ready, which wakes the virtual DOM, which — through the waker
+`View::poll` builds out of the shell proxy — puts an event on the winit loop,
+which polls the document. So a theme saved in an editor reaches the screen with
+nothing anywhere polling a clock. In the harness the same wake marks the same
+task ready and the next `pump()` runs it, which is why the whole feature can be
+tested with no window and no thread.
+
+That is the answer to a question the assessment left open and `PROGRESS.md`
+has been keeping a list of: what owning the window costs. Here it cost nothing
+— the shell needed no new event, and `Windows`/`Remote` were not touched.
+
+**What the reader does about it.** `themes_changed` is `themesChanged` in
+`main.ts`: the set is replaced, whatever is in use is put back on from the new
+files, and nothing is written down, because nobody chose a theme and an editor
+saving every few seconds must not be a rewrite of `settings.toml` every few
+seconds. A theme whose file has *gone* hands the reader to another one — the
+one remembered for that half of the light/dark pair, else anything of the same
+darkness, else whatever is left — and *that* is written down, because it is a
+choice made on the reader's behalf.
+
+*A shipped theme cannot go, and finding that out took a test.* `load_all` falls
+back to the copy embedded in the binary, so deleting `hylo-light.toml` deletes
+nothing a reader can see — it is reinstated on the next run and answered from
+memory in the meantime. The theme that can actually vanish is the one that only
+ever existed as a file, which is the one this is for.
+
+*One case the app has and this does not.* A theme being composed in the editor
+window is the live theme and has no id, so every save in the directory reads as
+"the theme you are reading in has been deleted"; `isEditingTheme()` is the
+app's guard. There is no settings window here yet — item 1's other half — and
+the line is marked in `themes_changed` for the day there is.
+
+**`document_changed` is a reload that keeps the reader's place**, and where
+they are comes off the layout rather than out of the library, for `main.ts`'s
+reason: the library has the last position *written down*, and this is the one
+moment the two can differ by a whole scroll. What goes is everything read out
+of the old file — the outline, the labels, the links, the search index, the
+crop — and everything that points into it, which is the history. What stays is
+everything that is the reader's: the fit, the zoom, the spread, the rotation,
+the panel, the theme. A draft that lost its last chapter lands on the end of
+what is left, because `go_to` clamps and `Layout::replace_sizes` clamps
+`current` — paged mode lays out `current` and nothing else, so a page number
+past the end is a window with nothing in it.
+
+*And it needed one new number.* A page keeps its texture for as long as its key
+does not move — the page, the size, the theme, the view — and a recompile
+changes none of those while changing every pixel. `generation` could not do it:
+it is bumped by opening the sidebar, which must not throw a texture away. So
+`edition` counts drafts, it is in the key, and Blitz releases the old textures
+between frames the way it does for a zoom.
+
+*A rebuilt paper may also call itself something else*, so the title is asked
+again and `library::retitle` — the app's own, which writes only when there is a
+difference — records it. That is the seventh question of the renderer seam
+earning its keep a second time.
+
+**Eight tests of the reader's half, and one of them has a file system in it.**
+The other seven post the news through the mailbox the reader really listens on,
+which is deterministic and is how the app's own suite tests this side. The
+eighth deletes and rewrites a real theme file beside a reader with the real
+watcher running, and it is the only test in this suite that waits on a clock —
+because the thing being waited for is a clock. Two things about it are worth
+keeping:
+
+*The watch is set up on a thread and nothing says when it is up.* A save made
+before that produces no event at all, and no amount of waiting afterwards
+conjures one. So the test saves again — which is what an editor with the file
+open does anyway — with a pause between saves longer than the watcher's own
+settle window, or the burst never ends and nothing is ever reported.
+
+*And a test that writes into `/tmp` on macOS must canonicalise it.* `/var` is a
+symlink to `/private/var`; the file system reports the real path and the
+watcher decides an event is about the themes directory by comparing the event's
+parent with the directory it was given, so a directory named through the link
+never matches and nothing is ever reported. Nothing a reader has is behind a
+link. This cost an hour and is the sort of thing that only ever bites a test.
+
+**One thing that is off in the harness on purpose: the watcher itself.**
+`Watching` has no way to stop — the sender the notify callback holds keeps the
+receiver alive, so the thread outlives the handle — which is nothing at one per
+process and is a hundred threads and a hundred file-system watches on a `cargo
+test`. `Config::watch` is therefore true in the binary and false in the
+harness, and the one test that wants the real thing asks for it. The day
+`watch.rs` learns to stop is the day that flag can go.
+
 ### What is not built
 
 No text layer, no selection, no markup, no settings window, no Keyboard page,
-no watchers, one window — and of the library, everything but the markup
-journal, which waits for the item that is about markup. Presenting is the one
-part of item 6 still outstanding, and it is a window rather than a page.
+one window — and of the library, everything but the markup journal, which waits
+for the item that is about markup. Presenting is the one part of item 6 still
+outstanding, and it is a window rather than a page.
 
 ---
 

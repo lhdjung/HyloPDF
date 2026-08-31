@@ -30,8 +30,10 @@ proposition rather than a fantasy:
    redrawing the app from nothing in a foreign idiom.
 3. **Roughly 2,450 lines of the Rust side port unchanged.** `settings.rs`,
    `theme.rs`, `library.rs`, `keys.rs` and `watch.rs` know nothing about Tauri.
-   *Measured on the first two: they needed no change at all, not even the
-   attribute this file expected to remove.*
+   *Measured on all five: every one is mounted by `#[path]` and compiled
+   unchanged, with its own tests. Not even the attribute this file expected to
+   remove, and not even the emit in `watch.rs` — the two names it imports are
+   supplied on the other side rather than edited out of it.*
 
 And three things that keep expectations honest:
 
@@ -128,7 +130,7 @@ theme component.
 | `theme.rs` | 463 | **none. Built — same, with `build.rs` and the fourteen `themes/*.toml` shared rather than copied** |
 | `library.rs` | 601 | **none. Built — mounted by `#[path]`, its eight tests with it; only `touch` and `toggle_mark` are called so far** |
 | `keys.rs` | 215 | **none. Built — mounted by `#[path]`, its five tests and its `keys.toml` template with it** |
-| `watch.rs` | 668 | `emit_to(window, …)` becomes an `EventLoopProxy::send_event` |
+| `watch.rs` | 668 | **none. Built — mounted by `#[path]`, its fourteen tests with it; what changed is on the other side, `src/emit.rs` supplying the two names it imports** |
 
 The `atomic_write`, the per-file locks, `whole()`, the settle window, the
 `Exiting` flag, `library.open` as a list — all of it is about the disk and none
@@ -442,7 +444,15 @@ step was chosen to be testable:
    answers that at open where pdf.js cannot, so the toolbar is never briefly
    wrong. What is not built is the shelf: there is nowhere to show a
    recently-read list in a reader that always has a document open*
-8. the watchers: themes directory, the document being recompiled
+8. the watchers: themes directory, the document being recompiled — *done, and
+   the file was mounted rather than ported: `watch.rs` is the fifth of the
+   app's modules compiled here unchanged, with its fourteen tests. The one
+   line this entry predicted it would need turned out to be needed on the
+   other side of it — `extern crate self as tauri;` and a hundred lines
+   supplying the two names it imports, rather than a change to the file. The
+   wire on the reader's side is a `Waker` in a mailbox, so a theme saved in an
+   editor reaches the screen with nothing polling a clock; owning the window
+   cost nothing here*
 9. multi-window: `hand_over`, placements, the Dock menu, `Exiting`
 10. markup — and this is where it stops being a port, because the annotation
     hole that shaped the current design is gone. Rebuild it as it should have

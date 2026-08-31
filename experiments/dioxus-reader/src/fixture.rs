@@ -168,6 +168,23 @@ pub fn contents_pdf() -> String {
     written("hylopdf-fixture-contents.pdf", || build(12))
 }
 
+/// A document of `pages` pages, written where you say, right now.
+///
+/// **The opposite of everything else in this file**, and deliberately: those
+/// are cached in the temp directory and shared, because two tests wanting the
+/// same fixture want the same bytes. This one is what a recompile looks like
+/// — a named file that has to be *rewritten* while a reader is holding it
+/// open — so it takes a path, writes every time, and each draft is a
+/// different length so that a test can tell one from the other.
+///
+/// Written through the app's own [`crate::atomic_write`], which is what
+/// `watch.rs` expects to see: a compiler replaces a document by writing
+/// another one beside it and renaming it over the top, which is why the watch
+/// is on the directory and not on the file.
+pub fn draft(path: &std::path::Path, pages: usize) {
+    crate::atomic_write(path, &build(pages)).expect("write the draft");
+}
+
 /// Three plain pages under a title the document gives itself.
 ///
 /// The one shape none of the fixtures above has: an `/Info` dictionary with a

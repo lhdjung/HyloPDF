@@ -74,6 +74,11 @@ toml = "0.8"   # the app's version, so the modules mounted from it compile again
 # with it, and these are 100KB of them.
 unicode-normalization = "0.1"
 
+# What the app's own `watch.rs` needs, and it is mounted by path like the other
+# four — see `src/tauri.rs` for how a file that says `use tauri::…` compiles in
+# a crate with no Tauri in it.
+notify = "8"
+
 # The harness's own, optional. See the `harness` feature above.
 blitz-test-harness = { path = "../../../blitz/packages/blitz-test-harness", optional = true }
 anyrender_vello_cpu = { version = "0.17", optional = true }

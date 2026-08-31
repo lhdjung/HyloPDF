@@ -12,7 +12,7 @@
 //! turns on and `cargo build` does not, so nothing it needs is in the binary.
 //!
 //! What is not built: no selection, no markup, no settings *window*, no
-//! Keyboard page, no watchers, one window.
+//! Keyboard page, one window.
 //!
 //! What *is* built, beyond opening a document and reading it: the document's
 //! own links, with the page labels and the go-to field that belong to the same
@@ -30,7 +30,9 @@
 //! remembers between runs is no longer only settings: where they were in each
 //! document, what each document calls itself, and which one was open last are
 //! all in `library.toml` — see [`store`], which is also where the one write
-//! that had to move off the thread drawing the window lives.
+//! that had to move off the thread drawing the window lives. Two of the files
+//! it reads are watched, so a theme saved in an editor and a paper recompiled
+//! by LaTeX both arrive without anybody asking for them.
 //!
 //! # The app's own modules, compiled here unchanged
 //!
@@ -52,9 +54,9 @@
 //!
 //! Their own tests come with them, and `cargo test` runs them here: eleven
 //! about the settings table, the write race and hand-edited files, six about
-//! themes on disk, five about `keys.toml`, eight about the library. Those are
-//! not this crate's tests and this crate did not write them; they are the port
-//! working.
+//! themes on disk, five about `keys.toml`, eight about the library, fourteen
+//! about watching a directory. Those are not this crate's tests and this crate
+//! did not write them; they are the port working.
 //!
 //! [`keys`] is the third of them and the most interesting, because its other
 //! half is TypeScript. In the app, `keys.rs` owns the *file* and `keys.ts`
@@ -63,6 +65,11 @@
 //! ported beside it, so the same seam holds between two Rust modules. Nothing
 //! about it had to move.
 //!
+//! And what changes on the disk while the reader is running — a theme edited
+//! in an editor beside it, a paper recompiled underneath it — reaches the
+//! screen without the reader asking: see [`watch`], which is the app's own
+//! file, and [`emit`], which is the whole of what it took to mount it.
+//!
 //! [`library`] is the fourth, and it came across for the sidebar's sake: a
 //! mark is a pin in a page and the pins have to be somewhere the next run can
 //! read them. Where the reader was, what the document calls itself and what
@@ -70,6 +77,15 @@
 //! `touch`, `set_open` and `prune` — so the only part of the file with no
 //! caller here is the markup journal, which waits for the item of Phase 3
 //! that is about markup. It needed no change either.
+//!
+//! [`watch`] is the fifth, and it is the one this crate expected to have to
+//! edit: it imports two names from Tauri and calls two methods on them, and
+//! everything else in it is about the disk. So the names are supplied instead
+//! — `extern crate self as tauri;` below, and [`emit`] — and the file is
+//! mounted like the other four, with its fourteen tests. That is the whole of
+//! the "`emit_to(window, …)` becomes an `EventLoopProxy::send_event`" the
+//! assessment budgeted for, and it happened outside the file rather than
+//! inside it.
 
 pub mod app;
 pub mod config;
@@ -95,6 +111,9 @@ pub mod sidebar;
 pub mod stats;
 pub mod store;
 pub mod styles;
+/// The three names the app's `watch.rs` reaches for, and the reason it can be
+/// mounted rather than ported. See the module's own comment.
+pub mod emit;
 
 // The app's own, unchanged. See the module comment above.
 #[path = "../../../src-tauri/src/keys.rs"]
@@ -105,8 +124,25 @@ pub mod library;
 pub mod settings;
 #[path = "../../../src-tauri/src/theme.rs"]
 pub mod theme;
+// The one lint that fires here and not in the app, and it is a difference of
+// standard rather than of code: `src-tauri` pins `rust-version = "1.77.2"`,
+// which is older than `iter::repeat_n`, so clippy does not suggest it there.
+// This crate has no such pin. Allowed rather than fixed, because holding a
+// file this crate does not own to a standard its own crate does not set is
+// how a mounted module starts being edited.
+#[allow(clippy::manual_repeat_n)]
+#[path = "../../../src-tauri/src/watch.rs"]
+pub mod watch;
 
 // `theme.rs` and `settings.rs` both write through this, and in the app it
 // lives in `lib.rs` beside the commands. Re-exported at the crate root under
 // the name they use, which is the whole of what mounting them costs.
 pub use config::atomic_write;
+
+// And `watch.rs` costs these three lines, which are the same trick one turn
+// further: it says `use tauri::{AppHandle, Emitter};`, so this crate answers
+// to `tauri` as well as to its own name and puts those two at its root. See
+// [`emit`], which is where they actually live and why they have Tauri's
+// signatures rather than nicer ones.
+extern crate self as tauri;
+pub use emit::{AppHandle, Emitter};

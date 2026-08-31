@@ -386,6 +386,40 @@ impl Store {
         name
     }
 
+    /// The themes, again, because one of the files changed.
+    ///
+    /// The whole set arrives rather than a filename — that is what
+    /// `themes-changed` carries, and fourteen themes of five colours is
+    /// cheaper to send than to ask for. Nothing is written down: nobody chose
+    /// a theme here, and an editor saving a file every few seconds must not
+    /// be a rewrite of `settings.toml` every few seconds.
+    pub fn set_themes(&mut self, themes: Vec<theme::Theme>) {
+        self.themes = themes;
+        self.complaint = self.unreadable();
+    }
+
+    /// What to wear instead of a theme whose file has gone.
+    ///
+    /// `replacementFor` in `main.ts`, in order: the theme remembered for that
+    /// half of the pair, else anything of the same darkness, else whatever is
+    /// left. The point of the order is that somebody who was reading in a
+    /// dark theme is not put into a light one because a file was deleted.
+    pub fn replacement_for(&self, gone: &theme::Theme) -> Option<usize> {
+        let dark = self.is_dark(gone);
+        let remembered = self.text(if dark { "dark_theme" } else { "light_theme" });
+        let left = || {
+            self.themes
+                .iter()
+                .enumerate()
+                .filter(|(_, theme)| theme.id != gone.id)
+        };
+        left()
+            .find(|(_, theme)| theme.id == remembered)
+            .or_else(|| left().find(|(_, theme)| self.is_dark(theme) == dark))
+            .or_else(|| left().next())
+            .map(|(index, _)| index)
+    }
+
     /// Wear a theme for this run only. See `for_now`.
     pub fn wear_for_now(&mut self, index: usize) {
         self.for_now = Some(index);
@@ -487,6 +521,33 @@ impl Store {
     /// and the file's name where it is not.
     pub fn title(&self) -> &str {
         &self.title
+    }
+
+    /// The document was rewritten, and a rewritten document may call itself
+    /// something else — a paper whose `\title{}` changed between two runs of
+    /// LaTeX is the ordinary case. Answers whether the name moved.
+    ///
+    /// `retitle` is the app's own and writes only when there is a difference,
+    /// which is what makes it safe to ask on every reload.
+    pub fn renamed(&mut self, declared: &str) -> bool {
+        if self.file.is_empty() {
+            return false;
+        }
+        let name = std::path::Path::new(&self.file)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let now = if worth_calling(declared, &name) {
+            declared.trim().to_string()
+        } else {
+            name
+        };
+        if now == self.title {
+            return false;
+        }
+        self.title = now;
+        let _ = library::retitle(&self.dir, &self.file, &self.title);
+        true
     }
 
     /// Write down where the reader is, eventually.

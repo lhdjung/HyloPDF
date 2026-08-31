@@ -26,6 +26,16 @@ pub static RESIDENT: AtomicU64 = AtomicU64::new(0);
 /// Pages in the document right now — the mounting window, observed rather
 /// than asserted.
 pub static MOUNTED: AtomicU64 = AtomicU64::new(0);
+/// Pages of *text* held for the sake of a selection — see `Viewer::texts`.
+///
+/// The newest count rather than a total, so it is a level and not a tally:
+/// what it says is how full that cache was the last time anything filled it,
+/// and the only thing worth asserting about it is that it stays under its cap.
+/// A page of text is a hundred kilobytes, which is small next to a texture and
+/// large next to nothing — it is here because an unbounded cache of them was
+/// the obvious way to write it and would have cost 40MB on a book read end to
+/// end.
+pub static TEXT_PAGES: AtomicU64 = AtomicU64::new(0);
 
 pub fn add(counter: &AtomicU64, by: u64) {
     counter.fetch_add(by, Ordering::Relaxed);
@@ -33,6 +43,12 @@ pub fn add(counter: &AtomicU64, by: u64) {
 
 pub fn sub(counter: &AtomicU64, by: u64) {
     counter.fetch_sub(by.min(counter.load(Ordering::Relaxed)), Ordering::Relaxed);
+}
+
+/// A level rather than a tally: the counter is *told* what it is now. See
+/// [`TEXT_PAGES`], which is the one counter here that is not cumulative.
+pub fn set(counter: &AtomicU64, to: u64) {
+    counter.store(to, Ordering::Relaxed);
 }
 
 pub fn get(counter: &AtomicU64) -> u64 {

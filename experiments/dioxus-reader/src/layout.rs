@@ -693,6 +693,96 @@ impl Layout {
         }
     }
 
+    /// [`Layout::place_on`] backwards: a point on the screen, in CSS pixels
+    /// from the top left of a page's box, said in the page's own unturned
+    /// points.
+    ///
+    /// This exists because the pointer is the one thing that arrives in the
+    /// wrong space. Everything else in this reader starts life in the page's
+    /// own points — a link's area, a match's quad, a character's cell — and
+    /// goes *out* through `place_on` once, on its way to the screen. A click
+    /// starts on the screen and has to come the other way, through the same
+    /// crop and the same rotation, or a page turned on its side selects the
+    /// words that were under the pointer before it was turned.
+    ///
+    /// Written as the inverse rather than by searching for the rectangle that
+    /// contains the point, which was the other way to do it: a character's box
+    /// is 8 points wide and there are two thousand of them on a page, so a
+    /// point that falls between two of them — in the gap between words, or in
+    /// the leading between lines — has no answer at all. Inverting the
+    /// transform gives every point in the box an answer, and choosing *which
+    /// character* is then [`crate::select::caret_at`]'s to make with the whole
+    /// page in hand.
+    pub fn unplace_on(&self, index: usize, x: f64, y: f64) -> (f64, f64) {
+        let Some(page) = self.box_of(index) else {
+            return (x, y);
+        };
+        // Out of the crop first, because it was applied last.
+        let size = self.whole_size_of(index);
+        let (offset_x, offset_y) = match self.crop {
+            Some(crop) => (crop.x * size.width, crop.y * size.height),
+            None => (0.0, 0.0),
+        };
+        let scale = if page.scale == 0.0 { 1.0 } else { page.scale };
+        let turned_x = x / scale + offset_x;
+        let turned_y = y / scale + offset_y;
+        // And then back the other way round the turn.
+        let whole = self.sizes[index];
+        match self.rotation {
+            90 => (turned_y, whole.height - turned_x),
+            180 => (whole.width - turned_x, whole.height - turned_y),
+            270 => (whole.width - turned_y, turned_x),
+            _ => (turned_x, turned_y),
+        }
+    }
+
+    /// Which page a point in the content is on, and where on it — CSS pixels
+    /// from the top left of that page's box.
+    ///
+    /// **The point is never outside a page.** A sweep that leaves the paper —
+    /// into the gutter between two pages of a spread, into the grey either
+    /// side, past the last page of the document — is still a sweep, and a
+    /// reader dragging down the margin means "carry on down the text". So the
+    /// nearest page is chosen and the point is clamped into it, which is what
+    /// makes dragging into the space below a page select to the end of it.
+    ///
+    /// `None` only when there is nothing laid out at all.
+    pub fn page_at_point(&self, x: f64, y: f64) -> Option<(usize, f64, f64)> {
+        let mut nearest: Option<(f64, usize, PageBox)> = None;
+        for (index, page) in self.boxes.iter().enumerate() {
+            // A hole, which is every page but one in paged mode.
+            let Some(page) = page else { continue };
+            let dx = if x < page.left {
+                page.left - x
+            } else if x > page.left + page.width {
+                x - page.left - page.width
+            } else {
+                0.0
+            };
+            let dy = if y < page.top {
+                page.top - y
+            } else if y > page.top + page.height {
+                y - page.top - page.height
+            } else {
+                0.0
+            };
+            // Vertical first, as it is in `caret_at` and for the same reason:
+            // two pages side by side are one line of the document, and a
+            // point between them belongs to the one it is level with rather
+            // than to the row above.
+            let distance = dy * 1000.0 + dx;
+            if nearest.is_none_or(|(best, _, _)| distance < best) {
+                nearest = Some((distance, index, *page));
+            }
+        }
+        let (_, index, page) = nearest?;
+        Some((
+            index,
+            (x - page.left).clamp(0.0, page.width),
+            (y - page.top).clamp(0.0, page.height),
+        ))
+    }
+
     /// How many pixels a page is drawn at, which is its box in device pixels
     /// held under the ceiling. Returned as whole pixels, because a texture is.
     pub fn render_size(&self, index: usize, density: f64) -> (u32, u32) {

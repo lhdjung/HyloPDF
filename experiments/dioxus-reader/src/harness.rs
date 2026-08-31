@@ -224,6 +224,10 @@ pub struct Reader {
     /// leaves full screen" are tests rather than things somebody checked once
     /// by hand in a running app.
     asks: Rc<RefCell<Vec<crate::app::Ask>>>,
+    /// Everything this reader has copied, in order. See [`crate::app::Clip`]:
+    /// the real one is the machine's clipboard, and a suite that took it would
+    /// empty the clipboard of whoever is running `cargo test`.
+    copied: Rc<RefCell<Vec<String>>>,
 }
 
 impl Reader {
@@ -298,6 +302,12 @@ impl Reader {
         self.opened.borrow().clone()
     }
 
+    /// Everything this reader has copied, in order — see [`crate::app::Clip`].
+    /// Nothing reaches the machine's own clipboard.
+    pub fn copied(&self) -> Vec<String> {
+        self.copied.borrow().clone()
+    }
+
     /// How big the window is, in CSS pixels. What a test needs to know how
     /// much of a page taller than the window is actually on screen.
     pub fn window(&self) -> (f64, f64) {
@@ -369,6 +379,10 @@ impl Reader {
         // answered against winit and here is a list.
         let asks: Rc<RefCell<Vec<crate::app::Ask>>> = Rc::new(RefCell::new(Vec::new()));
         let asked = asks.clone();
+        // …and what it copied, for the same reason and with more at stake: a
+        // clipboard is somebody's and taking it is worse than adding a window.
+        let copied: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let copying = copied.clone();
         vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(posting);
             provide_context(Screen::fixed(width, height, scale));
@@ -377,6 +391,9 @@ impl Reader {
             }));
             provide_context(crate::app::Frame::new(move |ask| {
                 asked.borrow_mut().push(ask);
+            }));
+            provide_context(crate::app::Clip::new(move |text| {
+                copying.borrow_mut().push(text.to_string());
             }));
         });
 
@@ -410,6 +427,7 @@ impl Reader {
             opened,
             post,
             asks,
+            copied,
         };
         reader.focus_root();
         reader.settle();
@@ -579,6 +597,69 @@ impl Reader {
         self.harness.move_mouse_to(x + by, y);
         self.harness.mouse_up_at(x + by, y);
         self.settle();
+    }
+
+    /// Sweep the pointer from one point in the window to another, which is
+    /// what selecting text is.
+    ///
+    /// The same three events a pointer sends, because the selection is read
+    /// off all three: the press decides where the content is (see
+    /// `Viewer::sweep_from`), the moves extend it, and the release is what
+    /// turns a sweep that covered nothing into no selection at all. The
+    /// intermediate move is not decoration either — a sweep of one jump is a
+    /// sweep no reader makes, and a bug that only appears on the second move
+    /// would never be seen.
+    pub fn sweep(&mut self, from: (f32, f32), to: (f32, f32)) {
+        self.harness.mouse_down_at(from.0, from.1);
+        let middle = ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0);
+        self.harness.move_mouse_to(middle.0, middle.1);
+        self.harness.move_mouse_to(to.0, to.1);
+        self.harness.mouse_up_at(to.0, to.1);
+        self.give_keyboard_back();
+        self.settle();
+    }
+
+    /// A sweep across one line of a page, given as fractions of that page's
+    /// box: a test says "a fifth of the way down, from a tenth across to
+    /// nine tenths" and does not have to know where the page is on screen.
+    ///
+    /// The page is found by its `data-page` attribute, which is the one thing
+    /// the DOM says about a page that a reader could also check.
+    pub fn sweep_page(&mut self, page: usize, from: (f32, f32), to: (f32, f32)) {
+        let (from, to) = (self.point_on(page, from), self.point_on(page, to));
+        self.sweep(from, to);
+    }
+
+    /// Two clicks in the same place, quickly enough to be one gesture.
+    ///
+    /// Blitz decides that from the clock and the distance — under half a
+    /// second and within two pixels — so this is two ordinary clicks and no
+    /// synthesised event. Which is worth having: what is being tested is that
+    /// a reader double-clicking a word gets the word, not that a `dblclick`
+    /// handler runs when one is posted.
+    pub fn double_click_on(&mut self, page: usize, at: (f32, f32)) {
+        let (x, y) = self.point_on(page, at);
+        self.harness.click_at(x, y);
+        self.harness.click_at(x, y);
+        self.give_keyboard_back();
+        self.settle();
+    }
+
+    /// Where a point given as fractions of a page's box is, in the window.
+    ///
+    /// The page is found by its `data-page` attribute, which is the one thing
+    /// the DOM says about a page that a reader could also check — see the
+    /// comment on it in `app.rs`, which is there because the mounting window
+    /// is invisible from outside without it.
+    pub fn point_on(&self, page: usize, at: (f32, f32)) -> (f32, f32) {
+        let node = self
+            .harness
+            .query_all(&format!("[data-page='{page}']"))
+            .first()
+            .copied()
+            .unwrap_or_else(|| panic!("page {page} is not mounted"));
+        let rect = self.harness.layout_rect_of(node);
+        (rect.x + rect.width * at.0, rect.y + rect.height * at.1)
     }
 
     /// What the shell does after a click *and after a key*, done here instead.

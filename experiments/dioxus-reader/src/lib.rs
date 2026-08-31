@@ -11,8 +11,8 @@
 //! tests through today. It is behind the `harness` feature, which `cargo test`
 //! turns on and `cargo build` does not, so nothing it needs is in the binary.
 //!
-//! What is not built: no selection, no markup, no settings *window*, no
-//! Keyboard page, and no file picker.
+//! What is not built: no markup, no settings *window*, no Keyboard page, and
+//! no file picker.
 //!
 //! What *is* built, beyond opening a document and reading it: the document's
 //! own links, with the page labels and the go-to field that belong to the same
@@ -32,7 +32,10 @@
 //! all in `library.toml` — see [`store`], which is also where the one write
 //! that had to move off the thread drawing the window lives. Two of the files
 //! it reads are watched, so a theme saved in an editor and a paper recompiled
-//! by LaTeX both arrive without anybody asking for them.
+//! by LaTeX both arrive without anybody asking for them. And words can be
+//! swept with the pointer and copied — [`select`], which is the file the app
+//! does not have because a webview comes with one, and the first place in this
+//! port where that turned out to be worth having.
 //!
 //! # The app's own modules, compiled here unchanged
 //!
@@ -121,6 +124,7 @@ pub mod pdfium;
 pub mod recolor;
 pub mod render;
 pub mod search;
+pub mod select;
 pub mod session;
 pub mod shell;
 pub mod sidebar;

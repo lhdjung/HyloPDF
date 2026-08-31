@@ -253,6 +253,22 @@ plain scrim.
 **Clipboard events do not exist.** Copying selected text is a keybinding into
 `arboard`, which is a native app's answer anyway and is *better* than the
 DOM's: we have the real text, not what happens to be in a text layer.
+**Built in Phase 3 item 10, and it came out even cheaper than this predicted**:
+`arboard` is already under `blitz-shell` behind its `clipboard` feature and
+reachable through the `ShellProvider` every window is handed, so it is a
+feature flag rather than a dependency — 96 bytes on the release binary. What
+this entry did not foresee is that ⌘C has to become an *action*, because in the
+app it is not a key at all: the webview owns the selection and therefore owns
+copying it.
+
+**And nothing selects text for you.** Blitz has a selection of its own for the
+text it lays out, and a page is a custom widget with no text nodes in it, so a
+reader's sweep over a page is the reader's own from the pointer up. That is
+`select.rs` and it is item 10; what it cannot do is what a browser's selection
+does for nothing — the keyboard, a real notion of a word, right-to-left. A
+custom widget also never sees a `click` or a `dblclick`, because both are
+default actions and Blitz forwards a widget's events to the widget instead of
+running them.
 
 **IME does not exist** — no `compositionstart` / `update` / `end`. The find
 field and the settings fields cannot take composed input, which means CJK,
@@ -486,7 +502,19 @@ step was chosen to be testable:
    where binding it is the claim and connecting to it carries the document;
    Apple Events are the one route out of reach, and only because there is no
    application bundle to send them to*
-10. markup — and this is where it stops being a port, because the annotation
+10. selecting text — *done, and it was not on this list, because in the app it
+    is the webview's. Markup needs something to mark and this reader had
+    nothing: no text layer, no selection. It is `select.rs`, 240 lines against
+    `paintSelection` and the text layer it undoes, because pdfium answers per
+    character and a selection is therefore two indices rather than a DOM range
+    measured against spans that exist only to be selected. It is also the first
+    place in the port where the webview was doing something worth having —
+    keyboard selection, a real notion of a word, and right-to-left all come
+    with a browser and none of them come with this. The fifth upstream fault
+    turned up here: a custom widget swallows every default action, so `click`
+    and `dblclick` never happen over a page, and a double click has to be
+    counted rather than heard about*
+11. markup — and this is where it stops being a port, because the annotation
     hole that shaped the current design is gone. Rebuild it as it should have
     been: create, edit and delete real annotations; keep the journal only for
     what a rebuilt document lost.

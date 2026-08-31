@@ -1,9 +1,9 @@
-//! Four faults that belong to somebody else, kept as the smallest thing that
+//! Five faults that belong to somebody else, kept as the smallest thing that
 //! shows each — to be sent upstream, and to say so the day any is fixed.
 //!
-//! Three of them run with the suite, because each catches the thing it is
+//! Four of them run with the suite, because each catches the thing it is
 //! about and therefore *passes while the bug is there*: the day one fails is
-//! the day the workaround it names can go. The fourth aborts the process
+//! the day the workaround it names can go. The fifth aborts the process
 //! rather than panicking, which is not something to do to a test run, so it is
 //! `#[ignore]`d:
 //!
@@ -195,6 +195,101 @@ fn a_node_scrolled_out_of_its_container_is_still_hit_tested_there() {
         "this is fixed upstream: hit-testing clips, and the `z-index` on every    row of the reader's window can go",
     );
     assert_eq!(hit, Some(far), "and what it landed on is the clipped node");
+}
+
+/// **A custom widget swallows every default action, so `click` and `dblclick`
+/// never happen over one.**
+///
+/// `handle_dom_event` in `blitz-dom` forwards an event whose target is a
+/// custom widget to that widget and then *returns*, before the `match` that
+/// runs the default actions. `click` is the default action of `pointerup` and
+/// `dblclick` is the default action of `click`, so neither is ever generated
+/// over a widget — and a component with an `onclick` on the element the widget
+/// is in hears nothing at all. Handlers still run for the events the shell
+/// sends directly, which is why `onmousedown` and `onmouseup` work and made
+/// this so confusing to find: the pointer is plainly reaching the node.
+///
+/// It is a reasonable-looking line — a widget that draws its own contents
+/// might well want the events raw — but the two it takes away are the two a
+/// widget cannot generate for itself, because a click is *not* a pointerup: it
+/// is a press and a release on the same node, and a double click is two of
+/// those within half a second and two pixels. Every widget that wants either
+/// has to reimplement both.
+///
+/// The reader works around it by counting the second press itself, with
+/// Blitz's own rule so that a page and a text field in the same window agree —
+/// see `Viewer::begin_sweep`.
+#[test]
+fn a_custom_widget_never_sees_a_click() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use anyrender::{RenderContext, Scene};
+    use blitz_dom::node::ComputedStyles;
+    use blitz_dom::Widget;
+    use dioxus_native::CustomWidgetAttr;
+
+    /// A widget that draws nothing. What is being tested is the event path,
+    /// and a widget with no surfaces takes the same one.
+    struct Nothing;
+
+    impl Widget for Nothing {
+        fn can_create_surfaces(&mut self, _ctx: &mut dyn RenderContext) {}
+        fn destroy_surfaces(&mut self) {}
+        fn requires_redraw(&self) -> bool {
+            false
+        }
+        fn paint(
+            &mut self,
+            _ctx: &mut dyn RenderContext,
+            _styles: &ComputedStyles,
+            _width: u32,
+            _height: u32,
+            _scale: f64,
+        ) -> Scene {
+            Scene::new()
+        }
+    }
+
+    // Counters rather than props, because what is being counted is what
+    // reached a handler and nothing here has two of anything.
+    static DOWN: AtomicUsize = AtomicUsize::new(0);
+    static CLICKED: AtomicUsize = AtomicUsize::new(0);
+
+    #[component]
+    fn Widgeted() -> Element {
+        let widget = use_hook(|| CustomWidgetAttr::new(Nothing));
+        rsx! {
+            div {
+                class: "holder",
+                style: "position: absolute; top: 0; left: 0; width: 200px; height: 200px;",
+                onmousedown: move |_| { DOWN.fetch_add(1, Ordering::Relaxed); },
+                onclick: move |_| { CLICKED.fetch_add(1, Ordering::Relaxed); },
+                object {
+                    "data": widget,
+                    style: "display: block; width: 200px; height: 200px;",
+                }
+            }
+        }
+    }
+
+    let mut harness = Harness::from_component(Widgeted);
+    harness.pump();
+    harness.click_at(100.0, 100.0);
+    harness.pump();
+
+    assert_eq!(
+        DOWN.load(Ordering::Relaxed),
+        1,
+        "the press reaches the element the widget is in, which is what makes \
+         the missing click so hard to see"
+    );
+    assert_eq!(
+        CLICKED.load(Ordering::Relaxed),
+        0,
+        "this is fixed upstream: a widget no longer swallows the default \
+         action, and `Viewer::begin_sweep` can stop counting double clicks \
+         for itself"
+    );
 }
 
 /// **`pdfium-render`'s `thread_safe` feature does not serialise anything.**

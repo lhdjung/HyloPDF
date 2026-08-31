@@ -142,6 +142,14 @@ body { margin: 0;
 .hit { background: var(--found); opacity: 0.38; border-radius: 2px; }
 .hit.current { background: var(--found-now); opacity: 0.45; }
 
+/* What the reader has swept over. The same rectangle as a match and the same
+   colour, because in this app's themes they are the same colour: `--found` is
+   the theme's `selection_area`, and a found word and a selected word are the
+   same statement about the page. A little stronger than a match, because a
+   selection is the thing the reader is doing right now and a match is a thing
+   the document was asked about a minute ago. */
+.selected { background: var(--found); opacity: 0.45; border-radius: 2px; }
+
 /* A link, as the area the document says it is. Nothing is drawn: the colour
    of a link is the *page's* business and is baked into the bitmap, exactly as
    `tintLinks` bakes it in the app — a rectangle drawn over the words would be
@@ -154,6 +162,10 @@ body { margin: 0;
    same reason it is above the widget: where a match falls on a
    cross-reference, following the link is the gesture that meant something. */
 .link { z-index: 2; cursor: pointer; }
+
+/* Words can be swept, so the pointer says so over a page — and says the other
+   thing over a link, which is the rule above winning by coming after it. */
+.page { cursor: text; }
 
 /* The toolbar, then the document with the panel beside it, then the notice.
    A row inside the column, which is the whole of what a sidebar is here —

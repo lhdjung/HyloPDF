@@ -10,8 +10,8 @@ working is ever wanted.
 **The experiment is passing its gates, and the one thing it is now blocked on
 upstream is IME** — see the end of this file: the find bar built in Phase 3
 item 4 cannot take composed input, because Blitz has no composition events,
-and that is a decision rather than something to work around. Four upstream
-*faults* were found and all four are worked around in this tree, with a test
+and that is a decision rather than something to work around. Five upstream
+*faults* were found and all five are worked around in this tree, with a test
 each that will fail the day they are fixed.
 
 ```
@@ -21,7 +21,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 241 tests, about a minute and a half
+cargo test                                   # 270 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -42,9 +42,13 @@ the left/right arrows a page, ⌘+ and ⌘− zoom, ⌘0 fit width, ⌘1 actual 
 ⌘2 fit page, ⌘B the sidebar, ⌘⇧B a mark on the page you are on, ⌘F the find
 bar with ⌘G and ⌘⇧G through the matches and Escape out of it, `p` or ⌥⌘G the
 page field, ⌘[ and ⌘] back and forward through the places you jumped from,
-⌘R and ⌘L turn the page a quarter each way.
+⌘R and ⌘L turn the page a quarter each way. **Words can be swept with the
+pointer** — a second click takes the word under it — and ⌘A takes the page,
+⌘C copies what is selected, ⌘⇧C copies it with the page it came from.
 `s` spreads
-and `t` the next theme are this experiment's own and are not in the app. Any
+and `t` the next theme are this experiment's own and are not in the app, and so
+is ⌘C: see item 10, where a key the app never had to write down is the clearest
+thing found so far that leaving the webview costs. Any
 of them can be rebound in `keys.toml`; a key bound to something not built yet
 says so on the notice line. The theme, the zoom, the fit, the spread, the
 sidebar, the trim, the marks and **the page you had got to** are all still
@@ -496,8 +500,9 @@ thread.
 | `tests/library.rs` | where you were, kept and put back; the switch that turns it off; the page remembered in paged mode; what a document calls itself and when that is not a name; what was open, and what has been deleted |
 | `tests/watch.rs` | what changes on the disk: a theme edited and a theme deleted, a document recompiled and one that got shorter, news about somebody else's document, a rebuild that renames the paper — and one test with a real watcher and a real file behind it |
 | `tests/windows.rs` | the window, asked for rather than made: a second one, closing against quitting, full screen and the way out of it, presenting taking the chrome and the panel and giving them back, and the toolbar naming its own way back |
+| `tests/select.rs` | sweeping words: what a sweep covers and what it reads as, a sweep backwards and one across two pages, a click that is not a selection, a second click taking a word, the page turned under the pointer, ⌘A, ⌘C, ⌘⇧C, Escape's order, a recompile putting it down, and the cap on the pages of text kept |
 | `tests/cost.rs` | the memory assertion |
-| `tests/upstream.rs` | the four faults above, as the smallest thing that shows each |
+| `tests/upstream.rs` | the five faults above, as the smallest thing that shows each |
 | `tests/recolor.rs` | the shader against the reference |
 | `src/layout.rs` | fourteen tests on the ported layout, three of them on the turn, the crop and where a rectangle lands under both |
 | `src/theme.rs`, `src/settings.rs`, `src/keys.rs`, `src/library.rs`, `src/watch.rs` | forty-four, and they are the app's own — see Phase 3 |
@@ -506,6 +511,7 @@ thread.
 | `src/windows.rs` | fourteen on the rules the app cannot test at all: which window a document goes to, what a window going means, and where the next one lands |
 | `src/emit.rs` | four on the switchboard: news for one window, news for all of them, and a window that has gone |
 | `src/search.rs` | eighteen: the fold, the origin map, whole words, the scan order, stepping, the cap, and the quads a match becomes |
+| `src/select.rs` | ten on where a caret lands, what two of them cover, what a word is, and what a range reads as |
 | `src/store.rs`, `src/palette.rs` | the layer between them and the reader |
 
 **And it is asked of the thumbnail column too**, in the same test rather than
@@ -540,7 +546,10 @@ harness ships its own font.
 The assessment's order: themes and settings, then the keyboard, then the
 sidebar, then search, then links and labels, spreads and trim, the library,
 the watchers, multi-window, and markup last because that is where it stops
-being a port.
+being a port. It came out as eleven rather than ten: markup needs something to
+mark, and selecting words is a whole item — see item 10, which is the first
+place in the port where the webview turned out to be doing something worth
+having.
 
 ### 1. Themes and settings — done, and the port was free
 
@@ -659,10 +668,12 @@ yet" — which turns the
 keyboard into a live list of what Phase 3 has left, and is a better answer than
 silence to somebody pressing ⌘P.
 
-Two actions are this experiment's and are in a list of their own so that the
+Three actions are this experiment's and are in a list of their own so that the
 app's table stays exactly the app's: `t` for the next theme and `s` for
-spreads, both of which exist only because there are no menus yet. The test that
-holds the table against the shipped `keys.toml` asserts they are *not* in it.
+spreads, both of which exist only because there are no menus yet, and ⌘C, which
+is there because the selection is this reader's own rather than a webview's —
+see item 10. The test that holds the table against the shipped `keys.toml`
+asserts none of them is in it.
 
 *One number moved.* Half a screen is now half of what a screen scrolls rather
 than half of the window: the app's `scrollByViewport` keeps 60px of the old
@@ -1640,13 +1651,182 @@ The shell's own answers to those asks — `set_fullscreen`, `focus_window`,
 `CloseRequested` — are one file and the last two are covered by the launches
 above.
 
+### 10. Selecting text — done, and it is the first thing the webview was doing for us
+
+Markup needs something to mark, and this reader had nothing: `PROGRESS.md` has
+said "no text layer, no selection" since Phase 1. So item 10 is selecting
+words, and item 11 is what the plan calls item 10.
+
+**`select.rs` is the file the app does not have, and the reason it does not is
+that a webview comes with one.** In the app, selecting is the browser's: pdf.js
+lays a text layer over every page — spans that exist to be selected rather than
+seen — and `paintSelection` then spends a hundred lines undoing the damage,
+because a `::selection` colour puts those spans on screen and a page's bold
+type comes back regular, its mathematics as boxes, every letter shifted as its
+line is stretched to the width the printer used. It copies the pixels under
+each selected line off the page canvas, runs them through the same luminance
+ramp that recolours a page, and lays them back down.
+
+Here there is no text layer, so there is nothing to hide. pdfium answers per
+character — `PageText` is characters and their boxes, indexed together — so a
+selection is **two indices**, what it covers is a range of characters, and what
+it looks like is `PageText::quads`, which the search has been drawing since
+item 4. The glyphs under it are the ones pdfium drew, because nothing is drawn
+over them but a translucent rectangle in the theme's own `selection_area`.
+`select.rs` is 240 lines including its tests; `paintSelection`, `joinRuns` and
+the text layer it was written against are rather more than that.
+
+What that costs is what a text layer buys, and it is worth naming: **no
+keyboard selection, no idea what a word is until `words_around` guesses, and
+nothing about right-to-left or vertical text** — a selection here is a range of
+indices in the document's own order, which is the order pdfium reports and
+usually but not always the order somebody would sweep. The app inherits the
+browser's answers to all three. This is the first place in the whole port where
+the webview was doing something worth having.
+
+#### The pointer is the one thing that arrives in the wrong space
+
+Everything else in this reader starts life in the page's own unturned points —
+a link's area, a match's quad, a character's cell — and goes *out* through
+`place_on` once, on its way to the screen. A press starts on the screen and has
+to come back the other way, through the same crop and the same rotation, which
+is `Layout::unplace_on`: `place_on` inverted, rather than a search for the
+rectangle the point is in. The search was the other way to write it and it has
+no answer for most of a page — a character's box is eight points wide, and a
+point in the gap between two words or in the leading between two lines is in
+none of them. Inverting the transform gives every point an answer and leaves
+*which character* to `caret_at`, which has the whole page in hand.
+
+`caret_at` is a browser's rule and is the one nobody notices when it is right:
+the nearest line, then the nearest character on it, then whichever side of that
+character the point actually fell — so a click past the end of a line lands
+after its last character rather than at the start of the next one, and a sweep
+that runs off the bottom of the page selects to the end of it. Vertical
+distance is weighted a thousand to one against horizontal, which is what makes
+a sweep leaving the right edge carry on along the line rather than jumping to
+whatever is directly below. `page_at_point` does the same thing one level up
+and never returns "no page": a sweep into the gutter of a spread, into the grey
+either side, or past the last page is still a sweep, so the nearest page is
+chosen and the point is clamped into it.
+
+**Where the content is, is worked out from the press itself.** A `MountedData`
+call borrows the document and every place a component can call one from is
+already inside a borrow of it — the same wall `Screen` exists for — so the
+viewer cannot ask the DOM where it is. It does not have to: the press arrives
+carrying both its client coordinates and its coordinates within the page it
+landed on, and the layout knows where that page is, so subtracting gives the
+origin. It is taken once per sweep and the scroll offset is added on every
+move, which is what makes scrolling mid-sweep extend the selection through the
+text that goes past rather than through the pixels the pointer is over.
+
+Because the selection is characters and not rectangles, **it survives a zoom, a
+turn, a trim and a spread with nothing recomputed** — the same property item 6
+found for links and matches, arriving for free a third time.
+
+#### A page never hears a click, and that is a fault worth having found
+
+`onclick` and `ondoubleclick` on a page do nothing at all, ever. A page is a
+custom widget, and `handle_dom_event` in `blitz-dom` forwards an event whose
+target is a widget straight to the widget and then **returns**, before the
+match that runs default actions — and `click` is the default action of
+`pointerup`, `dblclick` the default action of `click`. Handlers still run,
+because the handler phase is before the default action, which is why
+`onmousedown` and the root's `onmouseup` work and why this took an hour to see:
+the pointer is plainly reaching the node, and the two events that never arrive
+are the two that would say a *gesture* happened.
+
+The two it takes away are precisely the two a widget cannot generate for
+itself. A click is not a pointerup — it is a press and a release on the same
+node — and a double click is two of those within half a second and two pixels.
+So `begin_sweep` counts the second press itself, with Blitz's own numbers, so
+that a page and a text field in the same window answer a double click the same
+way. It is the fifth entry in `tests/upstream.rs` and the fourth that runs with
+the suite: a widget, a click, and an assertion that the handler heard nothing,
+which will fail the day it is fixed.
+
+#### Copying, and the key the app never needed
+
+⌘C is not in the app's table because it is not the app's key: the webview owns
+the selection, so it owns copying it, and `main.ts` reaches for the clipboard
+only for ⌘⇧C — a quote with its page number attached, which is the one thing a
+browser will not do for itself. Here the selection is the reader's own, so
+plain copying has to be an action like everything else. `keymap::EXTRA` now has
+three entries rather than two, and this one is different in kind from the other
+two: `t` and `s` exist because there are no menus yet and would go away on a
+merge, and `copy` would have to *join* the app's table. It is the clearest
+thing this port has found that leaving the webview costs — a key nobody ever
+had to write down.
+
+⌘⇧C is the app's own format and its own reasoning, carried across: the page is
+the one the selection *began* on rather than the one in the toolbar, because a
+selection that runs across a page boundary began where it began. ⌘A is "select
+the text of this page", which is the app's label and the app's decision — a
+reader who means the whole document means a file.
+
+`Clip` is a context holding one closure, which is `Away` and `Frame` for the
+third time: the real one is the machine's clipboard through the shell provider
+Blitz hands every window, and the harness provides its own. A suite that took
+the real one would empty the clipboard of whoever is running `cargo test`,
+which is a worse trespass than opening a browser window because it takes
+something away rather than adding something.
+
+**The clipboard costs 96 bytes.** `blitz-shell`'s `clipboard` feature was off —
+the trait method is on `ShellProvider` either way and it is the *implementation*
+that is behind the feature, so every copy would have silently returned `Err`
+and the reader would have pasted whatever it had an hour ago. Turning it on
+took the release binary from 13,054,096 to 13,054,192 bytes, which is arboard
+reduced to a few calls into `NSPasteboard` by LTO. `file-dialog` is the other
+half of that default set and stays off until there is a picker to use it.
+
+#### What is tested, and how
+
+Eighteen tests in `tests/select.rs`, and the interesting part is how they ask.
+**What is selected is asked by copying it**, because that is the only way a
+reader can find out too — the rectangles on the page carry no text, and a test
+that reached into the viewer would be asserting on a field rather than on the
+reader. So `selected()` presses ⌘C and reads the harness's clipboard, which
+exercises the whole path every time: a sweep of three pointer events, the
+caret arithmetic, the quote, and the door out.
+
+The fixture is `prose_pdf`, six pages of one line each, whose text is a
+constant in `fixture.rs` — so "the sweep covered the line" is an assertion
+about the document rather than about whatever came back. A sweep backwards
+covers the same words; a click is not a selection; a sweep below the line
+reaches the end of it; a sweep from page one to page two selects on both; a
+turn of the page selects what is under the pointer, which is the case that says
+`unplace_on` really is `place_on` backwards; Escape puts the selection down
+*after* the find bar and *before* presenting, which is the same "outward, in
+the order the reader arrived" rule item 6 established. And a recompile puts
+the selection down, because a selection is indices into a document and a paper
+rebuilt by LaTeX is a different document — markup is the case where a passage
+*does* survive a rebuild, and it survives as a quote to be looked up again
+rather than as a range.
+
+And the cache is asserted rather than assumed. `Viewer::texts` is the one cache
+in `app.rs` that is bounded where the links beside it are not, because a page of
+text is a `char` and a `Rect` per character — about thirty-six bytes each, so a
+four-hundred-page book read end to end would be 40MB, a quarter of what this
+whole reader costs, held for a feature nobody may have used. Eight pages,
+oldest out first, and `stats::TEXT_PAGES` is what a test reads to say so.
+
+#### What was checked in the real app
+
+That it still starts, draws and quits, and that the shell provider really does
+reach `Clip` — the one line no test covers, checked with a print and then taken
+out again. **The clipboard itself was not exercised in the real app**, because
+copying means writing to the machine's own clipboard and taking somebody's
+clipboard away is not a thing to do without being asked. Everything above it —
+the sweep, the caret, the quote, the page number — is exercised by the harness
+against the real event path.
+
 ### What is not built
 
-No text layer, no selection, no markup, no settings window, no Keyboard page,
-and no file picker — and of the library, everything but the markup journal,
-which waits for the item that is about markup. The picker is the reason ⌘N
-opens a second window on the document already in front rather than asking for
-one; see item 9.
+No markup, no settings window, no Keyboard page, and no file picker — and of
+the library, everything but the markup journal, which waits for the item that
+is about markup. The picker is the reason ⌘N opens a second window on the
+document already in front rather than asking for one; see item 9. There is
+still no text *layer*, and there is not going to be one: item 10 is what that
+was for.
 
 ---
 
@@ -1666,7 +1846,7 @@ one; see item 9.
    tested here at all — though item 9 found that most of what was on this list
    *can* be, once the rules are separated from the windows they are about.
 
-## Five things worth raising upstream, and only the last is blocking
+## Six things worth raising upstream, and only the last is blocking
 
 - `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
   comment in the source already says it should be. A tenth of every one of
@@ -1689,6 +1869,12 @@ one; see item 9.
   out of its container is still clickable where its box says it is, over
   whatever is drawn there. Painting gets this right; only the hit test does
   not. See Phase 3 item 4.
+- A custom widget swallowing every default action, so `click` and `dblclick`
+  never happen over one — `handle_dom_event` forwards the event to the widget
+  and returns before the match that generates them. The two it takes away are
+  exactly the two a widget cannot generate for itself, because a click is a
+  press and a release on the same node rather than a pointerup. See Phase 3
+  item 10.
 
 **And the blocking one is IME**, which is not a fault but an absence: there
 are no composition events, so the find field this phase built cannot take

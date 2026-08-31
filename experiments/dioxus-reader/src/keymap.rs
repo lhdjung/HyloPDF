@@ -126,9 +126,10 @@ actions! {
     Toolbar => "toolbar",
     Fullscreen => "fullscreen",
     Present => "present",
-    // …and the two this experiment has that the app does not. See `EXTRA`.
+    // …and the three this experiment has that the app does not. See `EXTRA`.
     NextTheme => "next-theme",
     Spread => "spread",
+    Copy => "copy",
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -244,17 +245,28 @@ pub const ACTIONS: &[Spec] = &[
     spec!(A::Present, "Presenting — full screen, nothing else on it", L, ["mod+shift+p"]),
 ];
 
-/// The two actions this experiment has and the app does not, kept in a list of
-/// their own so that [`ACTIONS`] stays exactly the app's and the test which
+/// The three actions this experiment has and the app does not, kept in a list
+/// of their own so that [`ACTIONS`] stays exactly the app's and the test which
 /// says so stays exact.
 ///
-/// Both exist because this reader has no menus yet: fourteen themes and three
-/// spread modes need *some* gesture, and one key each is the smallest one. The
-/// app reaches them through a menu and would gain nothing from a key. If the
-/// experiment is ever merged these two go away rather than joining the table.
+/// The first two exist because this reader has no menus yet: fourteen themes
+/// and three spread modes need *some* gesture, and one key each is the
+/// smallest one. The app reaches them through a menu and would gain nothing
+/// from a key. If the experiment is ever merged those two go away rather than
+/// joining the table.
+///
+/// **`copy` is the other kind of extra, and it would have to join it.** ⌘C is
+/// not in the app's table because it is not the app's key: the webview owns
+/// the selection, so it owns copying it, and `main.ts` reaches for the
+/// clipboard only for ⌘⇧C — a quote with its page number attached, which is
+/// the one thing a browser will not do for itself. Here the selection is the
+/// reader's own (see [`crate::select`]), so plain copying has to be an action
+/// like everything else. It is the clearest thing found so far that leaving
+/// the webview costs: a key nobody ever had to write down.
 pub const EXTRA: &[Spec] = &[
     spec!(A::NextTheme, "The next theme in the list", L, ["t"], doc),
     spec!(A::Spread, "One page or two side by side", L, ["s"], doc),
+    spec!(A::Copy, "Copy the selection", D, ["mod+c"], doc),
 ];
 
 /// Every action, the app's and this experiment's, in the order they are shown.

@@ -46,7 +46,13 @@ harness = [
 dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
 dioxus-core = "0.7"
 dioxus-native = { path = "../../../blitz/packages/dioxus-native", default-features = false, features = ["system-fonts", "html", "svg"] }
-blitz-shell = { path = "../../../blitz/packages/blitz-shell", default-features = false, features = ["custom-widget"] }
+# `clipboard` is arboard, and it is here for one key: ⌘C. The trait method is
+# on `ShellProvider` either way — it is the *implementation* that is behind the
+# feature, and without it every copy silently returns `Err` and the reader
+# pastes whatever it had an hour ago. Nothing else in the default set is taken:
+# `file-dialog` waits for the picker and `accessibility` for the item that is
+# about it.
+blitz-shell = { path = "../../../blitz/packages/blitz-shell", default-features = false, features = ["custom-widget", "clipboard"] }
 blitz-traits = { path = "../../../blitz/packages/blitz-traits" }
 blitz-dom = { path = "../../../blitz/packages/blitz-dom", default-features = false, features = ["custom-widget", "system-fonts", "svg"] }
 blitz-html = { path = "../../../blitz/packages/blitz-html" }

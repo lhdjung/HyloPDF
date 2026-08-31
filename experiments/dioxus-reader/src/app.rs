@@ -67,8 +67,9 @@ use crate::keymap::{Action, Keymap, Press};
 use crate::layout::{Anchor, Fit, Layout, Mode, Size, Spread};
 use crate::page::{Chosen, PageWidget};
 use crate::palette::Palette;
-use crate::render::{Heading, Link, PageSource, Rect, Target};
+use crate::render::{Heading, Link, PageSource, PageText, Rect, Target};
 use crate::search::{Options as Find, Search};
+use crate::select::{Selection, Spot};
 use crate::sidebar::{Column, Sidebar, Tab};
 use crate::store::Store;
 
@@ -218,6 +219,24 @@ const HISTORY_LIMIT: usize = 50;
 /// one: a third down, so there is something above it to read into.
 const REVEAL: f64 = 0.3;
 
+/// How many pages of text are kept for the sake of a selection.
+///
+/// A page is about a hundred kilobytes of characters and boxes, and a sweep
+/// is over the pages on screen — which at any zoom this reader offers is at
+/// most a spread and its neighbours. Eight is that with room either side, and
+/// it is 800KB against the 23MB two page textures already cost. See
+/// [`Viewer::texts`], which is the one cache in this file that is bounded
+/// where the links beside it are not.
+const TEXT_CACHE: usize = 8;
+
+/// How long after a press a second one in the same place is the same gesture.
+///
+/// Blitz's own number for the text fields it owns, restated here because a
+/// page cannot be told about a double click and has to count one — see
+/// [`Viewer::begin_sweep`]. Two windows disagreeing about what a double click
+/// is would be worse than either answer.
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// The zoom ladder, in the app's own steps.
 const ZOOMS: [f64; 13] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0, 3.0, 4.0,
@@ -268,6 +287,56 @@ impl Away {
 
     pub fn open(&self, url: &str) {
         (self.0)(url);
+    }
+}
+
+/// Where a copied passage goes.
+///
+/// A context holding one closure, for the reason [`Away`] is one: the thing it
+/// stands for does not exist in a test, and a suite that took the real one
+/// would empty the clipboard of whoever is running `cargo test` — which is a
+/// worse trespass than opening a browser window, because it takes something
+/// away rather than adding something.
+///
+/// **The app has no equivalent and needs none**, which is the whole of why
+/// this is here. There, ⌘C is the webview's own: the browser owns the
+/// selection, so it owns copying it, and `main.ts` reaches for the clipboard
+/// only for the one thing the browser cannot do for itself — a quote with its
+/// page number attached. Here the selection is the reader's own
+/// ([`crate::select`]), so copying it is too, and the clipboard is a door in
+/// the shell like every other door in this crate.
+#[derive(Clone)]
+pub struct Clip(Rc<dyn Fn(&str)>);
+
+impl PartialEq for Clip {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Clip {
+    pub fn new(put: impl Fn(&str) + 'static) -> Self {
+        Clip(Rc::new(put))
+    }
+
+    /// The default: the system's clipboard, through the shell provider Blitz
+    /// already hands every window. `None` for a shell that provided none,
+    /// which says so once rather than silently copying nothing — a reader who
+    /// presses ⌘C and pastes what they copied an hour ago has no way to tell
+    /// that from a key that is not bound.
+    pub fn to_the_system(shell: Option<Arc<dyn blitz_traits::shell::ShellProvider>>) -> Self {
+        Clip::new(move |text| match &shell {
+            Some(shell) => {
+                if shell.set_clipboard_text(text.to_string()).is_err() {
+                    eprintln!("the clipboard refused {} characters", text.len());
+                }
+            }
+            None => eprintln!("there is no clipboard to copy into"),
+        })
+    }
+
+    pub fn put(&self, text: &str) {
+        (self.0)(text);
     }
 }
 
@@ -397,6 +466,55 @@ pub struct Viewer {
     /// is a fiftieth of one page's texture, and the whole point of the caches
     /// this experiment does keep an eye on is that they hold *pixels*.
     links: RefCell<HashMap<usize, Rc<Vec<Link>>>>,
+    /// The text of the pages the pointer has touched, and where every
+    /// character of it is.
+    ///
+    /// Behind a `RefCell` for the reason the links are, and **bounded where
+    /// the links are not**, because the two are not the same size at all: a
+    /// link is a rectangle and a target, and a page of text is a `char` and a
+    /// `Rect` per character — about thirty-six bytes each, so a page of
+    /// typeset mathematics is a hundred kilobytes and a four-hundred-page book
+    /// read end to end would be forty megabytes. That is a quarter of what
+    /// this whole reader costs, held for a feature nobody may have used.
+    ///
+    /// [`TEXT_CACHE`] pages, oldest out first, which is the same shape the
+    /// search's index has and a two-hundredth of the size: a sweep is over the
+    /// pages on screen, and the pages on screen are a handful. The search
+    /// keeps its own copy while the find bar is up and gives it back when the
+    /// bar goes ([`Search::forget`]), and the two do not share one — a
+    /// selection outlives the find bar, and a cache that emptied when
+    /// somebody closed a search would be a selection that stopped being
+    /// copyable for no reason the reader could see.
+    texts: RefCell<Vec<(usize, Rc<PageText>)>>,
+    /// What the reader has swept over, or nothing.
+    ///
+    /// One selection for the document rather than one per page: a sweep that
+    /// runs off the bottom of a page carries on down the next one, which is
+    /// what continuous scrolling is for. See [`crate::select`].
+    selection: Option<Selection>,
+    /// Where the content's top left is, in the coordinates a mouse event
+    /// arrives in, worked out from the press that began the sweep.
+    ///
+    /// **Not asked of the DOM, because it cannot be asked from here.** A
+    /// `MountedData` call borrows the document and every place a component can
+    /// call one from is already inside a borrow of it — the same wall
+    /// `Screen` is here for. What is available is that the press arrives with
+    /// both its client coordinates and its coordinates within the page it
+    /// landed on, and the layout knows where that page is: subtract, and the
+    /// origin falls out. It is worked out once per sweep and the scroll
+    /// offset is added back on every move, so scrolling mid-sweep — which is
+    /// what a reader dragging to the bottom of the window does — extends the
+    /// selection through the text that scrolls past rather than through the
+    /// pixels it happens to be over.
+    ///
+    /// `None` outside a sweep, which is what root's `onmousemove` checks
+    /// before touching the signal at all — see the sidebar's `resize_from`,
+    /// which is the same shape for the same reason.
+    sweep_from: Option<(f64, f64)>,
+    /// When and where the pointer last went down on a page, which is the whole
+    /// of what tells a second click from a first one. See
+    /// [`Viewer::begin_sweep`].
+    pressed: Option<(std::time::Instant, f64, f64)>,
     /// Where the reader has jumped from, and where they came back from.
     ///
     /// The distinction the app draws and the reason both lists exist: moving
@@ -523,6 +641,10 @@ impl Viewer {
             headings: document.outline(),
             labels: document.labels(),
             links: RefCell::new(HashMap::new()),
+            texts: RefCell::new(Vec::new()),
+            selection: None,
+            sweep_from: None,
+            pressed: None,
             past: Vec::new(),
             future: Vec::new(),
             typing_page: false,
@@ -1150,6 +1272,261 @@ impl Viewer {
         }
     }
 
+    /* --------------------------------------------------------- selecting */
+
+    /// A page's text, asked for once and kept — see [`Viewer::texts`].
+    /// One-based, like everything that says "page" in this file.
+    pub fn text_on(&self, page: usize) -> Rc<PageText> {
+        if let Some(known) = self
+            .texts
+            .borrow()
+            .iter()
+            .find(|(at, _)| *at == page)
+            .map(|(_, text)| text.clone())
+        {
+            return known;
+        }
+        let Some(index) = page.checked_sub(1) else {
+            return Rc::new(PageText::default());
+        };
+        let text = Rc::new(self.document.text_of(index));
+        let mut held = self.texts.borrow_mut();
+        held.push((page, text.clone()));
+        if held.len() > TEXT_CACHE {
+            held.remove(0);
+        }
+        crate::stats::set(&crate::stats::TEXT_PAGES, held.len() as u64);
+        text
+    }
+
+    /// The pointer went down on a page: where the sweep starts, and where the
+    /// content is in the coordinates the pointer arrives in.
+    ///
+    /// `on` is the point within the page's own box, in CSS pixels from its top
+    /// left, which is what the event carries; `client` is the same press said
+    /// in the window's coordinates. The two together are the origin — see
+    /// [`Viewer::sweep_from`].
+    ///
+    /// **A second press in the same place is a double click and takes the word
+    /// under it**, which is counted here rather than heard about: `dblclick`
+    /// is a default action of `pointerup`, and a default action never runs
+    /// over a custom widget — see the comment on `onmousedown` in `Page`. The
+    /// rule is Blitz's own, so that a page and a text field in the same window
+    /// answer a double click the same way.
+    pub fn begin_sweep(&mut self, page: usize, on: (f64, f64), client: (f64, f64)) {
+        let Some(index) = page.checked_sub(1) else {
+            return;
+        };
+        let Some(area) = self.layout.box_of(index) else {
+            return;
+        };
+        self.sweep_from = Some((
+            client.0 - on.0 - area.left,
+            client.1 - on.1 - area.top + self.scroll_top,
+        ));
+        let again = self.pressed.is_some_and(|(when, x, y)| {
+            when.elapsed() < DOUBLE_CLICK
+                && (x - client.0).abs() <= 2.0
+                && (y - client.1).abs() <= 2.0
+        });
+        self.pressed = Some((std::time::Instant::now(), client.0, client.1));
+        if again {
+            self.sweep_word(page, on);
+            return;
+        }
+        let spot = self.spot_on(index, on.0, on.1);
+        self.selection = Some(Selection::at(spot));
+    }
+
+    /// The pointer moved with the button down. A no-op outside a sweep, which
+    /// is what lets this sit on the root and fire on every move in the window.
+    pub fn sweep_to(&mut self, client: (f64, f64)) {
+        let Some((left, top)) = self.sweep_from else {
+            return;
+        };
+        let Some(mut sweep) = self.selection else {
+            return;
+        };
+        let x = client.0 - left;
+        let y = client.1 - top + self.scroll_top;
+        let Some((index, on_x, on_y)) = self.layout.page_at_point(x, y) else {
+            return;
+        };
+        let head = self.spot_on(index, on_x, on_y);
+        if head == sweep.head {
+            return;
+        }
+        sweep.head = head;
+        self.selection = Some(sweep);
+    }
+
+    /// The pointer let go. A sweep that covered nothing is a click, and a
+    /// click puts the selection down rather than leaving a caret nobody can
+    /// see blinking in a document nobody can type into.
+    pub fn end_sweep(&mut self) {
+        self.sweep_from = None;
+        if self.selection.is_some_and(|sweep| sweep.is_empty()) {
+            self.selection = None;
+        }
+    }
+
+    /// True while the pointer is down on a page.
+    pub fn sweeping(&self) -> bool {
+        self.sweep_from.is_some()
+    }
+
+    /// The word under a point, which is what a second click on it means.
+    ///
+    /// The anchor is left at the *start* of the word and the head at its end,
+    /// so a reader who goes on dragging extends from the word rather than from
+    /// wherever inside it they happened to press.
+    pub fn sweep_word(&mut self, page: usize, on: (f64, f64)) {
+        let Some(index) = page.checked_sub(1) else {
+            return;
+        };
+        let (x, y) = self.layout.unplace_on(index, on.0, on.1);
+        let text = self.text_on(index + 1);
+        let (from, to) = crate::select::words_around(&text, crate::select::caret_at(&text, x, y));
+        if from == to {
+            return;
+        }
+        self.selection = Some(Selection {
+            anchor: Spot {
+                page: index + 1,
+                index: from,
+            },
+            head: Spot {
+                page: index + 1,
+                index: to,
+            },
+        });
+    }
+
+    /// Where a caret goes for a point in a page's box.
+    fn spot_on(&self, index: usize, on_x: f64, on_y: f64) -> Spot {
+        let (x, y) = self.layout.unplace_on(index, on_x, on_y);
+        let text = self.text_on(index + 1);
+        Spot {
+            page: index + 1,
+            index: crate::select::caret_at(&text, x, y),
+        }
+    }
+
+    /// Everything on the page the reader is on, which is ⌘A.
+    ///
+    /// The *page* rather than the document, which is the app's own label for
+    /// this key — "Select the text of this page" — and its own reasoning: a
+    /// reader who means the whole document means a file, and what this gesture
+    /// is actually for is taking a page of a paper into something else.
+    pub fn select_page(&mut self) -> bool {
+        let page = self.page();
+        let text = self.text_on(page);
+        if text.is_empty() {
+            self.notice = "There is no text on this page to select.".into();
+            return false;
+        }
+        self.selection = Some(Selection {
+            anchor: Spot { page, index: 0 },
+            head: Spot {
+                page,
+                index: text.chars.len(),
+            },
+        });
+        true
+    }
+
+    /// Put the selection down. `false` when there was none, so that whatever
+    /// asked can go on to the next thing Escape means.
+    pub fn clear_selection(&mut self) -> bool {
+        self.sweep_from = None;
+        self.selection.take().is_some()
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.selection.is_some_and(|sweep| !sweep.is_empty())
+    }
+
+    /// What is selected on one mounted page, as rectangles in CSS pixels from
+    /// the top left of its box — the space [`Viewer::highlights`] and
+    /// [`Viewer::link_areas`] answer in.
+    pub fn selected_areas(&self, page: usize) -> Vec<Rect> {
+        let Some(sweep) = self.selection else {
+            return Vec::new();
+        };
+        let Some(index) = page.checked_sub(1) else {
+            return Vec::new();
+        };
+        if self.layout.box_of(index).is_none() {
+            return Vec::new();
+        }
+        if !sweep.pages().contains(&page) {
+            return Vec::new();
+        }
+        let text = self.text_on(page);
+        let Some((from, to)) = sweep.range_on(page, text.chars.len()) else {
+            return Vec::new();
+        };
+        text.quads(from, to)
+            .into_iter()
+            .map(|quad| self.layout.place_on(index, quad))
+            .collect()
+    }
+
+    /// The selected words, in reading order, over as many pages as the sweep
+    /// covers.
+    pub fn selected_text(&self) -> String {
+        let Some(sweep) = self.selection else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for page in sweep.pages() {
+            let text = self.text_on(page);
+            let Some((from, to)) = sweep.range_on(page, text.chars.len()) else {
+                continue;
+            };
+            let part = crate::select::quote(&text, from, to);
+            if part.is_empty() {
+                continue;
+            }
+            if !out.is_empty() {
+                // A page break is a paragraph break, which is what a reader
+                // pasting two pages of a paper into their notes means by it.
+                out.push('\n');
+            }
+            out.push_str(&part);
+        }
+        out
+    }
+
+    /// The selected words with where they came from, which is ⌘⇧C.
+    ///
+    /// The app's own format and the app's own reason: copying a sentence out
+    /// of a paper and then going back to find the page it was on is the small,
+    /// constant tax of reading for work. The page is the one the selection
+    /// *began* on rather than the one in the toolbar, because a selection that
+    /// runs across a page boundary began on the page it began on.
+    ///
+    /// Returns the text to copy and the words for the notice line, or nothing
+    /// when there is no selection.
+    pub fn quoted(&self) -> Option<(String, String)> {
+        let sweep = self.selection?;
+        let quoted = self.selected_text();
+        if quoted.is_empty() {
+            return None;
+        }
+        let name = self.store.title().to_string();
+        let where_from = format!(
+            "{}p. {}",
+            if name.is_empty() {
+                String::new()
+            } else {
+                format!("{name}, ")
+            },
+            self.label(sweep.span().0.page)
+        );
+        Some((format!("“{quoted}” — {where_from}"), where_from))
+    }
+
     /* ------------------------------------------------- what a page is called */
 
     /// Whether this document numbers its pages its own way.
@@ -1740,6 +2117,15 @@ impl Viewer {
         self.headings = self.document.outline();
         self.labels = self.document.labels();
         self.links.borrow_mut().clear();
+        // And the text with them, along with whatever was selected: both are
+        // indices into a document that no longer exists, and a selection kept
+        // across a recompile is a highlight over words nobody chose. The
+        // markup journal is where a passage *does* survive a rebuild, and it
+        // survives as a quote to be looked up again rather than as a range —
+        // see `findQuote` in the app, and item 11.
+        self.texts.borrow_mut().clear();
+        self.selection = None;
+        self.sweep_from = None;
         self.past.clear();
         self.future.clear();
         let sizes = (0..self.document.pages())
@@ -1844,6 +2230,9 @@ struct Placed {
     height: f64,
     hits: Vec<(Rect, bool)>,
     links: Vec<(Rect, Target)>,
+    /// What the reader has swept over, on this page, in the same space as the
+    /// other two. See [`crate::select`].
+    selected: Vec<Rect>,
 }
 
 /// The element that wants the keyboard, as a selector.
@@ -1955,6 +2344,17 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     // answers these against winit, and a harness writes them down.
     let frame =
         use_hook(|| dioxus_core::try_consume_context::<Frame>().unwrap_or_else(Frame::unanswered));
+    // And where a copied passage goes. See [`Clip`]: the default is the
+    // system's clipboard through the shell provider Blitz hands every window,
+    // and a harness provides its own so that `cargo test` does not empty
+    // anybody's.
+    let clip = use_hook(|| {
+        dioxus_core::try_consume_context::<Clip>().unwrap_or_else(|| {
+            Clip::to_the_system(dioxus_core::try_consume_context::<
+                Arc<dyn blitz_traits::shell::ShellProvider>,
+            >())
+        })
+    });
 
     let resize_from_window = {
         let screen = screen.clone();
@@ -1977,6 +2377,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     // this: work out what was asked for, and do it.
     let on_key = {
         let frame = frame.clone();
+        let clip = clip.clone();
         move |event: KeyboardEvent| {
             let (press, screen) = {
                 let held = viewer.read();
@@ -1995,7 +2396,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 Press::Nothing => viewer.write().pending.clear(),
                 Press::Act(action) => {
                     viewer.write().pending.clear();
-                    perform(viewer, action, screen, &frame);
+                    perform(viewer, action, screen, &frame, &clip);
                 }
             }
         }
@@ -2147,6 +2548,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 height: page.height,
                 hits: held.highlights(index + 1),
                 links: held.link_areas(index + 1),
+                selected: held.selected_areas(index + 1),
             })
         })
         .collect();
@@ -2208,15 +2610,34 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             // whether or not anything changed, and every move in the window
             // reaches here.
             onmousemove: move |event| {
-                if viewer.read().resize_from.is_none() {
-                    return;
+                let (resizing, sweeping) = {
+                    let held = viewer.read();
+                    (held.resize_from.is_some(), held.sweeping())
+                };
+                if resizing {
+                    let x = event.client_coordinates().x;
+                    viewer.write().drag_sidebar(x);
+                } else if sweeping {
+                    // The pointer has left the page it went down on, most of
+                    // the time: a sweep of two lines crosses into the gap
+                    // between pages and a sweep down the margin is never over
+                    // a page at all. So this works in the *content's* own
+                    // coordinates rather than in any element's, which is what
+                    // the origin recorded at the press is for.
+                    let at = event.client_coordinates();
+                    viewer.write().sweep_to((at.x, at.y));
                 }
-                let x = event.client_coordinates().x;
-                viewer.write().drag_sidebar(x);
             },
             onmouseup: move |_| {
-                if viewer.read().resize_from.is_some() {
+                let (resizing, sweeping) = {
+                    let held = viewer.read();
+                    (held.resize_from.is_some(), held.sweeping())
+                };
+                if resizing {
                     viewer.write().finish_resize_sidebar();
+                }
+                if sweeping {
+                    viewer.write().end_sweep();
                 }
             },
             if toolbar_on {
@@ -2495,6 +2916,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             height: placed.height,
                             hits: placed.hits,
                             links: placed.links,
+                            selected: placed.selected,
                             view,
                             viewer,
                             away: away.clone(),
@@ -2542,6 +2964,18 @@ fn Page(
     /// layer here to hang an anchor off, and a rectangle is what a link
     /// actually is in the file.
     links: Vec<(Rect, Target)>,
+    /// What the reader has swept over, on this page.
+    ///
+    /// Rectangles like the matches and for the same reason, and painted in
+    /// the theme's own selection colour — which is exactly what the theme
+    /// says it is for. What this cannot do is the app's other half: there,
+    /// `paintSelection` copies the pixels under each selected line off the
+    /// page canvas and runs them back through the luminance ramp, so selected
+    /// words come out as the theme's ink on the theme's selection ground. Here
+    /// a translucent rectangle lies over the printed words and they keep the
+    /// colour they were printed in. It is the honest version of the same
+    /// statement and it is one shader short of the app's.
+    selected: Vec<Rect>,
     /// How this page is turned and how much of it is drawn. In the key as
     /// well, which is what gives the old texture back — see [`PageWidget`].
     view: crate::layout::View,
@@ -2575,11 +3009,45 @@ fn Page(
             // outside without this.
             "data-page": "{index + 1}",
             style: "position: absolute; top: {top}px; left: {left}px; width: {width}px; height: {height}px;",
+            // Where a sweep begins, and the whole of what a page hears from
+            // the pointer.
+            //
+            // **`onclick` and `ondoubleclick` would never fire here**, which
+            // is not obvious and cost an hour: a page is a custom widget, and
+            // `handle_dom_event` in `blitz-dom` forwards an event whose target
+            // is a widget straight to the widget and *returns* — so the
+            // default action never runs, and `click` and `dblclick` are both
+            // default actions of `pointerup`. Handlers still run, because the
+            // handler phase is before the default action, which is why
+            // `onmousedown` and the root's `onmouseup` work at all. So the
+            // second click is counted here rather than heard about; see
+            // [`Viewer::begin_sweep`], which is Blitz's own rule — half a
+            // second and two pixels — restated where it can be reached.
+            //
+            // The rest of the sweep is on the root, because a pointer dragged
+            // down a document leaves the page it started on within a line or
+            // two and the root is the one ancestor that spans the window.
+            onmousedown: move |event| {
+                let on = event.element_coordinates();
+                let client = event.client_coordinates();
+                viewer.write().begin_sweep(
+                    index + 1,
+                    (on.x, on.y),
+                    (client.x, client.y),
+                );
+            },
             object {
                 "data": widget,
                 // A widget laid out at 0×0 is a blank window with nothing to
                 // say why, which is what `display: block` costs to avoid.
                 style: "display: block; width: {width}px; height: {height}px;",
+            }
+            for (at, area) in selected.iter().enumerate() {
+                div {
+                    key: "s{at}",
+                    class: "selected",
+                    style: "position: absolute; top: {area.top}px; left: {area.left}px; width: {area.width}px; height: {area.height}px;",
+                }
             }
             for (at, (quad, current)) in hits.iter().enumerate() {
                 div {
@@ -2638,7 +3106,13 @@ fn Page(
 /// which turns the keyboard into a live list of what Phase 3 has left. It is
 /// also the honest answer to a reader who presses ⌘P: printing is not there
 /// yet, and silence would be indistinguishable from a broken keymap.
-fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64, frame: &Frame) {
+fn perform(
+    mut viewer: Signal<Viewer>,
+    action: Action,
+    screen: f64,
+    frame: &Frame,
+    clip: &Clip,
+) {
     // Every movement goes through the viewer rather than through an offset,
     // because in paged mode an offset is not where a reader ends up: the page
     // has to be turned first. See [`Viewer::nudge`] and [`Viewer::go_to`].
@@ -2712,11 +3186,12 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64, frame: &Fram
             // Escape typed *into* the field never reaches here — the field
             // stops it — so this is the case where the field is open and the
             // pointer took the focus elsewhere.
-            let (typing, finding, presenting, full) = {
+            let (typing, finding, selected, presenting, full) = {
                 let held = viewer.read();
                 (
                     held.typing_page,
                     held.find_open,
+                    held.has_selection(),
                     held.presenting,
                     held.full_screen,
                 )
@@ -2725,6 +3200,14 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64, frame: &Fram
                 viewer.write().cancel_page();
             } else if finding {
                 viewer.write().close_find();
+            } else if selected {
+                // Between the find bar and presenting, which is where a
+                // selection sits in the same "outward, in the order the reader
+                // arrived" order: it is a thing on the page, and full screen
+                // and presenting are things the window is doing. A reader who
+                // is presenting and has swept a sentence to point at means to
+                // put the sentence down first.
+                viewer.write().clear_selection();
             } else if presenting {
                 let full = viewer.write().present(false);
                 frame.ask(Ask::FullScreen(full));
@@ -2732,6 +3215,35 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64, frame: &Fram
                 viewer.write().set_full_screen(false);
                 frame.ask(Ask::FullScreen(false));
             }
+        }
+        // The three a selection is for. `Copy` is this experiment's own —
+        // see `keymap::EXTRA`: in the app ⌘C is the webview's, because the
+        // browser owns the selection and therefore owns copying it.
+        Action::SelectPage => {
+            if viewer.write().select_page() {
+                let words = viewer.read().selected_text().chars().count();
+                viewer.write().notice = format!("{words} characters of this page selected.");
+            }
+        }
+        Action::Copy => {
+            let copied = viewer.read().selected_text();
+            if copied.is_empty() {
+                viewer.write().notice = "Select something first, and this copies it.".into();
+            } else {
+                clip.put(&copied);
+                viewer.write().notice = "Copied.".into();
+            }
+        }
+        Action::CopyQuote => {
+            let quoted = viewer.read().quoted();
+            let said = match quoted {
+                Some((quote, where_from)) => {
+                    clip.put(&quote);
+                    format!("Copied, with {where_from}.")
+                }
+                None => "Select something first, and this copies it with its page number.".into(),
+            };
+            viewer.write().notice = said;
         }
         // The window's own three, which the page can only ask for. See
         // [`Frame`]: what answers is the shell in the app and a list in the

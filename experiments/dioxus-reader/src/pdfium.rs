@@ -43,10 +43,9 @@ fn pdfium() -> Result<&'static Pdfium, String> {
     if let Some(instance) = *held {
         return Ok(instance);
     }
-    let bindings = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(
-        &library_dir(),
-    ))
-    .map_err(|e| format!("pdfium could not be loaded: {e}"))?;
+    let bindings =
+        Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(&library_dir()))
+            .map_err(|e| format!("pdfium could not be loaded: {e}"))?;
     let instance: &'static Pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
     *held = Some(instance);
     Ok(instance)
@@ -79,6 +78,11 @@ pub struct Document {
     /// What the document calls its own pages, read once beside their sizes,
     /// and empty when it calls them 1 to n. See [`PageSource::labels`].
     labels: Vec<String>,
+    /// What the document calls *itself*, as written, or empty. Read at open
+    /// like the outline and for the same reason: it decides what the toolbar
+    /// and the window say, and a name that arrives late is a name that was
+    /// wrong. See [`PageSource::title`].
+    title: String,
     opened_in: f64,
 }
 
@@ -130,11 +134,20 @@ impl Document {
             labels.push(page.label().unwrap_or_default().to_string());
         }
         let outline = read_outline(&document);
+        // `/Info /Title`, trimmed. Whether it is worth showing is not asked
+        // here: that needs the file name to weigh it against, and the one
+        // place that has both is `store::worth_calling`.
+        let title = document
+            .metadata()
+            .get(PdfDocumentMetadataTagType::Title)
+            .map(|tag| tag.value().trim().to_string())
+            .unwrap_or_default();
         Ok(Document {
             path: path.to_string(),
             labels: own_numbering(labels),
             sizes,
             outline,
+            title,
             opened_in: began.elapsed().as_secs_f64() * 1000.0,
             inner: Mutex::new(Open {
                 document,
@@ -163,6 +176,10 @@ impl PageSource for Document {
 
     fn labels(&self) -> Vec<String> {
         self.labels.clone()
+    }
+
+    fn title(&self) -> String {
+        self.title.clone()
     }
 
     /// The links on one page.
@@ -340,14 +357,13 @@ impl PageSource for Document {
             held.scratch.clear();
             held.scratch.resize(wanted, 0);
         }
-        let mut bitmap =
-            PdfBitmap::from_bytes(
-                width as i32,
-                height as i32,
-                PdfBitmapFormat::BGRA,
-                &mut held.scratch,
-            )
-                .map_err(|e| format!("page {index}: {e}"))?;
+        let mut bitmap = PdfBitmap::from_bytes(
+            width as i32,
+            height as i32,
+            PdfBitmapFormat::BGRA,
+            &mut held.scratch,
+        )
+        .map_err(|e| format!("page {index}: {e}"))?;
 
         // **The crop is a window onto a page drawn whole, not a page drawn
         // small.** pdfium's `start_x`/`start_y` are where the page's top-left

@@ -12,10 +12,12 @@
 //! turns on and `cargo build` does not, so nothing it needs is in the binary.
 //!
 //! What is not built: no selection, no markup, no settings *window*, no
-//! Keyboard page, no watchers, one window. The document's own links are built,
-//! with the page labels and the go-to field that belong to the same question —
-//! where a document says its parts are — and the history that following one
-//! needs. The sidebar is built —
+//! Keyboard page, no watchers, one window.
+//!
+//! What *is* built, beyond opening a document and reading it: the document's
+//! own links, with the page labels and the go-to field that belong to the same
+//! question — where a document says its parts are — and the history that
+//! following one needs. The sidebar is built —
 //! [`sidebar`] — with the document's own contents, the reader's marks, a
 //! column of thumbnails and the search results in it. [`search`] is built
 //! too, and it is half the size of the app's because pdfium answers per
@@ -24,7 +26,11 @@
 //! turned a quarter at a time, and the document can be read one page at a
 //! time rather than continuously — the last of which is a line in
 //! `settings.toml` and deliberately nothing else, because the brief says a
-//! shortcut for it would be a thing to hit by accident.
+//! shortcut for it would be a thing to hit by accident. And what the reader
+//! remembers between runs is no longer only settings: where they were in each
+//! document, what each document calls itself, and which one was open last are
+//! all in `library.toml` — see [`store`], which is also where the one write
+//! that had to move off the thread drawing the window lives.
 //!
 //! # The app's own modules, compiled here unchanged
 //!
@@ -59,18 +65,19 @@
 //!
 //! [`library`] is the fourth, and it came across for the sidebar's sake: a
 //! mark is a pin in a page and the pins have to be somewhere the next run can
-//! read them. Only the half the sidebar needs is called — `touch` and
-//! `toggle_mark` — and the rest of what the file already does (where you
-//! were, what was open in each window, the markup journal) waits for the
-//! items of Phase 3 that are about those things. It needed no change either.
+//! read them. Where the reader was, what the document calls itself and what
+//! was open last are read and written through it now as well — `remember`,
+//! `touch`, `set_open` and `prune` — so the only part of the file with no
+//! caller here is the markup journal, which waits for the item of Phase 3
+//! that is about markup. It needed no change either.
 
 pub mod app;
 pub mod config;
 pub mod crop;
-pub mod gpu;
 /// Documents written by hand for the tests. Not in the binary either.
 #[cfg(feature = "harness")]
 pub mod fixture;
+pub mod gpu;
 /// Phase 2, and it is not in the binary: see the `harness` feature.
 #[cfg(feature = "harness")]
 pub mod harness;

@@ -435,7 +435,13 @@ step was chosen to be testable:
    away; and the sparse `boxes` array paged mode needs is
    `Vec<Option<PageBox>>`, which is the app's most carefully commented trap
    made into a type*
-7. the library: position, open documents, marks, the restore list
+7. the library: position, open documents, marks, the restore list — *done.
+   The one write in this crate that had to move off the thread drawing the
+   window, because a position changes on every wheel event and every change is
+   a whole-file rewrite; a document's own `/Title` came with it, and pdfium
+   answers that at open where pdf.js cannot, so the toolbar is never briefly
+   wrong. What is not built is the shelf: there is nowhere to show a
+   recently-read list in a reader that always has a document open*
 8. the watchers: themes directory, the document being recompiled
 9. multi-window: `hand_over`, placements, the Dock menu, `Exiting`
 10. markup — and this is where it stops being a port, because the annotation

@@ -21,15 +21,19 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 182 tests, about a minute and a half
+cargo test                                   # 191 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
-With no path it opens the app's own `tests/fixtures/book.pdf`, which is the
-document every number below was taken on. (It used to be documented as
-`-- book.pdf`, which is a path relative to wherever cargo was run from and was
-therefore usually not there — and pdfium reports a missing file as a
-Debug-printed `io::Error`. Both halves of that are fixed.)
+With no path it opens **whatever was open when it was last put down**, and
+the app's own `tests/fixtures/book.pdf` when there was nothing. See Phase 3
+item 7 — and note that `--measure` and `--quit` deliberately do *not* restore:
+every number below was taken on that fixture, and a measuring run that quietly
+used whatever had last been read would not be comparable with any of them.
+(The fixture used to be documented as `-- book.pdf`, which is a path relative
+to wherever cargo was run from and was therefore usually not there — and
+pdfium reports a missing file as a Debug-printed `io::Error`. Both halves of
+that are fixed.)
 
 **The keys are the app's own**, because `keys.ts` and `keys.toml` are ported —
 see Phase 3 item 2. `j`/`k` and the arrows move a line, `d`/`u` half a screen,
@@ -43,7 +47,8 @@ page field, ⌘[ and ⌘] back and forward through the places you jumped from,
 and `t` the next theme are this experiment's own and are not in the app. Any
 of them can be rebound in `keys.toml`; a key bound to something not built yet
 says so on the notice line. The theme, the zoom, the fit, the spread, the
-sidebar, the trim and the marks are all still there the next time it opens.
+sidebar, the trim, the marks and **the page you had got to** are all still
+there the next time it opens.
 
 **Two things are settings and nothing else.** Trimming the margins is the
 chip marked Trim in the toolbar — the app puts it in a menu, and there are no
@@ -483,6 +488,7 @@ thread.
 | `tests/links.rs` | the links: where one is, where following it lands, the two ways a document writes a destination, an address handed to the system, a link that points nowhere; and the history, the labels and the page field |
 | `tests/view.rs` | the margins measured off a sample and taken away, the page turned, a link that turns with it, and the two together |
 | `tests/paged.rs` | one page at a time: what is laid out, what a page turn is, the ends of the document, and every chord in the keymap failing to leave the mode |
+| `tests/library.rs` | where you were, kept and put back; the switch that turns it off; the page remembered in paged mode; what a document calls itself and when that is not a name; what was open, and what has been deleted |
 | `tests/cost.rs` | the memory assertion |
 | `tests/upstream.rs` | the four faults above, as the smallest thing that shows each |
 | `tests/recolor.rs` | the shader against the reference |
@@ -586,13 +592,16 @@ component calls a method, the table is stated once in the file that already
 stated it, and there is no second copy to drift. That test has nothing left to
 check and does not exist here.
 
-*Two things deliberately not done yet.* Writes happen on whichever thread
-asked; the app moved these off the main thread because `remember_position`
-fires on every pause in a scroll, and nothing here does that until the library
-lands (item 7). And there is no settings *window* and no theme editor — those
-are interface, and an interface is what the items after the keyboard are for.
-The keyboard itself is done — item 2 below — and the settings window is now the
-oldest thing outstanding on this list.
+*One thing deliberately not done.* There is no settings *window* and no theme
+editor — those are interface, and an interface is what the items after the
+keyboard are for. The keyboard itself is done — item 2 below — and the settings
+window is now the oldest thing outstanding on this list.
+
+*The other thing on this line has since been done.* Writes happened on
+whichever thread asked, which the app moved off the main thread because
+`remember_position` fires on every pause in a scroll — and nothing here did
+that until the library landed. It does now, and the answer is one thread for
+that one write: see item 7.
 
 ### 2. The keyboard — done, and it took a file with it
 
@@ -1171,13 +1180,108 @@ exist before this item and four call sites were each doing
 for the same reason — some of what this reader does is deliberately not
 reachable by pressing anything.
 
+### 7. The library — done, and it cost one thread
+
+Where you were in each document, what the document calls itself, and what was
+open when the reader put it down. The marks came in item 3 and the history in
+item 5; this is the rest of `library.rs`, and it is the fourth of the app's
+modules to be used rather than the fourth to be ported — it has been mounted
+since item 3 and needed no change for any of this either.
+
+**A position moves sixty times a second, and that is the whole of what made
+this interesting.** Everything else this reader remembers is chosen a few
+times a session: a theme, a zoom, a fit mode, the panel. The scroll offset
+changes on every wheel event, and every change is a read-modify-write of the
+whole of `library.toml`. `AGENTS.md` describes exactly what that costs on the
+thread drawing the window — "a whole-file rewrite of `library.toml` was
+landing in the middle of the one gesture this app exists to make smooth" — and
+`store.rs` had a comment since item 1 saying that when the library landed, this
+is where the thread would go. It went there.
+
+`Scribe` is one thread, asleep on a channel. `Store::remember` sends it a
+place; it keeps the latest one *per document* and writes when nothing new has
+arrived for 700ms, which is `onScroll`'s own `setTimeout` in `main.ts` turned
+inside out. So a reader scrolling through a chapter costs one write at the end
+of it rather than four hundred, and the cost on the thread that is scrolling is
+a channel send.
+
+*Per document, and that is not fastidiousness.* The thread is the process's and
+`cargo test` runs its tests in parallel, so a single pending slot would have
+one test's position quietly replacing another's — intermittently, by timing,
+which is the worst shape a test failure comes in. There is one window here, so
+in the real binary the map has one entry and the keying costs nothing.
+
+*And `flush()` is the other half of the same design.* A place is written when
+the scrolling stops, and quitting is the one way to stop scrolling that does not
+wait — so `main.rs` flushes once the event loop has returned, which is the same
+call `savePosition` is awaited for on the app's way out. It is also what a test
+calls instead of sleeping: `tests/library.rs` opens a reader, scrolls it,
+flushes, and opens a *second* reader over the same directory, which is what "the
+next time you open it" means when there is no window to close.
+
+**Restoring is held rather than done.** `Viewer::new` runs before anything is
+mounted, so the layout has a viewport of 0×0 and every page in it is zero high:
+a place turned into a scroll offset there is turned back into page one the
+moment the window says how big it is. So `restore` keeps it as what it is — a
+page and a fraction of it — and the first `resize` spends it, through `go_to`
+rather than through `scroll_target` because in paged mode arriving at a page is
+a relayout. `remember_place` says nothing while one is pending, or the
+relayouts on the way to the first frame would record page one over the place
+being restored. Both of those were bugs before they were comments.
+
+**`2310.06825v3.pdf` is not a name.** The document usually knows better, so
+`title()` is the renderer seam's seventh question and `worth_calling` is
+`main.ts`'s own judgement ported: a title under four characters or over two
+hundred, the file name over again, anything beginning "untitled" or "Microsoft
+Word -", anything ending in a document suffix — each of those is *worse* than
+the file name, because it looks deliberate. It decides what the toolbar says,
+what the window is called and what goes in the library, and it is asked once,
+at open.
+
+*One thing the port improved by accident.* In the app this is `adoptDocumentTitle`,
+an async method that runs after the document has been parsed and rewrites the
+toolbar when it lands — because pdf.js cannot answer until then. pdfium answers
+at open, so the title is settled before the first frame and the toolbar is never
+briefly wrong. The `.title` slot in the toolbar used to say "400 pages", which
+the pill beside it already said.
+
+*The one deviation from the app is a rule kept rather than a rule broken.*
+`/^untitled\b/i` rejects any title *beginning* with the word, so "Untitled
+Letters" — a real book — falls back to its file name. Carried across as
+written: "Untitled document" and "Untitled 1" are what producers actually emit,
+the cost is a file name instead of a name, and a port that quietly disagrees
+with the app about a judgement is the drift this whole experiment is arranged
+to avoid. The test says so in as many words.
+
+**What was open comes back, and a document that is gone does not.**
+`set_open` is written at open — one path, because there is one window; the
+file has been a list since the app had two, and `one_or_many` in `library.rs`
+is what makes both readable. `store::reopening` is what `main.rs` asks before
+there is a window to hold a `Store`, and it does the two things the app's
+`bootstrap` does in the same order: `prune`, so a document that has been moved
+or deleted is not reopened and failed on at every launch for ever, and
+`reopen_last_document`, which is asked *there* rather than left to the caller
+for the app's own reason — two sides that each assume the other checked it are
+two sides that disagree about whether the window has anything in it.
+
+*What is deliberately not built is the shelf.* `library.toml` holds
+twenty-four recently-read documents with their titles and where you were in
+each, and there is nowhere here to show them: the app has a start screen and
+this reader always has a document open. Building one would be inventing an
+interface rather than porting it. The list is kept and pruned correctly, which
+is what the day there is a start screen needs.
+
+*And the write is still a whole file.* `remember` re-reads and rewrites
+`library.toml` for every position it records — which is the app's design and
+costs nothing at one write per pause, and would be the first thing to look at
+if the recents list ever grew a thumbnail.
+
 ### What is not built
 
 No text layer, no selection, no markup, no settings window, no Keyboard page,
-no watchers, one window — and of the library, only the half the marks and the
-history needed, which is to say `touch` and `toggle_mark` and nothing about
-where you were. Presenting is the one part of item 6 still outstanding, and it
-is a window rather than a page.
+no watchers, one window — and of the library, everything but the markup
+journal, which waits for the item that is about markup. Presenting is the one
+part of item 6 still outstanding, and it is a window rather than a page.
 
 ---
 

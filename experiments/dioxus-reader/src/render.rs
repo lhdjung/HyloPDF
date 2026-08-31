@@ -9,9 +9,12 @@
 //!
 //! Phase 1 needed two of those questions, Phase 3's sidebar added the third
 //! and its search the fourth — a page's text, and where every character of it
-//! sits. The rest are named here and not declared,
-//! because a trait method with no caller is a guess about what the caller
-//! will want.
+//! sits — its links and labels the fifth and sixth, and its library the
+//! seventh: what the document calls itself. Every one of them was added when
+//! something asked, because a trait method with no caller is a guess about
+//! what the caller will want, and every one but the first two has a default
+//! that answers "nothing", because a renderer that cannot say is not a
+//! renderer this reader refuses to run over.
 
 use std::sync::Arc;
 
@@ -219,7 +222,7 @@ pub trait PageSource: Send + Sync {
         width: u32,
         height: u32,
         view: View,
-        take: &mut dyn FnMut(Bitmap) ,
+        take: &mut dyn FnMut(Bitmap),
     ) -> Result<(), String>;
     /// Where the document was opened from.
     ///
@@ -280,6 +283,22 @@ pub trait PageSource: Send + Sync {
     /// it, look every page up in it, and get back the number it started with.
     fn labels(&self) -> Vec<String> {
         Vec::new()
+    }
+
+    /// What the document calls itself, or empty when it says nothing.
+    ///
+    /// `2310.06825v3.pdf` is not a name and a shelf of them is unreadable, but
+    /// whatever produced the file usually wrote a title into it. This is that
+    /// string exactly as the document gives it — whether it is *worth* calling
+    /// the document is a judgement rather than a rendering question, and it is
+    /// made once in [`crate::store::worth_calling`] where the file name it has
+    /// to be weighed against is also known.
+    ///
+    /// Empty for a renderer that cannot answer, for the reason
+    /// [`Self::labels`] has a default: the file name is what the library
+    /// falls back to and is what it held before this question existed.
+    fn title(&self) -> String {
+        String::new()
     }
 
     /// What opening the document cost, in milliseconds — the other half of the

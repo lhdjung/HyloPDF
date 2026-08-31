@@ -218,7 +218,9 @@ impl Away {
     /// because the document asked.
     pub fn to_the_system() -> Self {
         Away::new(|url| {
-            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:")
+            if url.starts_with("http://")
+                || url.starts_with("https://")
+                || url.starts_with("mailto:")
             {
                 if let Err(err) = webbrowser::open(url) {
                     eprintln!("could not open {url}: {err}");
@@ -355,6 +357,22 @@ pub struct Viewer {
     /// panel takes its share first. Kept because opening the panel has to
     /// relay out against the same window.
     window_width: f64,
+    /// Where the last run left the reader, waiting for a window to put it
+    /// back in.
+    ///
+    /// **A held place rather than a scroll offset, because there is no
+    /// viewport yet.** `Viewer::new` runs before anything is mounted, so the
+    /// layout has a viewport of 0×0 and every page in it is zero high — a
+    /// place turned into an offset there is turned back into page one the
+    /// moment the window says how big it is. So it is kept as what it is, a
+    /// page and a fraction of it, and [`Viewer::resize`] spends it on the
+    /// first layout that has room in it.
+    ///
+    /// It is also what stops the restore from writing over itself:
+    /// [`Viewer::remember_place`] says nothing while this is pending, or the
+    /// relayouts on the way to the first frame would record page one over the
+    /// place being restored.
+    place: Option<Anchor>,
 }
 
 impl Viewer {
@@ -398,6 +416,7 @@ impl Viewer {
             revealed: false,
             trimming: false,
             window_width: 0.0,
+            place: None,
             notice: String::new(),
             keymap,
             pending: String::new(),
@@ -411,7 +430,8 @@ impl Viewer {
         // `Store::opened`.
         let path = viewer.document.path().to_string();
         if !path.is_empty() {
-            viewer.store.opened(&path);
+            let declared = viewer.document.title();
+            viewer.place = viewer.store.opened(&path, &declared);
         }
         viewer.restore();
         viewer
@@ -431,7 +451,10 @@ impl Viewer {
         };
         // A zoom out of the range the ladder covers is a zoom nothing can step
         // away from, and `settings.rs` only promises the value is a number.
-        self.layout.zoom = self.store.number("zoom").clamp(ZOOMS[0], ZOOMS[ZOOMS.len() - 1]);
+        self.layout.zoom = self
+            .store
+            .number("zoom")
+            .clamp(ZOOMS[0], ZOOMS[ZOOMS.len() - 1]);
         self.layout.spread = match self.store.text("spread_mode").as_str() {
             "two" => Spread::Two,
             "cover" => Spread::Cover,
@@ -523,9 +546,11 @@ impl Viewer {
     pub fn resize(&mut self, width: f64, height: f64) {
         self.window_width = width;
         let width = self.document_width();
-        if (self.layout.viewport.width - width).abs() < 0.5
-            && (self.layout.viewport.height - height).abs() < 0.5
-        {
+        let settled = (self.layout.viewport.width - width).abs() < 0.5
+            && (self.layout.viewport.height - height).abs() < 0.5;
+        // A window that has not changed size still owes the reader their
+        // place, so this is the one thing that gets past the early return.
+        if settled && self.place.is_none() {
             return;
         }
         let anchor = self.layout.anchor(self.scroll_top);
@@ -536,6 +561,14 @@ impl Viewer {
         // panel of a height, and this is where both of those move.
         self.relay_column();
         self.reveal_thumb();
+        // And where the last run left off, spent on the first window this
+        // reader gets: a place is a page and a fraction of it, and turning
+        // that into a scroll offset needs pages that have been laid out. It
+        // goes through `go_to` rather than through `scroll_target` because in
+        // paged mode arriving at a page is a relayout — see [`Viewer::go_to`].
+        if let Some(place) = self.place.take() {
+            self.go_to(place);
+        }
     }
 
     /// How much of the window the document has: everything the panel is not
@@ -645,7 +678,10 @@ impl Viewer {
             return;
         }
         let height = self.layout.viewport.height;
-        if let Some(to) = self.column.reveal(self.page() - 1, self.thumb_scroll, height) {
+        if let Some(to) = self
+            .column
+            .reveal(self.page() - 1, self.thumb_scroll, height)
+        {
             self.thumb_scroll = to;
         }
     }
@@ -674,6 +710,11 @@ impl Viewer {
                 self.generation += 1;
                 self.scroll_top = 0.0;
                 self.reveal_thumb();
+                // A page turn where both sides sit at the top of their page
+                // does not move `scroll_top` at all, so the write cannot be
+                // left to `scroll_to` — and the page is the whole of what
+                // there is to remember in this mode.
+                self.remember_place();
             }
         }
         let target = self.layout.scroll_target(anchor);
@@ -684,7 +725,10 @@ impl Viewer {
     /// the top and the bottom of what is laid out.
     pub fn to_start(&mut self) {
         match self.layout.mode {
-            Mode::Paged => self.go_to(Anchor { page: 1, offset: 0.0 }),
+            Mode::Paged => self.go_to(Anchor {
+                page: 1,
+                offset: 0.0,
+            }),
             Mode::Continuous => {
                 self.scroll_to(0.0);
             }
@@ -737,7 +781,12 @@ impl Viewer {
         }
         let page = self.layout.current;
         let next = if delta > 0.0 {
-            self.layout.row_of(page - 1).last().copied().unwrap_or(page - 1) + 2
+            self.layout
+                .row_of(page - 1)
+                .last()
+                .copied()
+                .unwrap_or(page - 1)
+                + 2
         } else {
             page.saturating_sub(1)
         };
@@ -1163,8 +1212,10 @@ impl Viewer {
     /// Paint every match, or only the one the reader is on.
     pub fn toggle_highlight_all(&mut self) {
         self.highlight_all = !self.highlight_all;
-        self.store
-            .set(vec![("search_highlight_all".into(), json!(self.highlight_all))]);
+        self.store.set(vec![(
+            "search_highlight_all".into(),
+            json!(self.highlight_all),
+        )]);
     }
 
     /// What to paint over one page, in CSS pixels from its top left.
@@ -1231,7 +1282,8 @@ impl Viewer {
             Fit::Page => "Fit page".into(),
             Fit::Actual => "Actual size".into(),
         };
-        self.store.set(vec![("fit_mode".into(), json!(name_of(fit)))]);
+        self.store
+            .set(vec![("fit_mode".into(), json!(name_of(fit)))]);
     }
 
     /// Actual size, which is a fit mode *and* a zoom of 1.
@@ -1412,7 +1464,25 @@ impl Viewer {
         // The column follows the document, and only when it has to — see
         // `Column::reveal`. `setPage` in `sidebar.ts` is this call.
         self.reveal_thumb();
+        self.remember_place();
         true
+    }
+
+    /// Note where the reader is, for the next run.
+    ///
+    /// Called from the two places the reader actually moves — this one and a
+    /// page turned in paged mode, which does not go past [`Viewer::scroll_to`]
+    /// when both sides of the turn sit at the top of their page. What it
+    /// costs here is a channel send: the disk is the scribe's, and it writes
+    /// once the scrolling has stopped. See [`Store::remember`].
+    fn remember_place(&self) {
+        // Not while the last run's place is still waiting for a window to be
+        // put back in: the relayouts on the way to the first frame would
+        // record page one over the place being restored.
+        if self.place.is_some() {
+            return;
+        }
+        self.store.remember(self.layout.anchor(self.scroll_top));
     }
 
     pub fn page_target(&self, page: usize) -> f64 {
@@ -1529,9 +1599,8 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     });
     // Where a link out of the document goes. See [`Away`]: the default is the
     // system browser, and a harness provides its own.
-    let away = use_hook(|| {
-        dioxus_core::try_consume_context::<Away>().unwrap_or_else(Away::to_the_system)
-    });
+    let away =
+        use_hook(|| dioxus_core::try_consume_context::<Away>().unwrap_or_else(Away::to_the_system));
 
     let resize_from_window = {
         let screen = screen.clone();
@@ -1556,12 +1625,8 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         let (press, screen) = {
             let held = viewer.read();
             (
-                held.keymap.press(
-                    &event.key(),
-                    event.code(),
-                    event.modifiers(),
-                    &held.pending,
-                ),
+                held.keymap
+                    .press(&event.key(), event.code(), event.modifiers(), &held.pending),
                 held.layout.viewport.height,
             )
         };
@@ -1597,6 +1662,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let scroll_top = held.scroll_top;
     let wearing = held.palette();
     let theme_name = held.theme_name();
+    let title = held.store.title().to_string();
     let mounted = held.layout.mounted(held.scroll_top);
     let content_width = held.layout.content_width();
     let content_height = held.layout.content_height();
@@ -1705,7 +1771,11 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     onclick: move |_| viewer.write().toggle_sidebar(),
                     "Contents"
                 }
-                div { class: "title", "{pages} pages" }
+                // What the document is called: its own `/Title` where that
+                // is worth having, and the file's name where it is not — see
+                // `store::worth_calling`. It was the page count, which the
+                // pill beside it already says.
+                div { class: "title", "{title}" }
                 div { class: "spacer" }
                 button {
                     class: if marked { "chip mark on" } else { "chip mark" },
@@ -2112,10 +2182,9 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
         viewer.write().nudge(delta);
     }
     fn page(mut viewer: Signal<Viewer>, page: usize) {
-        viewer.write().go_to(crate::layout::Anchor {
-            page,
-            offset: 0.0,
-        });
+        viewer
+            .write()
+            .go_to(crate::layout::Anchor { page, offset: 0.0 });
     }
 
     match action {

@@ -15,23 +15,227 @@
 //! times. Here a component calls a method. The settings table is stated once,
 //! in the file the app states it in, and there is no second copy to drift.
 //!
-//! *Writes are still off the main thread's critical path in the app and are
-//! not here yet.* `set_many` is a read-modify-write of one small TOML file and
-//! it happens on whichever thread asked; the app moved these to `async`
-//! commands because `remember_position` fires on every pause in a scroll, and
-//! nothing in this crate does that yet. When the library lands — Phase 3 item
-//! 7 — this is where the thread goes, and the lock inside `settings.rs` is
-//! already what makes that safe.
+//! *One write is off the main thread, and only one needs to be.* `set_many`
+//! is a read-modify-write of a small TOML file and happens on whichever
+//! thread asked, which is fine for a theme or a zoom — a reader changes those
+//! a handful of times a session. Where the reader *is* moves sixty times a
+//! second, and the app moved that one to an `async` command for exactly that
+//! reason: a whole-file rewrite of `library.toml` was landing in the middle of
+//! the one gesture this app exists to make smooth. `Scribe` is that here —
+//! one thread, one pending place per document, written when the scrolling
+//! stops. The lock inside `library.rs` is what makes it safe, and it was
+//! already there.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
 use crate::keys;
+use crate::layout::Anchor;
 use crate::library::{self, Mark};
 use crate::palette::{self, Palette};
 use crate::settings::{self, Settings};
 use crate::theme;
+
+/// How long the scrolling has to stop for before where the reader is gets
+/// written down. `onScroll` in `main.ts` is the same number, spelled
+/// `setTimeout(… , 700)`.
+const SETTLE: Duration = Duration::from_millis(700);
+
+/// The one thread that writes down where the reader is.
+///
+/// **The only write in this crate that needed moving, and the reason is the
+/// rate.** A theme is chosen a few times a session and a zoom a few dozen; the
+/// scroll offset changes on every wheel event, and every change is a
+/// read-modify-write of the whole of `library.toml`. Done on the thread that
+/// draws the window, that is the app's own bug — `AGENTS.md` describes a
+/// whole-file rewrite landing in the middle of the one gesture this app exists
+/// to make smooth — and this crate would have had it the moment the position
+/// was remembered at all.
+///
+/// Two things it does, and they are separable but not usefully so. It moves
+/// the write off the thread that is scrolling, and it *coalesces*: a place
+/// arriving while another is pending replaces it, and nothing is written until
+/// [`SETTLE`] has passed with nothing new. So a reader scrolling through a
+/// chapter costs one write at the end of it rather than four hundred.
+///
+/// **Pending places are keyed by document**, which matters for one reason
+/// only: `cargo test` runs its tests in parallel and this thread is the
+/// process's. A single pending slot would have one test's position quietly
+/// replacing another's, intermittently and by timing, which is the worst
+/// shape a test failure comes in.
+struct Scribe {
+    jobs: Sender<Job>,
+}
+
+enum Job {
+    /// Where the reader is in one document, superseding whatever was pending
+    /// for it.
+    Place {
+        dir: PathBuf,
+        file: String,
+        page: u32,
+        offset: f64,
+    },
+    /// Write everything pending now and say when it is done. What quitting
+    /// asks for, and what a test asks for instead of sleeping.
+    Flush(Sender<()>),
+}
+
+impl Scribe {
+    /// The process's, made on first use. There is no way to stop it and
+    /// nothing that would want to: it is asleep on a channel except when
+    /// there is something to write.
+    fn get() -> &'static Scribe {
+        static SCRIBE: OnceLock<Scribe> = OnceLock::new();
+        SCRIBE.get_or_init(|| {
+            let (jobs, inbox) = mpsc::channel();
+            std::thread::Builder::new()
+                .name("hylopdf-library".into())
+                .spawn(move || run(inbox))
+                .expect("a thread to write the library on");
+            Scribe { jobs }
+        })
+    }
+}
+
+/// Wait, coalesce, write.
+///
+/// The shape is `clearTimeout` and `setTimeout` from `main.ts` turned inside
+/// out: with nothing pending this blocks for ever, and with something pending
+/// it waits [`SETTLE`] for a newer answer and writes when none comes. A place
+/// arriving in the meantime restarts the wait, which is what makes a
+/// continuous scroll cost one write — and means, exactly as in the app, that
+/// a scroll which never pauses is not written down until something asks for a
+/// flush.
+fn run(inbox: Receiver<Job>) {
+    let mut pending: BTreeMap<(PathBuf, String), (u32, f64)> = BTreeMap::new();
+    loop {
+        let job = if pending.is_empty() {
+            inbox.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        } else {
+            inbox.recv_timeout(SETTLE)
+        };
+        match job {
+            Ok(Job::Place {
+                dir,
+                file,
+                page,
+                offset,
+            }) => {
+                pending.insert((dir, file), (page, offset));
+            }
+            Ok(Job::Flush(done)) => {
+                write_out(&mut pending);
+                // The sender may be gone — a test that stopped waiting — and
+                // that is not this thread's problem.
+                let _ = done.send(());
+            }
+            Err(RecvTimeoutError::Timeout) => write_out(&mut pending),
+            Err(RecvTimeoutError::Disconnected) => {
+                write_out(&mut pending);
+                return;
+            }
+        }
+    }
+}
+
+fn write_out(pending: &mut BTreeMap<(PathBuf, String), (u32, f64)>) {
+    for ((dir, file), (page, offset)) in std::mem::take(pending) {
+        // A library that cannot be written is a reader who loses their place,
+        // which is worth nothing at all on a thread with nowhere to say it.
+        // The notice for that case is raised at open, where the same file is
+        // written by `touch` and somebody is looking at the screen.
+        let _ = library::remember(&dir, &file, page, offset);
+    }
+}
+
+/// Write down everything the scribe is holding, and wait for it.
+///
+/// Called on the way out — `main.rs`, once the event loop has returned — and
+/// by any test that wants to reopen a reader and find its place kept. Without
+/// it a run that ends while somebody is still scrolling loses the last
+/// seven hundred milliseconds of reading, which is a page.
+pub fn flush() {
+    let (done, wait) = mpsc::channel();
+    if Scribe::get().jobs.send(Job::Flush(done)).is_ok() {
+        // Two seconds is not a timeout anybody should reach; it is here so
+        // that a thread which has somehow died cannot hold up a quit.
+        let _ = wait.recv_timeout(Duration::from_secs(2));
+    }
+}
+
+/// Whether a document's own `/Title` is worth calling it by.
+///
+/// `worthCalling` in `main.ts`, and every line of it is a fact about what
+/// producers actually write rather than about this app. A great many PDFs
+/// carry a title filled in by the program that made them and not by anybody:
+/// the file name again, the file name of the *source* — "Microsoft Word -
+/// report.doc" — or the word "untitled". Each of those is worse than the file
+/// name, because it looks deliberate. Anything that fails leaves the file name
+/// alone, which is what it was before.
+pub fn worth_calling(title: &str, file_name: &str) -> bool {
+    let title = title.trim();
+    if title.chars().count() < 4 || title.chars().count() > 200 {
+        return false;
+    }
+    let folded = title.to_lowercase();
+    let name = file_name.to_lowercase();
+    let stem = name.strip_suffix(".pdf").unwrap_or(&name);
+    if folded == stem || folded == name {
+        return false;
+    }
+    if folded.starts_with("untitled")
+        && !folded[8..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+    {
+        return false;
+    }
+    if folded.starts_with("microsoft word -") {
+        return false;
+    }
+    if let Some(rest) = folded.strip_prefix("document") {
+        if rest.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+    }
+    // A title that is a file name is a file name, whatever file it names.
+    const SUFFIXES: &[&str] = &[
+        ".pdf", ".doc", ".docx", ".tex", ".indd", ".ppt", ".pptx", ".odt", ".rtf", ".ps", ".dvi",
+    ];
+    if SUFFIXES.iter().any(|suffix| folded.ends_with(suffix)) {
+        return false;
+    }
+    true
+}
+
+/// What was open when the reader was last put down, if it is still there and
+/// the reader wants it back.
+///
+/// Read before there is a window, which is why it is a function rather than a
+/// method: `main.rs` has to know what to open before it can make the thing
+/// that would hold a [`Store`].
+///
+/// `prune` is the app's own and is what keeps this honest — a document that
+/// has been moved or deleted would otherwise be reopened, and fail, on every
+/// launch for ever. `reopen_last_document` is the app's own setting too, and
+/// is asked here rather than left to the caller for the reason `bootstrap`
+/// gives in `lib.rs`: two sides that each assume the other checked it are two
+/// sides that disagree about whether the window has anything in it.
+pub fn reopening(dir: &Path) -> Option<String> {
+    let settings = settings::load(dir);
+    let wanted = settings
+        .get("reopen_last_document")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if !wanted {
+        return None;
+    }
+    library::prune(&library::load(dir)).open.into_iter().next()
+}
 
 pub struct Store {
     dir: PathBuf,
@@ -55,6 +259,10 @@ pub struct Store {
     /// every change here is written through, and the write is what the next
     /// run reads.
     marks: Vec<Mark>,
+    /// What the document is called on the shelf: its own `/Title` where that
+    /// is worth having, and the file's name where it is not. Decided once, at
+    /// open, by [`worth_calling`].
+    title: String,
 }
 
 impl Store {
@@ -86,6 +294,7 @@ impl Store {
             complaint: None,
             file: String::new(),
             marks: Vec::new(),
+            title: String::new(),
         };
         store.complaint = store.unreadable();
         store
@@ -172,10 +381,7 @@ impl Store {
         } else {
             "light_theme"
         };
-        self.set(vec![
-            ("theme".into(), json!(id)),
-            (slot.into(), json!(id)),
-        ]);
+        self.set(vec![("theme".into(), json!(id)), (slot.into(), json!(id))]);
         self.complaint = self.unreadable();
         name
     }
@@ -209,7 +415,7 @@ impl Store {
     /* ------------------------------------------------------- the library */
 
     /// Say which document this reader has open, and read back what is already
-    /// known about it.
+    /// known about it: what to call it, and where the last run left off.
     ///
     /// `touch` is the app's own, and it does two things at once: it moves the
     /// document to the front of the recently-read list, and it *makes an
@@ -219,34 +425,87 @@ impl Store {
     /// stale path and the wrong one to a document that was opened a moment
     /// ago.
     ///
-    /// The title is the file's own name here. The app asks the document what
-    /// it calls itself (`set_document_title`), and that is Phase 3's item
-    /// about labels rather than this one.
-    pub fn opened(&mut self, path: &str) {
+    /// `declared` is what the document calls itself, as written — see
+    /// [`crate::render::PageSource::title`]. Whether it is worth using is
+    /// [`worth_calling`]'s to say, and it is asked *here* rather than at the
+    /// renderer because it is the one place that also has the file name to
+    /// weigh it against. The app asks the same question a moment later, in
+    /// `adoptDocumentTitle`, because pdf.js cannot answer it until the
+    /// document has been parsed; pdfium answers it at open, so the toolbar is
+    /// never briefly wrong.
+    ///
+    /// Answers where the reader was, which is `None` for a document that has
+    /// not been read before **and for a reader who has turned remembering
+    /// off**. That switch is asked here rather than at the caller for the
+    /// reason `bootstrap` gives in the app's `lib.rs`: a position handed over
+    /// regardless, with the caller expected to ignore it, is two sides that
+    /// eventually disagree about whether there was one.
+    pub fn opened(&mut self, path: &str, declared: &str) -> Option<Anchor> {
         let name = std::path::Path::new(path)
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
+        self.title = if worth_calling(declared, &name) {
+            declared.trim().to_string()
+        } else {
+            name.clone()
+        };
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|since| since.as_secs() as i64)
             .unwrap_or(0);
         self.file = path.to_string();
-        match library::touch(&self.dir, path, &name, now) {
+        let title = self.title.clone();
+        let mut place = None;
+        match library::touch(&self.dir, path, &title, now) {
             Ok(library) => {
-                self.marks = library
-                    .files
-                    .iter()
-                    .find(|entry| entry.path == path)
-                    .map(|entry| entry.marks.clone())
-                    .unwrap_or_default();
+                if let Some(entry) = library.files.iter().find(|entry| entry.path == path) {
+                    self.marks = entry.marks.clone();
+                    place = Some(Anchor {
+                        page: entry.page.max(1) as usize,
+                        offset: entry.offset,
+                    });
+                }
             }
             // A library that cannot be written is a reader who loses their
-            // marks at the end of the session, which is worth a line at the
-            // bottom of the window and is not worth refusing to open a
-            // document over.
+            // marks and their place at the end of the session, which is worth
+            // a line at the bottom of the window and is not worth refusing to
+            // open a document over.
             Err(refused) => self.complaint = Some(refused),
         }
+        // And what is open now, so that the next launch can pick it up. One
+        // path because there is one window; the app writes one per window and
+        // the file has been a list since there were two of them.
+        let _ = library::set_open(&self.dir, std::slice::from_ref(&self.file));
+        if !self.flag("remember_position") {
+            return None;
+        }
+        place.filter(|at| at.page > 1 || at.offset > 0.0)
+    }
+
+    /// What to call this document: its own title where that is worth having,
+    /// and the file's name where it is not.
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// Write down where the reader is, eventually.
+    ///
+    /// **Eventually is the whole of the design.** This is called on every
+    /// change of the scroll offset, which is every wheel event; what it does
+    /// is hand a place to `Scribe`, which keeps one per document and writes
+    /// when the scrolling has stopped. Nothing here touches the disk, so the
+    /// cost on the thread drawing the window is a channel send.
+    pub fn remember(&self, at: Anchor) {
+        if self.file.is_empty() || !self.flag("remember_position") {
+            return;
+        }
+        let _ = Scribe::get().jobs.send(Job::Place {
+            dir: self.dir.clone(),
+            file: self.file.clone(),
+            page: at.page as u32,
+            offset: at.offset,
+        });
     }
 
     /// The pages the reader has put a pin in, by page number, in page order.
@@ -419,12 +678,57 @@ mod tests {
             .iter()
             .position(|theme| theme.name == "Mine")
             .expect("listed");
-        assert!(mine >= theme::BUILT_IN.len(), "listed after the shipped set");
+        assert!(
+            mine >= theme::BUILT_IN.len(),
+            "listed after the shipped set"
+        );
         store.wear(mine);
         assert_eq!(store.palette().text, [0x10, 0x20, 0x30]);
         // It is light, so it filled the light slot.
         assert_eq!(store.text("light_theme"), "Mine");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The judgement `worth_calling` makes, in the cases that made it exist.
+    ///
+    /// Every "no" here is a string a real producer writes into a real file,
+    /// which is why the test is a list rather than an argument: the rule is
+    /// not derivable, it is observed.
+    #[test]
+    fn a_name_worth_having_is_told_from_one_that_is_not() {
+        for (title, file) in [
+            ("The Structure of Scientific Revolutions", "kuhn.pdf"),
+            ("Attention Is All You Need", "1706.03762v7.pdf"),
+        ] {
+            assert!(worth_calling(title, file), "{title:?}");
+        }
+        for (title, file) in [
+            // Filled in by the program that made it, not by anybody.
+            ("Microsoft Word - report.doc", "report.pdf"),
+            ("untitled", "notes.pdf"),
+            ("Untitled", "notes.pdf"),
+            ("Document1", "notes.pdf"),
+            // A title that is a file name is a file name, whatever file it
+            // names.
+            ("thesis.tex", "thesis.pdf"),
+            ("scan_0001.PDF", "scan_0001.pdf"),
+            // The file name over again, with and without its suffix.
+            ("kuhn", "kuhn.pdf"),
+            ("Kuhn.pdf", "kuhn.pdf"),
+            // Too short to be a title, and long enough to be a page.
+            ("Abc", "paper.pdf"),
+            (&"x".repeat(201), "paper.pdf"),
+        ] {
+            assert!(!worth_calling(title, file), "{title:?}");
+        }
+        // The app rejects anything *beginning* with the word, not only the
+        // word alone — `/^untitled\b/i` — so "Untitled Letters", which is a
+        // real book, falls back to its file name. Carried across as written
+        // rather than improved on: "Untitled document" and "Untitled 1" are
+        // what producers actually emit, the cost of the rule is a file name
+        // instead of a name, and a port that quietly disagrees with the app
+        // about a judgement is the drift this experiment exists to avoid.
+        assert!(!worth_calling("Untitled Letters", "letters.pdf"));
     }
 
     /// And one that names a colour the renderer cannot read says so, rather

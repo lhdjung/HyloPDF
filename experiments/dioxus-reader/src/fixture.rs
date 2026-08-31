@@ -25,12 +25,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// A body of PDF objects, numbered from 1, and the file they make.
 struct Pdf {
     objects: Vec<String>,
+    /// The `/Info` dictionary, if this document has one. Named in the trailer
+    /// rather than reachable from the catalogue, which is where a PDF keeps
+    /// the title it calls itself by and is why it is a field here.
+    info: Option<usize>,
 }
 
 impl Pdf {
     fn new() -> Pdf {
         Pdf {
             objects: Vec::new(),
+            info: None,
         }
     }
 
@@ -62,13 +67,21 @@ impl Pdf {
             let _ = write!(out, "{} 0 obj\n{}\nendobj\n", index + 1, body);
         }
         let xref = out.len();
-        let _ = write!(out, "xref\n0 {}\n0000000000 65535 f \n", self.objects.len() + 1);
+        let _ = write!(
+            out,
+            "xref\n0 {}\n0000000000 65535 f \n",
+            self.objects.len() + 1
+        );
         for offset in &offsets {
             let _ = writeln!(out, "{offset:010} 00000 n ");
         }
+        let info = match self.info {
+            Some(id) => format!(" /Info {id} 0 R"),
+            None => String::new(),
+        };
         let _ = write!(
             out,
-            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            "trailer\n<< /Size {} /Root 1 0 R{info} >>\nstartxref\n{}\n%%EOF\n",
             self.objects.len() + 1,
             xref,
         );
@@ -119,11 +132,7 @@ const fn section(title: &'static str, page: usize, under: &'static [Section]) ->
 /// The contents the fixture carries, and therefore what a test asserts on:
 /// seven rows over three levels, in this order.
 pub const CONTENTS: &[Section] = &[
-    section(
-        "Front matter",
-        1,
-        &[section("Preface", 2, &[])],
-    ),
+    section("Front matter", 1, &[section("Preface", 2, &[])]),
     section(
         "Chapter One",
         3,
@@ -157,6 +166,77 @@ pub fn expected_headings() -> Vec<(String, usize, usize)> {
 /// bytes.
 pub fn contents_pdf() -> String {
     written("hylopdf-fixture-contents.pdf", || build(12))
+}
+
+/// Three plain pages under a title the document gives itself.
+///
+/// The one shape none of the fixtures above has: an `/Info` dictionary with a
+/// `/Title` in it, which is what `2310.06825v3.pdf` usually carries instead of
+/// a name worth reading. Parameterised rather than fixed because the
+/// interesting half of the feature is the *judgement* — a great many documents
+/// name themselves "Microsoft Word - report.doc" or the file name over again,
+/// and each of those is worse than the file name because it looks deliberate.
+/// See [`crate::store::worth_calling`].
+pub fn titled_pdf(title: &str) -> String {
+    // The name on disk has to follow the title, or the second call would be
+    // handed the first one's file. It is a digest rather than the title itself
+    // because a title is somebody's prose and a file name is not.
+    let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in title.as_bytes() {
+        digest ^= *byte as u64;
+        digest = digest.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let named = title.to_string();
+    written(
+        &format!("hylopdf-fixture-titled-{digest:016x}.pdf"),
+        move || build_titled(&named),
+    )
+}
+
+fn build_titled(title: &str) -> Vec<u8> {
+    let mut pdf = Pdf::new();
+    let catalog = pdf.reserve();
+    let tree = pdf.reserve();
+    let font = pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let page_ids: Vec<usize> = (0..3).map(|_| pdf.reserve()).collect();
+    for (index, &id) in page_ids.iter().enumerate() {
+        let stream = format!("BT /F1 18 Tf 72 700 Td (Page {}.) Tj ET", index + 1);
+        let content = pdf.add(format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            stream.len(),
+            stream
+        ));
+        pdf.put(
+            id,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 612 792] \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R >>"
+            ),
+        );
+    }
+    pdf.put(
+        tree,
+        format!(
+            "<< /Type /Pages /Count 3 /Kids [{}] >>",
+            page_ids
+                .iter()
+                .map(|id| format!("{id} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    );
+    pdf.put(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    // A literal string, so the three characters that end one early are the
+    // three to escape.
+    let escaped: String = title
+        .chars()
+        .flat_map(|c| match c {
+            '(' | ')' | '\\' => vec!['\\', c],
+            other => vec![other],
+        })
+        .collect();
+    pdf.info = Some(pdf.add(format!("<< /Title ({escaped}) >>")));
+    pdf.bytes()
 }
 
 /// Six pages of prose, written to exercise the *fold* through the renderer
@@ -214,9 +294,8 @@ fn build_prose() -> Vec<u8> {
     let mut pdf = Pdf::new();
     let catalog = pdf.reserve();
     let tree = pdf.reserve();
-    let plain = pdf.add(
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-    );
+    let plain = pdf
+        .add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
     // The ligature: one glyph, named in a `/Differences` array, drawn by one
     // byte in the content stream.
     //
@@ -436,9 +515,7 @@ fn build_links() -> Vec<u8> {
         page_ids[5],
     ));
     // Neither an action nor a destination: a rectangle that means nothing.
-    let empty = pdf.add(
-        "<< /Type /Annot /Subtype /Link /Rect [72 700 200 720] /Border [0 0 0] >>",
-    );
+    let empty = pdf.add("<< /Type /Annot /Subtype /Link /Rect [72 700 200 720] /Border [0 0 0] >>");
 
     for (index, &id) in page_ids.iter().enumerate() {
         let text = format!("Page {} of the fixture.", index + 1);

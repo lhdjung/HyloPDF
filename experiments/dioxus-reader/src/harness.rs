@@ -177,6 +177,9 @@ pub struct State {
     pub hits: usize,
     /// Which results the list is showing, by their place in the whole list.
     pub results: Vec<usize>,
+    /// What the document is called, off the toolbar: its own `/Title` where
+    /// that is worth having, and the file's name where it is not.
+    pub title: String,
 }
 
 /// A reader with no window, driven by hand.
@@ -253,7 +256,11 @@ impl Reader {
         // numbers instead. Nothing else the reader consumes is required: the
         // shell provider is asked for with `try_consume_context`, and without
         // one a page simply does not ask for a frame it is not going to get.
-        let (width, height, scale) = (options.width as f64, options.height as f64, options.scale as f64);
+        let (width, height, scale) = (
+            options.width as f64,
+            options.height as f64,
+            options.scale as f64,
+        );
         // Where a link out of the document would have gone, written down
         // instead of opened. The default is the system browser and is right in
         // the app; a suite that took it would open a browser window on
@@ -304,6 +311,18 @@ impl Reader {
             self.harness.base_mut().set_focus_to(root);
         }
         self.harness.pump();
+    }
+
+    /// Write down where the reader is, now, rather than when the scrolling
+    /// stops.
+    ///
+    /// A position is the one thing this reader writes on a thread of its own
+    /// and after a pause — see `Scribe` in `store.rs` — so a test that opens
+    /// a second reader on the same directory has to say when the first one has
+    /// finished. It is the same call quitting makes, which is what makes this
+    /// the real path rather than a hook for the tests.
+    pub fn flush(&self) {
+        crate::store::flush();
     }
 
     /// Let everything that is going to happen, happen.
@@ -375,8 +394,6 @@ impl Reader {
         self.harness.type_text(text);
         self.settle();
     }
-
-
 
     /// Read pages until the scan has finished, or until it plainly is not
     /// going to.
@@ -538,6 +555,7 @@ impl Reader {
             query: self.field(".find-field"),
             hits: self.harness.query_all(".hit").len(),
             results: self.numbered(".result", "data-result"),
+            title: self.harness.text_content(".title"),
         }
     }
 

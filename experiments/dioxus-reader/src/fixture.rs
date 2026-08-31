@@ -329,6 +329,77 @@ pub const LINK_OFFSET: f64 = (792.0 - 400.0) / 792.0;
 /// `page_for_label` exists for, and the shape no fixture in the app has.
 pub const LABELS: &[&str] = &["i", "ii", "iii", "1", "2", "3"];
 
+/// Where the ink sits on every page of [`margins_pdf`], as fractions of the
+/// page: left, top, right, bottom.
+///
+/// Deliberately not the same on both axes. A crop that keeps the page's shape
+/// is a crop a layout test cannot see, and the whole of what trimming does to
+/// a reader is change the shape of what is in front of them.
+pub const INK: (f64, f64, f64, f64) = (0.2, 0.1, 0.8, 0.9);
+
+/// Three pages with a black rectangle on each and nothing else.
+///
+/// The one fixture here that is about *pixels* rather than about text, and it
+/// exists because the margins have to be arithmetic: every other document in
+/// this file carries a single line of type, whose ink box is a band a few
+/// percent tall, and a crop measured off one is decided entirely by the
+/// clamp in [`crate::crop`] rather than by the page. Here the answer is
+/// [`INK`] padded, and a test can say so in numbers.
+pub fn margins_pdf() -> String {
+    written("hylopdf-fixture-margins.pdf", build_margins)
+}
+
+fn build_margins() -> Vec<u8> {
+    const PAGES: usize = 3;
+    const WIDTH: f64 = 612.0;
+    const HEIGHT: f64 = 792.0;
+    let mut pdf = Pdf::new();
+    let catalog = pdf.reserve();
+    let tree = pdf.reserve();
+    let page_ids: Vec<usize> = (0..PAGES).map(|_| pdf.reserve()).collect();
+
+    // PDF space counts from the bottom, so the fractions above are turned
+    // over on the way in: what `INK` calls the top is the far edge from the
+    // origin.
+    let left = INK.0 * WIDTH;
+    let right = INK.2 * WIDTH;
+    let bottom = (1.0 - INK.3) * HEIGHT;
+    let top = (1.0 - INK.1) * HEIGHT;
+    let stream = format!(
+        "0 0 0 rg {left:.2} {bottom:.2} {:.2} {:.2} re f",
+        right - left,
+        top - bottom
+    );
+    let content = pdf.add(format!(
+        "<< /Length {} >>\nstream\n{}\nendstream",
+        stream.len(),
+        stream
+    ));
+
+    for &id in &page_ids {
+        pdf.put(
+            id,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {WIDTH} {HEIGHT}] \
+                 /Resources << >> /Contents {content} 0 R >>"
+            ),
+        );
+    }
+    pdf.put(
+        tree,
+        format!(
+            "<< /Type /Pages /Count {PAGES} /Kids [{}] >>",
+            page_ids
+                .iter()
+                .map(|id| format!("{id} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+    );
+    pdf.put(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    pdf.bytes()
+}
+
 /// Six pages that carry links and number their own pages.
 ///
 /// Two documents in one, because they are the same item of the plan and a

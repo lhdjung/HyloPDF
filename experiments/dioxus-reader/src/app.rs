@@ -64,7 +64,7 @@ use dioxus_native::CustomWidgetAttr;
 use serde_json::json;
 
 use crate::keymap::{Action, Keymap, Press};
-use crate::layout::{Anchor, Fit, Layout, Size, Spread};
+use crate::layout::{Anchor, Fit, Layout, Mode, Size, Spread};
 use crate::page::{Chosen, PageWidget};
 use crate::palette::Palette;
 use crate::render::{Heading, Link, PageSource, Rect, Target};
@@ -348,6 +348,9 @@ pub struct Viewer {
     /// Once, and only for the first result to arrive — after that the reader
     /// is moved by asking, not by the scan catching up.
     revealed: bool,
+    /// Whether the reader has asked for the margins to come off. Not the
+    /// same question as whether any came off — see [`Viewer::trimmed`].
+    trimming: bool,
     /// How wide the window is, which is not how wide the document is: the
     /// panel takes its share first. Kept because opening the panel has to
     /// relay out against the same window.
@@ -393,6 +396,7 @@ impl Viewer {
             highlight_all: true,
             scan: 0,
             revealed: false,
+            trimming: false,
             window_width: 0.0,
             notice: String::new(),
             keymap,
@@ -434,7 +438,18 @@ impl Viewer {
             _ => Spread::Single,
         };
         self.layout.gap = self.store.number("page_gap");
+        // Continuous unless the file says otherwise, and the file is the only
+        // way to say otherwise: see [`Mode`].
+        self.layout.mode = match self.store.text("scroll_mode").as_str() {
+            "paged" => Mode::Paged,
+            _ => Mode::Continuous,
+        };
         self.sidebar_open = self.store.flag("show_sidebar");
+        // The switch is a setting and the crop is not, so a run that had it on
+        // measures this document rather than putting back the last one's
+        // rectangle. It is deferred to the end of `restore` because measuring
+        // draws eight pages and the layout has not been built yet.
+        self.trimming = self.store.flag("trim_margins");
         // Where a match is looked for is a way of reading rather than a
         // property of a document, so these outlive the find bar they are set
         // from and the session they were set in — which is the comment
@@ -459,6 +474,9 @@ impl Viewer {
         }
         self.relay_column();
         self.layout.relayout();
+        if self.trimming {
+            self.measure_crop();
+        }
         self.chosen.set(self.store.palette());
         // A theme naming a colour that cannot be read is the one thing here
         // worth a sentence on the screen, and `store` has already worked out
@@ -638,6 +656,131 @@ impl Viewer {
         self.jump_to(page, 0.0);
     }
 
+    /// Land at a place in the document, turning the page first if that is
+    /// what landing means here.
+    ///
+    /// **The one place the two scroll modes actually differ to a caller.** In
+    /// continuous mode a page is somewhere to scroll to; in paged mode it is
+    /// the only page laid out, so arriving at it is a relayout and the scroll
+    /// offset starts again from the top of it. Everything that moves the
+    /// reader goes through this — the history, a link, a heading, a match, a
+    /// typed page number — so none of them has to know which mode is on.
+    pub fn go_to(&mut self, anchor: Anchor) {
+        if self.layout.mode == Mode::Paged {
+            let page = anchor.page.clamp(1, self.pages().max(1));
+            if page != self.layout.current {
+                self.layout.current = page;
+                self.layout.relayout();
+                self.generation += 1;
+                self.scroll_top = 0.0;
+                self.reveal_thumb();
+            }
+        }
+        let target = self.layout.scroll_target(anchor);
+        self.scroll_to(target);
+    }
+
+    /// The start and the end of the document, which are not the same thing as
+    /// the top and the bottom of what is laid out.
+    pub fn to_start(&mut self) {
+        match self.layout.mode {
+            Mode::Paged => self.go_to(Anchor { page: 1, offset: 0.0 }),
+            Mode::Continuous => {
+                self.scroll_to(0.0);
+            }
+        }
+    }
+
+    pub fn to_end(&mut self) {
+        match self.layout.mode {
+            Mode::Paged => {
+                let last = self.pages().max(1);
+                self.go_to(Anchor {
+                    page: last,
+                    offset: 0.0,
+                });
+                let bottom = self.layout.max_scroll();
+                self.scroll_to(bottom);
+            }
+            Mode::Continuous => {
+                let bottom = self.layout.max_scroll();
+                self.scroll_to(bottom);
+            }
+        }
+    }
+
+    /// Move by a distance, and turn the page when there is nowhere left to
+    /// move.
+    ///
+    /// `scrollByViewport` in `viewer.ts` does this for a screen and `onWheel`
+    /// for a gesture; here it is one function because a key and a wheel ask
+    /// the same question. In paged mode the strip holds exactly one page, so
+    /// a page that fits the window cannot be scrolled at all and a taller one
+    /// stops dead at its own bottom edge — either way the reader pushes and
+    /// nothing happens, which is the one gesture everybody tries first.
+    pub fn nudge(&mut self, delta: f64) {
+        if self.layout.mode == Mode::Continuous || delta == 0.0 {
+            let to = self.scroll_by(delta);
+            self.scroll_to(to);
+            return;
+        }
+        let room = self.layout.max_scroll();
+        let at_edge = if delta > 0.0 {
+            self.scroll_top >= room - 1.0
+        } else {
+            self.scroll_top <= 1.0
+        };
+        if !at_edge {
+            let to = self.scroll_by(delta);
+            self.scroll_to(to);
+            return;
+        }
+        let page = self.layout.current;
+        let next = if delta > 0.0 {
+            self.layout.row_of(page - 1).last().copied().unwrap_or(page - 1) + 2
+        } else {
+            page.saturating_sub(1)
+        };
+        if next < 1 || next > self.pages() {
+            return;
+        }
+        self.go_to(Anchor {
+            page: next,
+            offset: 0.0,
+        });
+        // Backwards is the *bottom* of the page arrived at, because that is
+        // where the reader was reading: turning back to the top of the
+        // previous page skips everything they were about to re-read.
+        if delta < 0.0 {
+            let bottom = self.layout.max_scroll();
+            self.scroll_to(bottom);
+        }
+    }
+
+    /// One page at a time, or continuous.
+    ///
+    /// A setting and nothing else — there is no shortcut and no chip, which
+    /// is the brief's own instruction: continuous is a strong default and a
+    /// key that leaves it by accident is the failure it names. See [`Mode`].
+    pub fn set_scroll_mode(&mut self, mode: Mode) {
+        if mode == self.layout.mode {
+            return;
+        }
+        let here = self.layout.anchor(self.scroll_top);
+        self.layout.mode = mode;
+        self.layout.current = here.page;
+        self.layout.relayout();
+        self.scroll_top = self.layout.scroll_target(here);
+        self.generation += 1;
+        self.store.set(vec![(
+            "scroll_mode".into(),
+            json!(match mode {
+                Mode::Paged => "paged",
+                Mode::Continuous => "continuous",
+            }),
+        )]);
+    }
+
     /* ------------------------------------------------------ where you were */
 
     /// Go somewhere the reader asked to go, remembering where they were.
@@ -655,8 +798,7 @@ impl Viewer {
         let from = self.layout.anchor(self.scroll_top);
         let to = page.clamp(1, self.pages().max(1));
         if to == from.page && (offset - from.offset).abs() < 0.01 {
-            let target = self.layout.scroll_target(Anchor { page: to, offset });
-            self.scroll_to(target);
+            self.go_to(Anchor { page: to, offset });
             return;
         }
         self.past.push(from);
@@ -666,8 +808,7 @@ impl Viewer {
         // A jump made after stepping back throws away what was ahead, which
         // is what every back button does and what nobody is surprised by.
         self.future.clear();
-        let target = self.layout.scroll_target(Anchor { page: to, offset });
-        self.scroll_to(target);
+        self.go_to(Anchor { page: to, offset });
     }
 
     /// Back to where the last jump started, or forward again.
@@ -680,8 +821,7 @@ impl Viewer {
             return false;
         };
         self.future.push(self.layout.anchor(self.scroll_top));
-        let target = self.layout.scroll_target(place);
-        self.scroll_to(target);
+        self.go_to(place);
         true
     }
 
@@ -690,8 +830,7 @@ impl Viewer {
             return false;
         };
         self.past.push(self.layout.anchor(self.scroll_top));
-        let target = self.layout.scroll_target(place);
-        self.scroll_to(target);
+        self.go_to(place);
         true
     }
 
@@ -714,23 +853,12 @@ impl Viewer {
         let Some(index) = page.checked_sub(1) else {
             return Vec::new();
         };
-        let Some(area) = self.layout.box_of(index) else {
+        if self.layout.box_of(index).is_none() {
             return Vec::new();
-        };
-        let scale = area.scale;
+        }
         self.links_on(index)
             .iter()
-            .map(|link| {
-                (
-                    Rect {
-                        left: link.rect.left * scale,
-                        top: link.rect.top * scale,
-                        width: link.rect.width * scale,
-                        height: link.rect.height * scale,
-                    },
-                    link.target.clone(),
-                )
-            })
+            .map(|link| (self.layout.place_on(index, link.rect), link.target.clone()))
             .collect()
     }
 
@@ -984,22 +1112,29 @@ impl Viewer {
             return;
         };
         let Some(page) = self.layout.box_of(hit.page - 1) else {
-            // Paged mode leaves `boxes` full of holes, and a match on a page
-            // that is not laid out is a page to go to rather than a place on
-            // one.
-            let target = self.page_target(hit.page);
-            self.scroll_to(target);
+            // Paged mode lays out one page and leaves the rest of `boxes`
+            // empty, so a match anywhere else is a page to turn to rather
+            // than a place on one. `revealMatch` in `viewer.ts` says the same
+            // thing: the other pages have no place on the strip at all.
+            self.go_to(Anchor {
+                page: hit.page,
+                offset: 0.0,
+            });
             return;
         };
+        // Where the match lands on the *page as it is being shown*, which a
+        // quad in the page's own points is not once the reader has turned or
+        // trimmed it. One call rather than a multiplication by the scale —
+        // see [`Layout::place_on`].
         let top = self
             .search
             .quads_on(hit.page)
             .into_iter()
             .filter(|(_, current)| *current)
-            .map(|(quad, _)| quad.top)
+            .map(|(quad, _)| self.layout.place_on(hit.page - 1, quad).top)
             .fold(f64::INFINITY, f64::min);
         let target = if top.is_finite() {
-            page.top + top * page.scale - self.layout.viewport.height * REVEAL
+            page.top + top - self.layout.viewport.height * REVEAL
         } else {
             // A match nothing drew — pdfium generates characters the printer
             // never put on the page — is still on a page.
@@ -1041,25 +1176,14 @@ impl Viewer {
         if !self.find_open {
             return Vec::new();
         }
-        let Some(box_of) = self.layout.box_of(page - 1) else {
+        if self.layout.box_of(page - 1).is_none() {
             return Vec::new();
-        };
-        let scale = box_of.scale;
+        }
         self.search
             .quads_on(page)
             .into_iter()
             .filter(|(_, current)| self.highlight_all || *current)
-            .map(|(quad, current)| {
-                (
-                    Rect {
-                        left: quad.left * scale,
-                        top: quad.top * scale,
-                        width: quad.width * scale,
-                        height: quad.height * scale,
-                    },
-                    current,
-                )
-            })
+            .map(|(quad, current)| (self.layout.place_on(page - 1, quad), current))
             .collect()
     }
 
@@ -1160,6 +1284,80 @@ impl Viewer {
             ("zoom".into(), json!(next)),
             ("fit_mode".into(), json!(name_of(Fit::Actual))),
         ]);
+    }
+
+    /// Take the margins off, or put them back.
+    ///
+    /// The switch is remembered and the measurement is not: `trim_margins` is
+    /// a setting in the app's own `settings.rs`, which this crate mounts, and
+    /// the crop it produces is a fact about a document rather than about the
+    /// reader. So a run that opens a different document measures that one.
+    ///
+    /// **Left on when there is nothing to trim.** A document with no margins
+    /// to speak of, or one this misread, keeps the switch and loses nothing —
+    /// [`Viewer::trimmed`] is how the interface says which of the two
+    /// happened, and it is the difference between "off" and "on, and there
+    /// was nothing there".
+    pub fn set_trim(&mut self, on: bool) {
+        self.trimming = on;
+        self.store.set(vec![("trim_margins".into(), json!(on))]);
+        if !on {
+            self.keeping_place(|layout| layout.crop = None);
+            self.notice = "Margins put back".into();
+            return;
+        }
+        self.measure_crop();
+        self.notice = if self.trimmed() {
+            "Margins trimmed".into()
+        } else {
+            "There are no margins to trim on this document".into()
+        };
+    }
+
+    pub fn trims_margins(&self) -> bool {
+        self.trimming
+    }
+
+    /// Whether anything was actually found to trim.
+    pub fn trimmed(&self) -> bool {
+        self.layout.crop.is_some()
+    }
+
+    /// Measure the document and lay it out again against what was found.
+    ///
+    /// The crop is measured on the page as the *document* has it and then
+    /// turned to match the page as the reader has it, which is the same order
+    /// [`Layout::turn`] keeps: measuring after a rotation would ask pdfium to
+    /// draw eight pages sideways for an answer that is one transposition away
+    /// from the one already in hand.
+    fn measure_crop(&mut self) {
+        let mut crop = crate::crop::measure(&self.document);
+        let mut turns = (self.layout.rotation / 90) % 4;
+        while turns > 0 {
+            crop = crop.map(crate::layout::Crop::turned);
+            turns -= 1;
+        }
+        self.keeping_place(|layout| layout.crop = crop);
+    }
+
+    /// Turn the document a quarter at a time.
+    ///
+    /// Nothing is written down: a rotation is a way of looking rather than a
+    /// property of the file, which is what `viewer.ts` says of it and what
+    /// Preview, Acrobat and Sumatra all do.
+    ///
+    /// **And no cache is thrown away**, which is where this parts company
+    /// with the app. There `rotate()` clears the links, the notes and the
+    /// markup, because all three are held as fractions of a page that has
+    /// just changed shape. Here they are held in the page's own unturned
+    /// points and [`Layout::place_on`] does the turning where they are drawn,
+    /// so a rotation costs a relayout and the pages that were on screen.
+    pub fn rotate(&mut self, quarter_turns: i32) {
+        self.keeping_place(|layout| layout.turn(quarter_turns));
+        self.notice = match self.layout.rotation {
+            0 => "Upright".into(),
+            degrees => format!("Turned {degrees}°"),
+        };
     }
 
     pub fn set_spread(&mut self, spread: Spread) {
@@ -1343,15 +1541,6 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         }
     };
 
-    // Going somewhere is a number changing. Nothing is asked of the engine.
-    // The signal is copied into the closure rather than captured by reference,
-    // which is what keeps this an `Fn` and lets the key handler build small
-    // closures of its own out of it.
-    let scroll_to = move |top: f64| {
-        let mut viewer = viewer;
-        viewer.write().scroll_to(top);
-    };
-
     // Every key the reader can press is an *action*, and a chord is only a
     // way of asking for one. What was here before was a `match` on
     // `event.key()` — which is the shape the app spent a rewrite getting out
@@ -1442,6 +1631,19 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         })
         .collect();
     let document = held.document.clone();
+    // How every page is drawn, and the string that says so in a key. A turn
+    // of 180° leaves a page exactly the shape it was, so the box's size
+    // cannot stand in for this: the pixels differ and nothing else would say
+    // so. See `page.rs` on why the key is what invalidates a texture.
+    let view = held.layout.view();
+    let view_key = match view.crop {
+        Some(crop) => format!(
+            "{}|{:.3},{:.3},{:.3},{:.3}",
+            view.rotation, crop.x, crop.y, crop.width, crop.height
+        ),
+        None => format!("{}|whole", view.rotation),
+    };
+    let trimming = held.trims_margins();
     let chosen = chosen.clone();
     drop(held);
 
@@ -1509,6 +1711,14 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     class: if marked { "chip mark on" } else { "chip mark" },
                     onclick: move |_| { let page = viewer.read().page(); viewer.write().mark_page(page); },
                     if marked { "Marked" } else { "Mark" }
+                }
+                button {
+                    // On means the reader asked, not that anything was found:
+                    // a document with nothing to trim keeps the switch and
+                    // says so on the notice line. See [`Viewer::set_trim`].
+                    class: if trimming { "chip trim on" } else { "chip trim" },
+                    onclick: move |_| { let on = viewer.read().trims_margins(); viewer.write().set_trim(!on); },
+                    if trimming { "Trimmed" } else { "Trim" }
                 }
                 button { class: "chip fit", onclick: move |_| viewer.write().set_fit(Fit::Width), "{zoom}" }
                 button { class: "chip zoom-out", onclick: move |_| viewer.write().zoom(false), "−" }
@@ -1729,8 +1939,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                         WheelDelta::Lines(delta) => delta.y * LINE,
                         WheelDelta::Pages(delta) => delta.y * viewer.read().layout.viewport.height,
                     };
-                    let to = viewer.read().scroll_by(delta);
-                    scroll_to(to);
+                    viewer.write().nudge(delta);
                 },
                 div {
                     class: "pages",
@@ -1747,7 +1956,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             // drawn at, and the theme it is wearing. A change
                             // to any of them is a different node, which is
                             // what gives the old texture back — see `page.rs`.
-                            key: "{placed.index}:{placed.width}x{placed.height}:{theme_name}",
+                            key: "{placed.index}:{placed.width}x{placed.height}:{theme_name}:{view_key}",
                             document: Handle(document.clone()),
                             chosen: chosen.clone(),
                             index: placed.index,
@@ -1757,6 +1966,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             height: placed.height,
                             hits: placed.hits,
                             links: placed.links,
+                            view,
                             viewer,
                             away: away.clone(),
                         }
@@ -1798,6 +2008,9 @@ fn Page(
     /// layer here to hang an anchor off, and a rectangle is what a link
     /// actually is in the file.
     links: Vec<(Rect, Target)>,
+    /// How this page is turned and how much of it is drawn. In the key as
+    /// well, which is what gives the old texture back — see [`PageWidget`].
+    view: crate::layout::View,
     /// Following a link is a jump, and a jump is the viewer's.
     viewer: Signal<Viewer>,
     /// …unless it leads out of the document, which is the window's. See
@@ -1814,6 +2027,7 @@ fn Page(
         CustomWidgetAttr::new(PageWidget::new(
             document.0.clone(),
             index,
+            view,
             chosen.clone(),
             shell,
         ))
@@ -1891,16 +2105,17 @@ fn Page(
 /// also the honest answer to a reader who presses ⌘P: printing is not there
 /// yet, and silence would be indistinguishable from a broken keymap.
 fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
+    // Every movement goes through the viewer rather than through an offset,
+    // because in paged mode an offset is not where a reader ends up: the page
+    // has to be turned first. See [`Viewer::nudge`] and [`Viewer::go_to`].
     fn by(mut viewer: Signal<Viewer>, delta: f64) {
-        let to = viewer.read().scroll_by(delta);
-        viewer.write().scroll_to(to);
-    }
-    fn to(mut viewer: Signal<Viewer>, top: f64) {
-        viewer.write().scroll_to(top);
+        viewer.write().nudge(delta);
     }
     fn page(mut viewer: Signal<Viewer>, page: usize) {
-        let target = viewer.read().page_target(page);
-        viewer.write().scroll_to(target);
+        viewer.write().go_to(crate::layout::Anchor {
+            page,
+            offset: 0.0,
+        });
     }
 
     match action {
@@ -1910,11 +2125,8 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
         Action::HalfScreenUp => by(viewer, -(screen - OVERLAP) / 2.0),
         Action::ScreenDown => by(viewer, screen - OVERLAP),
         Action::ScreenUp => by(viewer, -(screen - OVERLAP)),
-        Action::FirstPage => to(viewer, 0.0),
-        Action::LastPage => {
-            let bottom = viewer.read().layout.max_scroll();
-            to(viewer, bottom);
-        }
+        Action::FirstPage => viewer.write().to_start(),
+        Action::LastPage => viewer.write().to_end(),
         Action::NextPage => {
             let next = viewer.read().page() + 1;
             page(viewer, next);
@@ -1928,6 +2140,8 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
         Action::FitWidth => viewer.write().set_fit(Fit::Width),
         Action::FitPage => viewer.write().set_fit(Fit::Page),
         Action::ActualSize => viewer.write().actual_size(),
+        Action::RotateRight => viewer.write().rotate(1),
+        Action::RotateLeft => viewer.write().rotate(-1),
         Action::NextTheme => viewer.write().next_theme(),
         Action::Sidebar => viewer.write().toggle_sidebar(),
         Action::Mark => {

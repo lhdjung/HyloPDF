@@ -78,6 +78,19 @@ pub struct Options {
     /// straight to the keymap. `openApp({ keys: … })` in the app's harness is
     /// the same trick against the browser twin of the same loader.
     pub keys: BTreeMap<String, Vec<String>>,
+    /// Settings written into the config directory before the reader opens,
+    /// as key against value.
+    ///
+    /// The twin of `openApp({ settings })` in the app's own harness, and it
+    /// exists for the same reason: some of what this reader does is not
+    /// reachable by pressing anything. `scroll_mode` is the case in point —
+    /// the brief says continuous scrolling may only ever change if the reader
+    /// explicitly opts into it, so there is deliberately no key and no chip,
+    /// and a line in `settings.toml` is the whole of the interface for it.
+    ///
+    /// Written through the app's own [`crate::settings::set_many`], so what a
+    /// test exercises is the real loader reading a real file.
+    pub settings: Vec<(String, serde_json::Value)>,
     /// Where this reader's settings and themes live.
     ///
     /// **A directory of its own per reader, and that is not fastidiousness.**
@@ -108,6 +121,7 @@ impl Default for Options {
             scale: 1.0,
             theme: None,
             keys: BTreeMap::new(),
+            settings: Vec::new(),
             config: scratch_config(),
         }
     }
@@ -189,6 +203,12 @@ impl Reader {
         self.opened.borrow().clone()
     }
 
+    /// How big the window is, in CSS pixels. What a test needs to know how
+    /// much of a page taller than the window is actually on screen.
+    pub fn window(&self) -> (f64, f64) {
+        (self.width as f64, self.height as f64)
+    }
+
     /// Open a document with the default options.
     pub fn open(path: &str) -> Self {
         Self::open_with(path, Options::default())
@@ -213,6 +233,7 @@ impl Reader {
     /// document and drives several readers over it.
     pub fn over(document: Arc<dyn PageSource>, options: Options) -> Self {
         write_keys(&options.config, &options.keys);
+        write_settings(&options.config, &options.settings);
         // Corrected in `Viewer::new` during the first render, before anything
         // is painted. See `main.rs`, which does the same.
         let chosen = Chosen::new(palette::FALLBACK);
@@ -796,6 +817,15 @@ fn write_keys(dir: &std::path::Path, keys: &BTreeMap<String, Vec<String>>) {
     }
     let _ = std::fs::create_dir_all(dir);
     std::fs::write(dir.join(crate::keys::FILE), body).expect("keys.toml");
+}
+
+/// The settings a test asked for, written the way the app writes them.
+fn write_settings(dir: &std::path::Path, settings: &[(String, serde_json::Value)]) {
+    if settings.is_empty() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(dir);
+    crate::settings::set_many(dir, settings.to_vec()).expect("settings.toml");
 }
 
 /// "ArrowDown" is a named key and "j" is a character. `keyboard_types` parses

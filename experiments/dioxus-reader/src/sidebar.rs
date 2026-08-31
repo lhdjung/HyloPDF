@@ -465,9 +465,15 @@ fn Thumb(
         let shell = dioxus_core::try_consume_context::<
             std::sync::Arc<dyn blitz_traits::shell::ShellProvider>,
         >();
+        // `View::WHOLE`: a thumbnail is the page as the document has it,
+        // not as the reader has turned or trimmed it. The app draws its
+        // thumbnails through a viewport of their own for the same reason —
+        // the column is a map of the file, and a map that turns with the
+        // reader is one they have to re-learn.
         CustomWidgetAttr::new(PageWidget::new(
             document.0.clone(),
             index,
+            crate::layout::View::WHOLE,
             chosen.clone(),
             shell,
         ))

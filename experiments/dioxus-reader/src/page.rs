@@ -29,7 +29,7 @@ use peniko::{Blob, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Ima
 use blitz_traits::shell::ShellProvider;
 
 use crate::gpu::{PageTexture, Recolorer};
-use crate::layout::MAX_PIXELS;
+use crate::layout::{View, MAX_PIXELS};
 use crate::render::PageSource;
 use crate::stats;
 use crate::palette::Palette;
@@ -90,6 +90,13 @@ impl Chosen {
 pub struct PageWidget {
     document: Arc<dyn PageSource>,
     index: usize,
+    /// How the page is turned and how much of it is drawn.
+    ///
+    /// Given once, like the page number, because it is in the component's key
+    /// — the same reason the size is not stored here and the theme is. A turn
+    /// or a trim is a different node, a new widget and a new texture, and the
+    /// old one is released by Blitz between frames where it is safe.
+    view: View,
     chosen: Chosen,
     /// How a widget asks for another frame. The `fresh` dance below needs the
     /// frame after the one that registered the texture, and
@@ -151,6 +158,7 @@ impl PageWidget {
     pub fn new(
         document: Arc<dyn PageSource>,
         index: usize,
+        view: View,
         chosen: Chosen,
         shell: Option<Arc<dyn ShellProvider>>,
     ) -> Self {
@@ -158,6 +166,7 @@ impl PageWidget {
         PageWidget {
             document,
             index,
+            view,
             chosen,
             shell,
             device: None,
@@ -204,7 +213,7 @@ impl PageWidget {
         let began = Instant::now();
         let outcome = self
             .document
-            .render(self.index, width, height, &mut |bitmap| {
+            .render(self.index, width, height, self.view, &mut |bitmap| {
                 // BGRA as pdfium wrote it, in RGBA order because that is what
                 // the reference ramp reads — the swizzle the GPU path gets for
                 // free by uploading as `Bgra8Unorm`.
@@ -272,7 +281,7 @@ impl PageWidget {
         let mut uploaded = std::time::Duration::ZERO;
         let outcome = self
             .document
-            .render(self.index, width, height, &mut |bitmap| {
+            .render(self.index, width, height, self.view, &mut |bitmap| {
                 let began = Instant::now();
                 uploaded_texture = recolorer.upload(ctx, &bitmap, &theme);
                 uploaded = began.elapsed();

@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use crate::layout::Size;
+use crate::layout::{Size, View};
 
 /// One page's pixels, as pdfium hands them over: BGRA, top row first.
 ///
@@ -206,11 +206,19 @@ pub trait PageSource: Send + Sync {
     ///
     /// A callback rather than a return value because the buffer is the
     /// renderer's and is reused — see [`Bitmap`].
+    ///
+    /// `view` says how the page is to be turned and how much of it to draw,
+    /// and the pixels handed over are `width`×`height` of *that*. A renderer
+    /// that cannot turn or crop is not a renderer this reader can use, so it
+    /// is an argument rather than something with a default: a page drawn
+    /// whole into a box shaped for a cropped one is a picture that is subtly
+    /// and permanently wrong, which is the failure a default would buy.
     fn render(
         &self,
         index: usize,
         width: u32,
         height: u32,
+        view: View,
         take: &mut dyn FnMut(Bitmap) ,
     ) -> Result<(), String>;
     /// Where the document was opened from.

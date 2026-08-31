@@ -20,7 +20,11 @@
 //! column of thumbnails and the search results in it. [`search`] is built
 //! too, and it is half the size of the app's because pdfium answers per
 //! character: there is no text layer here and nothing measuring a DOM range
-//! against one.
+//! against one. The margins can be trimmed off ([`crop`]), the page can be
+//! turned a quarter at a time, and the document can be read one page at a
+//! time rather than continuously — the last of which is a line in
+//! `settings.toml` and deliberately nothing else, because the brief says a
+//! shortcut for it would be a thing to hit by accident.
 //!
 //! # The app's own modules, compiled here unchanged
 //!
@@ -62,6 +66,7 @@
 
 pub mod app;
 pub mod config;
+pub mod crop;
 pub mod gpu;
 /// Documents written by hand for the tests. Not in the binary either.
 #[cfg(feature = "harness")]

@@ -229,7 +229,7 @@ fn pdfium_is_not_thread_safe() {
                 let document = render::open(&path).unwrap();
                 for page in 0..4 {
                     document
-                        .render(page, 400, 500, &mut |_bitmap| {})
+                        .render(page, 400, 500, dioxus_reader::layout::View::WHOLE, &mut |_bitmap| {})
                         .unwrap();
                 }
             })

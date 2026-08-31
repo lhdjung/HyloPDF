@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use pdfium_render::prelude::*;
 
-use crate::layout::Size;
+use crate::layout::{Size, View};
 use crate::render::{Bitmap, Heading, Link, PageSource, PageText, Rect, Target};
 
 /// The lock every call into pdfium is taken behind.
@@ -312,6 +312,7 @@ impl PageSource for Document {
         index: usize,
         width: u32,
         height: u32,
+        view: View,
         take: &mut dyn FnMut(Bitmap),
     ) -> Result<(), String> {
         // The library first, then the document — always in that order, which
@@ -348,7 +349,41 @@ impl PageSource for Document {
             )
                 .map_err(|e| format!("page {index}: {e}"))?;
 
-        let config = PdfRenderConfig::new().set_target_size(width as i32, height as i32);
+        // **The crop is a window onto a page drawn whole, not a page drawn
+        // small.** pdfium's `start_x`/`start_y` are where the page's top-left
+        // corner goes in the bitmap, and everything outside the bitmap is
+        // simply not drawn — so a page is asked for at the size it *would* be
+        // uncropped and slid up and left until the part worth keeping is the
+        // part inside. That is `offsetX`/`offsetY` in `viewer.ts` exactly, and
+        // it is why a trimmed document costs *less* to draw than an untrimmed
+        // one rather than more: nothing is rendered that will be clipped.
+        //
+        // The rotation is pdfium's own, added to the page's: `rotate` here is
+        // a quarter turn on top of whatever `/Rotate` the file asks for, which
+        // is what `page.rotate + this.rotation` says in the app.
+        let mut config = PdfRenderConfig::new().set_target_size(width as i32, height as i32);
+        if let Some(crop) = view.crop {
+            // What the whole page would be, at the scale that makes the crop
+            // exactly the pixels asked for. Rounded once, here, so that the
+            // origin below is an offset into the same grid.
+            let whole_width = (width as f64 / crop.width.max(0.001)).round().max(1.0);
+            let whole_height = (height as f64 / crop.height.max(0.001)).round().max(1.0);
+            config = config
+                .set_target_size(whole_width as i32, whole_height as i32)
+                .set_origin(
+                    -(crop.x * whole_width).round() as i32,
+                    -(crop.y * whole_height).round() as i32,
+                );
+        }
+        config = config.rotate(
+            match view.rotation {
+                90 => PdfPageRenderRotation::Degrees90,
+                180 => PdfPageRenderRotation::Degrees180,
+                270 => PdfPageRenderRotation::Degrees270,
+                _ => PdfPageRenderRotation::None,
+            },
+            false,
+        );
         let began = Instant::now();
         page.render_into_bitmap_with_config(&mut bitmap, &config)
             .map_err(|e| format!("page {index}: {e}"))?;

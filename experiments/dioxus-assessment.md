@@ -427,7 +427,14 @@ step was chosen to be testable:
    with them, because following a cross-reference and typing a page number are
    the two moves that leave a reader stranded. The page field is a readout that
    becomes a field, which is Blitz's focus rule and not a preference*
-6. spreads, trim, rotation, paged mode, presenting — *spreads done in Phase 1*
+6. spreads, trim, rotation, paged mode, presenting — *spreads done in Phase 1;
+   trim, rotation and paged mode done. Presenting is the one thing left, and
+   it is the window rather than the page, so it goes with item 9. Two things
+   the port improved on the app: every rectangle stays in the page's own
+   unturned points and one function places it, so a rotation throws no cache
+   away; and the sparse `boxes` array paged mode needs is
+   `Vec<Option<PageBox>>`, which is the app's most carefully commented trap
+   made into a type*
 7. the library: position, open documents, marks, the restore list
 8. the watchers: themes directory, the document being recompiled
 9. multi-window: `hand_over`, placements, the Dock menu, `Exiting`

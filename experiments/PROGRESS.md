@@ -21,7 +21,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 157 tests, about fifteen seconds
+cargo test                                   # 182 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -37,12 +37,19 @@ space and Page Up/Down a screen, Home/End and `g g`/`G` the ends, `h`/`l` and
 the left/right arrows a page, ⌘+ and ⌘− zoom, ⌘0 fit width, ⌘1 actual size,
 ⌘2 fit page, ⌘B the sidebar, ⌘⇧B a mark on the page you are on, ⌘F the find
 bar with ⌘G and ⌘⇧G through the matches and Escape out of it, `p` or ⌥⌘G the
-page field, ⌘[ and ⌘] back and forward through the places you jumped from.
+page field, ⌘[ and ⌘] back and forward through the places you jumped from,
+⌘R and ⌘L turn the page a quarter each way.
 `s` spreads
 and `t` the next theme are this experiment's own and are not in the app. Any
 of them can be rebound in `keys.toml`; a key bound to something not built yet
 says so on the notice line. The theme, the zoom, the fit, the spread, the
-sidebar and the marks are all still there the next time it opens.
+sidebar, the trim and the marks are all still there the next time it opens.
+
+**Two things are settings and nothing else.** Trimming the margins is the
+chip marked Trim in the toolbar — the app puts it in a menu, and there are no
+menus here yet — and one page at a time is `scroll_mode = "paged"` in
+`settings.toml` with no key and no chip at all, which is the brief's own
+instruction about it. See Phase 3 item 6.
 
 ## The numbers
 
@@ -105,6 +112,23 @@ pointed at with `SPIKE_PDFIUM`. Blitz comes in through **path dependencies
 into a clone beside this repository** (`../../../blitz`), because the Custom
 Widget API this rests on is on `main` and only partly on crates.io. Move to a
 git dependency when the next alpha lands.
+
+**That clone is a build dependency and it is not in this repository**, so a
+machine that does not have it gets `failed to load manifest for dependency
+blitz-dom` and nothing else — which is the whole error, and it names a path
+rather than saying what to do about it. Put it back with:
+
+```sh
+git clone https://github.com/DioxusLabs/blitz ~/rust_projects/blitz
+```
+
+The reader has since been moved onto that repository's **`main`**, which is
+`c6dec888` at the time of writing, and it compiles and passes the whole suite
+there with no change on either side. Two things worth knowing from doing it:
+the API this rests on has not moved since `64eb2785`, and **all four of the
+upstream faults in `tests/upstream.rs` are still faults** — every one of those
+tests still passes, and they are written to pass while the bug is there and
+fail the day it is fixed.
 
 **A page is a `blitz_dom::Widget`, and it costs no frames when it is still.**
 The older `<canvas src=…>` paint source set `has_canvas` on the document, which
@@ -457,12 +481,15 @@ thread.
 | `tests/sidebar.rs` | the panel: the contents listed and indented, a heading clicked and the one the reader is under, the column's mounting window, a thumbnail with ink on it, the document giving up exactly the panel's width, and a mark made, named, followed, taken off and remembered |
 | `tests/search.rs` | the find bar: opening and closing it, what is typed reaching the scan, the match the reader lands on, stepping and wrapping, a highlight's rectangle on the page, the three switches, the results tab, a key typed into the field not driving the document, and one slice not reading a whole book |
 | `tests/links.rs` | the links: where one is, where following it lands, the two ways a document writes a destination, an address handed to the system, a link that points nowhere; and the history, the labels and the page field |
+| `tests/view.rs` | the margins measured off a sample and taken away, the page turned, a link that turns with it, and the two together |
+| `tests/paged.rs` | one page at a time: what is laid out, what a page turn is, the ends of the document, and every chord in the keymap failing to leave the mode |
 | `tests/cost.rs` | the memory assertion |
 | `tests/upstream.rs` | the four faults above, as the smallest thing that shows each |
 | `tests/recolor.rs` | the shader against the reference |
-| `src/layout.rs` | eleven tests on the ported layout |
+| `src/layout.rs` | fourteen tests on the ported layout, three of them on the turn, the crop and where a rectangle lands under both |
 | `src/theme.rs`, `src/settings.rs`, `src/keys.rs`, `src/library.rs` | thirty, and they are the app's own — see Phase 3 |
 | `src/sidebar.rs` | four on the thumbnail column's geometry |
+| `src/crop.rs` | seven: the ink box, the padding, the clamp, the refusals, and the sample |
 | `src/search.rs` | eighteen: the fold, the origin map, whole words, the scan order, stepping, the cap, and the quads a match becomes |
 | `src/store.rs`, `src/palette.rs` | the layer between them and the reader |
 
@@ -1054,15 +1081,103 @@ needs and what the app had to add for the same reason — a bare rectangle over
 printed words has no text of its own, and a page of them otherwise reads as
 "link, link, link".
 
+### 6. Trimming the margins, turning the page, and one page at a time — done but for presenting
+
+Three of the four things in this item. **Presenting is the fourth and is the
+window's rather than the page's** — full screen with nothing on it — which is
+the one category `PROGRESS.md` has said from Phase 2 cannot be tested here at
+all, and it waits for the multi-window work of item 9 where the rest of the
+window lives.
+
+**Trimming is `measureCrop` and `inkBox` from `viewer.ts`, and the whole of the
+machinery around them is gone.** In the app it is an `async` method with a
+`cropping` generation counter, a check after every `await` that the document
+has not been closed and the run has not been superseded, and a `void` call at
+three sites — because eight page renders in a browser are eight trips through
+pdf.js's worker and cannot be waited for. Here eight pages at a hundred and
+sixty pixels wide is under five milliseconds in the same call, so a toggle
+measures and lays out before it returns. There is no run to supersede and no
+state to be stale. `src/crop.rs` is the module and it is 190 lines against the
+app's 130 plus the counter threaded through the viewer.
+
+The constants come across unchanged and so do the arguments for them: eight
+pages sampled because the shapes that vary are the front matter, the plates
+and the index; the union rather than a per-page crop, because a per-page crop
+changes the scale from page to page and in continuous scrolling that is a
+document that breathes as you read it; `INK` at 235, which is the same
+threshold `WHITE_POINT` recolours by, so a hairline printed at 90% white is
+paper to both; and never more than a third off any one side, because a page
+whose margins measure wider than that is more likely to be a page this has
+misread and the cost of being wrong is a reader who cannot see the top line.
+
+*The switch is remembered and the measurement is not.* `trim_margins` is
+already a key in the app's own `settings.rs`, which this crate mounts, so
+there was nothing to add: a run that had it on measures *this* document rather
+than putting back the last one's rectangle. And a document with nothing to
+trim keeps the switch and says so, which is the difference between "off" and
+"on, and there was nothing there" — the chip reads Trimmed either way and the
+notice line is what tells them apart.
+
+**Rotation is four lines of arithmetic and a rectangle that turns with it.**
+The crop is a rectangle on the page as the reader sees it, so a quarter
+clockwise takes `(x, y, w, h)` to `(1 − y − h, x, h, w)` — turning it is exact
+and free, where measuring it again would be eight renders for an answer
+already in hand. Nothing is written down: a rotation is a way of looking
+rather than a property of the file, which is what `viewer.ts` says of it and
+what Preview, Acrobat and Sumatra all do.
+
+*And no cache is thrown away, which is where this parts company with the app.*
+There `rotate()` clears the link cache, the note cache and the markup cache,
+because all three hold **fractions of a turned page** — the app's link layer
+is a DOM overlay sized in percentages, so it has to know the shape it is a
+percentage of. Here every rectangle stays in the page's own unturned points
+and one function does the turning where it is drawn: `Layout::place_on`, the
+single place a link, a match or a mark meets the rotation and the crop. It
+replaced three multiplications by a scale that were spelled out in three
+places, so the port came out shorter than what it replaced *and* gained a
+feature.
+
+**Paged mode made the app's sparse-array trap into a type.** `AGENTS.md` calls
+that array "a genuine trap — two binary searches, `trackCurrentPage`,
+`pointAt` and `mount` all have to know about it — and every one of them did,
+each with a comment saying why", and calls that "the correct amount of defence
+for the shape". In Rust the shape defends itself: `boxes` is
+`Vec<Option<PageBox>>`, `box_of` was already returning an `Option` for the
+out-of-range case, and nothing can read a box without answering the question.
+The five comments are still there, because the *reasoning* is what was paid
+for, but none of them is load-bearing any more.
+
+*There is no key for it and no chip, on purpose.* The brief calls continuous
+scrolling a strong default that may only ever change if the reader explicitly
+opts into it, and says a shortcut for it would be a thing to hit by accident.
+So the whole interface is a line in `settings.toml`, exactly as the app has
+it — and `tests/paged.rs` presses every chord in the keymap at a paged reader
+to hold it to that, which is the only way to make a claim about a keymap
+rather than about the twenty keys somebody thought of.
+
+*What a page turn is, and it is not a scroll.* One page is laid out, so
+arriving at a page starts at the top of it; scrolling past the bottom of a
+page turns it, and past the top turns back **to the bottom of the page
+arrived at**, because that is where the reader was reading. Everything that
+moves a reader now goes through one door — `Viewer::go_to` — so the history,
+a link, a heading, a typed page number and a search result all turn the page
+in paged mode without any of them knowing which mode is on. That door did not
+exist before this item and four call sites were each doing
+`scroll_target` then `scroll_to` by hand.
+
+**The harness grew one thing: `Options.settings`**, which writes a real
+`settings.toml` through the app's own `set_many` before the reader opens.
+`openApp({ settings })` is the same trick in the app's harness and it is here
+for the same reason — some of what this reader does is deliberately not
+reachable by pressing anything.
+
 ### What is not built
 
 No text layer, no selection, no markup, no settings window, no Keyboard page,
 no watchers, one window — and of the library, only the half the marks and the
 history needed, which is to say `touch` and `toggle_mark` and nothing about
-where you were. Two things in the assessment's Phase 1 scope that are also
-still absent: `measureCrop` (trim margins) and paged mode, both of which are
-layout and both of which the ported `Layout` has room for. Rotation and
-presenting are the rest of item 6.
+where you were. Presenting is the one part of item 6 still outstanding, and it
+is a window rather than a page.
 
 ---
 

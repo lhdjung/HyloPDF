@@ -45,18 +45,18 @@ harness = [
 [dependencies]
 dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
 dioxus-core = "0.7"
-dioxus-native = { path = "../../../blitz/packages/dioxus-native", default-features = false, features = ["system-fonts", "html", "svg"] }
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["system-fonts", "html", "svg"] }
 # `clipboard` is arboard, and it is here for one key: ⌘C. The trait method is
 # on `ShellProvider` either way — it is the *implementation* that is behind the
 # feature, and without it every copy silently returns `Err` and the reader
 # pastes whatever it had an hour ago. Nothing else in the default set is taken:
 # `file-dialog` waits for the picker and `accessibility` for the item that is
 # about it.
-blitz-shell = { path = "../../../blitz/packages/blitz-shell", default-features = false, features = ["custom-widget", "clipboard"] }
-blitz-traits = { path = "../../../blitz/packages/blitz-traits" }
-blitz-dom = { path = "../../../blitz/packages/blitz-dom", default-features = false, features = ["custom-widget", "system-fonts", "svg"] }
-blitz-html = { path = "../../../blitz/packages/blitz-html" }
-blitz-paint = { path = "../../../blitz/packages/blitz-paint", default-features = false, features = ["custom-widget"] }
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget", "clipboard"] }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget", "system-fonts", "svg"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget"] }
 anyrender = "0.13"
 anyrender_vello = "0.14"
 wgpu_context = "0.9"
@@ -86,7 +86,7 @@ unicode-normalization = "0.1"
 notify = "8"
 
 # The harness's own, optional. See the `harness` feature above.
-blitz-test-harness = { path = "../../../blitz/packages/blitz-test-harness", optional = true }
+blitz-test-harness = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", optional = true }
 anyrender_vello_cpu = { version = "0.17", optional = true }
 png = { version = "0.18", optional = true }
 keyboard-types = { version = "0.7", optional = true }
@@ -122,7 +122,7 @@ toml = "0.8"
 dioxus-reader = { path = ".", features = ["harness"] }
 # Named again here so that a test can reach them directly, which only
 # `tests/upstream.rs` does — a minimal reproduction owes nothing to this crate.
-blitz-test-harness = { path = "../../../blitz/packages/blitz-test-harness" }
+blitz-test-harness = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
 dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
 
 # The Dock menu, which is AppKit and nothing else: neither winit nor Tauri

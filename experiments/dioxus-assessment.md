@@ -277,6 +277,17 @@ no workaround at this layer and it needs a fix upstream. It is a real
 regression for a class of readers** and the decision below is whether to accept
 it or wait.
 
+**Struck, and it was the only item on either risk list that a decision had to
+be made about.** It was true when this was written and is not true of
+`c6dec888`: `packages/blitz-dom/src/events/ime.rs` applies a composition to the
+focused element's editor through Parley and `blitz-shell` routes all four of
+winit's `WindowEvent::Ime` variants into it, cursor area included. What never
+arrives is a DOM `CompositionEvent` — and that turns out to be the right shape
+rather than a shortfall, because a composition event is a *notification* that
+composing is under way and what a find bar wants is the result. `tests/ime.rs`
+types 日本語 into the field and finds a composed word in a document; nothing in
+the reader had to change. See `PROGRESS.md`, "The platform work".
+
 **`ResizeObserver`, `IntersectionObserver` and the `resize` event do not
 exist.** Replace with the window size from winit and element geometry from
 `onmounted` + `get_client_rect()`, recomputed on the events that actually
@@ -411,7 +422,8 @@ found already** — a Stylo panic on a mouse click, and a `pdfium-render` featur
 called `thread_safe` that serialises nothing — and both were worked around in
 a day, which is the shape to expect rather than a reason to stop.
 
-**IME.** Named above. A real regression, with no local fix.
+**IME.** Named above — and answered upstream since: composition reaches a
+focused field at the revision this tree is pinned to, with a test.
 
 ---
 
@@ -425,7 +437,7 @@ a day, which is the shape to expect rather than a reason to stop.
 | memory win is small | **passed: 144MB against 373MB** | — |
 | text quality worse than the webview | screenshots side by side — **unrun** | probably livable; the brief cares about the look |
 | Blitz bugs block a UI element | continuous — two found, two worked around | fix upstream or work around |
-| IME | known | flag to user; accept or wait for Blitz |
+| ~~IME~~ | **it exists at `c6dec888`; `tests/ime.rs`** | — |
 
 ---
 
@@ -519,6 +531,16 @@ step was chosen to be testable:
     been: create, edit and delete real annotations; keep the journal only for
     what a rebuilt document lost.
 
+**And the platform work was taken out of order, before item 11.**
+`dioxus-fit.md` argued for it and the argument is about sequence rather than
+scope: the two structural risks left are both about platforms and both were
+un-probed, while what remains of the features is large and well understood, so
+finishing markup on macOS and *then* finding out the shell does not hold on
+Windows is the worst available order. Done: Blitz is a pinned git revision
+rather than a path into a clone, so a fresh checkout builds; `experiment.yml`
+runs the whole suite on three runners; IME is struck; and the memory bound now
+binds on Linux as well as on a Mac. See `PROGRESS.md`, "The platform work".
+
 **Phase 4 — the decision.** Same shape as the pdfium write-up: a table of
 measurements, a plain verdict, and either a merge or a parked branch with its
 reasoning intact. The parked branch is a perfectly good outcome and the pdfium
@@ -539,11 +561,11 @@ is that the binary matters more, the alternative is to stop and spend the same
 weeks reducing memory inside the current architecture — where the last such
 pass took 2521MB to 327MB, so there may well be more to find.
 
-**2. IME**, and it stopped being hypothetical with Phase 3 item 4: the search
-field is built, and somebody composing CJK cannot type into it. There will be
-no composed input there until Blitz has composition events. If HyloPDF is
-meant for readers writing CJK that is a blocker, and asking upstream when it
-is coming is the cheapest thing on this list.
+**2. ~~IME~~**, which stopped being hypothetical with Phase 3 item 4 — the
+search field was built and somebody composing CJK could not type into it — and
+then stopped being a decision altogether. Blitz has the input path; the field
+takes 日本語; there is a test. The cheapest thing on this list turned out to be
+reading the pinned revision rather than asking when it was coming.
 
 ## Sources
 

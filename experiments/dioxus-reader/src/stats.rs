@@ -123,7 +123,71 @@ pub fn footprint_mb() -> (f64, f64) {
     (settled, peak)
 }
 
-#[cfg(not(target_os = "macos"))]
+/// The same question on Linux, answered out of `/proc/self/status`.
+///
+/// **`VmRSS` here, when "never RSS" is the rule this file exists to state.**
+/// The rule is about a Mac and about the GPU: a `wgpu` allocation is charged
+/// to the physical footprint and only partly to the resident size, which is
+/// how Phase 1 measured `vello` and `vello_hybrid` at 3% apart when they are
+/// eleven times apart. Neither half of that holds here. Linux has no separate
+/// footprint counter to prefer — `VmRSS` and its high-water mark `VmHWM` are
+/// what the kernel offers — and the one caller of this is the memory test,
+/// which runs the whole reader down the **CPU** path: a page is an `ImageData`
+/// on the heap, there is no device and no driver, and everything the process
+/// holds is resident by construction. So on the platform this is read on, RSS
+/// is the honest number rather than the misleading one.
+///
+/// What that buys is the reason to write it at all: `tests/cost.rs` was a
+/// growth bound that only bound anything on a Mac, and CI runs on Linux. A
+/// leak of the shape that cost 96MB and went unnoticed through the whole of
+/// Phase 1 is now caught by the machine that runs on every push.
+#[cfg(target_os = "linux")]
+pub fn footprint_mb() -> (f64, f64) {
+    match std::fs::read_to_string("/proc/self/status") {
+        Ok(status) => read_status(&status),
+        Err(_) => (0.0, 0.0),
+    }
+}
+
+/// `VmRSS` and `VmHWM` out of the text `/proc/self/status` holds, in
+/// megabytes.
+///
+/// A function of a string rather than of the file, and compiled on every
+/// platform under `cfg(test)`, because the machine this was written on cannot
+/// run it: a cross-check for Linux from a Mac stops at `fontconfig`, whose
+/// build script wants pkg-config and a sysroot, and whose one documented
+/// escape (`RUST_FONTCONFIG_DLOPEN`) changes the crate's API enough that
+/// `fontique` no longer compiles against it. So the parsing is tested here and
+/// the reading is three lines above.
+#[cfg(any(target_os = "linux", test))]
+fn read_status(status: &str) -> (f64, f64) {
+    let (mut settled, mut peak) = (0.0, 0.0);
+    for line in status.lines() {
+        let Some((label, value)) = line.split_once(':') else {
+            continue;
+        };
+        // "VmRSS:\t  123456 kB" — always kilobytes, whatever unit the line
+        // states, which is the kernel's own promise about this file.
+        let kb = value
+            .trim()
+            .trim_end_matches("kB")
+            .trim()
+            .parse::<f64>()
+            .unwrap_or(0.0);
+        match label {
+            "VmRSS" => settled = kb / 1024.0,
+            "VmHWM" => peak = kb / 1024.0,
+            _ => {}
+        }
+    }
+    (settled, peak)
+}
+
+/// And nothing on Windows, which is the one platform with neither a `vmmap`
+/// nor a `/proc`: `GetProcessMemoryInfo` is the answer and it means linking
+/// against `windows-sys` for one number. `tests/cost.rs` says what it does
+/// with a zero — the counters still stand, and the growth bound is skipped.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn footprint_mb() -> (f64, f64) {
     (0.0, 0.0)
 }
@@ -146,4 +210,35 @@ pub fn line() -> String {
         footprint.1,
         get(&PAINTS),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_status;
+
+    /// A real `/proc/self/status`, cut down to the lines that are read and the
+    /// two either side of them — including `VmRSS`'s neighbours, which are
+    /// spelled the same way and must not be picked up instead.
+    #[test]
+    fn the_two_lines_that_matter_are_read_out_of_a_proc_status() {
+        let status = "Name:\tdioxus-reader\n\
+             VmPeak:\t 2530812 kB\n\
+             VmSize:\t 2530812 kB\n\
+             VmHWM:\t  392704 kB\n\
+             VmRSS:\t  147456 kB\n\
+             RssAnon:\t  120000 kB\n\
+             Threads:\t8\n";
+        let (settled, peak) = read_status(status);
+        assert_eq!(settled, 144.0);
+        assert_eq!(peak, 383.5);
+    }
+
+    /// And a file with nothing in it worth reading is zero rather than a
+    /// panic, which is the answer `tests/cost.rs` knows how to treat as "this
+    /// platform does not say".
+    #[test]
+    fn a_status_without_those_lines_is_no_answer_rather_than_a_wrong_one() {
+        assert_eq!(read_status("Name:\tdioxus-reader\n"), (0.0, 0.0));
+        assert_eq!(read_status(""), (0.0, 0.0));
+    }
 }

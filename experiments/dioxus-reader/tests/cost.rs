@@ -35,8 +35,11 @@ fn options() -> Options {
 fn reading_a_book_does_not_grow_without_bound() {
     let (settled, _) = stats::footprint_mb();
     if settled == 0.0 {
-        // Only macOS answers this without linking against mach. Elsewhere the
-        // counters below are still checked.
+        // macOS answers out of `vmmap` and Linux out of `/proc/self/status`;
+        // Windows has neither and would want `GetProcessMemoryInfo` and a
+        // dependency for it. Where nothing answers, the counters below still
+        // stand — which is most of what a leak of the shape this test exists
+        // for actually moves.
         eprintln!("cost: no footprint on this platform; the counters still stand");
     }
 

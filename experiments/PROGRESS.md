@@ -7,11 +7,12 @@ opened by correcting the one before, which is three quarters of a document to
 read before reaching a true sentence. They are in git at `d2b0370` if the
 working is ever wanted.
 
-**The experiment is passing its gates, and the one thing it is now blocked on
-upstream is IME** — see the end of this file: the find bar built in Phase 3
-item 4 cannot take composed input, because Blitz has no composition events,
-and that is a decision rather than something to work around. Five upstream
-*faults* were found and all five are worked around in this tree, with a test
+**The experiment is passing its gates and is no longer blocked on anything
+upstream.** IME was the one item that needed a decision rather than a
+workaround, and it is struck: composition events exist at the revision this
+tree is pinned to, the find bar takes 日本語, and nothing in the reader had to
+change for it — see "The platform work" near the end of this file. Five
+upstream *faults* were found and all five are worked around here, with a test
 each that will fail the day they are fixed.
 
 ```
@@ -21,7 +22,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 270 tests, about a minute and a half
+cargo test                                   # 277 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -122,27 +123,28 @@ cargo run --bin floor -- --all        # the stack, one layer at a time
 
 `libpdfium.dylib` is not committed: `vendor/lib/` is filled from
 [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries), or
-pointed at with `SPIKE_PDFIUM`. Blitz comes in through **path dependencies
-into a clone beside this repository** (`../../../blitz`), because the Custom
-Widget API this rests on is on `main` and only partly on crates.io. Move to a
-git dependency when the next alpha lands.
+pointed at with `SPIKE_PDFIUM` — the reader reads `HYLO_PDFIUM` and falls back
+to the spike's copy. Blitz comes in as a **git dependency pinned to
+`c6dec888`**, because the Custom Widget API this rests on is on `main` and only
+partly on crates.io.
 
-**That clone is a build dependency and it is not in this repository**, so a
-machine that does not have it gets `failed to load manifest for dependency
-blitz-dom` and nothing else — which is the whole error, and it names a path
-rather than saying what to do about it. Put it back with:
+**It used to be a path dependency into a clone beside this repository**
+(`../../../blitz`), and that clone was a build dependency that is not in this
+repository: a machine without it got `failed to load manifest for dependency
+blitz-dom` and nothing else, which names a path rather than saying what to do
+about it. This file called moving off that "when the next alpha lands", and
+waiting was never going to work — `blitz-test-harness` is `publish = false` in
+upstream's own manifest, so the harness the whole Phase 2 argument rests on can
+never come from crates.io. A pinned revision is the answer instead, both crates
+take it, and **a fresh checkout now builds with nothing beside it**. That is
+what made the CI job below possible; it is the only thing that ever stood in
+its way.
 
-```sh
-git clone https://github.com/DioxusLabs/blitz ~/rust_projects/blitz
-```
-
-The reader has since been moved onto that repository's **`main`**, which is
-`c6dec888` at the time of writing, and it compiles and passes the whole suite
-there with no change on either side. Two things worth knowing from doing it:
-the API this rests on has not moved since `64eb2785`, and **all four of the
-upstream faults in `tests/upstream.rs` are still faults** — every one of those
-tests still passes, and they are written to pass while the bug is there and
-fail the day it is fixed.
+Two things worth knowing from the move onto `main` that preceded it: the API
+this rests on has not moved since `64eb2785`, and **all five of the upstream
+faults in `tests/upstream.rs` are still faults** — every one of those tests
+still passes, and they are written to pass while the bug is there and fail the
+day it is fixed.
 
 **A page is a `blitz_dom::Widget`, and it costs no frames when it is still.**
 The older `<canvas src=…>` paint source set `has_canvas` on the document, which
@@ -501,12 +503,14 @@ thread.
 | `tests/watch.rs` | what changes on the disk: a theme edited and a theme deleted, a document recompiled and one that got shorter, news about somebody else's document, a rebuild that renames the paper — and one test with a real watcher and a real file behind it |
 | `tests/windows.rs` | the window, asked for rather than made: a second one, closing against quitting, full screen and the way out of it, presenting taking the chrome and the panel and giving them back, and the toolbar naming its own way back |
 | `tests/select.rs` | sweeping words: what a sweep covers and what it reads as, a sweep backwards and one across two pages, a click that is not a selection, a second click taking a word, the page turned under the pointer, ⌘A, ⌘C, ⌘⇧C, Escape's order, a recompile putting it down, and the cap on the pages of text kept |
+| `tests/ime.rs` | composed input: a word from a candidate window reaching the field, one that is in the document being found, a preedit that is not searched for, the empty preedit before a commit, and a composition that does not drive the document |
 | `tests/cost.rs` | the memory assertion |
 | `tests/upstream.rs` | the five faults above, as the smallest thing that shows each |
 | `tests/recolor.rs` | the shader against the reference |
 | `src/layout.rs` | fourteen tests on the ported layout, three of them on the turn, the crop and where a rectangle lands under both |
 | `src/theme.rs`, `src/settings.rs`, `src/keys.rs`, `src/library.rs`, `src/watch.rs` | forty-four, and they are the app's own — see Phase 3 |
 | `src/sidebar.rs` | four on the thumbnail column's geometry |
+| `src/stats.rs` | two on the two lines of `/proc/self/status` the memory test reads on Linux |
 | `src/crop.rs` | seven: the ink box, the padding, the clamp, the refusals, and the sample |
 | `src/windows.rs` | fourteen on the rules the app cannot test at all: which window a document goes to, what a window going means, and where the next one lands |
 | `src/emit.rs` | four on the switchboard: news for one window, news for all of them, and a window that has gone |
@@ -1819,6 +1823,158 @@ clipboard away is not a thing to do without being asked. Everything above it —
 the sweep, the caret, the quote, the page number — is exercised by the harness
 against the real event path.
 
+### The platform work, which was supposed to come after markup
+
+`dioxus-fit.md` was written from the other side of the fence — against QRnew's
+own migration, built the same week onto the same Blitz revision — and its
+recommendation was to reverse the order this file had been working in: **do the
+cheap platform work before the expensive feature work**, because the two
+structural risks left are both about platforms and both were un-probed, while
+the feature work remaining is large and well understood. Finishing markup on
+macOS and *then* finding out the shell does not hold on Windows is the worst
+available sequence. So markup waited, and this is what came first.
+
+#### Blitz is a pinned git revision now, and a fresh checkout builds
+
+Both crates, at `c6dec888`, which is the revision the clone was already sitting
+on. The whole change is seven lines of `Cargo.toml` in the reader and six in
+the spike; the lockfiles moved and nothing else did, and all 270 tests passed on
+the other side of it without a rebuild of anything but the dependency graph.
+
+The reason this was worth doing first is that it is the only thing that stood
+between this tree and a machine other than this one. See Phase 0 above for what
+it replaces.
+
+#### And there is a CI job on three platforms
+
+`.github/workflows/experiment.yml`. It is the third of the three things to
+carry forward, which has been on that list since Phase 2 and is the item
+`dioxus-fit.md` calls the highest information per hour left in the experiment:
+`cargo test` needs no GPU, no screen and no compositor, so the whole reader —
+Stylo, Parley, fontique, Taffy, the layout, the shader's CPU twin, pdfium and
+every one of the app's five mounted modules — can be run on Windows and Linux
+for the price of a runner. **Nothing in this experiment had ever run on
+either.**
+
+It is a workflow of its own rather than a job in `ci.yml` because the two share
+nothing: that one is Node and Tauri and a webview. Four things it needs, and
+each was a small discovery:
+
+- **pdfium is downloaded per platform**, from the same `chromium/8021` release
+  `vendor/lib` was filled from. The Windows archive keeps the DLL in `bin/` and
+  its import library in `lib/`, so the directory `HYLO_PDFIUM` names is not the
+  same on all three.
+- **Linux needs `libfontconfig1-dev`**, because `yeslogic-fontconfig-sys` looks
+  for fontconfig with pkg-config at build time and panics out of a build script
+  without it — long before any test runs. Its own escape hatch,
+  `RUST_FONTCONFIG_DLOPEN=1`, is not one here: it changes the crate's API
+  surface enough that `fontique` stops compiling against it. That was found by
+  trying it.
+- **Node, for one file.** `Reader::book()` is the app's own 400-page fixture,
+  which the app generates rather than commits, and `make-pdf.mjs` has no
+  dependencies — no `npm ci`, one command. `src/fixture.rs`'s own documents are
+  written in Rust precisely so that this is the *only* place the suite needs
+  anything but cargo.
+- **No `cargo fmt --check`**, unlike the app's Rust job, and deliberately: the
+  keymap is one row per action so that it can be read against `keys.ts`, the
+  macro above it is one line per arm, and rustfmt explodes both. Clippy runs,
+  on one runner, and is clean.
+
+What it cannot cover is the window — the shell, the cascade, full screen, the
+Dock menu and the socket. Item 9 is what makes that a small hole rather than a
+large one: the *rules* are in `windows.rs` with fourteen tests of their own, and
+what is left needing a real window is the part that genuinely is a window.
+
+**One thing was answered before the job ever ran.** `cargo check --all-targets
+--target x86_64-pc-windows-msvc` compiles, from this machine, with the standard
+library for the target and no linker: the `cfg(not(unix))` arm of `single.rs`,
+`stats.rs` without `vmmap`, and everything under them. Linux cannot be
+cross-checked the same way, because fontconfig wants a sysroot — which is the
+entry above, and is why the runner is the answer.
+
+#### IME exists, and it was never going to need a decision
+
+This file has carried IME as **the** one item that needed a decision rather
+than a workaround, on the strength of `dioxus-assessment.md`'s "IME does not
+exist — no `compositionstart` / `update` / `end`". Both were right when they
+were written and neither is now. `packages/blitz-dom/src/events/ime.rs` takes
+the focused node's editor and applies the composition through Parley;
+`blitz-shell` routes all four of winit's `WindowEvent::Ime` variants into it
+and reports the cursor area back so the candidate window lands in the right
+place.
+
+What arrives is not a DOM `CompositionEvent` and never will be, and that is the
+right answer rather than a shortfall: the DOM's composition events are a
+*notification* that a composition is under way, and what a find bar wants is
+the result. `Reader::compose` sends what an input method sends — a run of
+preedits, then the word — and `tests/ime.rs` types 日本語 into the field by
+composition, finds `résumé` in the document by composing it, and asserts that
+the reader is taken to the page it is on. **Nothing in `app.rs` had to change**:
+the find field is an ordinary `<input>` and a committed composition is an
+`input` event like any other.
+
+Two things came out of writing it that were not the point.
+
+*A preedit is not a query, and here that is free.* Blitz answers a preedit with
+a redraw and no `input` event, so the reader never searches for a half-typed
+romaji. A browser **does** fire `input` mid-composition, with `isComposing` set
+for the application to check — and `main.ts` does not check it, so the app runs
+a scan of the whole document for every intermediate guess. That is the second
+time the port has come out ahead by inheriting a stricter substrate.
+
+*The empty preedit before a commit is winit's contract and not a nicety.*
+Without it, the commit is inserted beside the composing region rather than in
+place of it, and the field ends up holding にほん日本語 — which looks exactly
+like a Blitz fault and is not one. `compose` sends it, and one test sends the
+raw pair the other way round so that the contract is written down somewhere
+that fails if it changes.
+
+So: struck from the risk list, struck from "worth raising upstream", and struck
+from the two documents that called it blocking. It cost an afternoon and five
+tests.
+
+#### The memory bound now binds on the platform CI runs on
+
+`tests/cost.rs` is a growth bound, and `footprint_mb()` answered `0.0` anywhere
+but macOS — so on the machine that will now run this on every push, the one
+test written to catch the shape of regression that cost 96MB and went unnoticed
+through the whole of Phase 1 was checking counters and nothing else.
+
+Linux answers out of `/proc/self/status`: `VmRSS`, and `VmHWM` for the peak.
+**That is RSS, in a file whose own heading says never to measure RSS**, and the
+exception is exact rather than convenient. The rule is about a Mac and about
+the GPU — a `wgpu` allocation is charged to the physical footprint and only
+partly to the resident size, which is how `vello` and `vello_hybrid` were
+measured at 3% apart when they are eleven times apart. Neither half holds here:
+Linux has no separate footprint counter to prefer, and the one caller runs the
+whole reader down the **CPU** path, where a page is an `ImageData` on the heap,
+there is no device and no driver, and everything the process holds is resident
+by construction.
+
+The parsing is a function of a string with two tests on it, because the machine
+this was written on cannot run the function that reads the file. Windows still
+answers nothing: `GetProcessMemoryInfo` means a dependency for one number, and
+the test already knows what to do with silence.
+
+#### One thing seen once and not since
+
+A single `SIGSEGV` out of the test binary, on the first run after the IME tests
+were written, with two of the five having passed. It has not come back in
+twenty-seven runs of that binary and four of the whole suite, and a probe
+written for the most likely cause — documents opened and dropped on eight
+threads while others are read, which is the one thing pdfium's process-wide
+lock does not cover, since `FPDF_CloseDocument` runs from `Drop` outside it —
+did not reproduce it in twelve runs either.
+
+It is recorded rather than fixed because the honest state is that it is not
+understood. The other candidate is font fallback: those tests are the first
+thing in this tree to shape Japanese, and first-time CJK fallback on several
+threads at once goes through fontique and the platform's font machinery. If it
+returns, it will most likely return on the CI job, which runs a cold process on
+a cold machine every time — and the two places to look are a `Drop` for
+`pdfium::Open` that takes `library()` before the document goes, and the font
+context.
+
 ### What is not built
 
 No markup, no settings window, no Keyboard page, and no file picker — and of
@@ -1837,16 +1993,17 @@ was for.
 2. **The CPU path is real code, not a test fixture.** A widget added in Phase 3
    that draws through wgpu needs its `Software` half, or the screenshots
    quietly stop covering it.
-3. **Nothing here has run on Windows or Linux.** The harness is the first part
-   of this experiment that *could* run on either without a screen — a CI job
-   running `cargo test` on three platforms would exercise Stylo, Parley,
-   fontique and the whole reader on engines this is not developed on, and none
-   of it needs a GPU. That is a small job and it is not done. Window dragging
-   and the traffic lights are the window's rather than the page's and cannot be
-   tested here at all — though item 9 found that most of what was on this list
-   *can* be, once the rules are separated from the windows they are about.
+3. **The CI job exists now, and until it has gone green nothing here has run
+   on Windows or Linux.** `experiment.yml` runs `cargo test` on three runners,
+   which needs no GPU and no screen and exercises Stylo, Parley, fontique,
+   Taffy and the whole reader on engines this is not developed on. It was
+   blocked on one thing — a path dependency into a clone — and that is gone.
+   Window dragging and the traffic lights are the window's rather than the
+   page's and cannot be tested there at all, though item 9 found that most of
+   what was on this list *can* be, once the rules are separated from the
+   windows they are about.
 
-## Six things worth raising upstream, and only the last is blocking
+## Five things worth raising upstream, and none of them is blocking
 
 - `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
   comment in the source already says it should be. A tenth of every one of
@@ -1864,7 +2021,13 @@ was for.
   of the page field: an element that stops asking for the keyboard while still
   holding the focus is the same dead keyboard, and the only reliable way to
   make it let go is to stop existing. `tabindex` honoured in the focus walk,
-  which is what a browser does, would answer all four.
+  which is what a browser does, would answer all four — and the fix has an
+  address: `handle_click` in `packages/blitz-dom/src/events/pointer.rs` walks
+  up from the target matching on `el.name.local` and clears the focus if the
+  walk reaches the root unmatched, **without ever consulting `is_focussable()`**,
+  which is `packages/blitz-dom/src/node/element.rs`'s own predicate, already
+  honours `tabindex >= 0`, and is already used by `focus_next_node`. One call,
+  in a file that has the answer in it.
 - Hit-testing that does not clip on `overflow: hidden`, so a node scrolled far
   out of its container is still clickable where its box says it is, over
   whatever is drawn there. Painting gets this right; only the hit test does
@@ -1876,8 +2039,11 @@ was for.
   press and a release on the same node rather than a pointerup. See Phase 3
   item 10.
 
-**And the blocking one is IME**, which is not a fault but an absence: there
-are no composition events, so the find field this phase built cannot take
-composed input and a reader writing CJK cannot search. It is the one item on
-either of these lists that a decision has to be made about rather than worked
-around, and the assessment says so too.
+**IME used to be the sixth entry and the only blocking one**, on the strength
+of there being no composition events at all: a reader writing CJK could not
+search. It is struck. Blitz applies a composition to the focused element's
+editor through Parley and tells the application about the result, `blitz-shell`
+routes all four of winit's IME variants into it, and `tests/ime.rs` types 日本語
+into the find field and finds a composed word in a document. Nothing in this
+reader had to change for it. See "The platform work" above — and note that what
+arrives is not a `CompositionEvent` and does not need to be.

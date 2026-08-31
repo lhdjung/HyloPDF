@@ -46,11 +46,12 @@ use serde::Serialize;
 /// What a window's frontend is told, and by whom.
 ///
 /// The shape is the bridge's, kept deliberately: an event has a name, a
-/// payload, and either a target or everybody. There is one window in this
-/// crate and `target` is therefore always ignored — but it is carried rather
-/// than dropped, because `emit_to` naming one window is the whole reason
-/// `watch.rs` follows a document *per window*, and item 9 is where that stops
-/// being theoretical.
+/// payload, and either a target or everybody. `target` was carried and
+/// ignored while there was one window, on the grounds that `emit_to` naming
+/// one window is the whole reason `watch.rs` follows a document *per window*
+/// — and item 9 is where that stopped being theoretical. It is [`Exchange`]
+/// that reads it now: a recompiled paper reaches the window reading it and
+/// no other, and a saved theme reaches all of them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct News {
     pub event: String,
@@ -136,17 +137,71 @@ impl std::future::Future for Next {
     }
 }
 
+/// Every window's mailbox, by the name the window is known to `watch.rs` by.
+///
+/// One process watches one themes directory and any number of documents, so
+/// there is one watcher and one [`AppHandle`] — and the handle has to be able
+/// to reach a particular window, because `watch.rs` reports a rewritten
+/// document with `emit_to(label, …)` and reports the themes with `emit`. That
+/// is the whole difference between one window and several here: a mailbox
+/// became a switchboard, and nothing in the app's file noticed.
+///
+/// A window joins when it is made and leaves when it is destroyed. Leaving
+/// matters: news for a window that has gone would otherwise pile up in a
+/// mailbox nobody is reading, and the window's `Post` holds a `Waker` into a
+/// virtual DOM that no longer exists.
+#[derive(Clone, Default)]
+pub struct Exchange(Arc<Mutex<Vec<(String, Post)>>>);
+
+impl Exchange {
+    pub fn new() -> Exchange {
+        Exchange::default()
+    }
+
+    /// A window, and the mailbox it reads.
+    pub fn join(&self, label: &str, post: Post) {
+        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        held.retain(|(known, _)| known != label);
+        held.push((label.to_string(), post));
+    }
+
+    pub fn leave(&self, label: &str) {
+        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        held.retain(|(known, _)| known != label);
+    }
+
+    /// Deliver: to the window named, or to every window when none is.
+    pub fn post(&self, news: News) {
+        let boxes: Vec<Post> = {
+            let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            match news.target.as_deref() {
+                Some(target) => held
+                    .iter()
+                    .filter(|(label, _)| label == target)
+                    .map(|(_, post)| post.clone())
+                    .collect(),
+                None => held.iter().map(|(_, post)| post.clone()).collect(),
+            }
+        };
+        // Outside the lock, for the reason `Post::send` is: a waker can run a
+        // task inline, and that task may be joining or leaving.
+        for post in boxes {
+            post.send(news.clone());
+        }
+    }
+}
+
 /// What `watch.rs` is handed, and the whole of what it does with it is emit.
 ///
-/// Tauri's is a handle on the running application. Here it is a handle on one
-/// mailbox, which is the only part of an application that file ever reaches
-/// for.
+/// Tauri's is a handle on the running application. Here it is a handle on the
+/// switchboard, which is the only part of an application that file ever
+/// reaches for.
 #[derive(Clone)]
-pub struct AppHandle(Post);
+pub struct AppHandle(Exchange);
 
 impl AppHandle {
-    pub fn new(post: Post) -> AppHandle {
-        AppHandle(post)
+    pub fn new(exchange: Exchange) -> AppHandle {
+        AppHandle(exchange)
     }
 }
 
@@ -204,11 +259,81 @@ impl Emitter for AppHandle {
 impl AppHandle {
     fn deliver<S: Serialize>(&self, event: &str, target: Option<String>, payload: S) -> Result<()> {
         let payload = serde_json::to_value(payload).map_err(|_| Undeliverable)?;
-        self.0.send(News {
+        self.0.post(News {
             event: event.to_string(),
             target,
             payload,
         });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn news(event: &str, target: Option<&str>) -> News {
+        News {
+            event: event.to_string(),
+            target: target.map(str::to_string),
+            payload: serde_json::Value::Null,
+        }
+    }
+
+    /// What `emit_to` is for, and the whole of what changed when there was
+    /// more than one window: a recompiled paper reaches the window reading it.
+    #[test]
+    fn news_for_one_window_reaches_that_window_alone() {
+        let exchange = Exchange::new();
+        let (main, other) = (Post::new(), Post::new());
+        exchange.join("main", main.clone());
+        exchange.join("reader-1", other.clone());
+
+        exchange.post(news("document-changed", Some("reader-1")));
+        assert_eq!(main.take(), None);
+        assert_eq!(
+            other.take(),
+            Some(news("document-changed", Some("reader-1")))
+        );
+    }
+
+    /// And `emit` with no target is a theme somebody saved, which every window
+    /// is wearing.
+    #[test]
+    fn news_for_nobody_in_particular_reaches_everybody() {
+        let exchange = Exchange::new();
+        let (main, other) = (Post::new(), Post::new());
+        exchange.join("main", main.clone());
+        exchange.join("reader-1", other.clone());
+
+        exchange.post(news("themes-changed", None));
+        assert!(main.take().is_some());
+        assert!(other.take().is_some());
+    }
+
+    /// A window that has gone hears nothing. Its mailbox holds a `Waker` into
+    /// a virtual DOM that no longer exists, and news nobody reads is a queue
+    /// that only grows.
+    #[test]
+    fn a_window_that_left_hears_nothing() {
+        let exchange = Exchange::new();
+        let post = Post::new();
+        exchange.join("reader-1", post.clone());
+        exchange.leave("reader-1");
+        exchange.post(news("themes-changed", None));
+        assert_eq!(post.take(), None);
+    }
+
+    /// Nothing is delivered twice to a window that reported in twice, which is
+    /// what a window remade under the same name would be.
+    #[test]
+    fn a_name_belongs_to_one_mailbox() {
+        let exchange = Exchange::new();
+        let (first, second) = (Post::new(), Post::new());
+        exchange.join("main", first.clone());
+        exchange.join("main", second.clone());
+        exchange.post(news("themes-changed", None));
+        assert_eq!(first.take(), None);
+        assert!(second.take().is_some());
     }
 }

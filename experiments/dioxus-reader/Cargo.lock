@@ -1154,6 +1154,7 @@ dependencies = [
  "dioxus-reader",
  "keyboard-types 0.7.0",
  "notify",
+ "objc2",
  "pdfium-render",
  "peniko",
  "png",

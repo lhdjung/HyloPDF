@@ -12,7 +12,7 @@
 //! turns on and `cargo build` does not, so nothing it needs is in the binary.
 //!
 //! What is not built: no selection, no markup, no settings *window*, no
-//! Keyboard page, one window.
+//! Keyboard page, and no file picker.
 //!
 //! What *is* built, beyond opening a document and reading it: the document's
 //! own links, with the page labels and the go-to field that belong to the same
@@ -78,6 +78,15 @@
 //! caller here is the markup journal, which waits for the item of Phase 3
 //! that is about markup. It needed no change either.
 //!
+//! **There is more than one window now** — see [`windows`], which is the app's
+//! own rules about which window a document goes to and what a window going
+//! means, with every mention of a window taken out of them and a test against
+//! each; [`session`], which is the half that actually makes one; and [`single`],
+//! which is why a second launch hands its document to the reader that is
+//! already running rather than becoming a second one. A window can also be put
+//! into full screen with nothing on it at all, which is the last thing item 6
+//! was waiting for.
+//!
 //! [`watch`] is the fifth, and it is the one this crate expected to have to
 //! edit: it imports two names from Tauri and calls two methods on them, and
 //! everything else in it is about the disk. So the names are supplied instead
@@ -90,6 +99,12 @@
 pub mod app;
 pub mod config;
 pub mod crop;
+/// The Dock's own menu, which is AppKit and exists nowhere else.
+#[cfg(target_os = "macos")]
+pub mod dock;
+/// The three names the app's `watch.rs` reaches for, and the reason it can be
+/// mounted rather than ported. See the module's own comment.
+pub mod emit;
 /// Documents written by hand for the tests. Not in the binary either.
 #[cfg(feature = "harness")]
 pub mod fixture;
@@ -106,14 +121,14 @@ pub mod pdfium;
 pub mod recolor;
 pub mod render;
 pub mod search;
+pub mod session;
 pub mod shell;
 pub mod sidebar;
+pub mod single;
 pub mod stats;
 pub mod store;
 pub mod styles;
-/// The three names the app's `watch.rs` reaches for, and the reason it can be
-/// mounted rather than ported. See the module's own comment.
-pub mod emit;
+pub mod windows;
 
 // The app's own, unchanged. See the module comment above.
 #[path = "../../../src-tauri/src/keys.rs"]

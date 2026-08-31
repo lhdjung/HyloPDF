@@ -143,7 +143,11 @@ it pays off exactly as advertised.
 serialisation, no `async` for the sake of the main thread (though the disk
 writes should stay off it). The window management (`hand_over`, `Placements`,
 `OpenFiles`, `OpenDocuments`, `spawn_window`, `tidy_after`, the Dock menu) is
-rewritten against winit and a shell of our own over `BlitzApplication`.
+rewritten against winit and a shell of our own over `BlitzApplication`. **Built
+— see Phase 3 item 9, and it came out smaller than this line expects: the rules
+separate from the windows and become a tested module of their own, `Placements`
+is not needed at all, and `Pending`/`ready` were a handshake across a bridge
+that is not there.**
 
 Doors that need a crate rather than a Tauri plugin:
 
@@ -151,9 +155,9 @@ Doors that need a crate rather than a Tauri plugin:
 | --- | --- | --- |
 | file picker | `tauri-plugin-dialog` | `rfd` |
 | open a link / reveal a file | Tauri shell | `webbrowser` (already a dep) + `opener` |
-| single instance | `tauri-plugin-single-instance` | `single-instance`, or a Unix socket / named pipe; `RunEvent::Opened` becomes a macOS `NSApplicationDelegate` |
+| single instance | `tauri-plugin-single-instance` | **built — a Unix socket, where binding it is the claim and connecting to it carries the document. Windows wants a named pipe and there is no std type for one; `RunEvent::Opened` needs an application bundle before it needs an `NSApplicationDelegate`** |
 | clipboard | webview | `arboard` |
-| title-bar buttons, Dock menu | `objc2` (already direct) | unchanged |
+| title-bar buttons, Dock menu | `objc2` (already direct) | **the Dock menu is built and is unchanged — it posts the same event ⌘N does, so the thread the app has to spawn for it is not needed here** |
 | print | shells out | unchanged |
 
 ### TypeScript that is reinvented (~11,900 lines + 2,129 CSS)
@@ -298,13 +302,28 @@ app — and it takes about three hundred lines of shell of our own, because
 `DioxusNativeApplication::add_window` does not do what its name suggests. The
 mechanics are in `PROGRESS.md`, Phase 0.
 
-**It remains the highest-risk item on the list.** It is off the documented
-path, written against public fields rather than a supported API, multi-window
-has a history of being broken on Windows in this project, and the app's window
-story is elaborate. **It has been shown to work on macOS and nowhere else.** If
-it does not hold up on all three platforms the rewrite is not worth doing,
-because a reader who cannot open two papers side by side has lost the thing
-this app most recently gained.
+**It remains the highest-risk item on the list**, and Phase 3 item 9 has now
+built the whole of the app's window story on it — two documents at once, the
+cascade, the Dock menu, the quit-versus-close rule, one instance and the
+handover — so what follows is what that found rather than what it feared.
+
+It holds on macOS. It is still off the documented path and still written
+against public fields rather than a supported API, and **it has been shown to
+work on macOS and nowhere else**: single instance is a Unix socket, so Windows
+has none, and Apple Events need an application bundle this experiment does not
+have. If it does not hold up on all three platforms the rewrite is not worth
+doing, because a reader who cannot open two papers side by side has lost the
+thing this app most recently gained.
+
+The one thing it cost was a crash, and it is worth knowing because it was not
+where it looked. Two windows died on the third frame inside Vello's atlas
+upload — and so did *one* window, made after the event loop had started, which
+is a path that had existed since Phase 0 and had never been taken. The cause
+was a page's texture being registered in the same frame as every other page in
+the document was being replaced, which happened on every launch because the
+viewer was laid out at a default size and corrected on mount. Sizing it from
+the window before the first frame removed the collision and a wasted round of
+renders with it. Multi-window found the bug; it did not cause it.
 
 ---
 
@@ -429,9 +448,8 @@ step was chosen to be testable:
    with them, because following a cross-reference and typing a page number are
    the two moves that leave a reader stranded. The page field is a readout that
    becomes a field, which is Blitz's focus rule and not a preference*
-6. spreads, trim, rotation, paged mode, presenting — *spreads done in Phase 1;
-   trim, rotation and paged mode done. Presenting is the one thing left, and
-   it is the window rather than the page, so it goes with item 9. Two things
+6. spreads, trim, rotation, paged mode, presenting — *all done; presenting
+   landed with item 9, being the window's rather than the page's. Two things
    the port improved on the app: every rectangle stays in the page's own
    unturned points and one function places it, so a rotation throws no cache
    away; and the sparse `boxes` array paged mode needs is
@@ -453,7 +471,21 @@ step was chosen to be testable:
    wire on the reader's side is a `Waker` in a mailbox, so a theme saved in an
    editor reaches the screen with nothing polling a clock; owning the window
    cost nothing here*
-9. multi-window: `hand_over`, placements, the Dock menu, `Exiting`
+9. multi-window: `hand_over`, placements, the Dock menu, `Exiting` — *done,
+   with presenting, which item 6 left here. The finding is that most of this
+   was never untestable: the app's window code is rules and windows in one
+   coat, and the rules — which window a document goes to, what a window going
+   means, where the next one lands — need no window to be true. Separated out,
+   they are `windows.rs` and fourteen tests, against a list of things
+   `AGENTS.md` records as checked by hand. What the port lost is most of
+   `spawn_window`: no `Placements` map, because a window is made and placed in
+   one turn with nothing shown in between; no `Pending`/`ready` handshake,
+   because there is no bridge to shake hands across. What has no equivalent is
+   the empty window, and it decides ⌘N: with no start screen, a new window is a
+   second one on the document already in front. One instance is a Unix socket
+   where binding it is the claim and connecting to it carries the document;
+   Apple Events are the one route out of reach, and only because there is no
+   application bundle to send them to*
 10. markup — and this is where it stops being a port, because the annotation
     hole that shaped the current design is gone. Rebuild it as it should have
     been: create, edit and delete real annotations; keep the journal only for

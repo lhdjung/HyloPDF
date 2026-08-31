@@ -267,4 +267,13 @@ body { margin: 0;
   padding: 0 14px; background: var(--surface); border-top: 1px solid var(--line);
   color: var(--muted);
 }
+
+/* Presenting: full screen with nothing else on it. The chrome is gone from
+   the DOM rather than hidden here — see `Viewer::chrome`, which is what gives
+   the document the room the toolbar was using — so all that is left for CSS
+   is the ground. It is the theme's paper rather than its `--ground`: with
+   nothing else on screen the frame around the page is the only thing left
+   that is not the page, and the darker shade reads as a border on a window
+   that has none. */
+.root.presenting .viewer { background: var(--paper); }
 "#;

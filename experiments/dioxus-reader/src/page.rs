@@ -123,6 +123,15 @@ pub struct PageWidget {
     /// is the one legitimate use of the flag that Phase 0 spent its time
     /// establishing must otherwise stay false: a page is not an animation, but
     /// a page that has just arrived is one frame's worth of one.
+    ///
+    /// **And that only moves the collision a frame along**, which item 9 found
+    /// the hard way: a window whose frames landed differently hit it again as
+    /// `MissingTextureBinding`, two runs in three. The frame where every page
+    /// is replaced at once is the whole of the problem, and it was happening
+    /// on every launch because the viewer was laid out at a default viewport
+    /// and corrected on mount. `Reader` sizes it from the window before the
+    /// first frame now, so there is no such frame — see `app.rs`. Anything
+    /// that re-keys every page at once brings this back.
     fresh: bool,
     /// The same page, for a renderer that is not wgpu. See [`Software`].
     software: Option<Software>,

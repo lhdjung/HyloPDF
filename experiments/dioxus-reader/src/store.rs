@@ -212,6 +212,25 @@ pub fn worth_calling(title: &str, file_name: &str) -> bool {
     true
 }
 
+/// What to call a document: its own `/Title` where that is worth having, and
+/// the file's name where it is not.
+///
+/// A function rather than a method for the reason [`reopening`] is one: a
+/// window is given its title before there is a [`Store`] to ask, because a
+/// window's title is an attribute handed to the builder. `Store::opened`
+/// decides the same thing the same way, and this is the deciding.
+pub fn called(path: &str, declared: &str) -> String {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string());
+    if worth_calling(declared, &name) {
+        declared.trim().to_string()
+    } else {
+        name
+    }
+}
+
 /// What was open when the reader was last put down, if it is still there and
 /// the reader wants it back.
 ///
@@ -226,15 +245,25 @@ pub fn worth_calling(title: &str, file_name: &str) -> bool {
 /// gives in `lib.rs`: two sides that each assume the other checked it are two
 /// sides that disagree about whether the window has anything in it.
 pub fn reopening(dir: &Path) -> Option<String> {
+    reopening_all(dir).into_iter().next()
+}
+
+/// The whole of it: one path per window that was open, in the order the
+/// windows were made.
+///
+/// `library.open` has been a list since the app had two windows, and this is
+/// where that stops being a list of one. The first is the launch window's and
+/// the rest are windows of their own — see `main.rs`.
+pub fn reopening_all(dir: &Path) -> Vec<String> {
     let settings = settings::load(dir);
     let wanted = settings
         .get("reopen_last_document")
         .and_then(Value::as_bool)
         .unwrap_or(true);
     if !wanted {
-        return None;
+        return Vec::new();
     }
-    library::prune(&library::load(dir)).open.into_iter().next()
+    library::prune(&library::load(dir)).open
 }
 
 pub struct Store {
@@ -475,15 +504,7 @@ impl Store {
     /// regardless, with the caller expected to ignore it, is two sides that
     /// eventually disagree about whether there was one.
     pub fn opened(&mut self, path: &str, declared: &str) -> Option<Anchor> {
-        let name = std::path::Path::new(path)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        self.title = if worth_calling(declared, &name) {
-            declared.trim().to_string()
-        } else {
-            name.clone()
-        };
+        self.title = called(path, declared);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|since| since.as_secs() as i64)
@@ -507,10 +528,13 @@ impl Store {
             // open a document over.
             Err(refused) => self.complaint = Some(refused),
         }
-        // And what is open now, so that the next launch can pick it up. One
-        // path because there is one window; the app writes one per window and
-        // the file has been a list since there were two of them.
-        let _ = library::set_open(&self.dir, std::slice::from_ref(&self.file));
+        // What is open now is deliberately *not* written here. It is one
+        // entry per window and a `Store` is one window's, so a store that
+        // wrote the list would write a list of one and take the other windows
+        // out of it — which is exactly what happened, and it took a session
+        // of three windows down to whichever rendered last. Whoever makes a
+        // window records what it shows: `Session::window` in the app, and the
+        // harness for a reader that has no window at all.
         if !self.flag("remember_position") {
             return None;
         }

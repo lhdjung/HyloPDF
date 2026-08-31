@@ -100,15 +100,24 @@ pub struct Config {
     /// changes made by somebody else — see [`crate::watch`], which is the
     /// app's own file mounted here.
     ///
-    /// **On in the binary and off in the harness, and the reason is a
-    /// thread.** `Watching` has no way to stop: the sender the notify
-    /// callback holds keeps the receiver alive, so the thread outlives the
-    /// handle. One per process is nothing and one per test is a hundred
-    /// threads and a hundred file-system watches on a `cargo test`. So a test
-    /// posts news into the mailbox itself, which is the deterministic thing
-    /// to do anyway, and the one test that wants the real watcher asks for
-    /// it.
+    /// **Only the harness reads this now.** The binary provides one
+    /// `Arc<Watching>` for the whole process as a context — there is one
+    /// themes directory and one document per window, which is the shape
+    /// `watch.rs` already has — and a window that is handed one uses it
+    /// whatever this says. What is left is the case with no context: off, and
+    /// the reason is a thread. `Watching` has no way to stop, so the thread
+    /// outlives the handle; one per process is nothing and one per test is a
+    /// hundred threads and a hundred file-system watches on a `cargo test`.
+    /// So a test posts news into the mailbox itself, which is the
+    /// deterministic thing to do anyway, and the one test that wants the real
+    /// watcher asks for it.
     pub watch: bool,
+    /// What this window is called — `main`, then `reader-1`, and so on.
+    ///
+    /// It is the name `watch.rs` reports a rewritten document to, and the
+    /// name [`crate::emit::Exchange`] routes that report by, which is the
+    /// whole of why a window needs one. See [`crate::windows`].
+    pub window: String,
 }
 
 impl Config {
@@ -119,6 +128,7 @@ impl Config {
             dir: crate::config::config_dir(),
             theme: None,
             watch: true,
+            window: crate::windows::MAIN.to_string(),
         }
     }
 
@@ -127,6 +137,7 @@ impl Config {
             dir: dir.into(),
             theme: None,
             watch: false,
+            window: crate::windows::MAIN.to_string(),
         }
     }
 }
@@ -168,11 +179,22 @@ impl Screen {
     }
 }
 
-/// The chrome above and below the document, which the viewport is the window
-/// minus. The app measures this off the elements; here it is stated, because
+/// The toolbar's height, the notice line's, and the hairline between them and
+/// the document.
+///
+/// The app measures these off the elements; here they are stated, because
 /// there is no `ResizeObserver` and no `get_client_rect` that can be called
-/// safely from an event — see `resize_from_window` below.
-pub const CHROME: f64 = 46.0 + 30.0 + 2.0;
+/// safely from an event — see `resize_from_window` below. They are three
+/// numbers rather than one because either of the first two can be taken away
+/// now: ⌘T puts the toolbar down, and presenting puts everything down. See
+/// [`Viewer::chrome`].
+pub const TOOLBAR: f64 = 46.0;
+const NOTICE: f64 = 30.0;
+const HAIRLINE: f64 = 2.0;
+
+/// What the chrome costs with all of it on screen, which is what a window
+/// opens with.
+pub const CHROME: f64 = TOOLBAR + NOTICE + HAIRLINE;
 
 /// How far one press of an arrow moves the page.
 const LINE: f64 = 60.0;
@@ -246,6 +268,60 @@ impl Away {
 
     pub fn open(&self, url: &str) {
         (self.0)(url);
+    }
+}
+
+/// What the *window* can be asked to do, which is not the page's business.
+///
+/// A context holding one closure, for the reason [`Screen`] and [`Away`] are
+/// contexts: the thing it stands for does not exist in a test. A shell answers
+/// these against winit; the harness writes them down, which is how "⌘N asks
+/// for a window" is a test rather than a thing somebody checked once by hand.
+///
+/// It is deliberately one closure and an enum rather than five closures. The
+/// asks are a small closed set, they are all "tell whoever owns the window",
+/// and a test that wants to know what the reader asked for wants the list in
+/// order — which is a `Vec<Ask>` and not five counters.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ask {
+    /// A window of its own. The document is chosen by whoever answers, which
+    /// in this reader means a file picker: there is no start screen here, so
+    /// there is no such thing as a window with nothing in it. See
+    /// [`crate::windows::Desk::hand_over`].
+    NewWindow,
+    /// This window, closed. On the last window that ends the app, which is
+    /// how most people quit it.
+    Close,
+    /// All of them, and the app with them.
+    Quit,
+    /// Full screen, on or off. Presenting is this and the chrome taken away,
+    /// and the second half is the page's own — see [`Viewer::present`].
+    FullScreen(bool),
+}
+
+#[derive(Clone)]
+pub struct Frame(Rc<dyn Fn(Ask)>);
+
+impl PartialEq for Frame {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Frame {
+    pub fn new(ask: impl Fn(Ask) + 'static) -> Self {
+        Frame(Rc::new(ask))
+    }
+
+    /// What a window with nobody listening does, which is say so once. A
+    /// reader who presses ⌘N and gets silence has no way to tell a shortcut
+    /// that did nothing from one that is not bound.
+    pub fn unanswered() -> Self {
+        Frame::new(|ask| eprintln!("nothing is listening for {ask:?}"))
+    }
+
+    pub fn ask(&self, ask: Ask) {
+        (self.0)(ask);
     }
 }
 
@@ -372,6 +448,23 @@ pub struct Viewer {
     /// panel takes its share first. Kept because opening the panel has to
     /// relay out against the same window.
     window_width: f64,
+    /// How tall the window is, which is not the same as how tall the document
+    /// area is: the difference is the chrome, and the chrome comes and goes.
+    /// See [`Viewer::chrome`] and [`Viewer::fit_window`].
+    window_height: f64,
+    /// Whether the toolbar is on screen. A setting, so a reader who reads
+    /// without one gets none next time.
+    pub toolbar: bool,
+    /// Full screen, as this reader last asked for it. The window is the thing
+    /// that is actually in it, and this is the asking — see [`Frame`]. It is
+    /// deliberately not a setting: the app remembers it because the window
+    /// state is Tauri's to restore, and a reader who quit in full screen and
+    /// launched into it again with no chrome would have nothing to press.
+    pub full_screen: bool,
+    /// Presenting: full screen with nothing else on it. Full screen plus the
+    /// chrome away, held apart from both so that leaving one puts the other
+    /// back the way it was.
+    pub presenting: bool,
     /// Where the last run left the reader, waiting for a window to put it
     /// back in.
     ///
@@ -442,6 +535,10 @@ impl Viewer {
             revealed: false,
             trimming: false,
             window_width: 0.0,
+            window_height: 0.0,
+            toolbar: true,
+            full_screen: false,
+            presenting: false,
             place: None,
             edition: 0,
             notice: String::new(),
@@ -495,6 +592,7 @@ impl Viewer {
             _ => Mode::Continuous,
         };
         self.sidebar_open = self.store.flag("show_sidebar");
+        self.toolbar = self.store.flag("show_toolbar");
         // The switch is a setting and the crop is not, so a run that had it on
         // measures this document rather than putting back the last one's
         // rectangle. It is deferred to the end of `restore` because measuring
@@ -601,7 +699,11 @@ impl Viewer {
     /// How much of the window the document has: everything the panel is not
     /// standing on.
     fn document_width(&self) -> f64 {
-        let panel = if self.sidebar_open {
+        // Presenting takes the panel with the rest of the chrome, and it does
+        // so here rather than by closing it: a reader who stops presenting
+        // gets back the sidebar they had open, which is the whole difference
+        // between hiding something and turning it off.
+        let panel = if self.sidebar_open && !self.presenting {
             self.sidebar_width
         } else {
             0.0
@@ -673,6 +775,95 @@ impl Viewer {
                 json!(self.sidebar_width.round() as i64),
             )]);
         }
+    }
+
+    /* --------------------------------------------------------- the window */
+
+    /// What the chrome costs on screen right now.
+    ///
+    /// The notice line stays when the toolbar goes, deliberately: the message
+    /// that says how to get the toolbar back is written on it, and a line that
+    /// disappeared along with the thing it explains would be a joke at the
+    /// reader's expense. Presenting is the case where everything goes, which
+    /// is what presenting *is*.
+    pub fn chrome(&self) -> f64 {
+        if self.presenting {
+            return 0.0;
+        }
+        let toolbar = if self.toolbar { TOOLBAR } else { 0.0 };
+        toolbar + NOTICE + HAIRLINE
+    }
+
+    /// The window is this big. What the document gets is the rest.
+    ///
+    /// The one place the chrome is subtracted, which is why it is a method
+    /// rather than a constant taken off at the call: the chrome comes and
+    /// goes now, and a subtraction at the call site is a subtraction that
+    /// only knows what was on screen when it was written.
+    pub fn fit_window(&mut self, width: f64, height: f64) {
+        self.window_height = height;
+        self.resize(width, (height - self.chrome()).max(120.0));
+    }
+
+    /// The same window, with a different amount of it left for the document.
+    fn refit(&mut self) {
+        let (width, height) = (self.window_width, self.window_height);
+        self.fit_window(width, height);
+    }
+
+    /// The toolbar, put away or brought back.
+    ///
+    /// The notice is the app's own and is the reason the notice line survives
+    /// this: with the toolbar gone there is nothing on screen that says how to
+    /// get it back, and the key that does it is whatever `keys.toml` says it
+    /// is — so the message reads the keymap rather than stating a chord.
+    pub fn toggle_toolbar(&mut self) {
+        self.toolbar = !self.toolbar;
+        self.store
+            .set(vec![("show_toolbar".into(), json!(self.toolbar))]);
+        if !self.toolbar {
+            let key = self
+                .keymap
+                .by_action
+                .get(&Action::Toolbar)
+                .and_then(|chords| chords.first())
+                .map(|chord| crate::keymap::shown(chord, crate::keymap::this_machine()));
+            self.notice = match key {
+                Some(key) => format!("Toolbar hidden, {key} brings it back"),
+                // Unbound, which `keys.toml` can do: an empty list unbinds.
+                // Then the sentence that names a key would be naming none.
+                None => "Toolbar hidden".to_string(),
+            };
+        }
+        self.refit();
+        self.generation += 1;
+    }
+
+    /// Full screen, as this reader is asking for it. The window is what is
+    /// actually in it — see [`Frame`] — and this is the half that is the
+    /// page's: nothing changes shape, because full screen is a bigger window
+    /// and a bigger window is a resize like any other.
+    pub fn set_full_screen(&mut self, on: bool) {
+        self.full_screen = on;
+    }
+
+    /// Presenting: full screen with nothing else on it.
+    ///
+    /// Answers what full screen should now be, which is the interesting part.
+    /// Presenting turns it on; *stopping* presenting puts it back to whatever
+    /// the reader had asked for themselves rather than turning it off — so
+    /// somebody who was reading in full screen, presented, and then stopped is
+    /// still in full screen, which is where they were.
+    pub fn present(&mut self, on: bool) -> bool {
+        self.presenting = on;
+        self.notice = if on {
+            "Presenting. Escape stops.".to_string()
+        } else {
+            String::new()
+        };
+        self.refit();
+        self.generation += 1;
+        on || self.full_screen
     }
 
     pub fn show_tab(&mut self, tab: Tab) {
@@ -1719,13 +1910,6 @@ pub fn give_keyboard_back(doc: &mut blitz_dom::BaseDocument) {
 ///
 #[component]
 pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
-    let mut viewer = use_signal(|| {
-        let mut store = Store::at(&config.dir);
-        if let Some(index) = config.theme {
-            store.wear_for_now(index);
-        }
-        Viewer::new(document.0.clone(), chosen.clone(), store)
-    });
     // The viewport, taken from the window rather than from the element.
     //
     // `get_client_rect` is the obvious way and it panics: a `MountedData` call
@@ -1742,16 +1926,41 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             // guessed, and it is the one `main.rs` defaults to.
             .unwrap_or_else(|| Screen::fixed(1100.0, 900.0, 1.0))
     });
+    let mut viewer = use_signal(|| {
+        let mut store = Store::at(&config.dir);
+        if let Some(index) = config.theme {
+            store.wear_for_now(index);
+        }
+        let mut viewer = Viewer::new(document.0.clone(), chosen.clone(), store);
+        // **Sized before the first frame, not on mount.** It was laid out at
+        // the default viewport and corrected by `onmounted`, which meant every
+        // page in the window was drawn at one size, re-keyed, and drawn again
+        // — a full round of pdfium renders and texture uploads thrown away on
+        // every launch, and a frame in which *every* node in the document is
+        // replaced at once. That frame is the one this file's `PageWidget`
+        // comment is about: a texture registered while something else is being
+        // unregistered is a texture Vello cannot find at submit, and the
+        // `fresh` flag only moves the collision a frame along. Asking the
+        // window how big it is before laying anything out costs nothing and
+        // takes the collision away rather than dodging it.
+        let (width, height, _scale) = screen.get();
+        viewer.fit_window(width, height);
+        viewer
+    });
     // Where a link out of the document goes. See [`Away`]: the default is the
     // system browser, and a harness provides its own.
     let away =
         use_hook(|| dioxus_core::try_consume_context::<Away>().unwrap_or_else(Away::to_the_system));
+    // And what the window itself can be asked to do. See [`Frame`]: the shell
+    // answers these against winit, and a harness writes them down.
+    let frame =
+        use_hook(|| dioxus_core::try_consume_context::<Frame>().unwrap_or_else(Frame::unanswered));
 
     let resize_from_window = {
         let screen = screen.clone();
         move |mut viewer: Signal<Viewer>| {
             let (width, height, _scale) = screen.get();
-            viewer.write().resize(width, (height - CHROME).max(120.0));
+            viewer.write().fit_window(width, height);
         }
     };
 
@@ -1766,25 +1975,28 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     // table is `keymap.rs` and the file over the top of it is `keys.toml`,
     // both of them the app's own — see `crate::keymap`. What is left here is
     // this: work out what was asked for, and do it.
-    let on_key = move |event: KeyboardEvent| {
-        let (press, screen) = {
-            let held = viewer.read();
-            (
-                held.keymap
-                    .press(&event.key(), event.code(), event.modifiers(), &held.pending),
-                held.layout.viewport.height,
-            )
-        };
-        match press {
-            // `g`, on its way to `g g`. A sequence half pressed and then
-            // abandoned is dropped by the next chord that continues nothing,
-            // rather than by a timer: there is no `setTimeout` here, and the
-            // app's 1200ms one is a nicety rather than the behaviour.
-            Press::Wait(prefix) => viewer.write().pending = prefix,
-            Press::Nothing => viewer.write().pending.clear(),
-            Press::Act(action) => {
-                viewer.write().pending.clear();
-                perform(viewer, action, screen);
+    let on_key = {
+        let frame = frame.clone();
+        move |event: KeyboardEvent| {
+            let (press, screen) = {
+                let held = viewer.read();
+                (
+                    held.keymap
+                        .press(&event.key(), event.code(), event.modifiers(), &held.pending),
+                    held.layout.viewport.height,
+                )
+            };
+            match press {
+                // `g`, on its way to `g g`. A sequence half pressed and then
+                // abandoned is dropped by the next chord that continues nothing,
+                // rather than by a timer: there is no `setTimeout` here, and the
+                // app's 1200ms one is a nicety rather than the behaviour.
+                Press::Wait(prefix) => viewer.write().pending = prefix,
+                Press::Nothing => viewer.write().pending.clear(),
+                Press::Act(action) => {
+                    viewer.write().pending.clear();
+                    perform(viewer, action, screen, &frame);
+                }
             }
         }
     };
@@ -1816,20 +2028,55 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     // `pump()` run it, which is what lets this be tested with no thread and
     // no window at all.
     let watching = use_hook(|| {
+        // This window's mailbox, joined to the process's switchboard under
+        // this window's name. Both come from whoever made the window; a
+        // harness provides them and a window with neither watches nothing.
         let post = dioxus_core::try_consume_context::<crate::emit::Post>().unwrap_or_default();
-        let held = config.watch.then(|| {
-            let held = viewer.read();
-            let (themes, path) = (
-                held.store.themes_dir().to_path_buf(),
-                held.document.path().to_string(),
-            );
-            drop(held);
-            let watching = crate::watch::start(crate::emit::AppHandle::new(post.clone()), themes);
-            if !path.is_empty() {
-                watching.document(WINDOW, Some(&path));
+        let exchange = dioxus_core::try_consume_context::<crate::emit::Exchange>();
+        if let Some(exchange) = exchange.as_ref() {
+            exchange.join(&config.window, post.clone());
+        }
+        // **One watcher for the process, not one per window.** It follows one
+        // themes directory and a document per window, which is exactly the
+        // shape `watch.rs` already has — `follow` counts what wants a
+        // directory rather than unwatching it along with the document that
+        // named it, because two papers being recompiled in the same folder is
+        // the ordinary case. A watcher per window would be that many watches
+        // on the same directory and that many copies of every theme reload.
+        let shared = dioxus_core::try_consume_context::<Arc<crate::watch::Watching>>();
+        let held = match (shared, config.watch) {
+            (Some(watching), _) => {
+                let path = viewer.read().document.path().to_string();
+                if !path.is_empty() {
+                    watching.document(&config.window, Some(&path));
+                }
+                Some(watching)
             }
-            watching
-        });
+            // Nobody made one, and this window wants one: the harness's own
+            // case, and it is a watcher of one window's own.
+            (None, true) => {
+                let held = viewer.read();
+                let (themes, path) = (
+                    held.store.themes_dir().to_path_buf(),
+                    held.document.path().to_string(),
+                );
+                drop(held);
+                let exchange = exchange.clone().unwrap_or_else(|| {
+                    let exchange = crate::emit::Exchange::new();
+                    exchange.join(&config.window, post.clone());
+                    exchange
+                });
+                let watching = Arc::new(crate::watch::start(
+                    crate::emit::AppHandle::new(exchange),
+                    themes,
+                ));
+                if !path.is_empty() {
+                    watching.document(&config.window, Some(&path));
+                }
+                Some(watching)
+            }
+            (None, false) => None,
+        };
         let listening = post.clone();
         spawn(async move {
             loop {
@@ -1854,7 +2101,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         });
         // Held for the life of the reader. Dropping it stops nothing — see
         // `Config::watch` — but this is where it will be asked to.
-        Rc::new(held)
+        held
     });
     // Read so that the handle is plainly alive rather than plainly unused.
     let _ = watching.is_some();
@@ -1875,6 +2122,8 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let notice = held.notice.clone();
     let sidebar_open = held.sidebar_open;
     let find_open = held.find_open;
+    let presenting = held.presenting;
+    let toolbar_on = held.toolbar && !held.presenting;
     let find_query = held.find_query.clone();
     let find_count = held.find_count();
     let find_options = held.search.options();
@@ -1926,7 +2175,10 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         // hovered takes Stylo down.
         style { {crate::styles::SHEET} }
         div {
-            class: "root",
+            // Presenting is a class rather than a pile of conditions: the
+            // chrome is gone from the DOM either way, and what is left for
+            // CSS is the ground the document sits on.
+            class: if presenting { "root presenting" } else { "root" },
             style: "{variables}",
             tabindex: 0,
             onkeydown: on_key,
@@ -1967,6 +2219,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     viewer.write().finish_resize_sidebar();
                 }
             },
+            if toolbar_on {
             div { class: "toolbar",
                 button {
                     // Not `.sidebar`, which is the panel itself: a selector
@@ -2069,6 +2322,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     }
                     span { class: "of", "/ {pages}" }
                 }
+            }
             }
             // Not a popover and not over anything: the root is a flex column,
             // so the bar is a row in it and the document is what gets shorter.
@@ -2191,7 +2445,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 }
             }
             div { class: "body",
-            if sidebar_open {
+            if sidebar_open && !presenting {
                 Sidebar {
                     viewer,
                     document: Handle(document.clone()),
@@ -2249,18 +2503,15 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 }
             }
             }
-            div { class: "notice", "{notice}" }
+            // The line the toolbar's own way back is written on, which is
+            // why it outlives the toolbar. Presenting is the case where
+            // nothing is on screen at all.
+            if !presenting {
+                div { class: "notice", "{notice}" }
+            }
         }
     }
 }
-
-/// What this window is called when something is emitted to it by name.
-///
-/// One window and one label, which is `main` for the same reason the app's
-/// launch window is: it is the window the geometry and the restore list
-/// belong to. `watch.rs` keys its followed documents by this, and item 9 is
-/// where a second one appears.
-pub const WINDOW: &str = "main";
 
 /// One page, in its place.
 #[component]
@@ -2387,7 +2638,7 @@ fn Page(
 /// which turns the keyboard into a live list of what Phase 3 has left. It is
 /// also the honest answer to a reader who presses ⌘P: printing is not there
 /// yet, and silence would be indistinguishable from a broken keymap.
-fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
+fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64, frame: &Frame) {
     // Every movement goes through the viewer rather than through an offset,
     // because in paged mode an offset is not where a reader ends up: the page
     // has to be turned first. See [`Viewer::nudge`] and [`Viewer::go_to`].
@@ -2450,23 +2701,54 @@ fn perform(mut viewer: Signal<Viewer>, action: Action, screen: f64) {
         }
         Action::FindNext => viewer.write().step_match(true),
         Action::FindPrevious => viewer.write().step_match(false),
-        // Escape, which in the app leaves full screen and stops presenting as
-        // well. There is neither here yet, so it is the find bar's way out and
-        // says nothing when there is nothing to close — a key that answers
-        // with a complaint about what it did not do is worse than one that
-        // does nothing.
+        // Escape, which is the way out of four things and says nothing when
+        // there is nothing to leave — a key that answers with a complaint
+        // about what it did not do is worse than one that does nothing.
         Action::Dismiss => {
-            // The page field first, because it is the thing the reader is
-            // most recently inside: pressing Escape while typing a number
-            // means "not that after all", not "close the find bar I opened a
-            // minute ago". Escape typed *into* the field never reaches here —
-            // the field stops it — so this is the case where the field is
-            // open and the pointer took the focus elsewhere.
-            if viewer.read().typing_page {
+            // Outward, in the order the reader arrived at them. The page
+            // field first, because it is the thing they are most recently
+            // inside: pressing Escape while typing a number means "not that
+            // after all", not "close the find bar I opened a minute ago".
+            // Escape typed *into* the field never reaches here — the field
+            // stops it — so this is the case where the field is open and the
+            // pointer took the focus elsewhere.
+            let (typing, finding, presenting, full) = {
+                let held = viewer.read();
+                (
+                    held.typing_page,
+                    held.find_open,
+                    held.presenting,
+                    held.full_screen,
+                )
+            };
+            if typing {
                 viewer.write().cancel_page();
-            } else if viewer.read().find_open {
+            } else if finding {
                 viewer.write().close_find();
+            } else if presenting {
+                let full = viewer.write().present(false);
+                frame.ask(Ask::FullScreen(full));
+            } else if full {
+                viewer.write().set_full_screen(false);
+                frame.ask(Ask::FullScreen(false));
             }
+        }
+        // The window's own three, which the page can only ask for. See
+        // [`Frame`]: what answers is the shell in the app and a list in the
+        // harness, and the reader's side is the same either way.
+        Action::NewWindow => frame.ask(Ask::NewWindow),
+        Action::CloseWindow => frame.ask(Ask::Close),
+        Action::Quit => frame.ask(Ask::Quit),
+        Action::Toolbar => viewer.write().toggle_toolbar(),
+        Action::Fullscreen => {
+            let on = !viewer.read().full_screen;
+            viewer.write().set_full_screen(on);
+            frame.ask(Ask::FullScreen(on));
+        }
+        Action::Present => {
+            let on = !viewer.read().presenting;
+            let full = viewer.write().present(on);
+            frame.ask(Ask::FullScreen(full));
         }
         Action::Spread => {
             let next = if viewer.read().layout.spread == Spread::Single {

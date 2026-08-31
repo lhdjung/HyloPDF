@@ -19,6 +19,21 @@
 //! callback has. So asking for a window is two things: a `WindowSpec` pushed
 //! onto a queue, and a wake-up sent through the shell proxy. The spec carries
 //! a `VirtualDom`, which is `!Send`, and the event carries nothing.
+//!
+//! **Everything a window is asked to do arrives as one of those events, even
+//! the things that could be done on the spot.** Closing a window and putting
+//! it in full screen are both reached from a Dioxus event handler, which runs
+//! inside `View::handle_winit_event` — inside a borrow of the document and
+//! inside the shell's own borrow of the window map. Taking the window out of
+//! that map from in there cannot be written at all, so the ask is posted and
+//! answered on the next turn, where nothing is borrowed. It costs a frame
+//! nobody can see and it makes every window verb one shape.
+//!
+//! What this file deliberately does *not* know is what a window is *for*.
+//! There is no document in it, no library and no settings: a window is a
+//! virtual DOM, a label and a place, and what has to happen when one goes is
+//! a closure somebody else set — see [`Shell::on_close`]. The bookkeeping is
+//! `windows.rs` and the wiring is `main.rs`.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -35,6 +50,11 @@ use winit::window::{WindowAttributes, WindowId};
 
 /// What a window is made of, before it has one.
 pub struct WindowSpec {
+    /// What this window is called: `main`, then `reader-1`. The name is the
+    /// shell's only interest in it — it is handed back to [`Shell::on_close`]
+    /// and given to the window's own [`crate::app::Frame`] — and everything
+    /// that name means is `windows.rs`'s.
+    pub label: String,
     pub attributes: WindowAttributes,
     /// Where the window should be, applied *after* it is created as well as
     /// through the attributes.
@@ -50,8 +70,9 @@ pub struct WindowSpec {
 }
 
 impl WindowSpec {
-    pub fn new(vdom: VirtualDom, attributes: WindowAttributes) -> Self {
+    pub fn new(label: impl Into<String>, vdom: VirtualDom, attributes: WindowAttributes) -> Self {
         Self {
+            label: label.into(),
             attributes,
             position: None,
             vdom,
@@ -75,10 +96,27 @@ pub struct Windows {
 /// `VirtualDom` cannot cross a channel that wants `Send + Sync`.
 struct Spawn;
 
-/// "Make whatever window comes next" — the shape `hand_over` has in the real
-/// app, where a double-clicked document arrives from somewhere with no window
-/// of its own to describe. Carries nothing, so it can be sent from any thread.
-struct Ask;
+/// "Make a window, on this document" — the shape `hand_over` has in the real
+/// app, where a document arrives from somewhere with no window of its own to
+/// describe. A path and nothing else, so it can be sent from any thread: the
+/// Dock menu's item and the single-instance listener are both on one.
+///
+/// `None` means "a window, and you choose the document", which is what ⌘N is
+/// in a reader with no start screen — see [`crate::windows::Desk::hand_over`].
+struct Wanted(Option<String>);
+
+/// This window, closed, from inside one of its own event handlers.
+struct CloseOne(WindowId);
+
+/// Bring the window with this name forward — what a document that is already
+/// open answers with, rather than opening a second copy of itself. See
+/// [`crate::windows::Handover::Front`].
+struct Show(String);
+
+/// This window, in or out of full screen. Deferred for the reason above: the
+/// ask comes from a Dioxus handler, and on macOS the answer is an animation
+/// the window is in the middle of being borrowed for.
+struct FullScreen(WindowId, bool);
 
 /// Ask every window to close and the app to end.
 struct Quit;
@@ -99,11 +137,13 @@ impl Windows {
         self.proxy.send_event(BlitzShellEvent::embedder_event(Spawn));
     }
 
-    /// Ask the shell's own factory for the next window. Unlike `open`, this
-    /// needs nothing that is `!Send`, so it can be sent from another thread —
-    /// which is what the Dock menu item does today.
-    pub fn request(&self) {
-        self.proxy.send_event(BlitzShellEvent::embedder_event(Ask));
+    /// Ask the shell's own factory for the next window, on this document.
+    /// Unlike `open`, this needs nothing that is `!Send`, so it can be sent
+    /// from another thread — which is what the Dock menu item does, and what
+    /// a second launch of the app does through the single-instance socket.
+    pub fn request(&self, path: Option<String>) {
+        self.proxy
+            .send_event(BlitzShellEvent::embedder_event(Wanted(path)));
     }
 
     /// A handle that can cross threads, carrying only the proxy.
@@ -126,8 +166,15 @@ pub struct Remote {
 }
 
 impl Remote {
-    pub fn request(&self) {
-        self.proxy.send_event(BlitzShellEvent::embedder_event(Ask));
+    pub fn request(&self, path: Option<String>) {
+        self.proxy
+            .send_event(BlitzShellEvent::embedder_event(Wanted(path)));
+    }
+
+    /// Bring a window forward by name.
+    pub fn show(&self, label: &str) {
+        self.proxy
+            .send_event(BlitzShellEvent::embedder_event(Show(label.to_string())));
     }
 
     /// Hand a made-up window event to whichever window is in front.
@@ -141,13 +188,33 @@ impl Remote {
     }
 }
 
+/// Where a window comes from, asked by path. `None` back means no window
+/// after all — a document that will not open.
+type Factory = Box<dyn FnMut(Option<String>) -> Option<WindowSpec>>;
+
+/// What a window gives back when it goes, by name. See [`Shell::on_close`].
+type Tidy = Box<dyn FnMut(&str)>;
+
 pub struct Shell {
     inner: BlitzApplication<DioxusNativeWindowRenderer>,
     proxy: BlitzShellProxy,
     windows: Windows,
     /// Where a window comes from when nobody handed one over: one place that
-    /// makes them, which is what `spawn_window` is today.
-    factory: Option<Box<dyn FnMut() -> WindowSpec>>,
+    /// makes them, which is what `spawn_window` is today. It answers `None`
+    /// when there is to be no window after all — a document that will not
+    /// open, or a picker the reader closed.
+    factory: Option<Factory>,
+    /// What each window is called, so that a `WindowId` arriving from winit
+    /// can be handed to [`Shell::on_close`] as a name.
+    labels: std::collections::HashMap<WindowId, String>,
+    /// What to do when a window goes: give back its place in the library, its
+    /// mailbox and its document watch. The shell knows none of that and does
+    /// not want to — see the module comment.
+    tidy: Option<Tidy>,
+    /// Which window has the keyboard, reported as winit says so.
+    focus: Option<Box<dyn FnMut(Option<String>)>>,
+    /// Raised before the first window of a quit goes.
+    leaving: Option<Box<dyn FnMut()>>,
     /// Whether winit has told us surfaces can be created yet. A window made
     /// before that is left for `BlitzApplication::can_create_surfaces` to
     /// bring up; one made after has to be brought up here, because nothing
@@ -177,19 +244,83 @@ impl Shell {
             },
             proxy,
             factory: None,
+            labels: std::collections::HashMap::new(),
+            tidy: None,
+            focus: None,
+            leaving: None,
             started: false,
             trace: true,
         }
     }
 
-    /// Say where a window comes from when one is asked for by name only.
-    pub fn on_request(&mut self, factory: impl FnMut() -> WindowSpec + 'static) {
+    /// Say where a window comes from when one is asked for by path only.
+    pub fn on_request(
+        &mut self,
+        factory: impl FnMut(Option<String>) -> Option<WindowSpec> + 'static,
+    ) {
         self.factory = Some(Box::new(factory));
+    }
+
+    /// Say what a window has to give back when it goes.
+    ///
+    /// Called with the window's label, before the window is taken down —
+    /// which is the app's `tidy_after` at one remove, and the remove is the
+    /// point: there it is a Tauri window event handler and everything it
+    /// touches is `State<'_, …>` off an `AppHandle`; here it is a closure and
+    /// what it touches is `windows.rs`.
+    pub fn on_close(&mut self, tidy: impl FnMut(&str) + 'static) {
+        self.tidy = Some(Box::new(tidy));
+    }
+
+    /// Say what has to happen before the app goes: raising the flag that
+    /// tells a window closing because of a quit from a window closed by the
+    /// reader. See [`crate::windows::Desk::closing`].
+    pub fn on_quit(&mut self, leaving: impl FnMut() + 'static) {
+        self.leaving = Some(Box::new(leaving));
+    }
+
+    /// Say where "which window is in front" should be written down.
+    pub fn on_focus(&mut self, tell: impl FnMut(Option<String>) + 'static) {
+        self.focus = Some(Box::new(tell));
+    }
+
+    /// Where every window is, in logical pixels — what a new one cascades
+    /// past. See [`crate::windows::cascade`].
+    pub fn corners(&self) -> Vec<(f64, f64)> {
+        self.inner
+            .windows
+            .values()
+            .filter_map(|view| {
+                let scale = view.window.scale_factor();
+                let at = view.window.outer_position().ok()?.to_logical::<f64>(scale);
+                Some((at.x, at.y))
+            })
+            .collect()
     }
 
     /// The handle to hand out before the loop starts.
     pub fn windows(&self) -> Windows {
         self.windows.clone()
+    }
+
+    /// One step down and across from the window in front, and on again while
+    /// the spot is taken. `None` when there is no window to step off, which is
+    /// the first one.
+    fn next_spot(&self) -> Option<Position> {
+        let corner = |view: &View<DioxusNativeWindowRenderer>| {
+            let scale = view.window.scale_factor();
+            let at = view.window.outer_position().ok()?.to_logical::<f64>(scale);
+            Some((at.x, at.y))
+        };
+        let front = self
+            .inner
+            .windows
+            .values()
+            .find(|view| view.window.has_focus())
+            .or_else(|| self.inner.windows.values().next())
+            .and_then(corner);
+        let (x, y) = crate::windows::cascade(front, &self.corners(), None)?;
+        Some(winit::dpi::LogicalPosition::new(x, y).into())
     }
 
     fn drain(&mut self, event_loop: &dyn ActiveEventLoop) {
@@ -222,6 +353,7 @@ impl Shell {
         let config =
             WindowConfig::with_attributes(Box::new(doc) as _, renderer.clone(), spec.attributes);
         let mut view = View::init(config, event_loop, &self.proxy);
+        self.labels.insert(view.window_id(), spec.label.clone());
 
         // The Dioxus half, which `BlitzApplication` knows nothing about.
         let windows = self.windows.clone();
@@ -243,6 +375,24 @@ impl Shell {
                 )
             })
         };
+        // What this window can be asked to do. Every one of them goes back
+        // out through the proxy rather than being done here — see the module
+        // comment: the ask arrives from inside a borrow of this very window.
+        let frame = {
+            let proxy = self.proxy.clone();
+            let id = view.window_id();
+            crate::app::Frame::new(move |ask| {
+                let event = match ask {
+                    crate::app::Ask::NewWindow => BlitzShellEvent::embedder_event(Wanted(None)),
+                    crate::app::Ask::Close => BlitzShellEvent::embedder_event(CloseOne(id)),
+                    crate::app::Ask::Quit => BlitzShellEvent::embedder_event(Quit),
+                    crate::app::Ask::FullScreen(on) => {
+                        BlitzShellEvent::embedder_event(FullScreen(id, on))
+                    }
+                };
+                proxy.send_event(event);
+            })
+        };
         let doc = view.downcast_doc_mut::<DioxusDocument>();
         doc.vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(renderer);
@@ -250,18 +400,21 @@ impl Shell {
             provide_context(winit_window);
             provide_context(shell_provider);
             provide_context(screen);
+            provide_context(frame);
         });
         doc.initial_build();
 
-        if self.started {
-            // A window made after the first `can_create_surfaces` has to be
-            // resumed here; the renderer answers with `ResumeReady`, which
-            // `BlitzApplication` turns into `complete_resume` once the view is
-            // in its map — which is why the insert below happens either way.
-            view.resume();
-        }
-
-        if let Some(position) = spec.position {
+        // Where it goes: what the spec asked for, else one step down and
+        // across from the window in front of it. The cascade is
+        // `windows::cascade` and the argument for it is there; what is here
+        // is that the shell is the only thing that knows where the windows
+        // actually are, and it knows *now* rather than when the spec was
+        // made. In the app this is a `Placements` map applied after the
+        // window is shown, because showing it on macOS moves it onto the
+        // launch window's frame — here the window is made, placed and drawn
+        // in one turn and nothing is seen in between.
+        let position = spec.position.or_else(|| self.next_spot());
+        if let Some(position) = position {
             let before = view.window.outer_position().ok();
             view.window.set_outer_position(position);
             if self.trace {
@@ -276,8 +429,18 @@ impl Shell {
             }
         }
 
-        view.request_redraw();
-        self.inner.windows.insert(view.window_id(), view);
+        let id = view.window_id();
+        self.inner.windows.insert(id, view);
+        if self.started {
+            // A window made after the first `can_create_surfaces` has to be
+            // resumed here; the renderer answers with `ResumeReady`, which
+            // `BlitzApplication` turns into `complete_resume` once the view is
+            // in its map — which is why the insert above happens either way.
+            if let Some(view) = self.inner.windows.get_mut(&id) {
+                view.resume();
+                view.request_redraw();
+            }
+        }
     }
 }
 
@@ -328,12 +491,34 @@ impl ApplicationHandler for Shell {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        if self.trace && matches!(event, WindowEvent::CloseRequested) {
-            eprintln!(
-                "shell: closing {:?}, {} open",
-                window_id,
-                self.inner.windows.len()
-            );
+        if matches!(event, WindowEvent::CloseRequested) {
+            if self.trace {
+                eprintln!(
+                    "shell: closing {:?}, {} open",
+                    window_id,
+                    self.inner.windows.len()
+                );
+            }
+            // Before `BlitzApplication` drops the window, because everything
+            // this gives back is asked *of* the window: what it was showing,
+            // and the document it was having watched. Afterwards there is a
+            // `WindowId` and nothing to look it up in.
+            if let Some(label) = self.labels.remove(&window_id) {
+                if let Some(tidy) = self.tidy.as_mut() {
+                    tidy(&label);
+                }
+            }
+        }
+        // Which window has the keyboard, which is what a new window cascades
+        // off and what a handed-over document prefers. winit is the only
+        // thing that knows, and it says so exactly once per change.
+        if let WindowEvent::Focused(gained) = event {
+            if let Some(tell) = self.focus.as_mut() {
+                let label = gained
+                    .then(|| self.labels.get(&window_id).cloned())
+                    .flatten();
+                tell(label);
+            }
         }
         // A click clears the focus off the page, and from that moment every
         // keyboard shortcut goes to `<html>`, which is above anything a
@@ -373,13 +558,45 @@ impl ApplicationHandler for Shell {
                     self.drain(event_loop);
                     continue;
                 }
-                if payload.downcast_ref::<Ask>().is_some() {
+                if let Some(wanted) = payload.downcast_ref::<Wanted>() {
+                    // Taken out and put back rather than borrowed, because the
+                    // factory is `FnMut` and what it does is make a window
+                    // through this same shell.
                     if let Some(mut factory) = self.factory.take() {
-                        let spec = factory();
+                        let spec = factory(wanted.0.clone());
                         self.factory = Some(factory);
-                        self.open(event_loop, spec);
+                        if let Some(spec) = spec {
+                            self.open(event_loop, spec);
+                        }
                     } else {
                         eprintln!("shell: asked for a window with no factory set");
+                    }
+                    continue;
+                }
+                if let Some(Show(label)) = payload.downcast_ref::<Show>() {
+                    let id = self
+                        .labels
+                        .iter()
+                        .find(|(_, known)| *known == label)
+                        .map(|(id, _)| *id);
+                    if let Some(view) = id.and_then(|id| self.inner.windows.get(&id)) {
+                        view.window.set_minimized(false);
+                        view.window.focus_window();
+                    }
+                    continue;
+                }
+                if let Some(CloseOne(id)) = payload.downcast_ref::<CloseOne>() {
+                    // The same path a click on the close button takes, rather
+                    // than a second way of closing a window: everything that
+                    // has to be given back is hung off `CloseRequested`.
+                    self.window_event(event_loop, *id, WindowEvent::CloseRequested);
+                    continue;
+                }
+                if let Some(FullScreen(id, on)) = payload.downcast_ref::<FullScreen>() {
+                    if let Some(view) = self.inner.windows.get(id) {
+                        view.window.set_fullscreen(
+                            on.then_some(winit::monitor::Fullscreen::Borderless(None)),
+                        );
                     }
                     continue;
                 }
@@ -390,6 +607,19 @@ impl ApplicationHandler for Shell {
                     continue;
                 }
                 if payload.downcast_ref::<Quit>().is_some() {
+                    if let Some(leaving) = self.leaving.as_mut() {
+                        leaving();
+                    }
+                    // Every window closed through the door a window closes
+                    // through, so that each of them gives back what it holds
+                    // — and whoever raised the flag that says this is a quit
+                    // has already done so, which is what stops the session
+                    // being forgotten on the way out. See
+                    // [`crate::windows::Desk::closing`].
+                    let ids: Vec<WindowId> = self.inner.windows.keys().copied().collect();
+                    for id in ids {
+                        self.window_event(event_loop, id, WindowEvent::CloseRequested);
+                    }
                     self.inner.windows.clear();
                     event_loop.exit();
                     continue;

@@ -193,6 +193,13 @@ pub struct State {
     /// What the document is called, off the toolbar: its own `/Title` where
     /// that is worth having, and the file's name where it is not.
     pub title: String,
+    /// Whether the toolbar is on screen. ⌘T puts it away and presenting takes
+    /// it with everything else — see [`crate::app::Viewer::chrome`]. Nearly
+    /// every other field here is read *off* the toolbar, so a test that hides
+    /// it is asserting on an empty string unless it means to.
+    pub toolbar: bool,
+    /// Full screen with nothing else on it.
+    pub presenting: bool,
 }
 
 /// A reader with no window, driven by hand.
@@ -211,6 +218,12 @@ pub struct Reader {
     opened: Rc<RefCell<Vec<String>>>,
     /// The mailbox the reader's watch task listens on. See [`Reader::deliver`].
     post: crate::emit::Post,
+    /// Everything this reader has asked its window for, in order. See
+    /// [`crate::app::Frame`]: there is no window here, so the asks are
+    /// written down instead — which is how "⌘N asks for a window" and "Escape
+    /// leaves full screen" are tests rather than things somebody checked once
+    /// by hand in a running app.
+    asks: Rc<RefCell<Vec<crate::app::Ask>>>,
 }
 
 impl Reader {
@@ -243,7 +256,7 @@ impl Reader {
     pub fn document_changed(&mut self, path: &str) {
         self.deliver(crate::emit::News {
             event: "document-changed".into(),
-            target: Some(crate::app::WINDOW.into()),
+            target: Some(crate::windows::MAIN.into()),
             payload: serde_json::Value::String(path.to_string()),
         });
     }
@@ -271,6 +284,11 @@ impl Reader {
             std::thread::sleep(std::time::Duration::from_millis(20));
             self.settle();
         }
+    }
+
+    /// Everything this reader has asked of the window it does not have.
+    pub fn asks(&self) -> Vec<crate::app::Ask> {
+        self.asks.borrow().clone()
     }
 
     /// Every address this reader has handed to the system, in order — see
@@ -318,6 +336,7 @@ impl Reader {
             dir: options.config.clone(),
             theme: options.theme,
             watch: options.watch,
+            window: crate::windows::MAIN.to_string(),
         };
         // The mailbox the reader listens on, made here so that a test can put
         // news in it. With `watch` off this is the only thing that ever does.
@@ -346,13 +365,30 @@ impl Reader {
         let opened: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let recorder = opened.clone();
         let posting = post.clone();
+        // And what this reader asked its window to do, which in the app is
+        // answered against winit and here is a list.
+        let asks: Rc<RefCell<Vec<crate::app::Ask>>> = Rc::new(RefCell::new(Vec::new()));
+        let asked = asks.clone();
         vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(posting);
             provide_context(Screen::fixed(width, height, scale));
             provide_context(Away::new(move |url| {
                 recorder.borrow_mut().push(url.to_string());
             }));
+            provide_context(crate::app::Frame::new(move |ask| {
+                asked.borrow_mut().push(ask);
+            }));
         });
+
+        // What this window is showing, which is the one thing `Store::opened`
+        // used to write and stopped writing when there was more than one
+        // window: an entry per window is the process's business, not a
+        // store's. `Session::window` does this in the app; here there is one
+        // reader and it is this line. See `store::opened`.
+        let path = document.path().to_string();
+        if !path.is_empty() {
+            let _ = crate::library::set_open(&options.config, std::slice::from_ref(&path));
+        }
 
         let harness = Harness::from_vdom(
             vdom,
@@ -373,6 +409,7 @@ impl Reader {
             scale,
             opened,
             post,
+            asks,
         };
         reader.focus_root();
         reader.settle();
@@ -572,6 +609,21 @@ impl Reader {
         self.settle();
     }
 
+    /// What an element says, or nothing when there is no such element.
+    ///
+    /// `text_content` panics on a selector that matches nothing, which is the
+    /// right default for a test asserting on something it expects to be
+    /// there — and the wrong one for [`Reader::state`], which reads eight
+    /// things off a toolbar that can now be put away. A reader with no
+    /// toolbar has no zoom on screen; that is a fact about the state, not a
+    /// failure to read it.
+    fn text(&self, selector: &str) -> String {
+        match self.harness.query(selector) {
+            Some(_) => self.harness.text_content(selector),
+            None => String::new(),
+        }
+    }
+
     /// What the interface says about itself.
     pub fn state(&self) -> State {
         // The page off the field and the count off the span beside it. It was
@@ -581,12 +633,11 @@ impl Reader {
         let label = match self.harness.query(".page-field") {
             // Being typed into, and then what it says is what has been typed.
             Some(_) => self.field(".page-field"),
-            None => self.harness.text_content(".page-now"),
+            None => self.text(".page-now"),
         };
         let page = label.trim().parse().unwrap_or(0);
         let pages = self
-            .harness
-            .text_content(".of")
+            .text(".of")
             .trim_start_matches('/')
             .trim()
             .parse()
@@ -617,9 +668,9 @@ impl Reader {
             // and the last of the chips, which was fine while there were four
             // and wrong the moment the sidebar added two more — and wrong
             // silently, because a chip is a chip.
-            zoom: self.harness.text_content(".chip.fit"),
-            theme: self.harness.text_content(".chip.theme"),
-            notice: self.harness.text_content(".notice"),
+            zoom: self.text(".chip.fit"),
+            theme: self.text(".chip.theme"),
+            notice: self.text(".notice"),
             scroll: self
                 .harness
                 .attr(".pages", "data-scroll")
@@ -636,7 +687,9 @@ impl Reader {
             query: self.field(".find-field"),
             hits: self.harness.query_all(".hit").len(),
             results: self.numbered(".result", "data-result"),
-            title: self.harness.text_content(".title"),
+            title: self.text(".title"),
+            toolbar: self.harness.query(".toolbar").is_some(),
+            presenting: self.harness.query(".root.presenting").is_some(),
         }
     }
 

@@ -21,7 +21,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 213 tests, about a minute and a half
+cargo test                                   # 241 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -495,6 +495,7 @@ thread.
 | `tests/paged.rs` | one page at a time: what is laid out, what a page turn is, the ends of the document, and every chord in the keymap failing to leave the mode |
 | `tests/library.rs` | where you were, kept and put back; the switch that turns it off; the page remembered in paged mode; what a document calls itself and when that is not a name; what was open, and what has been deleted |
 | `tests/watch.rs` | what changes on the disk: a theme edited and a theme deleted, a document recompiled and one that got shorter, news about somebody else's document, a rebuild that renames the paper — and one test with a real watcher and a real file behind it |
+| `tests/windows.rs` | the window, asked for rather than made: a second one, closing against quitting, full screen and the way out of it, presenting taking the chrome and the panel and giving them back, and the toolbar naming its own way back |
 | `tests/cost.rs` | the memory assertion |
 | `tests/upstream.rs` | the four faults above, as the smallest thing that shows each |
 | `tests/recolor.rs` | the shader against the reference |
@@ -502,6 +503,8 @@ thread.
 | `src/theme.rs`, `src/settings.rs`, `src/keys.rs`, `src/library.rs`, `src/watch.rs` | forty-four, and they are the app's own — see Phase 3 |
 | `src/sidebar.rs` | four on the thumbnail column's geometry |
 | `src/crop.rs` | seven: the ink box, the padding, the clamp, the refusals, and the sample |
+| `src/windows.rs` | fourteen on the rules the app cannot test at all: which window a document goes to, what a window going means, and where the next one lands |
+| `src/emit.rs` | four on the switchboard: news for one window, news for all of them, and a window that has gone |
 | `src/search.rs` | eighteen: the fold, the origin map, whole words, the scan order, stepping, the cap, and the quads a match becomes |
 | `src/store.rs`, `src/palette.rs` | the layer between them and the reader |
 
@@ -1423,12 +1426,227 @@ test`. `Config::watch` is therefore true in the binary and false in the
 harness, and the one test that wants the real thing asks for it. The day
 `watch.rs` learns to stop is the day that flag can go.
 
+### 9. Two documents at once, and presenting — done
+
+Everything in this item is the *window's* rather than the page's, which is why
+it is last of the nine and why `PROGRESS.md` has been saying since Phase 2 that
+this category cannot be tested here at all. Most of that turned out to be
+wrong, and the reason is the most useful thing the item found.
+
+**The app's window story is two things wearing one coat: rules, and windows.**
+`AGENTS.md` is plain about the cost of that — "None of this can be tested in
+the harness, which has no Rust behind it and no windows", followed by a list of
+things somebody checked by hand in a running app: two documents handed over,
+three windows restored from a session, ⌘N, a window closed, "New Window" from
+the Dock. Every one of those is a *rule* — which window gets a document, what a
+window going means, where the next one goes — and not one of them needs a
+window to be true. They are untestable there because they are written against
+`AppHandle`, `State<'_, …>` and `WebviewWindow`, so asking "what would happen
+if a second file arrived now" means having an application running to ask.
+
+So they are separated here. **`windows.rs` is `OpenDocuments`, `Placements`,
+`Exiting` and the deciding half of `hand_over`, with every mention of a window
+taken out**, and it has fourteen tests: that nothing is ever displaced, that a
+document already open comes to the front rather than opening twice, that
+quitting forgets nothing while closing a window forgets that window, that
+closing the *last* window writes nothing because no flag can tell "finished
+with this" from "goodbye" there, and that three windows closed one at a time
+come back as the third alone. `session.rs` is the half that makes windows and
+cannot be tested, and it is eighty lines.
+
+**The reader's own side goes through one door and the door is written down.**
+`Frame` is a context holding one closure — the shape `Screen` and `Away`
+already had, for the same reason: the thing it stands for does not exist in a
+test. A key asks for `Ask::NewWindow`, `Close`, `Quit` or `FullScreen(bool)`,
+the shell answers each against winit, and the harness appends it to a list. So
+"⌘N asks for a window", "⌘W and ⌘Q are not the same ask" and "Escape leaves
+full screen" are tests — and the last of those is specifically called out in
+`AGENTS.md` as a real-app check, because a browser in full screen keeps the
+Escape key and the app's harness is a browser.
+
+**What is left for the real app is one file, and it is `shell.rs`.**
+
+#### What the port lost
+
+Most of `spawn_window`, and each thing it lost says something about what the
+app's version is actually for.
+
+*There is no `Placements` map.* In the app a window is built with a position,
+then *shown*, and showing it on macOS moves it onto the launch window's frame —
+so the spot has to be remembered and applied again afterwards, and windows
+still coming up have to be counted as taken or a restored session lands three
+windows in one place. Here a window is made, positioned and drawn in one turn
+of the main thread with nothing on screen in between, so the windows that exist
+are the whole of what is taken and the cascade is a pure function of where they
+are. `cascade` is the app's arithmetic exactly, including the bounded walk.
+
+*There is no `Pending`, no `ready` and no "is the frontend listening yet".*
+Those exist because a Tauri window and its interface are two processes that
+have to shake hands: a document arriving before the webview reports in has to
+be held somewhere. Here the virtual DOM is built before the window is on
+screen, so a window is *made for* a document and there is nothing to hold.
+
+*There is no `visible(false)` and no three-second safety net thread.* The app
+hides a new window until its frontend says it has painted, so a dark theme
+never flashes white, and spawns a thread to show it anyway if that never
+happens. The equivalent here is that the theme is read during the first render,
+before anything is painted at all.
+
+*And there is no capability list.* `capabilities/default.json` naming
+`["main", "reader-*"]` is a Tauri fact; a window outside it gets no permissions
+and fails as a webview that never reports in.
+
+#### The one thing that has no equivalent, and it is the start screen
+
+`Desk::hand_over` has three answers — bring that window forward, fill an empty
+window, make one — and **the middle one is unreachable in this reader**. The
+app can have a window with nothing in it because it has something to show in
+one; item 7 already recorded that this reader does not, because "there is
+nowhere to show a recently-read list in a reader that always has a document
+open". So a window is made for a document and never before one.
+
+That decides ⌘N, which in the app is an empty window. Here it is **a second
+window on what the front one is reading** — which is not a compromise: two
+places in one book at once is a thing readers want, and the app's own "Open in
+a new window…" is the picker version of the same gesture. The picker itself is
+a door of its own (`rfd`, in the assessment's table) and belongs with the menus,
+which are not built. The `Fill` arm is kept because the rule is right and
+because a window whose document failed to open is that case arriving by the
+back door.
+
+#### A mailbox became a switchboard, and `watch.rs` did not notice
+
+Item 8 mounted the app's `watch.rs` unchanged by supplying the two names it
+imports, and said the cost of one window was nothing. This is the bill.
+`watch.rs` reports a rewritten document with `emit_to(label, …)` and the themes
+with `emit`, so with more than one window the handle has to *route*:
+`emit::Exchange` is a label-to-mailbox table, a window joins when it is made
+and leaves when it is destroyed, and `emit` with no target goes to everybody.
+Forty lines, four tests, and not one line of the app's file.
+
+Leaving matters as much as joining: news for a window that has gone piles up in
+a mailbox nobody reads, and that mailbox holds a `Waker` into a virtual DOM
+that no longer exists.
+
+The watcher itself is one per *process*, provided as a context — which is the
+shape `watch.rs` already had, since `follow` counts what wants a directory
+rather than unwatching it along with the document that named it. A watcher per
+window would be that many watches on one themes directory and that many copies
+of every theme reload.
+
+#### The store was writing the open list and had to stop
+
+`Store::opened` ended with `library::set_open(&dir, &[self.file])`, with a
+comment saying "one path because there is one window". A `Store` is one
+window's, so with three windows whichever rendered last wrote a list of one and
+took the other two out of it. The rule that replaced it is the one the app has:
+**whoever makes a window records what it shows** — `Session::window` in the
+binary, and the harness for a reader that has no window at all.
+
+#### Everything a window is asked to do is an event, even when it needn't be
+
+Closing a window and putting one in full screen are both reached from a Dioxus
+event handler, which runs inside `View::handle_winit_event` — inside a borrow
+of the document and inside the shell's own borrow of the window map. Taking the
+window out of that map from in there cannot be written. So every ask is posted
+to the shell proxy and answered on the next turn, where nothing is borrowed: it
+costs a frame nobody can see and it makes every window verb one shape. The Dock
+menu, which in the app has to spawn a thread because it is invoked on the main
+thread and `spawn_window` asks questions only the main thread can answer,
+needed no special case at all — it posts the same event everything else does.
+
+#### Presenting, and why the chrome is a method
+
+Presenting is full screen with nothing else on it, and it is the last part of
+item 6. The chrome is `TOOLBAR + NOTICE + HAIRLINE` and was a constant; it is
+`Viewer::chrome()` now, because either of the first two can be taken away and a
+subtraction at the call site only knows what was on screen when it was written.
+⌘T puts the toolbar down and presenting puts everything down — but *not* the
+notice line when only the toolbar goes, because the message saying how to get
+the toolbar back is written on it, and it names whatever key `keys.toml` says
+rather than a chord this file states. The panel is hidden rather than closed,
+so stopping puts back what was open.
+
+Full screen and presenting are two switches, not one: a reader who was in full
+screen, presented, and then stopped is still in full screen, which is where
+they were. Escape leaves them in the order the reader arrived — page field,
+find bar, presenting, full screen.
+
+#### One instance is a socket, and binding it is the claim
+
+The app uses `tauri-plugin-single-instance` and needs it for a reason
+`AGENTS.md` states: three double-clicked documents are three launches, and
+three processes writing over each other's `settings.toml` is a race no lock
+inside one of them can help with. `single.rs` is a Unix socket, and it is
+thirty lines because the socket does both jobs — **binding it is the claim and
+connecting to it is how the document gets across**. A lock file would need a
+second channel beside it, and that channel would be this. It connects before it
+looks, because a socket file proves nothing: a process killed outright leaves
+one behind.
+
+Two things it cannot do. Windows wants a named pipe and there is no std type
+for one, so a second launch there is still a second process — the same state
+this experiment has been in since Phase 0, and honest about. And **Apple Events
+are out of reach, because there is no application bundle**: `RunEvent::Opened`
+is how macOS tells an app that is already running to open a document, and
+before any `NSApplicationDelegate` there has to be an `Info.plist` saying this
+program opens PDFs. Every other route a document arrives by — a second launch
+with an argument, "Open with" on Linux, the command line — is a launch with an
+argument, and a launch with an argument comes through the socket.
+
+#### What it cost to find: a crash that was not multi-window's fault
+
+The first run of two windows died on the third frame with
+`MissingTextureBinding(TextureId(4))` from inside Vello's atlas upload, about
+two runs in three. It was not about two windows: **one window, made after the
+event loop had started, dies exactly the same way** — which is a path that had
+existed in `shell.rs` since Phase 0 and had never once been taken, because
+until this item every window was made before the loop began.
+
+The cause is the one `page.rs` already has a long comment about, one level
+along. A page's texture is registered on one frame and drawn from the next
+(`fresh`), because registering and drawing in the same frame breaks when
+something else is unregistered in that frame — and something else is
+unregistered whenever every page in the document is replaced at once. That
+happened on every launch: the viewer was laid out at a default viewport and
+corrected by `onmounted`, so the first frame drew every page at the wrong size
+and the second re-keyed all of them. The `fresh` flag moved the collision one
+frame along rather than removing it, and a window made late enough for its
+frames to land differently found it again.
+
+The fix is a line and it is worth more than the crash: **the viewer is sized
+from the window before the first frame rather than on mount**. There is nothing
+to re-key, so nothing is unregistered while something else is being registered
+— and a full round of pdfium renders and texture uploads is no longer drawn and
+thrown away on every launch. Five runs for five, both paths.
+
+#### What was checked in the real app
+
+A launch, a second launch on another document (the socket handed it over in
+9ms, the window cascaded to exactly the position it asked for, and both entries
+landed in `library.toml`), a third launch on a document already open (no window
+made, no entry added, the window brought forward), a second launch with no
+document at all (⌘N's own path: a second window on the same book, and
+`set_open` deduplicating it to one entry), and a quit (`CloseRequested` for
+every window, `tidy` for each, and the session list surviving, which is the
+whole of what `Exiting` is for).
+
+**What could not be checked is anything needing a keystroke.** Synthetic keys
+through System Events reach nothing in this binary — it is not a bundle, and
+`AGENTS.md` already records that driving the real app this way is unreliable —
+so ⌘N, ⌘T, presenting and closing a window from the keyboard were exercised
+through the harness and through the socket rather than through the keyboard.
+The shell's own answers to those asks — `set_fullscreen`, `focus_window`,
+`CloseRequested` — are one file and the last two are covered by the launches
+above.
+
 ### What is not built
 
 No text layer, no selection, no markup, no settings window, no Keyboard page,
-one window — and of the library, everything but the markup journal, which waits
-for the item that is about markup. Presenting is the one part of item 6 still
-outstanding, and it is a window rather than a page.
+and no file picker — and of the library, everything but the markup journal,
+which waits for the item that is about markup. The picker is the reason ⌘N
+opens a second window on the document already in front rather than asking for
+one; see item 9.
 
 ---
 
@@ -1443,10 +1661,10 @@ outstanding, and it is a window rather than a page.
    of this experiment that *could* run on either without a screen — a CI job
    running `cargo test` on three platforms would exercise Stylo, Parley,
    fontique and the whole reader on engines this is not developed on, and none
-   of it needs a GPU. That is a small job and it is not done. Full screen,
-   window dragging, the traffic lights and multi-window are the window's rather
-   than the page's and cannot be tested here at all, exactly as the app's own
-   harness says of the same list.
+   of it needs a GPU. That is a small job and it is not done. Window dragging
+   and the traffic lights are the window's rather than the page's and cannot be
+   tested here at all — though item 9 found that most of what was on this list
+   *can* be, once the rules are separated from the windows they are about.
 
 ## Five things worth raising upstream, and only the last is blocking
 

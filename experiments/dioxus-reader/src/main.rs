@@ -22,26 +22,16 @@
 //! rather than in a script so that the numbers come from the thing being
 //! measured.
 
+use std::rc::Rc;
 use std::sync::Arc;
 
-use dioxus::prelude::*;
-use dioxus_native::{LogicalSize, WindowAttributes};
+use dioxus_reader::app::Config;
 use dioxus_reader::app::CHROME;
-use dioxus_reader::app::{Config, Handle, Reader, ReaderProps};
-use dioxus_reader::page::Chosen;
-use dioxus_reader::palette;
-use dioxus_reader::shell::{Remote, Shell, WindowSpec};
-use dioxus_reader::store;
-use dioxus_reader::{render, stats};
-
-/// The last part of a path, which is what a document is called when it does
-/// not call itself anything.
-fn file_name(path: &str) -> String {
-    std::path::Path::new(path)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string())
-}
+use dioxus_reader::emit::{AppHandle, Exchange};
+use dioxus_reader::session::Session;
+use dioxus_reader::shell::{Remote, Shell};
+use dioxus_reader::windows::Desk;
+use dioxus_reader::{render, stats, store, watch};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -92,24 +82,49 @@ fn main() {
     // still measures whatever is named, which is the deliberate version of the
     // same thing.
     let measuring = measure > 0 || quit_after > 0;
-    let path = named
-        .clone()
-        .or_else(|| {
-            if measuring {
-                None
-            } else {
-                store::reopening(&config.dir)
-            }
-        })
-        .unwrap_or_else(|| {
-            format!(
-                "{}/../../tests/fixtures/book.pdf",
-                env!("CARGO_MANIFEST_DIR")
-            )
-        });
+    // One reader at a time, and a second launch hands its document to the one
+    // that is running rather than becoming a second one. A measuring run is
+    // exempt: the numbers are taken by launching this binary repeatedly, and
+    // a run that quietly handed its work to a reader somebody left open would
+    // measure nothing and say it had. See `single.rs`.
+    let door = if measuring {
+        dioxus_reader::single::Claim::Alone
+    } else {
+        dioxus_reader::single::claim(&config.dir, named.as_deref())
+    };
+    if matches!(door, dioxus_reader::single::Claim::Second) {
+        // Quietly and successfully: the document is on its way to a window
+        // that already exists, which is what was asked for.
+        return;
+    }
 
-    let document: Arc<dyn render::PageSource> = match render::open(&path) {
-        Ok(document) => document,
+    // One path per window that was open, in the order the windows were made.
+    // A document named on the command line is the launch window's and nothing
+    // is restored beside it, which is what naming one means.
+    let session: Vec<String> = match (&named, measuring) {
+        (Some(path), _) => vec![path.clone()],
+        (None, true) => Vec::new(),
+        (None, false) => store::reopening_all(&config.dir),
+    };
+    let path = session.first().cloned().unwrap_or_else(|| {
+        format!(
+            "{}/../../tests/fixtures/book.pdf",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    });
+
+    // Opened once here for the message below and then dropped: the window
+    // opens it again through `Session::window`, which is the one path a
+    // window's document comes down. Two opens of the same file cost the same
+    // milliseconds twice and buy a launch that says what went wrong before a
+    // window exists to say it in.
+    match render::open(&path) {
+        Ok(document) => println!(
+            "reader: {} pages in {path}, opened in {:.0}ms | {:.0}MB resident before any window",
+            document.pages(),
+            document.opened_in(),
+            stats::rss_mb(),
+        ),
         Err(err) => {
             eprintln!("{err}");
             // The one mistake worth a second sentence, because the documented
@@ -122,51 +137,88 @@ fn main() {
             }
             std::process::exit(1);
         }
-    };
-    println!(
-        "reader: {} pages in {path}, opened in {:.0}ms | {:.0}MB resident before any window",
-        document.pages(),
-        document.opened_in(),
-        stats::rss_mb(),
-    );
+    }
 
     let event_loop = blitz_shell::create_default_event_loop();
     let (proxy, queue) = blitz_shell::BlitzShellProxy::new(event_loop.create_proxy());
     let mut shell = Shell::new(proxy, queue);
-    shell.trace = false;
+    // What the shell says about the windows it makes and closes. Off, because
+    // it is a line per window on a run nobody asked to debug — and on with
+    // `HYLOPDF_TRACE=1`, which is how "did the second window actually land
+    // where it was told to" is answered from a terminal rather than with a
+    // ruler on the screen.
+    shell.trace = std::env::var_os("HYLOPDF_TRACE").is_some();
     let windows = shell.windows();
 
-    // Black on white until the reader's own theme is read, which happens in
-    // `Viewer::new` during the first render — before anything is painted, so
-    // this is never seen. It is deliberately not any theme's colours: a
-    // half-applied theme is harder to diagnose than one that plainly did not
-    // load.
-    let chosen = Chosen::new(palette::FALLBACK);
-    // The window wears the document's name, decided the same way the toolbar
-    // decides it — see `store::worth_calling`. It is settled here rather than
-    // changed once the reader has read the file because the window's title is
-    // an attribute given to the builder: changing it afterwards is a call on
-    // the winit window, which is item 9's, and there is nothing to gain by
-    // waiting when pdfium answers at open.
-    let name = file_name(&path);
-    let declared = document.title();
-    let called = if store::worth_calling(&declared, &name) {
-        declared.trim().to_string()
-    } else {
-        name
-    };
-    let attributes = WindowAttributes::default()
-        .with_title(format!("{called} — HyloPDF"))
-        .with_surface_size(LogicalSize::new(window_width, window_height));
-    let vdom = VirtualDom::new_with_props(
-        Reader,
-        ReaderProps {
-            document: Handle(document),
-            chosen,
-            config,
-        },
-    );
-    windows.open(WindowSpec::new(vdom, attributes));
+    // What the process holds and every window shares: who is showing what,
+    // where news goes, and one watcher over the themes directory and every
+    // open document. See `session.rs`.
+    let desk = Desk::new();
+    let exchange = Exchange::new();
+    let watching = Arc::new(watch::start(
+        AppHandle::new(exchange.clone()),
+        dioxus_reader::config::themes_dir(),
+    ));
+    let session_maker = Rc::new(Session {
+        desk: desk.clone(),
+        exchange: exchange.clone(),
+        watching: watching.clone(),
+        dir: config.dir.clone(),
+        theme: config.theme,
+        size: (window_width, window_height),
+        remote: windows.remote(),
+    });
+
+    // The launch window, and then the rest of the last session beside it.
+    // They are queued rather than made: a window can only be built from
+    // inside a winit callback, and `can_create_surfaces` is the first one.
+    // Each is placed as it is made, so the second cascades off the first —
+    // the app has to remember the spots instead, because showing a window on
+    // macOS moves it and its windows are shown later.
+    if let Some(spec) = session_maker.window(&path) {
+        windows.open(spec);
+    }
+    for beside in session.iter().skip(1) {
+        if let Some(spec) = session_maker.window(beside) {
+            windows.open(spec);
+        }
+    }
+
+    // Where a window comes from when one is asked for by path alone: the Dock
+    // menu, a second launch, ⌘N. See `Session::hand_over`.
+    {
+        let session = session_maker.clone();
+        shell.on_request(move |path| match path {
+            Some(path) => session.hand_over(&path),
+            None => session.another(),
+        });
+    }
+    {
+        let session = session_maker.clone();
+        shell.on_close(move |label| session.tidy(label));
+    }
+    {
+        let desk = desk.clone();
+        shell.on_focus(move |label| desk.focused(label.as_deref()));
+    }
+    {
+        // Raised before the first window of a quit goes, which is the whole
+        // of what tells a window closed by the reader from a window closed
+        // because the app is going. See `windows::Desk::closing`.
+        let desk = desk.clone();
+        shell.on_quit(move || desk.leaving());
+    }
+
+    // The door, answered for as long as the process lives, and the Dock's own
+    // "New Window" beside it — the one route to a second window that does not
+    // need this reader to be in front already, which is exactly the moment
+    // somebody wants one.
+    #[cfg(unix)]
+    if let dioxus_reader::single::Claim::First(listener) = door {
+        dioxus_reader::single::serve(listener, windows.remote());
+    }
+    #[cfg(target_os = "macos")]
+    dioxus_reader::dock::install(windows.remote());
 
     if measure > 0 {
         drive(windows.remote(), measure, window_height - CHROME);
@@ -181,6 +233,10 @@ fn main() {
     }
 
     event_loop.run_app(shell).unwrap();
+    // The socket goes with the process it stood for.
+    if !measuring {
+        dioxus_reader::single::release(&config.dir);
+    }
     // Where the reader got to, if the scribe is still holding it. Everything
     // else this reader remembers is written as it changes; a position is
     // written when the scrolling stops, and quitting is the one way to stop

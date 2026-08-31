@@ -49,6 +49,7 @@ use anyrender::PaintScene;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use blitz_dom::Document as _;
 use blitz_test_harness::{Harness, HarnessOptions};
+use blitz_traits::events::BlitzImeEvent;
 use dioxus::prelude::VirtualDom;
 use dioxus_core::{provide_context, ScopeId};
 use dioxus_native::DioxusDocument;
@@ -528,6 +529,59 @@ impl Reader {
     /// for and the shape a test should exercise.
     pub fn type_text(&mut self, text: &str) {
         self.harness.type_text(text);
+        self.settle();
+    }
+
+    /// Compose a word the way an input method does: a run of preedits, then
+    /// the text itself.
+    ///
+    /// **This is what a reader writing Japanese, Chinese or Korean actually
+    /// does**, and until this method existed nothing in either of this
+    /// experiment's documents could say whether the find bar answered it.
+    /// Both listed IME as the one item that needed a decision rather than a
+    /// workaround, on the strength of there being no composition events. There
+    /// are: `packages/blitz-dom/src/events/ime.rs` takes the focused node's
+    /// editor and applies the event through Parley, and `blitz-shell` routes
+    /// winit's four `WindowEvent::Ime` variants into it.
+    ///
+    /// `stages` is what the candidate window shows on the way — "に",
+    /// "にほん", "にほんご" — and `text` is what is chosen. Every stage is a
+    /// `Preedit`; the choice is an **empty preedit and then a `Commit`**,
+    /// because that is winit's own contract: "right before this event winit
+    /// will send empty [`Preedit`]". A test that leaves the empty one out
+    /// composes on top of its own composing region and gets にほん日本語,
+    /// which reads exactly like a Blitz fault and is not one.
+    pub fn compose(&mut self, stages: &[&str], text: &str) {
+        for stage in stages {
+            self.preedit(stage);
+        }
+        self.preedit("");
+        self.harness.ime(BlitzImeEvent::Commit(text.to_string()));
+        self.settle();
+    }
+
+    /// The commit on its own, without the empty preedit `compose` sends
+    /// first. Here so that a test can show what winit's contract is *for* —
+    /// see `tests/ime.rs` — and for nothing else: a reader's input method
+    /// always sends the empty one.
+    pub fn commit(&mut self, text: &str) {
+        self.harness.ime(BlitzImeEvent::Commit(text.to_string()));
+        self.settle();
+    }
+
+    /// One stage of a composition, shown in the field and committed to
+    /// nothing. An empty string clears the composing region.
+    ///
+    /// A preedit generates no `input` event — `apply_generated_text_input_event`
+    /// answers `PreEditChange` with a redraw and nothing else — so the reader
+    /// does not search for a half-typed romaji. A browser does fire `input`
+    /// during a composition, with `isComposing` set for the application to
+    /// check, and the app never checked it; here the right behaviour is what
+    /// arrives.
+    pub fn preedit(&mut self, stage: &str) {
+        let cursor = Some((stage.len(), stage.len()));
+        self.harness
+            .ime(BlitzImeEvent::Preedit(stage.to_string(), cursor));
         self.settle();
     }
 

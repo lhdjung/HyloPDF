@@ -31,13 +31,13 @@ use crate::render::{Bitmap, Heading, Link, PageSource, PageText, Rect, Target};
 /// per-document lock is exactly what was there and exactly what does not help.
 static LIBRARY: Mutex<()> = Mutex::new(());
 
-fn library() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn library() -> std::sync::MutexGuard<'static, ()> {
     LIBRARY.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The one pdfium instance, created on first use and kept for the life of the
 /// process. Leaked deliberately: every document and page borrows from it.
-fn pdfium() -> Result<&'static Pdfium, String> {
+pub(crate) fn pdfium() -> Result<&'static Pdfium, String> {
     static INSTANCE: Mutex<Option<&'static Pdfium>> = Mutex::new(None);
     let mut held = INSTANCE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(instance) = *held {
@@ -87,7 +87,16 @@ pub struct Document {
 }
 
 struct Open {
-    document: PdfDocument<'static>,
+    /// `None` between [`Document::release`] and the reopen that follows it.
+    ///
+    /// **The file is held open for as long as the document is**, which is the
+    /// whole of why this is an `Option`. pdfium reads a page's objects when
+    /// the page is asked for, not when the file is loaded, so
+    /// `FPDF_LoadDocument` keeps the file open for the life of the document —
+    /// which is the same lazy read the app gets from `read_range`, arrived at
+    /// from the other side. It costs nothing until something wants to *write*
+    /// that file, and then it costs everything: see [`Document::release`].
+    document: Option<PdfDocument<'static>>,
     /// The one buffer every page is drawn into.
     ///
     /// pdfium will make its own if asked (`render_with_config`), and then
@@ -150,7 +159,7 @@ impl Document {
             title,
             opened_in: began.elapsed().as_secs_f64() * 1000.0,
             inner: Mutex::new(Open {
-                document,
+                document: Some(document),
                 scratch: Vec::new(),
             }),
         })
@@ -206,7 +215,10 @@ impl PageSource for Document {
     fn links_of(&self, index: usize) -> Vec<Link> {
         let _library = library();
         let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let Ok(page) = held.document.pages().get(index as i32) else {
+        let Some(document) = held.document.as_ref() else {
+            return Vec::new();
+        };
+        let Ok(page) = document.pages().get(index as i32) else {
             return Vec::new();
         };
         let height = page.height().value as f64;
@@ -255,6 +267,80 @@ impl PageSource for Document {
         links
     }
 
+    /// Every highlight in the document, in reading order.
+    ///
+    /// Three things pdfium decides here.
+    ///
+    /// *A highlight is `/Subtype /Highlight` and nothing else.* Underline,
+    /// strike-out and squiggly are three more markup subtypes and pdfium can
+    /// write all of them; they are not read here because they are not
+    /// written here, and a list that showed a mark this reader has no way to
+    /// make or unmake would be a list with a dead row in it. The app arrived
+    /// at the same place from the other side: `saveNewAnnotations` in
+    /// `pdf.worker.mjs` has a case for `HIGHLIGHT` and none for the other
+    /// three.
+    ///
+    /// *The colour is `/C`, which pdfium calls the stroke colour.* See
+    /// [`crate::markup::add`], where the same name costs an hour if it is
+    /// taken at face value.
+    ///
+    /// *And a highlight with no attachment points is dropped.* `/QuadPoints`
+    /// is what says which words are marked; an annotation without them is a
+    /// rectangle somebody's software left behind, and a row in the panel that
+    /// scrolls to a page and points at nothing is worse than no row.
+    fn markup(&self) -> Vec<crate::markup::Mark> {
+        let _library = library();
+        let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(document) = held.document.as_ref() else {
+            return Vec::new();
+        };
+        let mut marks = Vec::new();
+        for (number, page) in document.pages().iter().enumerate() {
+            let height = page.height().value as f64;
+            for (index, annotation) in page.annotations().iter().enumerate() {
+                let PdfPageAnnotation::Highlight(highlight) = &annotation else {
+                    continue;
+                };
+                let quads: Vec<Rect> = highlight
+                    .attachment_points()
+                    .iter()
+                    .map(|quad| crate::markup::down(&quad.to_rect(), height))
+                    .filter(|quad| quad.width > 0.0 && quad.height > 0.0)
+                    .collect();
+                if quads.is_empty() {
+                    continue;
+                }
+                let colour = highlight
+                    .stroke_color()
+                    .map(|colour| {
+                        crate::markup::write_color((colour.red(), colour.green(), colour.blue()))
+                    })
+                    .unwrap_or_else(|_| "#ffd60a".to_string());
+                marks.push(crate::markup::Mark {
+                    page: number + 1,
+                    index,
+                    quads,
+                    color: colour,
+                });
+            }
+        }
+        marks
+    }
+
+    /// Close the file, keeping everything else. See
+    /// [`PageSource::release`] for why this exists at all.
+    ///
+    /// What is left behind is a `Document` that knows its own path, its
+    /// pages' sizes, its outline, its labels and its title — everything read
+    /// at open — and cannot draw or read a page. That is deliberate: the
+    /// layout is built from those sizes, and a release that took them with it
+    /// would take the reader's place in the document with them.
+    fn release(&self) {
+        let _library = library();
+        let mut held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        held.document = None;
+    }
+
     fn opened_in(&self) -> f64 {
         self.opened_in
     }
@@ -284,7 +370,10 @@ impl PageSource for Document {
     fn text_of(&self, index: usize) -> PageText {
         let _library = library();
         let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let Ok(page) = held.document.pages().get(index as i32) else {
+        let Some(document) = held.document.as_ref() else {
+            return PageText::default();
+        };
+        let Ok(page) = document.pages().get(index as i32) else {
             return PageText::default();
         };
         // pdfium counts from the bottom of the page and the layout counts from
@@ -339,6 +428,8 @@ impl PageSource for Document {
         let held = &mut *held;
         let page = held
             .document
+            .as_ref()
+            .ok_or("That document has been closed.")?
             .pages()
             .get(index as i32)
             .map_err(|e| format!("page {index}: {e}"))?;
@@ -377,7 +468,28 @@ impl PageSource for Document {
         // The rotation is pdfium's own, added to the page's: `rotate` here is
         // a quarter turn on top of whatever `/Rotate` the file asks for, which
         // is what `page.rotate + this.rotation` says in the app.
-        let mut config = PdfRenderConfig::new().set_target_size(width as i32, height as i32);
+        // **`set_reverse_byte_order(false)`, and it is not a nicety.**
+        // `PdfRenderConfig::new()` turns `FPDF_REVERSE_BYTE_ORDER` *on* — the
+        // crate says why in its own source, and the reason is `image`'s
+        // `DynamicImage` rather than anything about PDF — so a bitmap asked
+        // for as BGRA comes back with its red and blue channels the other way
+        // round. Both paths above this one take pdfium at its word: the GPU
+        // uploads the buffer as `Bgra8Unorm` and lets the sampler do the
+        // swizzle, and `ensure_software` swaps the two channels by hand. With
+        // the flag on, both of them were swapping an order that had already
+        // been swapped.
+        //
+        // It is invisible on almost everything this reader draws. A page of
+        // black type on white paper is the same picture either way, and so is
+        // every scan; a recolouring theme reads a pixel's luma, where red and
+        // blue carry different weights (0.2126 against 0.0722) but a grey
+        // page has neither. What shows it is a page with a *known* colour on
+        // it, and the first thing in this reader to put one there is markup:
+        // a passage marked in `#ff0000` came back on screen in `#0000ff`.
+        // See `tests/markup.rs`, which is where it was found.
+        let mut config = PdfRenderConfig::new()
+            .set_reverse_byte_order(false)
+            .set_target_size(width as i32, height as i32);
         if let Some(crop) = view.crop {
             // What the whole page would be, at the scale that makes the crop
             // exactly the pixels asked for. Rounded once, here, so that the

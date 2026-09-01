@@ -399,6 +399,47 @@ body { margin: 0;
 }
 .mark-drop:hover { background: var(--hover); color: var(--text); }
 
+/* The passages, under the pages. A row is a colour, the words themselves, and
+   the way to take it off — the colour first, because that is what a reader
+   picked and is how they will find the one they are looking for. */
+.markup { margin-top: 10px; }
+.markup-row { align-items: flex-start; }
+.markup-dot {
+  flex: 0 0 auto; width: 10px; height: 10px; margin-top: 8px; border-radius: 3px;
+}
+/* Two lines of the quote and then it stops. `text-overflow: ellipsis` is not
+   implemented in Blitz — see the note on `.chip.title` — and a mask is what
+   this file uses instead everywhere it wants the same thing. */
+.markup-row .mark-go {
+  height: auto; min-height: 26px; padding: 5px 6px; line-height: 1.35;
+  white-space: normal; max-height: 40px;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 12px), transparent);
+}
+.markup-restore {
+  display: block; width: 100%; margin: 0 0 8px 0; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 12px; text-align: left;
+}
+.markup-restore:hover { border-color: var(--accent); }
+.markup-beside {
+  display: block; color: var(--faint); font-size: 11px; margin-top: 2px;
+}
+
+/* The colour popover, over the passage it is about. It is not in `#popovers`
+   and there is no such thing here — it belongs to the page, because the
+   rectangle it is placed against is the page's. */
+.markup-popover {
+  display: flex; gap: 6px; padding: 7px; z-index: 6;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 11px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.markup-swatch {
+  width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 7px;
+  padding: 0;
+}
+.markup-swatch:hover { border-color: var(--accent); }
+
 /* The column takes its shape from the pictures in it, and only the rows near
    the view are here at all — see `sidebar.rs`. */
 .thumbs { position: relative; width: 100%; }

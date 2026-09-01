@@ -34,9 +34,15 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+/// What a mark kept beside the document is written down as being: the app's
+/// own `MARKUP_OPACITY`, so a journal this reader writes and the app reads
+/// says what the app would have said. Nothing here draws with it — a mark in
+/// the file is drawn by pdfium out of the appearance stream pdfium generates.
+const MARKUP_OPACITY: f64 = 0.35;
+
 use crate::keys;
 use crate::layout::Anchor;
-use crate::library::{self, Mark};
+use crate::library::{self, Highlight, Mark};
 use crate::palette::{self, Palette};
 use crate::settings::{self, Settings};
 use crate::theme;
@@ -288,6 +294,9 @@ pub struct Store {
     /// every change here is written through, and the write is what the next
     /// run reads.
     marks: Vec<Mark>,
+    /// Markup kept beside the document because it could not go into it. See
+    /// [`Store::journal`].
+    journal: Vec<Highlight>,
     /// What the document is called on the shelf: its own `/Title` where that
     /// is worth having, and the file's name where it is not. Decided once, at
     /// open, by [`worth_calling`].
@@ -323,6 +332,7 @@ impl Store {
             complaint: None,
             file: String::new(),
             marks: Vec::new(),
+            journal: Vec::new(),
             title: String::new(),
         };
         store.complaint = store.unreadable();
@@ -523,6 +533,7 @@ impl Store {
             Ok(library) => {
                 if let Some(entry) = library.files.iter().find(|entry| entry.path == path) {
                     self.marks = entry.marks.clone();
+                    self.journal = entry.highlights.clone();
                     place = Some(Anchor {
                         page: entry.page.max(1) as usize,
                         offset: entry.offset,
@@ -631,6 +642,113 @@ impl Store {
                 marked
             }
             Err(_) => false,
+        }
+    }
+
+    /* --------------------------------------------------- the markup journal */
+
+    /// Markup this reader is keeping *beside* the document rather than in it.
+    ///
+    /// **The journal is never the authority**, which is the app's rule and the
+    /// reason `library.rs` says so at the top of `Highlight`: a mark that is
+    /// in the file is read out of the file, and this list holds only what a
+    /// file cannot carry — markup on a document that could not be written.
+    /// Those are the entries the app holds with `annotation_id: null`, and
+    /// they are the only ones this reader ever puts here.
+    ///
+    /// The shape on disk is the app's exactly — the same `library.toml`, the
+    /// same eight numbers a run, in the page's own PDF space counting from the
+    /// bottom — because `library.rs` is the app's file mounted here rather
+    /// than a copy, and a journal one of them writes is a journal the other
+    /// reads.
+    pub fn journal(&self) -> &[Highlight] {
+        &self.journal
+    }
+
+    /// Keep one mark beside the document, because it could not go in.
+    /// Answers its id, which is what takes it out again.
+    pub fn keep_markup(&mut self, page: usize, quads: &[f64], color: &str, quote: &str) -> String {
+        let id = format!(
+            "{:x}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.as_nanos())
+                .unwrap_or(0),
+            self.journal.len()
+        );
+        if self.file.is_empty() {
+            return id;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_secs() as i64)
+            .unwrap_or(0);
+        let highlight = Highlight {
+            id: id.clone(),
+            page: page as u32,
+            quads: quads.to_vec(),
+            color: color.to_string(),
+            opacity: MARKUP_OPACITY,
+            style: library::HighlightStyle::Highlight,
+            quote: quote.to_string(),
+            at: now,
+            annotation_id: None,
+        };
+        match library::add_highlight(&self.dir, &self.file, highlight) {
+            Ok(highlights) => self.journal = highlights,
+            Err(refused) => self.complaint = Some(refused),
+        }
+        id
+    }
+
+    /// Replace the whole journal with what the file itself says, plus
+    /// whatever the file could not carry.
+    ///
+    /// **The journal is a cache and a recovery log, never an authority** —
+    /// `library.rs` says so above `Highlight` and this is what makes it true:
+    /// everything that was here is discarded in favour of what was just read
+    /// out of the document. What the caller keeps is its own business, and
+    /// the only things it ever keeps are the two the file cannot say.
+    pub fn set_journal(&mut self, highlights: Vec<Highlight>) {
+        if self.file.is_empty() {
+            return;
+        }
+        if library::set_highlights(&self.dir, &self.file, highlights.clone()).is_ok() {
+            self.journal = highlights;
+        }
+    }
+
+    /// One entry of the journal, as this reader writes them.
+    pub fn markup_entry(
+        page: usize,
+        quads: Vec<f64>,
+        color: &str,
+        quote: &str,
+        annotation: Option<String>,
+    ) -> Highlight {
+        Highlight {
+            id: format!("{page}-{}-{}", color, quote.len()),
+            page: page as u32,
+            quads,
+            color: color.to_string(),
+            opacity: MARKUP_OPACITY,
+            style: library::HighlightStyle::Highlight,
+            quote: quote.to_string(),
+            at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.as_secs() as i64)
+                .unwrap_or(0),
+            annotation_id: annotation,
+        }
+    }
+
+    /// Take one out of the journal by the id it was given.
+    pub fn drop_markup(&mut self, id: &str) {
+        if self.file.is_empty() {
+            return;
+        }
+        if let Ok(highlights) = library::remove_highlight(&self.dir, &self.file, id) {
+            self.journal = highlights;
         }
     }
 

@@ -163,7 +163,11 @@ fn a_quote_carries_the_page_it_came_from() {
         quote.contains("“A needle in the first page.”") && quote.ends_with("p. 1"),
         "{quote}"
     );
-    assert!(reader.state().notice.contains("p. 1"), "{}", reader.state().notice);
+    assert!(
+        reader.state().notice.contains("p. 1"),
+        "{}",
+        reader.state().notice
+    );
 }
 
 #[test]
@@ -196,6 +200,17 @@ fn escape_puts_the_selection_down() {
     let mut reader = prose();
     reader.sweep_page(1, (0.10, LINE), (0.55, LINE));
     assert!(painted(&reader) > 0);
+    // Letting go of a sweep offers to mark it — see `tests/markup.rs` — and
+    // the swatches are the outermost thing on screen, so the first Escape is
+    // theirs. That is the same "outward, in the order the reader arrived"
+    // every other Escape in this app follows.
+    assert!(reader.harness.query(".markup-popover").is_some());
+    reader.press("Escape");
+    assert!(reader.harness.query(".markup-popover").is_none());
+    assert!(
+        painted(&reader) > 0,
+        "and the selection is still there under it"
+    );
     reader.press("Escape");
     assert_eq!(painted(&reader), 0);
     assert_eq!(selected(&mut reader), "");

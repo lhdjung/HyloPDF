@@ -230,6 +230,17 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
             (page, title)
         })
         .collect();
+    // Every mark in the document, and whatever the journal is holding beside
+    // it. Read here rather than in the rows below because it costs a page of
+    // text per mark — see `Viewer::markup_rows` — and the panel is redrawn on
+    // every scroll frame.
+    let markup = held.markup_rows();
+    let marked_up = !markup.is_empty();
+    // How many passages the journal is holding that the document itself has
+    // lost — a paper recompiled by LaTeX is a new file and the annotations
+    // went with it. The offer is a button and never a thing that happens on
+    // its own. See [`crate::app::Viewer::restore_markup`].
+    let adrift = held.restorable();
     let column = held.column.clone();
     // Worked out once rather than per row: the answer is the same for every
     // one of them, and a document's outline can be long.
@@ -369,8 +380,80 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                             }
                         }
                     }
-                    if headings.is_empty() {
+                    // The passages the reader has marked, under the pages
+                    // they pinned and above the document's own contents.
+                    // `showHighlights` in the app puts them in the same
+                    // panel and in the same order, and for the reason the
+                    // marks are up there: there are never many, and this is
+                    // the reader's own account of the document rather than
+                    // the document's.
+                    if marked_up {
+                        div { class: "markup",
+                            p { class: "marks-title", "Marked up" }
+                            if adrift > 0 {
+                                button {
+                                    class: "markup-restore",
+                                    onclick: move |_| {
+                                        let restarted = viewer.write().restore_markup();
+                                        crate::app::rescan(viewer, restarted);
+                                    },
+                                    if adrift == 1 {
+                                        "Put 1 passage back"
+                                    } else {
+                                        "Put {adrift} passages back"
+                                    }
+                                }
+                            }
+                            for row in markup {
+                                {
+                                    let (page, colour) = (row.page, row.color.clone());
+                                    let quote = if row.quote.is_empty() {
+                                        format!("Page {page}")
+                                    } else {
+                                        row.quote.clone()
+                                    };
+                                    let beside = matches!(row.key, crate::app::MarkKey::Beside(_));
+                                    let key = row.key.clone();
+                                    rsx! {
+                                        div { class: "mark markup-row", key: "{row.key:?}",
+                                            span {
+                                                class: "markup-dot",
+                                                style: "background: {colour};",
+                                            }
+                                            button {
+                                                class: "mark-go",
+                                                "data-page": "{page}",
+                                                onclick: move |_| viewer.write().go_to_page(page),
+                                                "{quote}"
+                                                // What the file cannot carry
+                                                // says so on the row rather
+                                                // than in a section of its
+                                                // own: to a reader it is one
+                                                // kind of thing, and this is
+                                                // the one fact about it worth
+                                                // knowing.
+                                                if beside {
+                                                    span { class: "markup-beside", "beside the document" }
+                                                }
+                                            }
+                                            button {
+                                                class: "mark-drop",
+                                                "aria-label": "Remove this mark",
+                                                onclick: move |_| {
+                                                    let restarted = viewer.write().remove_markup(&key);
+                                                    crate::app::rescan(viewer, restarted);
+                                                },
+                                                "×"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if headings.is_empty() && !marked_up {
                         p { class: "sidebar-empty", "This document has no table of contents." }
+                    } else if headings.is_empty() {
                     } else {
                         for (at, heading) in headings.iter().enumerate() {
                             {
@@ -541,7 +624,10 @@ mod tests {
                 let (top, picture) = column.row(index).expect("a row");
                 let visible = top < scroll + height && top + picture > scroll;
                 if visible {
-                    assert!(mounted.contains(&index), "row {index} is in view at {scroll}");
+                    assert!(
+                        mounted.contains(&index),
+                        "row {index} is in view at {scroll}"
+                    );
                 }
             }
             // And nothing more than a screen of overscan either side of it.
@@ -574,7 +660,9 @@ mod tests {
         let column = Column::new(&sizes(50), 252.0);
         let height = 800.0;
         assert_eq!(column.reveal(0, 0.0, height), None);
-        let far = column.reveal(40, 0.0, height).expect("row 40 is not in view");
+        let far = column
+            .reveal(40, 0.0, height)
+            .expect("row 40 is not in view");
         assert!(far > 0.0 && far <= column.max_scroll(height));
         // And once it is there, it stays.
         assert_eq!(column.reveal(40, far, height), None);

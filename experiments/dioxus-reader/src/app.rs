@@ -468,6 +468,43 @@ impl Frame {
     }
 }
 
+/// What a mark says it was made by, which is what every other reader shows in
+/// the margin beside it. The app writes nothing here, because pdf.js's
+/// annotation editor does not offer to; this reader is writing the annotation
+/// itself and there is no reason to leave it anonymous.
+const AUTHOR: &str = "HyloPDF";
+
+/// One row of the markup list, wherever the mark itself is being kept.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MarkRow {
+    pub page: usize,
+    pub color: String,
+    /// The words under it — read off the page for a mark in the document,
+    /// and remembered for one the journal is holding, because a mark that is
+    /// beside a document may be beside a document that has been rewritten.
+    pub quote: String,
+    pub key: MarkKey,
+}
+
+/// How to find a mark again in order to take it out.
+///
+/// **The two halves of this enum are the whole of what item 11 found.** A
+/// mark in the file is named by where it sits and is removed by removing it;
+/// a mark beside the file is named by an id this reader made up and is
+/// removed from a TOML table. In the app every mark is the second kind for
+/// the purposes of removal, because the first kind cannot be removed at all —
+/// which is why its journal needs a durable id and this one does not.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MarkKey {
+    /// In the document: the page, and where among that page's annotations.
+    /// Good for as long as the document is the one it was read from, which
+    /// is until the next write — and every write here is followed by a
+    /// reopen and a re-read.
+    InFile(usize, usize),
+    /// Beside the document, in `library.toml`, by the id it was given.
+    Beside(String),
+}
+
 /// A fit mode, spelled the way `settings.toml` spells it. One function rather
 /// than two match arms in two places, because the value written and the value
 /// read back have to be the same word and nothing else checks that they are.
@@ -680,6 +717,31 @@ pub struct Viewer {
     /// runs off the bottom of a page carries on down the next one, which is
     /// what continuous scrolling is for. See [`crate::select`].
     selection: Option<Selection>,
+    /// Every highlight in the document, read out of the file at open and
+    /// again after every reload. See [`crate::markup`].
+    ///
+    /// **The file is the record and this is a reading of it**, which is why
+    /// there is nothing to keep in step: a mark is written, the document is
+    /// reopened through the path a recompile already uses, and this is filled
+    /// from what came back. The app has a journal that has to be reconciled
+    /// against the file on every open because its writes and its reads are on
+    /// opposite sides of a bridge; here they are the same call.
+    pub markup: Vec<crate::markup::Mark>,
+    /// Where a mark can go on this document, asked once when it opened.
+    standing: crate::markup::Standing,
+    /// Whether the reader has been told about the standing yet. Once per
+    /// document, as the app says it: a sentence repeated on every gesture is
+    /// a sentence nobody reads.
+    said_standing: bool,
+    /// The colour popover: which page it is over and where on that page, in
+    /// the same space as a mark's own quads.
+    ///
+    /// `None` almost always. It opens where the selection ends rather than
+    /// off a toolbar button, because nothing in the toolbar is what it is
+    /// about — which is `showMarkupPopover` in `main.ts` making a throwaway
+    /// element over the selection's own rectangle, said in a reader that can
+    /// simply put the node on the page.
+    pub markup_at: Option<(usize, Rect)>,
     /// Where the content's top left is, in the coordinates a mouse event
     /// arrives in, worked out from the press that began the sweep.
     ///
@@ -849,6 +911,10 @@ impl Viewer {
             links: RefCell::new(HashMap::new()),
             texts: RefCell::new(Vec::new()),
             selection: None,
+            markup: Vec::new(),
+            standing: crate::markup::Standing::default(),
+            said_standing: false,
+            markup_at: None,
             sweep_from: None,
             pressed: None,
             past: Vec::new(),
@@ -886,6 +952,7 @@ impl Viewer {
             let declared = viewer.document.title();
             viewer.place = viewer.store.opened(&path, &declared);
         }
+        viewer.read_markup();
         viewer.restore();
         viewer
     }
@@ -1231,6 +1298,10 @@ impl Viewer {
     /// menu that is already open closes it, which is what clicking its own
     /// button means.
     pub fn show_menu(&mut self, menu: Menu) {
+        // One thing down at a time: the swatches are a menu in everything but
+        // name, and two of them open at once is the thing `showPopover` in
+        // `ui.ts` exists to prevent.
+        self.markup_at = None;
         self.menu = if self.menu == Some(menu) {
             None
         } else {
@@ -1321,8 +1392,7 @@ impl Viewer {
     /// changing it is a new palette and every drawn page is stale. See
     /// `store.rs`, where the same flag is read.
     pub fn set_recolor_images(&mut self, on: bool) {
-        self.store
-            .set(vec![("recolor_images".into(), json!(on))]);
+        self.store.set(vec![("recolor_images".into(), json!(on))]);
         self.generation += 1;
     }
 
@@ -1703,6 +1773,9 @@ impl Viewer {
         }
         let spot = self.spot_on(index, on.0, on.1);
         self.selection = Some(Selection::at(spot));
+        // A new sweep is a new passage; the swatches offered for the last one
+        // go with it.
+        self.markup_at = None;
     }
 
     /// The pointer moved with the button down. A no-op outside a sweep, which
@@ -1806,6 +1879,7 @@ impl Viewer {
     /// asked can go on to the next thing Escape means.
     pub fn clear_selection(&mut self) -> bool {
         self.sweep_from = None;
+        self.markup_at = None;
         self.selection.take().is_some()
     }
 
@@ -1894,6 +1968,513 @@ impl Viewer {
         Some((format!("“{quoted}” — {where_from}"), where_from))
     }
 
+    /* ------------------------------------------------------------- markup */
+
+    /// Read the document's own markup, ask the disk where a new mark could
+    /// go, and bring the journal into line with both. Called at open and
+    /// after every reload.
+    fn read_markup(&mut self) {
+        self.markup = self.document.markup();
+        let path = self.document.path().to_string();
+        self.standing = if path.is_empty() {
+            crate::markup::Standing::default()
+        } else {
+            crate::markup::standing(&path)
+        };
+        self.sync_journal();
+    }
+
+    /// The journal, rebuilt from what the file says.
+    ///
+    /// **This is where a recompile is survived**, and it is the one job the
+    /// journal has that a document cannot do for itself. A paper rebuilt by
+    /// LaTeX is a new file: every annotation in the old one went with it, and
+    /// the words are usually still there. So each mark in the document is
+    /// written down here with the passage it covers, and a reload that finds
+    /// the annotations gone finds the quotes still written down — which is
+    /// what [`Viewer::restore_markup`] then looks up again.
+    ///
+    /// The rule is the app's `syncMarkup`, said in this reader's terms:
+    /// **everything is thrown away and rebuilt from the file**, and what
+    /// survives is only what the file cannot carry — a mark beside a document
+    /// that could not be written, and a mark a rebuilt document lost.
+    ///
+    /// A mark is the same mark as before when its colour and its words are
+    /// the same. Not its page and not its index: a rebuilt paper moves a
+    /// passage down the document, which is precisely the case this exists
+    /// for, and an index shifts every time an earlier annotation is added or
+    /// taken away. The folded quote is what `findQuote` matches on in the app
+    /// and it is what a reader would recognise.
+    fn sync_journal(&mut self) {
+        let inside: Vec<(String, String, crate::markup::Mark)> = self
+            .markup
+            .iter()
+            .map(|mark| {
+                let quote = crate::markup::quote_under(&self.text_on(mark.page), &mark.quads);
+                (mark.color.to_lowercase(), folded(&quote), mark.clone())
+            })
+            .collect();
+        let mut next = Vec::new();
+        for held in self.store.journal() {
+            let known = inside.iter().any(|(colour, quote, _)| {
+                *colour == held.color.to_lowercase() && *quote == folded(&held.quote)
+            });
+            if known {
+                // In the file, so the file's own entry below is the one to
+                // keep — this copy is last time's reading of it.
+                continue;
+            }
+            // Not in the file. Either it never was, or it went with a
+            // rebuild, and **`annotation_id` is what says so**: `None` is the
+            // app's own mark for a highlight the document is not carrying,
+            // and it is what the panel reads to know which rows to list and
+            // which passages it can offer to put back.
+            let mut lost = held.clone();
+            lost.annotation_id = None;
+            next.push(lost);
+        }
+        for (_, _, mark) in &inside {
+            let height = self.document.size_of(mark.page.saturating_sub(1)).height;
+            let quote = crate::markup::quote_under(&self.text_on(mark.page), &mark.quads);
+            next.push(crate::store::Store::markup_entry(
+                mark.page,
+                crate::markup::flat(&mark.quads, height),
+                &mark.color,
+                &quote,
+                Some(format!("{}:{}", mark.page, mark.index)),
+            ));
+        }
+        self.store.set_journal(next);
+    }
+
+    /// The marks the journal is holding that are not in the document: the
+    /// ones a rebuild lost, and the ones a document that cannot be written
+    /// never took.
+    pub fn markup_adrift(&self) -> Vec<&crate::library::Highlight> {
+        self.store
+            .journal()
+            .iter()
+            .filter(|held| held.annotation_id.is_none())
+            .collect()
+    }
+
+    /// How many of those could be put back, which is what the offer says.
+    pub fn restorable(&self) -> usize {
+        if !self.standing.into_file {
+            return 0;
+        }
+        self.markup_adrift()
+            .iter()
+            .filter(|held| !held.quote.trim().is_empty())
+            .count()
+    }
+
+    /// Look the lost passages up again and write back the ones that are
+    /// still there.
+    ///
+    /// **A guess, and never a thing that happens on its own.** It is a button
+    /// in the panel because re-anchoring is a guess however good a one, and
+    /// this reader does not write to somebody's file without being asked —
+    /// which is the app's own sentence about the same button.
+    ///
+    /// The lookup starts on the page the passage used to be on and works
+    /// outwards, because a rebuilt paper usually moves a passage by a page
+    /// or two rather than to the other end of the book. What it does not
+    /// find is left in the journal and counted out loud: a passage that was
+    /// rewritten is not a passage that moved.
+    pub fn restore_markup(&mut self) -> Option<u64> {
+        let path = self.document.path().to_string();
+        let wanted: Vec<crate::library::Highlight> = self
+            .markup_adrift()
+            .into_iter()
+            .filter(|held| !held.quote.trim().is_empty())
+            .cloned()
+            .collect();
+        if wanted.is_empty() || !self.standing.into_file {
+            return None;
+        }
+        let mut found = Vec::new();
+        let mut missing = Vec::new();
+        for held in &wanted {
+            match self.find_quote(held.page as usize, &held.quote) {
+                Some((page, quads)) => found.push((held.clone(), page, quads)),
+                None => missing.push(held.clone()),
+            }
+        }
+        if found.is_empty() {
+            self.notice = format!(
+                "{} could not be found in this document.",
+                said_of(missing.len(), "passage", "passages"),
+            );
+            return None;
+        }
+        // The journal is written *before* the file, so that the reload the
+        // write causes does not put back what is about to be put back. The
+        // app's `restoreMarkup` does the same, for the same reason.
+        let keeping: Vec<crate::library::Highlight> = self
+            .store
+            .journal()
+            .iter()
+            .filter(|held| {
+                held.annotation_id.is_some() || missing.iter().any(|lost| lost.id == held.id)
+            })
+            .cloned()
+            .collect();
+        self.store.set_journal(keeping);
+        self.document.release();
+        let mut wrote = 0;
+        let mut refused = String::new();
+        for (held, page, quads) in &found {
+            match crate::markup::add(&path, &[(*page, quads.clone())], &held.color, AUTHOR) {
+                Ok(()) => wrote += 1,
+                Err(why) => refused = why,
+            }
+        }
+        let restarted = self.reopen(&path);
+        self.notice = if missing.is_empty() {
+            format!("{} put back.", said_of(wrote, "passage", "passages"))
+        } else {
+            format!(
+                "{} put back. {} could not be found in this document.",
+                said_of(wrote, "passage", "passages"),
+                said_of(missing.len(), "passage", "passages"),
+            )
+        };
+        if !refused.is_empty() {
+            self.notice = refused;
+        }
+        restarted
+    }
+
+    /// Where a remembered passage is now, starting from the page it used to
+    /// be on and working outwards.
+    ///
+    /// Through [`crate::search::fold`], which is the one thing this borrows
+    /// from the search and is what makes it work at all: a passage that moved
+    /// has very often been re-typeset on the way, so the ligatures and the
+    /// soft hyphens are not the ones it had. The app's `findQuote` reaches
+    /// for the same function for the same reason.
+    fn find_quote(&self, was_on: usize, quote: &str) -> Option<(usize, Vec<Rect>)> {
+        let wanted = folded(quote);
+        if wanted.is_empty() {
+            return None;
+        }
+        let pages = self.document.pages();
+        let order = std::iter::once(was_on.clamp(1, pages.max(1)))
+            .chain((1..=pages).filter(|page| *page != was_on));
+        for page in order {
+            let text = self.text_on(page);
+            if text.chars.is_empty() {
+                continue;
+            }
+            let folded = crate::search::fold(&text.chars, false);
+            // Whitespace is flattened on both sides before the comparison,
+            // because a passage that moved has very often been re-broken as
+            // well as re-set: the quote was written down with single spaces
+            // and the page it is now on may break it across a line. Each
+            // character of the flattened text remembers where in the folded
+            // text it came from, so the answer is still a range of the page's
+            // own characters — the same trick `fold` itself plays one level
+            // down.
+            let mut flat = String::with_capacity(folded.text.len());
+            let mut back = Vec::with_capacity(folded.text.len());
+            for (at, &character) in folded.text.iter().enumerate() {
+                if character.is_whitespace() {
+                    if flat.ends_with(' ') || flat.is_empty() {
+                        continue;
+                    }
+                    flat.push(' ');
+                } else {
+                    flat.push(character);
+                }
+                back.push(at);
+            }
+            let Some(at) = flat.find(&wanted) else {
+                continue;
+            };
+            // Byte offset into character offset, which is what `back` — and
+            // through it `origin` — is indexed by.
+            let from = flat[..at].chars().count();
+            let to = from + wanted.chars().count();
+            let (start, end) = (
+                *folded.origin.get(*back.get(from)?)?,
+                back.get(to)
+                    .and_then(|at| folded.origin.get(*at))
+                    .copied()
+                    .unwrap_or(text.chars.len()),
+            );
+            let quads = text.quads(start, end);
+            if !quads.is_empty() {
+                return Some((page, quads));
+            }
+        }
+        None
+    }
+
+    /// Every mark the panel lists: the document's own first, in reading
+    /// order, and then whatever the journal is holding.
+    ///
+    /// The two are one list because to a reader they are one thing — a
+    /// passage they marked — and they are told apart by a word on the row
+    /// rather than by a section of their own. Which is the app's answer as
+    /// well: `showHighlights` marks the ones that are not in the document
+    /// rather than putting them elsewhere.
+    pub fn markup_rows(&self) -> Vec<MarkRow> {
+        let mut rows: Vec<MarkRow> = self
+            .markup
+            .iter()
+            .map(|mark| MarkRow {
+                page: mark.page,
+                color: mark.color.clone(),
+                quote: crate::markup::quote_under(&self.text_on(mark.page), &mark.quads),
+                key: MarkKey::InFile(mark.page, mark.index),
+            })
+            .collect();
+        rows.sort_by(|a, b| {
+            let (first, second) = (
+                self.markup
+                    .iter()
+                    .find(|mark| MarkKey::InFile(mark.page, mark.index) == a.key)
+                    .map(|mark| (mark.page, mark.begins())),
+                self.markup
+                    .iter()
+                    .find(|mark| MarkKey::InFile(mark.page, mark.index) == b.key)
+                    .map(|mark| (mark.page, mark.begins())),
+            );
+            first
+                .partial_cmp(&second)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        // Only the ones the file is not already showing: the journal mirrors
+        // every mark in the document as well, so that a rebuild has the
+        // quotes to look up — see [`Viewer::sync_journal`] — and listing both
+        // copies would list every mark twice.
+        rows.extend(self.markup_adrift().into_iter().map(|held| MarkRow {
+            page: held.page as usize,
+            color: held.color.clone(),
+            quote: held.quote.clone(),
+            key: MarkKey::Beside(held.id.clone()),
+        }));
+        rows
+    }
+
+    /// Put the colour popover up over the selection, or say why not.
+    ///
+    /// Answers whether it opened, so that the gesture that opens it by
+    /// itself — letting go of a sweep — can stay silent while the key says
+    /// something.
+    pub fn open_markup(&mut self) -> bool {
+        let Some(sweep) = self.selection.filter(|sweep| !sweep.is_empty()) else {
+            return false;
+        };
+        // Where the sweep *ends*, which is where the reader's pointer is and
+        // is what the app anchors to as well — the last rectangle of the
+        // range, not the first.
+        let (_, last) = sweep.span();
+        let areas = self.selected_areas(last.page);
+        let Some(area) = areas.last().copied() else {
+            return false;
+        };
+        self.menu = None;
+        self.markup_at = Some((last.page, area));
+        true
+    }
+
+    /// Take it down again. `false` when it was not up, which is what lets
+    /// Escape go on to the next thing it means.
+    pub fn close_markup(&mut self) -> bool {
+        self.markup_at.take().is_some()
+    }
+
+    /// The six colours the popover offers, in the order the swatches show
+    /// them.
+    ///
+    /// Six independent settings rather than a list, because that is what
+    /// `settings.rs` has — the table has no list type and a palette is not
+    /// worth adding one for. The file this crate mounts is the app's, so
+    /// these are the app's six keys and a reader who edits `markup_color_3`
+    /// changes the third swatch in both.
+    pub fn markup_colors(&self) -> Vec<String> {
+        (1..=6)
+            .map(|at| self.store.text(&format!("markup_color_{at}")))
+            .filter(|colour| crate::markup::read_color(colour).is_some())
+            .collect()
+    }
+
+    /// Mark what is selected, in this colour.
+    ///
+    /// The whole gesture, in the order it happens: the quads come off the
+    /// selection, the document is let go of, the write goes in, and the
+    /// document is reopened through the same path a recompile uses. There is
+    /// no pending layer and no markup revision in any cache key, for the
+    /// reason the app gives in `AGENTS.md`: saving immediately makes the
+    /// deferred machinery unnecessary rather than merely delayed, and a
+    /// reload rebuilds every cache there is.
+    ///
+    /// Answers the scan to restart, when the find bar was up — see
+    /// [`Viewer::document_changed`], which is where that convention comes
+    /// from.
+    pub fn mark_selection(&mut self, color: &str) -> Option<u64> {
+        self.markup_at = None;
+        let Some(sweep) = self.selection.filter(|sweep| !sweep.is_empty()) else {
+            // Two different sentences, and the difference is the point. A
+            // scan has no text in it at all, so there is nothing this gesture
+            // could ever mark and no amount of selecting will help.
+            self.notice = if self.document.text_of(self.page() - 1).is_empty() {
+                "There is no text in this document to mark.".into()
+            } else {
+                "Select something first, and this marks it.".into()
+            };
+            return None;
+        };
+        let runs: Vec<(usize, Vec<Rect>)> = sweep
+            .pages()
+            .filter_map(|page| {
+                let text = self.text_on(page);
+                let (from, to) = sweep.range_on(page, text.chars.len())?;
+                let quads = text.quads(from, to);
+                (!quads.is_empty()).then_some((page, quads))
+            })
+            .collect();
+        if runs.is_empty() {
+            self.notice = "There is nothing there to mark.".into();
+            return None;
+        }
+        let quote = self.selected_text();
+        let path = self.document.path().to_string();
+        if !self.standing.into_file {
+            return self.keep_beside(&runs, color, &quote);
+        }
+        // Signed, and said once: it is their document, and a rewrite is
+        // exactly the thing a signature is there to detect. Asked rather than
+        // refused, which is the app's decision made again.
+        let warning = if self.standing.signed && !self.said_standing {
+            self.said_standing = true;
+            " This document is signed, and marking it breaks the signature."
+        } else {
+            ""
+        };
+        // **Let go of the file before writing it, and reopen whatever
+        // happens.** See [`crate::render::PageSource::release`]: pdfium keeps
+        // the document's file open for as long as the document lives, and on
+        // Windows nothing can rename over it or truncate it while it does.
+        // The reopen is unconditional because a released document draws
+        // nothing — so a write that fails must still leave the reader looking
+        // at their document.
+        self.document.release();
+        let written = crate::markup::add(&path, &runs, color, AUTHOR);
+        self.selection = None;
+        let restarted = self.reopen(&path);
+        self.show_markup_panel();
+        match written {
+            Ok(()) => self.notice = format!("Marked.{warning}"),
+            Err(refused) => {
+                // The file is as it was, so there is nothing to put back. The
+                // mark is kept beside the document instead, which is the
+                // answer a read-only file gets and for the same reason: a
+                // passage the reader marked is not lost because the disk said
+                // no.
+                self.keep_beside(&runs, color, &quote);
+                self.notice = format!("{refused} The mark is kept beside the document.");
+            }
+        }
+        restarted
+    }
+
+    /// Keep a mark beside the document rather than in it, and say so once.
+    fn keep_beside(
+        &mut self,
+        runs: &[(usize, Vec<Rect>)],
+        color: &str,
+        quote: &str,
+    ) -> Option<u64> {
+        for (page, quads) in runs {
+            let height = self.document.size_of(page.saturating_sub(1)).height;
+            self.store
+                .keep_markup(*page, &crate::markup::flat(quads, height), color, quote);
+        }
+        self.selection = None;
+        self.show_markup_panel();
+        let why = self.standing.refused.clone();
+        self.notice = if self.said_standing || why.is_empty() {
+            "Marked, beside the document.".into()
+        } else {
+            self.said_standing = true;
+            format!("Marked — but {why}, so it is kept beside the document rather than in it.")
+        };
+        None
+    }
+
+    /// A document with a passage marked in it has something to show in the
+    /// Contents panel after all, which is [`Viewer::mark_page`]'s own rule
+    /// and is as narrow here as it is there: only when the panel is already
+    /// open, and only when the tab it is on has nothing on it. Taking a
+    /// reader off the thumbnails they were looking at, for a list they can
+    /// see is there, is the panel arguing.
+    fn show_markup_panel(&mut self) {
+        if self.sidebar_open && self.tab == Tab::Pages && self.headings.is_empty() {
+            self.tab = Tab::Contents;
+        }
+    }
+
+    /// Take one mark out, wherever it is being kept.
+    ///
+    /// **A mark in the document comes out of the document**, which is the
+    /// sentence this whole item is about: `FPDFPage_RemoveAnnot`, a reopen,
+    /// and it is gone from the file for every reader of it. The app cannot
+    /// say that — see [`crate::markup`].
+    pub fn remove_markup(&mut self, key: &MarkKey) -> Option<u64> {
+        match key {
+            MarkKey::Beside(id) => {
+                self.store.drop_markup(id);
+                self.notice = "Mark removed.".into();
+                None
+            }
+            MarkKey::InFile(page, index) => {
+                let path = self.document.path().to_string();
+                // **The journal has to be told first**, or the reload cannot
+                // tell "the reader took this off" from "a rebuild lost it" —
+                // the mark is gone from the file either way, and the second
+                // reading offers it straight back. The app hit exactly this
+                // and fixed it exactly here, ahead of the write rather than
+                // after it.
+                let entry = self
+                    .markup
+                    .iter()
+                    .find(|mark| mark.page == *page && mark.index == *index)
+                    .map(|mark| {
+                        (
+                            mark.color.to_lowercase(),
+                            folded(&crate::markup::quote_under(
+                                &self.text_on(mark.page),
+                                &mark.quads,
+                            )),
+                        )
+                    });
+                if let Some((colour, quote)) = entry {
+                    let keeping: Vec<crate::library::Highlight> = self
+                        .store
+                        .journal()
+                        .iter()
+                        .filter(|held| {
+                            held.color.to_lowercase() != colour || folded(&held.quote) != quote
+                        })
+                        .cloned()
+                        .collect();
+                    self.store.set_journal(keeping);
+                }
+                self.document.release();
+                let taken = crate::markup::remove(&path, *page, *index);
+                let restarted = self.reopen(&path);
+                self.notice = match taken {
+                    Ok(()) => "Mark removed.".into(),
+                    Err(refused) => refused,
+                };
+                restarted
+            }
+        }
+    }
+
     /* ------------------------------------------------- what a page is called */
 
     /// Whether this document numbers its pages its own way.
@@ -1960,7 +2541,6 @@ impl Viewer {
         self.page_fresh = false;
     }
 
-
     /// Go where the field says, or say that it says nowhere.
     ///
     /// Either way the field stops being typed in and goes back to naming the
@@ -2026,6 +2606,12 @@ impl Viewer {
 
     /// Put the find bar up. Nothing is searched for until something is typed.
     pub fn open_find(&mut self) {
+        // The colour popover is about a passage, and somebody opening the
+        // find bar has moved on from it. Closing it here rather than leaving
+        // Escape to do it keeps that key's order the one it claims to be:
+        // outward, in the order the reader arrived — and the bar was arrived
+        // at second.
+        self.markup_at = None;
         self.find_open = true;
         if self.sidebar_open && !self.search.query().is_empty() {
             self.tab = Tab::Results;
@@ -2478,6 +3064,28 @@ impl Viewer {
         if path != self.document.path() {
             return None;
         }
+        let restarted = self.reopen(path);
+        let renamed = self.store.renamed(&self.document.title());
+        self.notice = if renamed {
+            format!(
+                "Reloaded — the document changed on disk. Now called {}.",
+                self.store.title()
+            )
+        } else {
+            "Reloaded — the document changed on disk.".into()
+        };
+        restarted
+    }
+
+    /// The document on disk, read again, with the reader left where they
+    /// were — and nothing said about it.
+    ///
+    /// Split out of [`Viewer::document_changed`] because there are now two
+    /// reasons to do this and they have different things to say afterwards:
+    /// a compiler rewrote the paper, or this reader just marked a passage in
+    /// it. The work is identical, and the sentence is not — "Reloaded" is the
+    /// wrong answer to a reader who pressed a colour.
+    fn reopen(&mut self, path: &str) -> Option<u64> {
         let at = self.layout.anchor(self.scroll_top);
         let reopened = match crate::render::open(path) {
             Ok(document) => document,
@@ -2494,6 +3102,7 @@ impl Viewer {
         self.document = reopened;
         self.headings = self.document.outline();
         self.labels = self.document.labels();
+        self.read_markup();
         self.links.borrow_mut().clear();
         // And the text with them, along with whatever was selected: both are
         // indices into a document that no longer exists, and a selection kept
@@ -2520,23 +3129,13 @@ impl Viewer {
         // Clamped by `go_to`, so a draft that lost its last chapter lands on
         // the end of what is left rather than nowhere.
         self.go_to(at);
-        let restarted = if self.find_open {
+        if self.find_open {
             let query = self.find_query.clone();
             self.search.forget();
             self.find(&query)
         } else {
             None
-        };
-        let renamed = self.store.renamed(&self.document.title());
-        self.notice = if renamed {
-            format!(
-                "Reloaded — the document changed on disk. Now called {}.",
-                self.store.title()
-            )
-        } else {
-            "Reloaded — the document changed on disk.".into()
-        };
-        restarted
+        }
     }
 
     /// A different document, in this window. ⌘O, and the menu item under it.
@@ -2589,6 +3188,12 @@ impl Viewer {
         let place = self.store.opened(path, &declared);
         self.headings = self.document.outline();
         self.labels = self.document.labels();
+        // A different document has different markup, and its own answer to
+        // whether it can be written — and `said_standing` goes with it,
+        // because "said once" means once per document.
+        self.read_markup();
+        self.said_standing = false;
+        self.markup_at = None;
         self.links.borrow_mut().clear();
         self.texts.borrow_mut().clear();
         self.selection = None;
@@ -2615,7 +3220,10 @@ impl Viewer {
         self.edition += 1;
         self.generation += 1;
         self.scroll_top = 0.0;
-        self.go_to(place.unwrap_or(crate::layout::Anchor { page: 1, offset: 0.0 }));
+        self.go_to(place.unwrap_or(crate::layout::Anchor {
+            page: 1,
+            offset: 0.0,
+        }));
         self.relay_column();
         self.revealed = false;
         self.reveal_thumb();
@@ -2726,6 +3334,9 @@ struct Placed {
     /// What the reader has swept over, on this page, in the same space as the
     /// other two. See [`crate::select`].
     selected: Vec<Rect>,
+    /// Where the colour popover goes, when it is over this page. See
+    /// [`Viewer::markup_at`].
+    swatches: Option<Rect>,
 }
 
 /// The element that wants the keyboard, as a selector.
@@ -3038,6 +3649,10 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let content_height = held.layout.content_height();
     let pages = held.pages();
     let notice = held.notice.clone();
+    // Read once for the whole render rather than per page: six strings out of
+    // the settings table, and the great majority of renders draw no popover
+    // at all.
+    let markup_colours = held.markup_colors();
     let sidebar_open = held.sidebar_open;
     let find_open = held.find_open;
     let presenting = held.presenting;
@@ -3061,6 +3676,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let key_new_window = held.chord_for(Action::NewWindow);
     let key_close = held.chord_for(Action::CloseWindow);
     let key_settings = held.chord_for(Action::Settings);
+    let key_markup = held.chord_for(Action::Markup);
     let key_fit_width = held.chord_for(Action::FitWidth);
     let key_fit_page = held.chord_for(Action::FitPage);
     let key_actual = held.chord_for(Action::ActualSize);
@@ -3104,6 +3720,10 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 hits: held.highlights(index + 1),
                 links: held.link_areas(index + 1),
                 selected: held.selected_areas(index + 1),
+                swatches: held
+                    .markup_at
+                    .filter(|(page, _)| *page == index + 1)
+                    .map(|(_, area)| area),
             })
         })
         .collect();
@@ -3218,6 +3838,16 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 }
                 if sweeping {
                     viewer.write().end_sweep();
+                    // **A sweep that covered something offers to mark it.**
+                    // The app's own hard-won lesson, and the reason it is
+                    // worth repeating here: the colour popover was reachable
+                    // only by ⌘⇧H, so nothing on screen ever pointed at
+                    // highlighting and nobody found the feature after it was
+                    // built. Letting go of a selection is the moment the
+                    // reader is looking at the passage, which is what
+                    // `markup-assessment.md` describes the gesture as all
+                    // along.
+                    viewer.write().open_markup();
                 }
             },
             if toolbar_on {
@@ -3331,6 +3961,28 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                                 },
                                 span { class: "menu-label", "Close window" }
                                 span { class: "menu-key", "{key_close}" }
+                            }
+                            div { class: "menu-rule" }
+                            // The one visible thing pointing at markup, and
+                            // the app learned the hard way that it has to
+                            // exist: there, ⌘⇧H was the only way in for a
+                            // while, and nobody found the feature after it
+                            // was built. Beside "Mark this page", which is
+                            // the other thing in this app called marking and
+                            // is not this one.
+                            button {
+                                class: "menu-item",
+                                "data-item": "markup",
+                                onclick: move |_| {
+                                    viewer.write().close_menu();
+                                    if !viewer.write().open_markup() {
+                                        viewer.write().notice =
+                                            "Select something first, and this marks it.".into();
+                                    }
+                                },
+                                span { class: "menu-tick", "" }
+                                span { class: "menu-label", "Highlight the selection" }
+                                span { class: "menu-key", "{key_markup}" }
                             }
                             div { class: "menu-rule" }
                             // The app has a Settings button of its own in the
@@ -3832,6 +4484,8 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             hits: placed.hits,
                             links: placed.links,
                             selected: placed.selected,
+                            swatches: placed.swatches,
+                            colours: markup_colours.clone(),
                             view,
                             viewer,
                             away: away.clone(),
@@ -3935,6 +4589,16 @@ fn Page(
     /// colour they were printed in. It is the honest version of the same
     /// statement and it is one shader short of the app's.
     selected: Vec<Rect>,
+    /// Where the colour popover goes on this page, when it is on this page.
+    ///
+    /// It hangs off the page rather than off the window because that is the
+    /// space it is positioned in — under the last line of the selection,
+    /// which is a rectangle in the page's own box. The app makes a throwaway
+    /// element over the same rectangle and hands it to `showPopover`, for
+    /// want of anywhere else to put one.
+    swatches: Option<Rect>,
+    /// The colours it offers. See [`Viewer::markup_colors`].
+    colours: Vec<String>,
     /// How this page is turned and how much of it is drawn. In the key as
     /// well, which is what gives the old texture back — see [`PageWidget`].
     view: crate::layout::View,
@@ -4015,6 +4679,45 @@ fn Page(
                     style: "position: absolute; top: {quad.top}px; left: {quad.left}px; width: {quad.width}px; height: {quad.height}px;",
                 }
             }
+            if let Some(area) = swatches {
+                div {
+                    class: "markup-popover",
+                    // **A press on the swatches must not reach the page**, or
+                    // it begins a sweep of its own and puts down the very
+                    // selection it is there to mark. The app has the same
+                    // problem and answers it the other way round — it
+                    // captures the selection when the popover opens and hands
+                    // it to the swatches, because in a webview the browser
+                    // collapses the selection before any handler runs and
+                    // there is nothing to stop. Here the selection is the
+                    // reader's own, so stopping the press is enough, and it
+                    // is what the menus one layer up already do.
+                    onmousedown: move |event| event.stop_propagation(),
+                    // Under the line it is about, which is where the app puts
+                    // it — and it took a fix there to get it: the anchor
+                    // element had no height, so `getBoundingClientRect` put
+                    // the swatches straight over the words they were about.
+                    // Here the rectangle is the line's own, so the offset is
+                    // simply its height.
+                    style: "position: absolute; top: {area.top + area.height + 8.0}px; left: {area.left}px;",
+                    for colour in colours.iter() {
+                        button {
+                            key: "{colour}",
+                            class: "markup-swatch",
+                            "data-colour": "{colour}",
+                            "aria-label": "Mark in {colour}",
+                            style: "background: {colour};",
+                            onclick: {
+                                let colour = colour.clone();
+                                move |_| {
+                                    let restarted = viewer.write().mark_selection(&colour);
+                                    rescan(viewer, restarted);
+                                }
+                            },
+                        }
+                    }
+                }
+            }
             for (at, (area, target)) in links.iter().enumerate() {
                 div {
                     key: "l{at}",
@@ -4053,6 +4756,45 @@ fn Page(
             }
         }
     }
+}
+
+/// The same text, in the form a passage is looked up by. See
+/// [`crate::search::fold`].
+fn folded(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    crate::search::fold(&chars, false)
+        .text
+        .into_iter()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// "One passage" and "three passages", which is a sentence rather than a
+/// count followed by a noun.
+fn said_of(many: usize, one: &str, more: &str) -> String {
+    if many == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{many} {more}")
+    }
+}
+
+/// Drive a scan that something restarted, from anywhere in the component.
+///
+/// The mailbox has a closure of exactly this shape and cannot lend it out —
+/// it is spawned inside the task that owns the news — so this is that closure
+/// said once more, for the two gestures that reload the document without any
+/// news arriving: marking a passage and taking a mark off. See
+/// [`Viewer::reopen`], which is what hands back the token.
+pub(crate) fn rescan(mut viewer: Signal<Viewer>, token: Option<u64>) {
+    let Some(token) = token else { return };
+    spawn(async move {
+        while viewer.write().scan_slice(token) {
+            Breathe::once().await;
+        }
+    });
 }
 
 /// One handler per action, and a dispatch of about thirty lines — which is
@@ -4154,6 +4896,11 @@ fn perform(
             if viewer.write().close_menu() {
                 return;
             }
+            // The colour popover, which is a menu in everything but name and
+            // sits in the same place in this list.
+            if viewer.write().close_markup() {
+                return;
+            }
             // Settings next, and above everything below it: it is a window
             // over the reader, and Escape inside a window means that window.
             // Below the menus because a menu opened *from* Settings is inside
@@ -4253,6 +5000,22 @@ fn perform(
             frame.ask(Ask::FullScreen(full));
         }
         Action::Settings => viewer.write().open_settings(),
+        // ⌘⇧H. The key opens the popover rather than marking in the last
+        // colour used, which is the app's arrangement: a colour is a decision
+        // and a keystroke that made one silently would be a keystroke nobody
+        // could undo.
+        Action::Markup => {
+            if !viewer.write().open_markup() {
+                let held = viewer.read();
+                let nothing = held.document.text_of(held.page() - 1).is_empty();
+                drop(held);
+                viewer.write().notice = if nothing {
+                    "There is no text in this document to mark.".into()
+                } else {
+                    "Select something first, and this marks it.".into()
+                };
+            }
+        }
         Action::Spread => {
             let next = if viewer.read().layout.spread == Spread::Single {
                 Spread::Cover

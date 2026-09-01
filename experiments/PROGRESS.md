@@ -67,7 +67,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 313 tests, about a minute and a half
+cargo test                                   # 329 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -2374,15 +2374,170 @@ scrolls the document behind the window — including the one key that closes the
 thing the reader is looking at. That is the focus fault turning up a fifth
 time. `tests/prefs.rs` is eight tests.
 
+### 11. Markup — done, and it is the item where pdfium wins outright
+
+The last item on the list, and the one the plan put last because it is where
+the port stops being a port: everything above it is the app's behaviour said
+in Rust, and this is a place where the two renderers disagree about what is
+*possible*.
+
+**A marked passage is a `/Subtype /Highlight` in the file**, with
+`/QuadPoints`, `/C` and the appearance stream pdfium generates for it — the
+specification's own annotation, the one Preview, Acrobat and Zotero read.
+Sweep a sentence, let go, and six swatches come up under the line; press one
+and the mark is in the document. `src/markup.rs` is 400 lines including its
+doc comments and `tests/markup.rs` is sixteen tests.
+
+#### Removal is one call, and in the app it is several hundred lines
+
+`saveDocument()` in pdf.js writes an incremental update and no markup subtype
+overrides `Annotation.save()`, so **an annotation already in the file cannot
+be edited or deleted through it at all**. `AGENTS.md` says so in as many
+words, and what the app does about it is the largest single piece of
+machinery in the feature: keep a pristine copy of every document it has ever
+written to, load it detached, replay every highlight but the one being
+removed into it, work out which of them are the app's to replay and which are
+baked into the backup already, refuse when the file carries markup neither
+the backup nor the journal can account for — and a one-level byte-truncation
+undo for the case even that cannot reach.
+
+Here it is `FPDFPage_RemoveAnnot`, which `pdfium-render` wraps as
+`delete_annotation`, and `markup::remove` is eleven lines. That is the whole
+difference, and it is worth being precise about where it comes from: it is
+not that pdfium is better software, it is that this reader *owns the
+document* — pdfium hands over a mutable `PdfDocument` and a save, where
+pdf.js hands over a read model and an annotation-storage side channel that
+was built for its own editor.
+
+**What pdfium charges for it, and it is a real charge.** `save_to_bytes` is
+`FPDF_SaveAsCopy` with `flags = 0`, and `pdfium-render` does not expose the
+flags — `FPDF_INCREMENTAL` is in its own bindings with a `TODO` above the
+hard-coded zero. So where the app appends new objects and leaves every
+original byte untouched, this re-serialises the document. For a paper that is
+nothing; for a signed one it is the end of the signature, which is why the
+reader is told once and asked rather than refused. `.hylopdf-original` is
+kept beside the document the first time this reader ever writes into one —
+the app's own file under the app's own name, kept here for the other reason.
+
+#### Two faults found by writing it, and one of them was in the reader
+
+**A highlight written with `PdfQuadPoints::from_rect` is invisible, and
+round-trips perfectly.** The specification numbers a quad's corners
+upper-left, upper-right, lower-left, lower-right, and pdfium reads them back
+that way — `RectFromQuadPointsArray` takes its left and bottom from the third
+point and its right and top from the second. `from_rect` instead *walks* the
+rectangle: bottom-left, bottom-right, top-right, top-left. Written that way,
+the annotation is in the file with the right colour, pdfium's own
+`GenerateHighlightAP` builds it an appearance stream whose `/BBox` has its
+left and right the same number, and nothing draws it. And `to_rect` takes the
+minimum and maximum of the four points, so it undoes `from_rect` exactly: the
+mark reads back correct through the library that wrote it, and only something
+else opening the document ever finds out. That is why the test beside it
+renders the page and looks at a pixel rather than re-reading the annotation.
+
+**And red and blue were the wrong way round in every page this reader has
+ever drawn.** `PdfRenderConfig::new()` turns `FPDF_REVERSE_BYTE_ORDER` on —
+the crate's own source says why, and the reason is `image`'s `DynamicImage`
+rather than anything about PDF — so a bitmap asked for as BGRA came back
+RGBA. Both paths above it take pdfium at its word: the GPU uploads the buffer
+as `Bgra8Unorm` and lets the sampler swizzle, and the software path swaps the
+two channels by hand. Both were swapping an order that had already been
+swapped.
+
+It is invisible on almost everything this reader draws, which is why nine
+phases of work and 313 tests never caught it: a page of black type on white
+paper is the same picture either way, and so is every scan. The first thing
+in the whole reader to put a *known* colour on a page is markup, and a
+passage marked in `#ff0000` came back on screen as `#0000ff`. One line in
+`pdfium.rs`, and it broke no test — which is the same evidence twice.
+
+#### What the file cannot carry, and the journal that holds it
+
+The journal is `library.toml` — the app's own file, through the app's own
+`library.rs`, mounted here rather than copied, so a journal one of them
+writes is a journal the other reads. The rule is `syncMarkup`'s: **everything
+is thrown away and rebuilt from the file on every read**, and what survives
+is only what a file cannot say.
+
+*A document that cannot be written.* Asked of the disk before the gesture
+rather than found out from a write that failed — `OpenOptions::new().write(true)`
+is the only question whose answer is actually true, because permission bits,
+a read-only volume, another owner and a sandbox all come back the same way.
+The mark is kept beside the document with its quads and its quote, the row in
+the panel says "beside the document", and the reader is told once.
+
+*A document that was rebuilt.* A paper recompiled by LaTeX is a new file and
+every annotation went with it — the case this whole app goes out of its way
+to support everywhere else. So every mark in the document is written into the
+journal with the passage it covers, and a reload that finds the annotations
+gone finds the quotes still written down. "Put 1 passage back" appears in the
+panel, looks each one up through `search::fold` — ligatures split, soft
+hyphens dropped, whitespace flattened, because a passage that moved has very
+often been re-set on the way — starting from the page it used to be on and
+working outwards, and writes back what it finds. What it does not find is
+left in the journal and counted out loud: a passage that was rewritten is not
+a passage that moved. It is a button and never a thing that happens on its
+own, which is the app's own sentence about the same button: re-anchoring is a
+guess, however good a one.
+
+*And a mark the reader took off is not a mark a rebuild lost.* Both are
+"missing from the file", and telling them apart is a bug the app had and
+fixed in exactly the same place: the journal is written **before** the file
+is, so the reload cannot offer back what was just deliberately removed.
+
+#### Three things this reader had to learn that the app never had to
+
+**The file has to be let go of before it can be written.** pdfium reads a
+page's objects when the page is asked for, so `FPDF_LoadDocument` keeps the
+file open for the life of the document — the same lazy read the app gets out
+of `read_range`, arrived at from the other end. On Windows nothing can rename
+over a file held open that way, and nothing can truncate it either. So
+`PageSource::release` exists: the write path lets go, writes, and reopens
+through the path a recompile already uses, and the reopen is unconditional
+because a released document draws nothing. The app needs none of this — the
+handle it holds is Rust's own `File`, which shares writing and deletion, and
+the bytes it writes came out of the worker rather than through that handle.
+
+**A press on the swatches must not reach the page.** It would begin a sweep
+of its own and put down the very selection it is there to mark. The app has
+the same problem from the other side and answers it the other way round: in a
+webview the browser collapses the selection before any handler runs, so there
+is nothing to stop and `captureSelection` takes a copy on the way in. Here
+the selection is the reader's own, so stopping the press is enough — which is
+what the toolbar menus one layer up already do.
+
+**A mark is drawn by pdfium, not by this reader.** Every other rectangle in
+this app — a search hit, a selection, a link — is a node over the page,
+because there is no text layer here and a rectangle is what those things
+actually are. Markup is the exception and it is the right way round: a
+highlight is *in the document*, `PdfRenderConfig` draws annotations by
+default, and that means a document arriving with markup somebody else made
+shows it too. The one cost is that a mark goes through the recolouring shader
+with the page it is on, exactly as it does in the app.
+
+#### What is not built, of markup
+
+No underline, no strike-out, no squiggly: pdfium can write all three and they
+are not offered, because a list that showed a mark this reader has no way to
+make would be a list with a dead row in it. The app arrives at the same place
+from the other side — `saveNewAnnotations` in `pdf.worker.mjs` has a case for
+`HIGHLIGHT` and none for the other three. No area drag for scans, which is
+the one thing `markup-assessment.md` still lists as unbuilt on both sides. No
+note attached to a mark: `/Contents` on a highlight is a comment somebody
+asked for, and the quote in the panel is read off the page instead — which
+has the property that matters, in that it is right for markup this reader did
+not make.
+
 ### What is not built
 
-No markup, no theme editor, and no `follow_system_theme` — the last needs a
-signal this reader does not get, and a switch that writes a setting nothing
-reads is worse than no switch. Of the library, everything but the markup
-journal, which waits for the item that is about markup. **Three of the app's
-forty-three keyboard actions still answer "not built yet"**: dark mode, print,
-and markup. There is still no text *layer*, and there is not going to be one:
-item 10 is what that was for.
+No theme editor and no `follow_system_theme` — the last needs a signal this
+reader does not get, and a switch that writes a setting nothing reads is
+worse than no switch. **Two of the app's forty-three keyboard actions still
+answer "not built yet"**: dark mode and print. There is still no text
+*layer*, and there is not going to be one: item 10 is what that was for.
+
+**Phase 3 is complete.** Eleven items, and the last one came out ahead of the
+thing it was porting.
 
 ---
 
@@ -2403,7 +2558,7 @@ item 10 is what that was for.
    what was on this list *can* be, once the rules are separated from the
    windows they are about.
 
-## Five things worth raising upstream, and none of them is blocking
+## Eight things worth raising upstream, and none of them is blocking
 
 - `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
   comment in the source already says it should be. A tenth of every one of
@@ -2412,6 +2567,29 @@ item 10 is what that was for.
 - `PdfBitmap::as_raw_bytes` named as the copy it is. A function that looks like
   a view and allocates 24MB is a trap anybody using `pdfium-render` for a
   reader will fall into.
+- `PdfQuadPoints::from_rect` in `pdfium-render` numbering the corners the way
+  the PDF specification does. It walks the rectangle — bottom-left,
+  bottom-right, top-right, top-left — where 12.5.6.10 and pdfium's own
+  `RectFromQuadPointsArray` want upper-left, upper-right, lower-left,
+  lower-right. A text-markup annotation built with it is written, saved, read
+  back correctly by the same crate, and drawn by nothing: the appearance
+  stream pdfium generates has a `/BBox` of no width. It is `from_rect`, it is
+  the obvious call, and its result is invisible from inside the library that
+  made it. See Phase 3 item 11.
+- `PdfDocument::save_to_writer` taking the flags. `FPDF_INCREMENTAL` and
+  `FPDF_NO_INCREMENTAL` are both in `pdfium-render`'s own bindings and the
+  flags word is hard-coded to zero, with a `TODO` above it from 2022 saying
+  there is not a lot of information on what they do. There is one thing worth
+  knowing about them and it decides a feature: an incremental save leaves the
+  original bytes untouched, which is what a signature, a syncing folder and a
+  document somebody else's software wrote all care about. It is one argument.
+- `PdfRenderConfig::new()` defaulting `FPDF_REVERSE_BYTE_ORDER` to *on*. The
+  crate's own comment says why — it is for `image`'s `DynamicImage` — and the
+  cost is that a bitmap asked for as `BGRA` is not BGRA. Anything drawing into
+  a buffer of its own, which is the whole point of `PdfBitmap::from_bytes`,
+  gets a silent channel swap that is invisible on grey pages. Defaulting it
+  off, or naming the format `RGBA` when it is set, would have made this
+  impossible to get wrong. See Phase 3 item 11.
 - A click clearing the focus onto `<html>`, with no way for a component to take
   it back. Either half alone is defensible, but together they mean an
   application whose shortcuts live on its own root stops answering them the
@@ -2439,7 +2617,7 @@ item 10 is what that was for.
   press and a release on the same node rather than a pointerup. See Phase 3
   item 10.
 
-**IME used to be the sixth entry and the only blocking one**, on the strength
+**IME used to be an entry of its own and the only blocking one**, on the strength
 of there being no composition events at all: a reader writing CJK could not
 search. It is struck. Blitz applies a composition to the focused element's
 editor through Parley and tells the application about the result, `blitz-shell`

@@ -301,6 +301,47 @@ pub trait PageSource: Send + Sync {
         String::new()
     }
 
+    /// Every highlight in the document, in reading order.
+    ///
+    /// The whole document rather than a page at a time, unlike the links and
+    /// the text beside it, and for the reason the outline is read at open:
+    /// what this answers is a *list* — the panel shows every mark in the book
+    /// — and a list assembled page by page is a list that cannot be shown
+    /// until the last page has been asked. It is a page load each, which is
+    /// what the sizes and the labels already cost at open.
+    ///
+    /// Empty for a renderer that cannot answer, which is the default here for
+    /// the reason [`Self::text_of`] has one — and a reader over one still
+    /// reads, it simply cannot mark.
+    fn markup(&self) -> Vec<crate::markup::Mark> {
+        Vec::new()
+    }
+
+    /// Let go of the file, because something is about to write to it.
+    ///
+    /// **This exists because pdfium reads a page when the page is asked
+    /// for**, not when the document is loaded, so the file stays open for as
+    /// long as the document does. That is the right arrangement for reading —
+    /// it is the same lazy read the app gets out of `read_range`, arrived at
+    /// from the other end — and it is the one thing standing between this
+    /// reader and writing a highlight into the document it is showing.
+    /// Renaming a file over one that is held open is refused on Windows, and
+    /// truncating it is refused there too, because the handle pdfium opens
+    /// does not grant either.
+    ///
+    /// So the write path lets go first and reopens immediately afterwards:
+    /// [`crate::app::Viewer::mark_selection`] releases, writes, and reloads
+    /// the document through the path a recompile already uses. A released
+    /// document renders nothing and answers nothing, which is safe rather
+    /// than merely tolerable — every caller of every method here already
+    /// handles a page it cannot have.
+    ///
+    /// The app needs none of this: the file it holds open is held open by
+    /// Rust's own `File`, which shares deletion and writing with anybody
+    /// else, and the bytes it writes came from the worker rather than from
+    /// the handle.
+    fn release(&self) {}
+
     /// What opening the document cost, in milliseconds — the other half of the
     /// comparison with pdf.js, which spends most of a document open starting
     /// its worker.

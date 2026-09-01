@@ -94,7 +94,11 @@ body { margin: 0;
   font-family: ui-sans-serif, -apple-system, "Helvetica Neue", Arial, sans-serif;
   font-size: 13.5px; line-height: 1.45; }
 
-.root { display: flex; flex-direction: column; height: 100vh;
+ /* `position: relative` so that the Settings scrim, which is absolute, is
+   measured against the window rather than against whatever Blitz would
+   otherwise pick — without it the scrim started below the toolbar and the bar
+   stayed bright behind a window that claims to be modal. */
+.root { position: relative; display: flex; flex-direction: column; height: 100vh;
   background: var(--paper); color: var(--text); }
 
 /* Every row of the window that is not the document carries `z-index`, and it
@@ -428,4 +432,146 @@ body { margin: 0;
    that is not the page, and the darker shade reads as a border on a window
    that has none. */
 .root.presenting .viewer { background: var(--paper); }
+
+/* --------------------------------------------------------- the Settings window
+
+   A scrim and a frame in the same document, which is `showWindow` in `ui.ts`.
+   Blitz has no `position: fixed`, so the scrim is absolute against the root —
+   which is a flex column filling the window, so the two come to the same
+   thing. `z-index` above the menus, because Settings is over everything
+   including the bar it was opened from. */
+.window-scrim {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.34);
+}
+.window {
+  display: flex; flex-direction: column;
+  width: 860px; height: 600px; max-width: 92%; max-height: 92%;
+  border-radius: 16px; border: 1px solid var(--line);
+  background: var(--paper); color: var(--text);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.28);
+}
+.window-bar {
+  display: flex; align-items: center; flex: 0 0 auto;
+  height: 46px; padding: 0 10px 0 18px; border-bottom: 1px solid var(--line);
+}
+.window-title { flex: 1 1 auto; font-size: 14px; font-weight: 600; }
+.chip.window-close { width: 30px; padding: 0; justify-content: center; }
+.window-body { flex: 1 1 auto; display: flex; flex-direction: row; min-height: 0; }
+.window-nav {
+  flex: 0 0 188px; display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 10px; border-right: 1px solid var(--line); background: var(--surface);
+}
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  height: 32px; padding: 0 10px; border: 0; border-radius: 9px;
+  background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 500;
+  text-align: left;
+}
+.nav-item:hover { background: var(--hover); color: var(--text); }
+/* The same pair as a chip in force: the tint carries it and the accent is
+   legible on the tint. See `.chip.on`. */
+.nav-item.on { background: var(--accent-soft); color: var(--accent); }
+/* `scroll`, not `auto` — Blitz has no `auto`, which is the note at the top of
+   this file. Reading is the longest page and does not fit in 600px. */
+.window-pane {
+  flex: 1 1 auto; min-width: 0; padding: 18px 22px 24px 22px;
+  overflow: scroll; scrollbar-width: thin;
+}
+.pane-title { margin: 0 0 4px 0; font-size: 19px; font-weight: 600; }
+.pane-lede { margin: 0 0 12px 0; color: var(--faint); font-size: 14px; }
+.pane-group {
+  margin: 22px 0 8px 0; font-size: 12.5px; font-weight: 600;
+  color: var(--faint);
+}
+.pane-note { margin: 0 0 12px 0; color: var(--faint); font-size: 13px; line-height: 1.5; }
+.pane-actions { display: flex; gap: 8px; margin-top: 16px; }
+.chip.action {
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+}
+.chip.action:hover { background: var(--hover); }
+
+/* One setting. The control sits on the same line as the name and the sentence
+   runs under both, which is what keeps a page of switches readable as prose
+   rather than as a form. */
+.field { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.field-head { display: flex; align-items: center; gap: 16px; }
+.field-label { flex: 1 1 auto; font-size: 14px; }
+.field-control { flex: 0 0 auto; display: flex; align-items: center; }
+.field-note { margin: 6px 0 0 0; color: var(--faint); font-size: 12.5px; line-height: 1.5; }
+
+.switch {
+  width: 40px; height: 23px; padding: 2px; border: 0; border-radius: 12px;
+  background: var(--sunk); display: flex; align-items: center;
+}
+.switch.on { background: var(--accent); }
+.switch-knob {
+  width: 19px; height: 19px; border-radius: 10px; background: var(--paper);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.24);
+}
+/* The knob moves by being pushed, not by being positioned: Blitz has the box
+   model and this needs nothing else. */
+.switch.on .switch-knob { margin-left: 17px; }
+
+.segmented {
+  display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--sunk);
+}
+.segment {
+  height: 26px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); font-size: 13px; font-weight: 500;
+  white-space: nowrap;
+}
+.segment:hover { color: var(--text); }
+.segment.on { background: var(--paper); color: var(--text); }
+
+.stepper {
+  display: flex; align-items: center; gap: 2px;
+  padding: 2px; border-radius: 10px; background: var(--sunk);
+}
+.stepper .chip { height: 26px; width: 26px; padding: 0; justify-content: center; }
+/* The number, typed. Sized to its digits for the reason `.page-field` is:
+   Blitz gives parley no alignment for an input's text, so a box wider than
+   what is in it is a number against its left wall. */
+.step-field {
+  box-sizing: border-box;
+  height: 26px; padding: 0 6px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text); font-size: 13.5px;
+}
+.step-field:focus { outline: none; background: var(--paper); }
+/* All of it selected, drawn the way the page field draws the same emulated
+   state — the theme's own selection colours. */
+.step-field.fresh { background: var(--found); color: var(--found-ink); }
+.step-unit { color: var(--faint); font-size: 12.5px; padding-right: 4px; }
+
+/* The theme list: a swatch of the three colours that decide what a theme
+   looks like, and its name. Resolved through `parseColor` before they get
+   here — a swatch showing a colour the renderer cannot read is the picker
+   lying about the page. */
+.theme-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.theme-card {
+  display: flex; flex-direction: column; gap: 6px;
+  box-sizing: border-box; width: 132px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: transparent; color: var(--text); text-align: left;
+}
+.theme-card:hover { background: var(--hover); }
+.theme-card.on { border-color: var(--accent); background: var(--accent-soft); }
+/* `align-self` and `box-sizing`, both load-bearing: a flex item in a column
+   does not stretch here on its own, and the padding and the hairline would
+   otherwise be added to the 52. */
+.theme-swatch {
+  display: flex; align-items: flex-end; align-self: stretch; gap: 5px;
+  box-sizing: border-box;
+  height: 52px; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+}
+.swatch-ink { flex: 1 1 auto; height: 6px; border-radius: 3px; }
+.swatch-accent { flex: 0 0 18px; height: 6px; border-radius: 3px; }
+.theme-name { font-size: 13px; font-weight: 500; }
+
+/* The Keyboard page's table: two columns, and the chord in the quiet shade
+   because it is the answer and the action is the question. */
+.keys { display: flex; flex-wrap: wrap; }
+.key-what { flex: 0 0 62%; padding: 5px 0; font-size: 13.5px; }
+.key-chord { flex: 0 0 38%; padding: 5px 0; color: var(--faint); font-size: 13px; }
 "#;

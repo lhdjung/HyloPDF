@@ -49,7 +49,7 @@ fn every_icon_is_the_app_s_own_drawing() {
     // drift — it is an icon nothing has asked for yet.
     let shared = [
         "contents", "pages", "search", "minus", "plus", "close", "document", "fitWidth", "mark",
-        "window", "folder", "theme", "up", "down",
+        "window", "folder", "theme", "up", "down", "book", "sidebar", "keyboard", "info",
     ];
     for name in shared {
         let ours = dioxus_reader::icons::path(name)

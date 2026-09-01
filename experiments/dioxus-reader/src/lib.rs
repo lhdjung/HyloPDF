@@ -120,6 +120,7 @@ pub mod keymap;
 pub mod layout;
 pub mod nav;
 pub mod page;
+pub mod prefs;
 pub mod palette;
 pub mod pdfium;
 pub mod recolor;

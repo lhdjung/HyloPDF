@@ -603,6 +603,10 @@ pub fn chords_of(key: &Key, code: Code, modifiers: Modifiers, mac: bool) -> Vec<
 /* --------------------------------------------------------------- keymaps */
 
 /// The bindings in force: the defaults, with the reader's file over the top.
+///
+/// `Clone`, because the Keyboard page is drawn from it and drawing happens
+/// outside the borrow the reader is read through.
+#[derive(Clone)]
 pub struct Keymap {
     /// Binding → the action it asks for.
     pub by_binding: HashMap<String, Action>,

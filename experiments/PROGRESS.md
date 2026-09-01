@@ -67,7 +67,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 305 tests, about a minute and a half
+cargo test                                   # 313 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -2323,19 +2323,66 @@ character — the same trick `settings.test.mjs` plays on the settings table.
 One icon is this reader's own and the test says so: `crop`, for the Trim chip,
 which lives in the app's settings and has never needed a drawing there.
 
+### The Settings window, which was item 1's other half
+
+The oldest thing outstanding since Phase 3 began, and the last large piece of
+interface — which is, per the top of this file, the category that was not on
+the list in the first place.
+
+**It is a window in the flow, not a window of the system's**, and the app is
+the same: `showWindow` in `ui.ts` is a scrim and a frame in the same document.
+That matters more here than there. A second winit window would be a second
+`Viewer` over a second `Store`, and every setting changed in it would reach
+the reader on its next launch — `AGENTS.md` describes exactly that staleness
+between two reader windows, and it is tolerable between two documents and not
+between a switch and the thing the switch is about. It also means the whole
+window is testable in a harness that has no windows.
+
+Five pages: **Reading** (progression, spread, the gap, trim, zoom, recolouring
+pictures, and the three things that are remembered), **Appearance** (every
+theme in the folder as a swatch of its three deciding colours, resolved
+through `parseColor` first — a swatch that hands its raw string to the
+renderer is the picker lying about the page), **Window**, **Keyboard**, and
+**About**. `.field` is `ui.field`: the control on the name's line and the
+sentence under both, which is most of why that window reads as prose rather
+than as a form.
+
+**The Keyboard page is drawn from the keymap and never from a list of its
+own**, which is the app's own hard-won rule: its hand-written table had
+already drifted, naming ⌘T twice and unable to know about a key the reader had
+rebound. Every row is an action out of `keymap.rs` with whatever `keys.toml`
+gave it, the file's complaints come first because a key that does nothing is
+otherwise found out about by pressing it, and Reload is a button because that
+directory is written to several times a minute while somebody is scrolling.
+
+**The stepper is where Blitz charged for it.** A number that can be typed
+needs two things this engine does not give: the caret starts at offset 0, so
+Backspace does nothing and a typed digit goes *in front* — 20 with 3 typed
+into it is 320, which clamps to the maximum — and there is no way to select
+what is in a field. So the page field's emulation is here too: a `fresh` flag,
+the first keystroke replacing the lot, the replacement done in `oninput`
+where the editor has already moved the caret. What is new is that the field
+holds its own text while it is being typed into, because a typed number is
+clamped on the way out and echoing the clamped one back would rewrite the
+editor under the caret. `set_text` is a no-op when the text already matches,
+which is the whole reason the echo is free the rest of the time.
+
+**And Escape had to be answered inside the field.** The keyboard goes to the
+innermost element asking for it, and a stepper is that the moment the window
+opens; every plain key has to be stopped there or it reaches the root and
+scrolls the document behind the window — including the one key that closes the
+thing the reader is looking at. That is the focus fault turning up a fifth
+time. `tests/prefs.rs` is eight tests.
+
 ### What is not built
 
-No markup, no settings window, no Keyboard page and no theme editor — and of
-the library, everything but the markup journal, which waits for the item that
-is about markup. **Five of the app's forty-three keyboard actions still answer
-"not built yet"**: dark mode, the settings window, the Keyboard page, print,
+No markup, no theme editor, and no `follow_system_theme` — the last needs a
+signal this reader does not get, and a switch that writes a setting nothing
+reads is worse than no switch. Of the library, everything but the markup
+journal, which waits for the item that is about markup. **Three of the app's
+forty-three keyboard actions still answer "not built yet"**: dark mode, print,
 and markup. There is still no text *layer*, and there is not going to be one:
 item 10 is what that was for.
-
-The settings window and the Keyboard page are item 1's other half and have
-been the oldest thing outstanding since Phase 3 began. They are also the last
-large piece of interface, which — see the top of this file — is the category
-that was not on the list.
 
 ---
 

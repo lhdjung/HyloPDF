@@ -479,6 +479,56 @@ fn name_of(fit: Fit) -> &'static str {
     }
 }
 
+/// Which page of the Settings window is open.
+///
+/// **A window in the flow rather than a window of the system's**, which is
+/// what the app does too: `showWindow` in `ui.ts` is a scrim and a frame in
+/// the same document, not a second webview. That matters more here than
+/// there — a second winit window would be a second `Viewer` over a second
+/// `Store`, and every setting changed in it would reach the reader on its
+/// next launch. See `AGENTS.md` on exactly that staleness between two reader
+/// windows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pane {
+    Reading,
+    Appearance,
+    Window,
+    Keyboard,
+    About,
+}
+
+impl Pane {
+    /// The five, in the order the nav column lists them.
+    pub const ALL: [Pane; 5] = [
+        Pane::Reading,
+        Pane::Appearance,
+        Pane::Window,
+        Pane::Keyboard,
+        Pane::About,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Pane::Reading => "Reading",
+            Pane::Appearance => "Appearance",
+            Pane::Window => "Window",
+            Pane::Keyboard => "Keyboard",
+            Pane::About => "About",
+        }
+    }
+
+    /// The icon beside it, by the app's own name for the drawing.
+    pub fn icon(self) -> &'static str {
+        match self {
+            Pane::Reading => "book",
+            Pane::Appearance => "theme",
+            Pane::Window => "sidebar",
+            Pane::Keyboard => "keyboard",
+            Pane::About => "info",
+        }
+    }
+}
+
 /// The toolbar's three menus.
 ///
 /// **This is the piece the port had been doing without, and the chips were
@@ -571,6 +621,11 @@ pub struct Viewer {
     /// a press anywhere the menu is not — see the root's `onmousedown` and
     /// [`Menu`].
     pub menu: Option<Menu>,
+    /// Which page of Settings is up, if any. See [`Pane`].
+    pub pane: Option<Pane>,
+    /// And which page it was on when it was last put away, so that reopening
+    /// it comes back to where the reader was.
+    pane_last: Pane,
     /// Where the thumbnail column has been scrolled to. Ours for the reason
     /// the document's own scroll offset is ours — see the module comment.
     pub thumb_scroll: f64,
@@ -785,6 +840,8 @@ impl Viewer {
             resize_from: None,
             tab: Tab::Contents,
             menu: None,
+            pane: None,
+            pane_last: Pane::Reading,
             thumb_scroll: 0.0,
             column: Column::default(),
             headings: document.outline(),
@@ -1179,6 +1236,117 @@ impl Viewer {
         } else {
             Some(menu)
         };
+    }
+
+    /* ------------------------------------------------------- the settings */
+
+    /// Put the Settings window up, on the page it was last left on.
+    ///
+    /// Coming back to the same page is what a window with a nav column is
+    /// expected to do, and it is `currentPage` in `settings.ts` — module
+    /// scope there, a field here, which is the same lifetime said in Rust:
+    /// as long as the reader, not as long as the window.
+    pub fn open_settings(&mut self) {
+        self.close_menu();
+        self.pane = Some(self.pane_last);
+    }
+
+    pub fn close_settings(&mut self) -> bool {
+        if let Some(pane) = self.pane.take() {
+            self.pane_last = pane;
+            return true;
+        }
+        false
+    }
+
+    pub fn show_pane(&mut self, pane: Pane) {
+        self.pane = Some(pane);
+        self.pane_last = pane;
+    }
+
+    /// A flag straight through to the settings file, for the switches whose
+    /// whole effect is that they are written down — `remember_position` is
+    /// read at the next open, `reopen_last_document` by the next launch.
+    pub fn set_flag(&mut self, key: &str, on: bool) {
+        self.store.set(vec![(key.to_string(), json!(on))]);
+    }
+
+    /// The gap between one page and the next, which is a distance on the
+    /// screen and therefore a relayout.
+    pub fn set_page_gap(&mut self, gap: f64) {
+        let gap = gap.clamp(0.0, 64.0).round();
+        if gap == self.layout.gap {
+            return;
+        }
+        self.keeping_place(|layout| layout.gap = gap);
+        self.store.set(vec![("page_gap".into(), json!(gap as i64))]);
+    }
+
+    /// The panel's width, set from the field rather than dragged. Goes through
+    /// the same relayout the drag's own ending does — see
+    /// [`Viewer::finish_resize_sidebar`], and the comment there about why a
+    /// whole number.
+    pub fn set_sidebar_width(&mut self, width: f64) {
+        let width = width
+            .clamp(crate::sidebar::MIN_WIDTH, crate::sidebar::MAX_WIDTH)
+            .round();
+        if width == self.sidebar_width {
+            return;
+        }
+        self.sidebar_width = width;
+        let (window_width, height) = (self.window_width, self.layout.viewport.height);
+        self.layout.viewport.width = -1.0;
+        self.resize(window_width, height);
+        self.store
+            .set(vec![("sidebar_width".into(), json!(width as i64))]);
+    }
+
+    /// A fixed zoom, typed rather than stepped. The pair that never moves
+    /// alone — see [`Viewer::zoom`].
+    pub fn set_zoom(&mut self, zoom: f64) {
+        let zoom = zoom.clamp(0.25, 6.0);
+        self.keeping_place(|layout| {
+            layout.fit = Fit::Actual;
+            layout.zoom = zoom;
+        });
+        self.store.set(vec![
+            ("zoom".into(), json!(zoom)),
+            ("fit_mode".into(), json!(name_of(Fit::Actual))),
+        ]);
+    }
+
+    /// Whether a picture on a recoloured page is recoloured with it.
+    ///
+    /// It is in the *palette* rather than beside it — `resolve` takes it — so
+    /// changing it is a new palette and every drawn page is stale. See
+    /// `store.rs`, where the same flag is read.
+    pub fn set_recolor_images(&mut self, on: bool) {
+        self.store
+            .set(vec![("recolor_images".into(), json!(on))]);
+        self.generation += 1;
+    }
+
+    /// Read `keys.toml` again, exactly as the launch did.
+    ///
+    /// A button rather than a watcher, and that is the app's reasoning
+    /// unchanged: the config directory is written to several times a minute
+    /// while somebody is scrolling — `remember_position` alone — so a watch on
+    /// it would be answering its own writes. See `Store::keyboard`.
+    pub fn reload_keys(&mut self) {
+        let file = self.store.keyboard();
+        let mut keymap = Keymap::build(crate::keymap::this_machine(), &file.bindings);
+        keymap.problems = file
+            .problems
+            .into_iter()
+            .chain(keymap.problems.drain(..))
+            .collect();
+        // The page redraws either way, so the line is what says it happened:
+        // a file with nothing wrong in it redraws to exactly what was there.
+        self.notice = match keymap.problems.len() {
+            0 => "Keys reloaded.".to_string(),
+            one => format!("Keys reloaded. {one} could not be used — below."),
+        };
+        self.keymap = keymap;
     }
 
     /// Whatever is down, put away. Answers whether there was anything, so
@@ -2892,6 +3060,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let key_open = held.chord_for(Action::Open);
     let key_new_window = held.chord_for(Action::NewWindow);
     let key_close = held.chord_for(Action::CloseWindow);
+    let key_settings = held.chord_for(Action::Settings);
     let key_fit_width = held.chord_for(Action::FitWidth);
     let key_fit_page = held.chord_for(Action::FitPage);
     let key_actual = held.chord_for(Action::ActualSize);
@@ -3162,6 +3331,18 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                                 },
                                 span { class: "menu-label", "Close window" }
                                 span { class: "menu-key", "{key_close}" }
+                            }
+                            div { class: "menu-rule" }
+                            // The app has a Settings button of its own in the
+                            // bar; there is no room for one here and this is
+                            // where a menu that already says "what this
+                            // window is" belongs.
+                            button {
+                                class: "menu-item",
+                                onclick: move |_| viewer.write().open_settings(),
+                                span { class: "menu-tick", "" }
+                                span { class: "menu-label", "Settings…" }
+                                span { class: "menu-key", "{key_settings}" }
                             }
                         }
                     }
@@ -3665,6 +3846,10 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             if !presenting {
                 div { class: "notice", "{notice}" }
             }
+            // And Settings, over all of it. Last in the root so that it is
+            // last in paint order too — Blitz paints by the rules, and a
+            // scrim that comes before the document is a scrim behind it.
+            crate::prefs::Settings { viewer }
         }
     }
 }
@@ -3969,6 +4154,14 @@ fn perform(
             if viewer.write().close_menu() {
                 return;
             }
+            // Settings next, and above everything below it: it is a window
+            // over the reader, and Escape inside a window means that window.
+            // Below the menus because a menu opened *from* Settings is inside
+            // it, which is the same "outward, in the order the reader arrived"
+            // this whole list is.
+            if viewer.write().close_settings() {
+                return;
+            }
             let (typing, finding, selected, presenting, full) = {
                 let held = viewer.read();
                 (
@@ -4059,6 +4252,7 @@ fn perform(
             let full = viewer.write().present(on);
             frame.ask(Ask::FullScreen(full));
         }
+        Action::Settings => viewer.write().open_settings(),
         Action::Spread => {
             let next = if viewer.read().layout.spread == Spread::Single {
                 Spread::Cover

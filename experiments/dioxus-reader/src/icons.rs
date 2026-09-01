@@ -38,6 +38,10 @@ pub fn path(name: &str) -> Option<&'static str> {
         // app's settings, so the app never needed a drawing for it. Two
         // corner brackets on the same 24px grid, in the same weight, which is
         // the shape every editor uses for a crop.
+        "book" => r#"<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v13a1.8 1.8 0 0 0-1.8-1.5H4z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v13a1.8 1.8 0 0 1 1.8-1.5H20z"/>"#,
+        "sidebar" => r#"<rect x="3.5" y="4.5" width="17" height="15" rx="2.2"/><path d="M10 4.5v15"/>"#,
+        "keyboard" => r#"<rect x="2.8" y="6.5" width="18.4" height="11" rx="2.2"/><path d="M6.5 10h.01M9.8 10h.01M13.1 10h.01M16.4 10h.01M6.5 13.2h.01M9.8 13.2h.01M13.1 13.2h.01M16.4 13.2h.01M8.5 16h7"/>"#,
+        "info" => r#"<circle cx="12" cy="12" r="8.2"/><path d="M12 11v5.2"/><path d="M12 7.9h.01"/>"#,
         "crop" => r#"<path d="M7.5 3.5v13h13"/><path d="M3.5 7.5h13v13"/>"#,
         _ => return None,
     })

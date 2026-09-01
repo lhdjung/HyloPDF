@@ -355,6 +355,13 @@ impl Store {
         &self.themes_dir
     }
 
+    /// Where `settings.toml` and `keys.toml` live — the About page names it,
+    /// because a reader who is told their settings are a plain file is owed
+    /// the path to it.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     /// Where the theme in use sits in [`Store::themes`].
     ///
     /// A theme is remembered by **id**, not by position: the list changes when

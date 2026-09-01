@@ -118,14 +118,26 @@ body { margin: 0;
    document scrolled at all, landed on the page behind it and did nothing.
    `position: relative` and a `z-index` put these back in front, which is the
    same trap and the same fix as `.sidebar-resize` below, one level out. */
-.toolbar, .findbar, .notice, .sidebar { position: relative; z-index: 1; }
+.toolbar, .findbar { position: relative; z-index: 2; }
+.sidebar { position: relative; z-index: 1; }
 
 .toolbar {
   display: flex; align-items: center; gap: 8px;
   height: 46px; flex: 0 0 auto; padding: 0 12px;
   background: var(--paper); border-bottom: 1px solid var(--line);
 }
-.spacer { flex: 1 1 auto; }
+/* **Three groups, and the middle one is why there are three.** The bar was
+   one flat row with a `.spacer` in it, so the page readout sat wherever the
+   row ran out of chips — which was the far right, beside the cog. The app's
+   own arrangement, and its reasoning: the two side groups start from what
+   they hold and share the slack, which keeps the page controls near the
+   middle without promising they are in it. When there is not enough room for
+   everything the left gives way, because it is the side with a title in it
+   and a title has an ellipsis to shrink into. */
+.bar-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar-left { flex: 1 1 auto; }
+.bar-center { flex: 0 0 auto; }
+.bar-right { flex: 1 0 auto; justify-content: flex-end; }
 
 .chip {
   display: flex; align-items: center; gap: 7px;
@@ -179,7 +191,7 @@ body { margin: 0;
 }
 /* Under the left edge of the button, except the two near the right end of the
    bar, which would otherwise run off it. */
-.menu.document, .menu.view { left: 0; }
+.menu.document, .menu.open, .menu.view { left: 0; }
 .menu.theme { right: 0; }
 /* Fourteen themes is taller than a short window, and this is the one list in
    the app that is a list rather than a handful. */
@@ -217,6 +229,10 @@ body { margin: 0;
 
 /* The title is a button now, because the document's menu hangs off it. It
    keeps the chip's shape and the title's own colour and truncation. */
+/* Icon-only, so they get the zoom group's square rather than a chip's
+   word-shaped one. */
+.chip.page-previous, .chip.page-next { width: 30px; padding: 0; justify-content: center; }
+
 .chip.title {
   flex: 0 1 auto; min-width: 0; color: var(--faint);
   white-space: nowrap; overflow: hidden;
@@ -280,7 +296,17 @@ body { margin: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--paper); color: var(--text); font-size: 13.5px;
 }
-.find-count { flex: 0 0 auto; min-width: 96px; color: var(--faint); }
+/* The count, and the way to the list behind it — `Viewer::show_results`. It
+   is a button, so it wears a button's clothes: transparent until there is
+   something to show, and then a hover, which is `.find-status:not(:empty)` in
+   the app. `.ready` rather than `:empty`, which Blitz does not implement. */
+.find-count {
+  flex: 0 0 auto; min-width: 96px; height: 26px; padding: 0 8px;
+  border: 0; border-radius: 7px;
+  background: transparent; color: var(--faint); font-size: 13.5px;
+  justify-content: flex-start;
+}
+.find-count.ready:hover { background: var(--hover); color: var(--text); }
 .chip.find-previous, .chip.find-next { min-width: 30px; padding: 0 8px; }
 
 /* A match, as a rectangle over the page. Behind the ink rather than over it:
@@ -317,10 +343,29 @@ body { margin: 0;
    thing over a link, which is the rule above winning by coming after it. */
 .page { cursor: text; }
 
-/* The toolbar, then the document with the panel beside it, then the notice.
-   A row inside the column, which is the whole of what a sidebar is here —
-   there is nothing floating over anything. */
-.body { flex: 1 1 auto; display: flex; flex-direction: row; min-height: 0; }
+/* The toolbar, then the document with the panel beside it. A row inside the
+   column, which is the whole of what a sidebar is here — there is nothing
+   floating over anything.
+
+   **`z-index: 0` is load-bearing and the reason is a rule two paragraphs up.**
+   Blitz gathers every z-indexed box into the nearest stacking context and
+   hit-tests that context only when the point falls inside the *union of the
+   boxes it holds* — and a toolbar menu is inside `.toolbar`'s own context, so
+   the root's union is the toolbar's 47px strip and nothing below it. A click
+   on a menu item hanging under the bar therefore missed the menu entirely and
+   landed on the page behind it, which reads as a menu that closes when you
+   choose from it and does nothing else.
+
+   It used to work by accident: the notice was a 30px row along the foot of
+   the window carrying `z-index: 1` for the same hit-testing reason, so the
+   root's union ran from the top of the toolbar to the bottom of the notice
+   and happened to contain every menu. Taking that row away — the notice is a
+   pill over the document now — took the menus with it, which is a fault
+   nothing about a notice line should be able to cause.
+
+   So the document says out loud what it was relying on: it is a layer of its
+   own, under the toolbar's, and the union of the two is the window. */
+.body { position: relative; z-index: 1; flex: 1 1 auto; display: flex; flex-direction: row; min-height: 0; }
 
 .viewer {
   flex: 1 1 auto; overflow: hidden; background: var(--ground);
@@ -349,11 +394,36 @@ body { margin: 0;
   z-index: 1; cursor: col-resize;
 }
 .sidebar-resize:hover { background: var(--accent); opacity: 0.35; }
-.tabs { display: flex; flex: 0 0 auto; gap: 4px; padding: 8px 8px 6px 8px; }
+.tabs { display: flex; flex: 0 0 auto; gap: 4px; padding: 8px 8px 6px 8px; min-width: 0; }
+/* **Three of these have to fit across a panel the reader can drag to any
+   width, and a flex item does not shrink below its content unless it is told
+   it may.** `flex: 1 1 auto` with no `min-width` is that rule not being told:
+   the three tabs kept the width of their words, the strip overflowed the
+   panel, and the third one — Results, which is the one that comes and goes —
+   was drawn *outside* the sidebar, over the document. Which is not only ugly.
+   Blitz hit-tests where a box is rather than where it is painted, and the
+   document's own layer is over the panel out there, so the tab could be seen
+   and could not be clicked: "I can't go back to Results after clicking
+   somewhere else" was this, and nothing to do with the tab.
+
+   `flex: 1 1 0` and `min-width: 0` are what the app's own `.tab` carries, for
+   the same three tabs and the same reason. The word gives way and the icon
+   does not — a tab with half an icon on it reads as a rendering fault and a
+   tab with a shortened word reads as a narrow panel — which is why the label
+   is a span of its own and the shrinking happens there. */
 .tab {
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  flex: 1 1 auto; height: 26px; border: 0; border-radius: 8px;
+  flex: 1 1 0; min-width: 0; overflow: hidden;
+  height: 26px; padding: 0 6px; border: 0; border-radius: 8px;
   background: transparent; color: var(--muted); font-size: 13px; font-weight: 500;
+}
+.tab .icon { flex: 0 0 auto; }
+/* `text-overflow: ellipsis` is not implemented — see the note at the top of
+   this file — so the word fades out instead, the same mask `.chip.title` and
+   `.result` use. */
+.tab-label {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 calc(100% - 10px), transparent);
 }
 .tab:hover { background: var(--hover); color: var(--text); }
 .tab.on { background: var(--sunk); color: var(--text); }
@@ -376,8 +446,16 @@ body { margin: 0;
    it, and the sentence behind it is there to be recognised, not read. */
 .results { padding: 4px 8px 8px 8px; overflow: scroll; scrollbar-width: thin; }
 .results-count { margin: 2px 4px 6px 4px; color: var(--faint); }
+/* `justify-content` and the `min-width: 0` on the line below it are the same
+   fault as `.tab` above, one panel down, and they showed as something
+   stranger: the page number went missing. A button is laid out as a *centring*
+   flex box by the user-agent sheet, and `.result-line` would not shrink, so a
+   row wider than a narrow panel overflowed at **both** ends — taking the
+   number off the left while the mask faded the quote on the right. The number
+   was there all along and was outside the panel. */
 .result {
-  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  display: flex; align-items: baseline; justify-content: flex-start; gap: 8px;
+  width: 100%; min-width: 0;
   border: 0; border-radius: 7px; padding: 5px 6px; margin-bottom: 1px;
   background: transparent; text-align: left; font-size: 13px;
   white-space: nowrap; overflow: hidden;
@@ -386,7 +464,7 @@ body { margin: 0;
 .result:hover { background: var(--hover); }
 .result.current { background: var(--sunk); }
 .result-page { flex: 0 0 auto; color: var(--faint); font-size: 12px; }
-.result-line { flex: 1 1 auto; color: var(--muted); }
+.result-line { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); }
 /* `pre`, because the space either side of the match is the whole difference
    between a line that reads as a sentence and "A**needle**in the first page":
    HTML collapses whitespace at the edge of an inline run, and these two runs
@@ -580,10 +658,25 @@ body { margin: 0;
 }
 .recent-forget:hover { background: var(--sunk); color: var(--text); }
 
+/* What the app says out loud, and it says it over the document rather than
+   under it. This was a 30px row of the flex column, which cost the document
+   that much whether or not there was anything to say and left the last thing
+   said — usually a zoom percentage — along the bottom edge of the window for
+   the rest of the session.
+
+   The row is what centres the pill: `left: 50%` and a `translateX(-50%)` is
+   how the app does it, and a flex row that fills the width does the same with
+   no transform to trust. It takes no clicks, so a message over the foot of a
+   page does not swallow a press on the page. */
+.notice-line {
+  position: absolute; left: 0; right: 0; bottom: 20px; z-index: 45;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
 .notice {
-  flex: 0 0 auto; height: 30px; display: flex; align-items: center;
-  padding: 0 14px; background: var(--surface); border-top: 1px solid var(--line);
-  color: var(--muted);
+  max-width: 70%; padding: 9px 16px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line);
+  color: var(--text);
 }
 
 /* Presenting: full screen with nothing else on it. The chrome is gone from

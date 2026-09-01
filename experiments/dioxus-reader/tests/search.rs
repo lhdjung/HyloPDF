@@ -331,3 +331,82 @@ fn one_slice_of_the_scan_does_not_read_the_whole_book() {
     viewer.find("fox");
     assert!(!viewer.scan_slice(stale));
 }
+
+/* ------------------------------------------- the list behind the count */
+
+/// **The count is the way through to the results, and the panel it opens is
+/// borrowed rather than kept.** "3 of 128" answers *is it in here* and the
+/// list answers *which one did I mean* — `el.findStatus` in `main.ts` is the
+/// same button for the same reason. What the app does not do is give the
+/// panel back, and this reader does: it came up on its own, so one Escape
+/// takes it down along with the bar that opened it.
+#[test]
+fn the_count_opens_the_results_and_escape_puts_them_away() {
+    let mut reader = searching();
+    assert_eq!(reader.state().sidebar, None, "the panel is shut to start with");
+    look_for(&mut reader, "needle");
+
+    reader.click(".find-count");
+    assert_eq!(
+        reader.state().sidebar.as_deref(),
+        Some("results"),
+        "the count opened the panel on the list",
+    );
+
+    reader.press("Escape");
+    assert_eq!(reader.state().find, None, "one Escape takes the bar down");
+    assert_eq!(reader.state().sidebar, None, "and the panel it borrowed");
+}
+
+/// A panel the reader had open before any of this is a panel the reader
+/// keeps. Closing something somebody can see is the sort of tidying that
+/// loses people their place.
+#[test]
+fn a_panel_the_reader_opened_is_not_taken_away() {
+    let mut reader = Reader::open_with(&fixture::contents_pdf(), Options::default());
+    reader.press_chord("mod+b");
+    assert!(reader.state().sidebar.is_some(), "open before the search");
+    reader.press_chord("mod+f");
+    look_for(&mut reader, "the");
+    reader.click(".find-count");
+
+    reader.press("Escape");
+    assert!(
+        reader.state().sidebar.is_some(),
+        "the panel stayed: {:?}",
+        reader.state().sidebar,
+    );
+}
+
+/// And a count with nothing behind it is not a way to anything.
+#[test]
+fn an_empty_count_opens_nothing() {
+    let mut reader = searching();
+    reader.click(".find-count");
+    assert_eq!(reader.state().sidebar, None, "nothing has been searched for");
+    look_for(&mut reader, "zzzzz");
+    reader.click(".find-count");
+    assert_eq!(reader.state().sidebar, None, "and nothing was found");
+}
+
+/// **Taking a letter back out again**, which is not the same key everywhere.
+///
+/// AppKit does not deliver Backspace as a keystroke: it reads the editing keys
+/// against the standard key bindings and calls `doCommandBySelector:` with a
+/// name, and `blitz-dom`'s own `Key::Backspace` arm is
+/// `#[cfg(not(target_os = "macos"))]` because of it. `Shell` was not
+/// forwarding that callback, so on a Mac a query could be typed and could not
+/// be corrected — the find bar, the go-to-page field and every field in the
+/// settings window, all of them write-only. See
+/// `ApplicationHandlerExtMacOS for Shell` and `Reader::apple_binding`.
+#[test]
+fn a_query_can_be_corrected_as_well_as_typed() {
+    let mut reader = searching();
+    look_for(&mut reader, "needles");
+    assert_eq!(reader.state().find.as_deref(), Some("None"), "no such word");
+
+    reader.press("Backspace");
+    reader.scan_out();
+    assert_eq!(reader.state().query, "needle", "the letter came back off");
+    assert_eq!(reader.state().find.as_deref(), Some("1 of 3"));
+}

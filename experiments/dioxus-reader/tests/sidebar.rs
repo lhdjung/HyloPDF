@@ -427,3 +427,85 @@ fn a_mark_can_be_taken_off_from_the_panel() {
     reader.click(".mark-drop");
     assert_eq!(reader.harness.query(".mark-go"), None);
 }
+
+/* ------------------------------------------ the strip across the top */
+
+/// **Everything in the panel stays inside the panel, at every width it can be
+/// dragged to.** This is not a matter of taste: Blitz hit-tests a box where it
+/// *is*, and the document's layer is over the panel's out there — so a tab
+/// drawn past the panel's edge could be seen and could not be pressed, which
+/// read as "I can't get back to the results". Three tabs that would not shrink
+/// were the cause, and a result row that would not shrink was the same fault
+/// one panel down, showing as a page number that had gone missing off the
+/// left.
+#[test]
+fn nothing_in_the_panel_hangs_over_the_document() {
+    let mut reader = Reader::open_with(&fixture::prose_pdf(), Options::default());
+    reader.press_chord("mod+b");
+    reader.press_chord("mod+f");
+    reader.type_text("the");
+    reader.scan_out();
+    reader.drag_sidebar_edge(-100.0);
+
+    let panel = reader.harness.layout_rect(".sidebar");
+    let edge = panel.x + panel.width;
+    for tab in reader.harness.query_all(".tab") {
+        let rect = reader.harness.layout_rect_of(tab);
+        assert!(
+            rect.x + rect.width <= edge,
+            "a tab runs to {} past a panel ending at {edge}",
+            rect.x + rect.width,
+        );
+        // …and it can be pressed, which is the half the geometry is for.
+        let (x, y) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+        assert!(
+            reader.harness.hit(x, y).is_some_and(|hit| {
+                let mut node = Some(hit.node_id);
+                while let Some(id) = node {
+                    if id == tab {
+                        return true;
+                    }
+                    node = reader.harness.base().get_node(id).and_then(|n| n.parent);
+                }
+                false
+            }),
+            "the tab at ({x}, {y}) is not what a press there lands on",
+        );
+    }
+
+    // The page a match is on is the first thing in its row and is still there.
+    let row = reader.harness.query_all(".result");
+    assert!(!row.is_empty(), "there are matches to list");
+    for (number, row) in reader.harness.query_all(".result-page").iter().zip(&row) {
+        let rect = reader.harness.layout_rect_of(*number);
+        let outer = reader.harness.layout_rect_of(*row);
+        assert!(
+            rect.x >= outer.x && rect.x + rect.width <= edge,
+            "a match's page number is outside its row: {rect:?} against {outer:?}",
+        );
+    }
+}
+
+/// And the word gives way before the drawing does — three tabs reading "C",
+/// "P", "R" are three tabs nobody can tell apart, so below the width a word
+/// fits in, the strip is icons.
+#[test]
+fn a_narrow_panel_keeps_the_drawings_and_drops_the_words() {
+    let mut reader = Reader::open_with(&fixture::contents_pdf(), Options::default());
+    reader.press_chord("mod+b");
+    assert!(
+        reader.harness.query(".tab-label").is_some(),
+        "the default width has room for the words",
+    );
+    // Past the minimum, which is where it stops: a pointer carried off the
+    // left of the window sends no move at all.
+    reader.drag_sidebar_edge(-100.0);
+    assert!(
+        reader.harness.query(".tab-label").is_none(),
+        "and the narrowest does not",
+    );
+    assert!(
+        reader.harness.query(".tab .icon").is_some(),
+        "the drawings stay at every width",
+    );
+}

@@ -121,10 +121,11 @@ fn a_menu_item_shows_the_key_that_is_actually_bound() {
             ..Options::default()
         },
     );
-    reader.click(".chip.title");
-    // The first key in the menu is Open's, which is the item that was
-    // rebound.
-    let shown = reader.harness.text_content(".menu.document .menu-key");
+    // Open is a menu of its own now, beside the document's rather than
+    // inside it — see `Menu::Open`. The first key in it is Open's, which is
+    // the item that was rebound.
+    reader.click(".chip.open");
+    let shown = reader.harness.text_content(".menu.open .menu-key");
     assert!(
         shown.contains('O') && (shown.contains('⇧') || shown.contains("Shift")),
         "the rebound chord is what the menu shows, not the shipped one: {shown:?}",
@@ -195,8 +196,8 @@ fn open_in_a_new_window_leaves_this_one_alone() {
     );
     let before = reader.state();
 
-    reader.click(".chip.title");
-    reader.click_nth(".menu.document .menu-item", 1);
+    reader.click(".chip.open");
+    reader.click_nth(".menu.open .menu-item", 1);
 
     assert_eq!(reader.state().pages, before.pages, "this window is untouched");
     assert_eq!(reader.state().title, before.title);

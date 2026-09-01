@@ -60,6 +60,15 @@ pub enum Tab {
 pub const MIN_WIDTH: f64 = 160.0;
 pub const MAX_WIDTH: f64 = 480.0;
 
+/// The panel width at which the tabs still have room for their words.
+///
+/// Three tabs of a 15px icon, a 6px gap, a word of about fifty and twelve of
+/// padding, with 4px between them and eight either side: 250 is where
+/// "Contents" stops fitting, which is why the default width is 252. Narrower
+/// than this and the strip is three icons — see the note on `.tabs` in
+/// `styles.rs` for why fading the word out instead was worse.
+const TAB_LABELS_FIT: f64 = 250.0;
+
 /// What is left for a picture once the column has its padding, and the space
 /// under one for its page number.
 pub const PAD: f64 = 10.0;
@@ -251,6 +260,8 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
     // The third tab is here only while the find bar is: a Results tab with
     // nothing behind it is a tab that answers a question nobody asked.
     let searching = held.find_open;
+    // See the note on `.tabs` below: an icon and a word, or an icon.
+    let labelled = width >= TAB_LABELS_FIT;
     let results = if searching {
         held.search.results(crate::search::RESULT_LIMIT)
     } else {
@@ -280,20 +291,27 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                     viewer.write().start_resize_sidebar(x);
                 },
             }
+            // **The word goes before the icon does**, which is the app's own
+            // rule for this strip said with a number instead of with
+            // `text-overflow`. Three tabs of an icon, a gap and a word need
+            // about 250px between them; below that the mask meant to fade the
+            // last few letters was fading the whole word, and three tabs
+            // reading "C", "P", "R" are three tabs nobody can tell apart. An
+            // icon on its own is still the thing it is a drawing of.
             div { class: "tabs",
                 button {
                     class: if tab == Tab::Contents { "tab on" } else { "tab" },
                     "data-tab": "contents",
                     onclick: move |_| viewer.write().show_tab(Tab::Contents),
                     Icon { name: "contents", stroke: if tab == Tab::Contents { ink_on.clone() } else { ink.clone() } }
-                    "Contents"
+                    if labelled { span { class: "tab-label", "Contents" } }
                 }
                 button {
                     class: if tab == Tab::Pages { "tab on" } else { "tab" },
                     "data-tab": "pages",
                     onclick: move |_| viewer.write().show_tab(Tab::Pages),
                     Icon { name: "pages", stroke: if tab == Tab::Pages { ink_on.clone() } else { ink.clone() } }
-                    "Pages"
+                    if labelled { span { class: "tab-label", "Pages" } }
                 }
                 if searching {
                     button {
@@ -301,7 +319,7 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                         "data-tab": "results",
                         onclick: move |_| viewer.write().show_tab(Tab::Results),
                         Icon { name: "search", stroke: if tab == Tab::Results { ink_on.clone() } else { ink.clone() } }
-                        "Results"
+                        if labelled { span { class: "tab-label", "Results" } }
                     }
                 }
             }

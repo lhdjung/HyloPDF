@@ -45,16 +45,14 @@ fn the_settings_window_opens_on_its_key_and_leaves_on_escape() {
 }
 
 #[test]
-fn the_document_menu_opens_it_too() {
-    // ⌘, is not discoverable and the app has a Settings button in its bar.
-    // There is no room for one here, so it hangs off the menu that already
-    // says what this window is.
+fn the_cog_opens_it_too() {
+    // ⌘, is not discoverable, and the app has a Settings button at the end of
+    // its bar. This used to be the last item of the document's own menu, for
+    // want of room; the bar has room now that it is three groups, and the
+    // button is where the app puts it.
     let mut reader = book();
-    reader.click(".chip.title");
-    let items = reader.harness.query_all(".menu.document .menu-item").len();
-    reader.click_nth(".menu.document .menu-item", items - 1);
+    reader.click(".chip.settings");
     assert!(open(&reader));
-    assert!(reader.harness.query(".menu.document").is_none(), "and the menu goes");
 }
 
 #[test]
@@ -77,28 +75,39 @@ fn a_press_beside_the_window_closes_it_and_a_press_inside_does_not() {
 fn a_switch_changes_the_reader_and_is_written_down() {
     let mut reader = book();
     reader.press_chord("mod+,");
-    assert_eq!(reader.harness.text_content(".chip.trim"), "Trim");
+    let before = reader.harness.layout_rect(".page");
 
     // "Trim the margins" is the fourth field on the Reading page and the
-    // first switch on it. What is asserted is the *toolbar*, because that is
-    // where a reader would see it: the chip and the switch are two views of
-    // one setting and this is the pair agreeing.
+    // first switch on it. **What is asserted is the page**, because that is
+    // where a reader would see it — the toolbar used to carry a Trim chip and
+    // does not any more, the app having never had one either: trimming is a
+    // setting somebody turns on for a scanned book and leaves on, not a thing
+    // pressed twice in an hour.
     reader.click(".switch");
-    assert_eq!(reader.harness.text_content(".chip.trim"), "Trimmed");
     assert_eq!(
         reader.harness.attr(".switch", "aria-checked").as_deref(),
         Some("true"),
-        "and the switch says so, which is what a screen reader is told",
+        "the switch says so, which is what a screen reader is told",
+    );
+    let after = reader.harness.layout_rect(".page");
+    assert!(
+        (after.height - before.height).abs() > 1.0,
+        "a page with its margins taken off is a different shape: \
+         {before:?} against {after:?}",
     );
 
     // Written down rather than only done: a second reader on the same config
     // directory opens trimming.
     let config = reader.config.clone();
-    let beside = Reader::open_with(
+    let mut beside = Reader::open_with(
         &Reader::book(),
         Options { config, ..Options::default() },
     );
-    assert_eq!(beside.harness.text_content(".chip.trim"), "Trimmed");
+    beside.press_chord("mod+,");
+    assert_eq!(
+        beside.harness.attr(".switch", "aria-checked").as_deref(),
+        Some("true"),
+    );
 }
 
 #[test]

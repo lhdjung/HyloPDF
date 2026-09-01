@@ -179,8 +179,11 @@ fn a_link_out_of_the_document_is_handed_to_the_system() {
 fn back_returns_to_where_the_jump_started_and_forward_returns_again() {
     let mut reader = linked();
     // Somewhere that is not the top of the document, so that "back" has an
-    // offset to put right as well as a page.
-    reader.wheel_screen();
+    // offset to put right as well as a page — but not a whole screenful,
+    // which now carries page one's links off the top of the window. The
+    // document area grew when the notice line stopped being a row of the
+    // window and became a pill over it, and a screenful grew with it.
+    reader.wheel(150.0);
     let started = reader.state().scroll;
 
     follow(&mut reader, "Page 5 of this document");

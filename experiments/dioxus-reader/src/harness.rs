@@ -648,10 +648,48 @@ impl Reader {
 
     pub fn press_with(&mut self, key: &str, modifiers: Modifiers) {
         let key = parse_key(key);
-        self.harness.press_with(key, modifiers);
+        self.harness.press_with(key.clone(), modifiers);
+        self.apple_binding(&key, modifiers);
         self.give_keyboard_back();
         self.settle();
     }
+
+    /// What AppKit sends *instead of* an editing key, on a Mac.
+    ///
+    /// **Backspace is not a key there.** AppKit reads the editing keys against
+    /// the standard key bindings and calls `doCommandBySelector:` with a name
+    /// — `deleteBackward:` — which winit surfaces through a callback of its
+    /// own and `blitz-shell` turns into `UiEvent::AppleStandardKeybinding`.
+    /// `blitz-dom` knows this and says so: its `Key::Backspace` arm is
+    /// `#[cfg(not(target_os = "macos"))]`, so on a Mac the keystroke alone
+    /// deletes nothing at all.
+    ///
+    /// A harness has no AppKit, so it has to send the second half itself, and
+    /// it must — the app's whole editing story is macOS-only otherwise, and
+    /// the fault this exists to cover was exactly that: `Shell` did not
+    /// forward the callback, so nothing anybody typed could be taken back
+    /// out. See `ApplicationHandlerExtMacOS for Shell` in `shell.rs`.
+    ///
+    /// Only the two a reader of this app presses. Everything else in a text
+    /// field here is a letter, an arrow or Escape, and those arrive as
+    /// keystrokes on every platform.
+    #[cfg(target_os = "macos")]
+    fn apple_binding(&mut self, key: &Key, modifiers: Modifiers) {
+        use blitz_traits::events::UiEvent;
+        let command = match key {
+            Key::Backspace if modifiers.alt() => "deleteWordBackward:",
+            Key::Backspace => "deleteBackward:",
+            Key::Delete if modifiers.alt() => "deleteWordForward:",
+            Key::Delete => "deleteForward:",
+            _ => return,
+        };
+        self.harness
+            .dispatch(UiEvent::AppleStandardKeybinding(command.into()));
+        self.harness.pump();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn apple_binding(&mut self, _key: &Key, _modifiers: Modifiers) {}
 
     /// Press a chord, written the way `keys.toml` writes one: "mod+0",
     /// "shift+g", "alt+left", "g".
@@ -676,6 +714,7 @@ impl Reader {
         use blitz_test_harness::key_event;
         use blitz_traits::events::{KeyState, UiEvent};
 
+        let key_for_binding = key.clone();
         let mut down = key_event(key.clone(), KeyState::Pressed, modifiers);
         down.code = code;
         let mut up = key_event(key, KeyState::Released, modifiers);
@@ -683,6 +722,7 @@ impl Reader {
         self.harness.dispatch(UiEvent::KeyDown(down));
         self.harness.dispatch(UiEvent::KeyUp(up));
         self.harness.pump();
+        self.apple_binding(&key_for_binding, modifiers);
         self.give_keyboard_back();
         self.settle();
     }
@@ -1003,7 +1043,7 @@ impl Reader {
             hits: self.harness.query_all(".hit").len(),
             results: self.numbered(".result", "data-result"),
             title: self.text(".title"),
-            menu: ["document", "theme", "view"]
+            menu: ["document", "open", "theme", "view"]
                 .into_iter()
                 .find(|which| self.harness.query(&format!(".menu.{which}")).is_some())
                 .map(str::to_string),

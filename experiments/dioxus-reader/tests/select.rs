@@ -112,10 +112,17 @@ fn a_sweep_below_the_line_reaches_the_end_of_it() {
 #[test]
 fn a_sweep_across_two_pages_selects_on_both() {
     let mut reader = prose();
-    // Fit the whole page first, so that page two is on screen at all: at fit
-    // width a 612×792 page is taller than this window and the mounting window
-    // does not reach the next one.
+    // Small enough that the *first line of each* page is on screen at once,
+    // which fit page alone no longer manages: a page fitted to this window is
+    // 813 points tall and the window is 900, so page two's first line lands
+    // below the bottom of it and the move that would reach it is never
+    // delivered. Three steps out is 50%, which is comfortable. (The document
+    // area grew when the notice line stopped being a row of the window — see
+    // `.notice-line` in `styles.rs` — and fit page grew with it.)
     reader.press_chord("mod+2");
+    for _ in 0..3 {
+        reader.press_chord("mod+-");
+    }
     // From the line on page one to the line on page two, which is the second
     // page's own box further down the same scroll.
     let start = reader.point_on(1, (0.10, LINE));

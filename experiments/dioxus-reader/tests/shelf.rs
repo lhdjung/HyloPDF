@@ -42,22 +42,29 @@ fn closing_a_document_leaves_the_start_screen() {
     let mut reader = reader_at(&Reader::book(), &dir);
     assert!(!reader.state().empty, "a document is open to begin with");
 
-    reader.click(".chip.title");
     reader.click("[data-item=\"close-document\"]");
 
     let state = reader.state();
     assert!(state.empty, "the start screen is what is left");
     assert_eq!(state.pages, 0, "and there is no document behind it");
-    // The bar keeps what is not about a document and loses what is.
+    // The bar keeps what is not about a document and loses what is. The
+    // document's own name is what goes: "Open…" is a chip of its own now and
+    // stands whether or not there is anything open — see `Menu::Open`, which
+    // is the split this used to predate.
     assert!(state.toolbar, "the toolbar is still there");
-    assert_eq!(state.title, "Open…", "and offers to open something");
+    assert_eq!(state.title, "", "the document's name is gone with it");
+    assert_eq!(
+        reader.harness.text_content(".chip.open"),
+        "Open…",
+        "and the bar still offers to open something",
+    );
     assert!(
         reader.harness.query(".chip.contents").is_none(),
         "nothing to show the contents of",
     );
     assert!(
-        reader.harness.query(".chip.mark").is_none(),
-        "and nothing to mark",
+        reader.harness.query(".chip.find").is_none(),
+        "and nothing to search",
     );
     assert!(
         reader.harness.query(".chip.theme").is_some(),
@@ -75,7 +82,6 @@ fn the_shelf_says_where_you_stopped() {
     let stopped = reader.state().page;
     assert!(stopped > 1, "the end of the book is not page one");
 
-    reader.click(".chip.title");
     reader.click("[data-item=\"close-document\"]");
 
     let recents = reader.state().recents;
@@ -102,7 +108,6 @@ fn a_row_on_the_shelf_opens_it() {
         first.press("j");
     }
     let mut reader = reader_at(&Reader::book(), &dir);
-    reader.click(".chip.title");
     reader.click("[data-item=\"close-document\"]");
     assert_eq!(reader.state().recents.len(), 2, "both are on the shelf");
 
@@ -124,7 +129,6 @@ fn a_document_can_be_taken_off_the_shelf() {
         let _ = reader_at(&other, &dir);
     }
     let mut reader = reader_at(&Reader::book(), &dir);
-    reader.click(".chip.title");
     reader.click("[data-item=\"close-document\"]");
     assert_eq!(reader.state().recents.len(), 2);
 
@@ -268,7 +272,6 @@ fn the_document_in_front_of_you_is_not_on_the_shelf() {
 fn closing_a_document_tells_the_process_the_window_is_empty() {
     let dir = scratch("showing");
     let mut reader = reader_at(&Reader::book(), &dir);
-    reader.click(".chip.title");
     reader.click("[data-item=\"close-document\"]");
 
     let asked = reader.asks();
@@ -288,7 +291,6 @@ fn the_shelf_is_not_touched_by_closing() {
     let dir = scratch("untouched");
     {
         let mut reader = reader_at(&Reader::book(), &dir);
-        reader.click(".chip.title");
         reader.click("[data-item=\"close-document\"]");
     }
     // One entry, keyed by a real path. A close that went through `opened`

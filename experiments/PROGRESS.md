@@ -2897,14 +2897,127 @@ went:
   answer: there, a strip along the top edge brings the bar down on hover.
 - **The page pill**, the floating readout the app shows while scrolling with
   the toolbar hidden.
-- **The three-group toolbar.** The app centres the page navigation with
-  previous/next buttons either side of the field; here the field sits at the
-  right end of one flat row and there are no page buttons. This is a layout
-  decision rather than a missing feature, and it is worth making deliberately.
-- **The notice line takes 30px whether or not it says anything.** In the app it
-  is hidden when empty. Here it is a row in a flex column and the room is
-  reserved, which is a grey band across the bottom of every screenshot in this
-  file.
+- **Rotate.** The app has Left and Right in the bar; here they are in the View
+  menu and on ⌘R alone.
+- **"Show in Finder"**, which needs a door of its own beside `Away`.
+
+---
+
+## The bar, read against the app's — and three bugs behind it
+
+Five things asked of this reader after reading with it, and every one of them
+turned out to be about the same half-finished port: the toolbar was built to
+the app's *older* layout and nothing had gone back to check it against
+`index.html`.
+
+**Mark and Trim were chips this bar had and the app's does not.** Trim is a
+setting on the Reading page there — something turned on for a scanned book and
+left on — and marking a page is an item under the document's name. Both are
+where the app puts them now, and the two places in the bar they were taking are
+what the page controls needed.
+
+**The bar is three groups.** `.bar-left` gives way because it holds a title and
+a title has an ellipsis to shrink into, `.bar-center` never gives way, and
+`.bar-right` grows against the left so the two sides share the slack. That is
+`styles.css` rule for rule, and it is what puts "23 / 297" in the middle of the
+window instead of at the far right beside the cog, with a step either side of
+it.
+
+**"Open…" is a menu of its own.** The app split it from the document's menu and
+this had not followed: a menu opened by pressing the name of the paper you are
+reading, four of whose items were about papers you are not. The picker, a
+second window and the shelf answer *open something*; a mark, a highlight and a
+print belong to the document already on screen.
+
+**The notice line is a pill over the document**, shown when there is something
+to say and gone four seconds later, which is `ui.ts`'s own 4200ms. It was a row
+of the flex column and took thirty pixels whether or not it said anything —
+a grey band across the bottom of every screenshot in this file.
+
+### The menus had only ever worked by accident
+
+Removing that band took the menus with it, and the reason is the most
+load-bearing thing learned this round.
+
+**Blitz gathers every z-indexed box into the nearest stacking context, and
+hit-tests that context's children only when the point falls inside the union of
+their own boxes** (`matches_hoisted_content` in `hit_inner`). A toolbar menu
+lives in `.toolbar`'s context, and `.toolbar` is 46px tall — so the root's union
+was a 46px strip across the top of the window, and a menu hanging below it was
+drawn where nothing would hit-test it.
+
+It had worked because `.notice` was a `z-index: 1` row at the *foot* of the
+window, which stretched that union over the whole of it. Delete the notice row
+and every menu item became unclickable, with nothing anywhere saying why.
+
+The fix is to make the document an explicit layer rather than to rely on one:
+`.toolbar, .findbar { z-index: 2 }`, `.sidebar { z-index: 1 }`, `.body
+{ position: relative; z-index: 1 }`. **`z-index: 0` does not do it** — Blitz's
+hoist test is `z_index != 0`, so a zero is not a layer.
+
+### Three more, found by measuring rather than by reading
+
+**The sidebar's tabs did not shrink**, and neither did a result row.
+`flex: 1 1 auto` with no `min-width: 0` keeps a flex item at the width of its
+content, so at a narrow panel the three tabs overflowed the sidebar and
+*Results* — the third, and the one that comes and goes — was drawn over the
+document. Which is not only ugly: out there the document's layer is on top, so
+the tab could be seen and could not be pressed. "I can't go back to Results
+after clicking somewhere else" was that, and nothing to do with tabs. The
+result rows were the same fault one panel down, showing as something stranger:
+a button is laid out as a *centring* flex box by the user-agent sheet, so a row
+too wide overflowed at both ends and the page number went off the left. The
+number had been there all along, outside the panel.
+
+The app's `.tab` carries `flex: 1 1 0; min-width: 0; overflow: hidden`, and
+this now does too — with the word in a span of its own, because `text-overflow:
+ellipsis` is not implemented here and a mask has to stand in for it. Below
+250px the word goes and the drawing stays: three tabs reading "C", "P", "R" are
+three tabs nobody can tell apart.
+
+**The count in the find bar is the way through to the list.** `el.findStatus`
+in `main.ts` is a button for the reason its comment gives — "3 of 128" answers
+*is it in here* and not *which one did I mean* — and this reader had it as a
+readout. It is a button now, and it goes one better than the app: a panel the
+search opened is *borrowed*, so one Escape takes the bar down and the panel
+with it. A panel the reader had open before any of that is theirs and stays.
+
+**And Backspace was not deleting anything, in any field, on macOS.** AppKit
+does not deliver the editing keys as keystrokes at all: it reads them against
+the standard key bindings and calls `doCommandBySelector:` with a name, which
+winit surfaces through `ApplicationHandlerExtMacOS::standard_key_binding` — a
+callback separate from `window_event`. `blitz-dom` knows this and says so, its
+`Key::Backspace` arm being `#[cfg(not(target_os = "macos"))]`; `BlitzApplication`
+implements the callback and returns itself from `macos_handler`. **`Shell`
+wraps it, implements `ApplicationHandler` itself, and was answering `None`** —
+winit's default — so every one of those commands was dropped. The find bar, the
+go-to-page field and every field in the settings window were write-only, and
+nothing in the suite could see it because a harness has no AppKit either.
+`Reader::apple_binding` now sends what AppKit would, so `press("Backspace")`
+means on a Mac what it means everywhere else, and two tests cover it.
+
+### What a reading session costs, measured again
+
+`cargo run --release`, one paper, `vmmap` rather than Activity Monitor:
+
+| what                                   | footprint |
+| -------------------------------------- | --------: |
+| idle, no document                      |     155MB |
+| reading, 900×700                       |     267MB |
+| reading, maximised                     |     313MB |
+| a second after a scroll stops          | 150-190MB |
+| peak during a fast scroll              | 320-390MB |
+
+Flat from ten screenfuls to sixty, which is what says it is a working set
+rather than a leak. Of the 313MB: 43MB of window drawables shared with
+WindowServer, about 104MB of wgpu/Metal with 50MB of that the two textures per
+page, 24MB of pdfium page buffer, about 40MB of malloc, and the rest dirty
+library data across 1041 mapped images. **The Tauri app on the same document is
+346MB steady and 466MB after sixty screenfuls**, so this is not the underwhelming
+half of the comparison — a wgpu device and a Metal driver are simply a floor
+that a webview does not pay twice. The levers, if it has to come down, are the
+12MP page ceiling and the two-textures-per-page upload; `device.poll` was
+measured and ruled out.
 
 ---
 
@@ -2977,6 +3090,21 @@ went:
   out of its container is still clickable where its box says it is, over
   whatever is drawn there. Painting gets this right; only the hit test does
   not. See Phase 3 item 4.
+- A stacking context's hoisted children hit-tested only inside the union of
+  their own boxes, so an absolutely positioned panel hanging *out* of a short
+  context — a menu under a toolbar, which is the ordinary case — is drawn where
+  nothing will hit it. Painting again gets it right and only the hit test does
+  not, and the failure is silent: the menu is there, it highlights on hover,
+  and pressing it does nothing. Worse, an unrelated z-indexed box elsewhere in
+  the same context can make it work by enlarging the union, which is how this
+  one went unnoticed for two phases. See "The menus had only ever worked by
+  accident" above.
+- `ApplicationHandler::macos_handler` being an opt-in that a wrapper silently
+  loses. An application that delegates to `BlitzApplication` for everything
+  else gets working text fields on Linux and Windows and write-only ones on
+  macOS, with nothing at either end saying so. `blitz-shell` cannot fix this
+  from where it stands, but a line in its docs beside `BlitzApplication` would
+  have saved the afternoon it cost here.
 - A custom widget swallowing every default action, so `click` and `dblclick`
   never happen over one — `handle_dom_event` forwards the event to the widget
   and returns before the match that generates them. The two it takes away are

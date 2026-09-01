@@ -607,7 +607,47 @@ impl Shell {
     }
 }
 
+/// **Backspace is not a key on a Mac.**
+///
+/// AppKit does not deliver the editing keys as keystrokes at all. It reads
+/// them against the standard key bindings and calls `doCommandBySelector:`
+/// with a name — `deleteBackward:`, `deleteWordBackward:`, `moveToBeginningOfLine:`
+/// — and winit surfaces that as [`ApplicationHandlerExtMacOS::standard_key_binding`],
+/// which is a *separate* callback from `window_event`. `blitz-dom` knows this
+/// and says so: the `Key::Backspace` arm in `node/text.rs` is
+/// `#[cfg(not(target_os = "macos"))]`, because on a Mac the command is the
+/// only thing that ever arrives.
+///
+/// `BlitzApplication` implements the callback and returns itself from
+/// `macos_handler`. This shell wraps it and implements `ApplicationHandler`
+/// itself, so until now it answered `None` — winit's default — and every one
+/// of those commands was dropped on the floor. What that looked like: a
+/// reader could type into the find bar and could not take anything back out
+/// of it, and the same in the go-to-page field and every field in the
+/// settings window. Nothing else in the app was affected, because nothing
+/// else in the app edits text.
+#[cfg(target_os = "macos")]
+impl winit::platform::macos::ApplicationHandlerExtMacOS for Shell {
+    fn standard_key_binding(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        window_id: WindowId,
+        action: &str,
+    ) {
+        self.inner.standard_key_binding(event_loop, window_id, action);
+    }
+}
+
 impl ApplicationHandler for Shell {
+    /// See [`ApplicationHandlerExtMacOS`] above: without this, winit answers
+    /// `None` and every editing key on a Mac is lost.
+    #[cfg(target_os = "macos")]
+    fn macos_handler(
+        &mut self,
+    ) -> Option<&mut dyn winit::platform::macos::ApplicationHandlerExtMacOS> {
+        Some(self)
+    }
+
     /// Where a window is actually born. Winit calls this once the platform can
     /// make surfaces, and again after a `destroy_surfaces`; everything queued
     /// so far is brought up by `BlitzApplication`, which resumes every window

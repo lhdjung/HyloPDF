@@ -241,20 +241,24 @@ fn the_toolbar_carries_the_app_s_icons_in_the_theme_s_shades() {
     let accent = value_of(&style, "--accent");
 
     assert_eq!(
-        reader.harness.attr(".chip.mark .icon", "stroke").as_deref(),
+        reader.harness.attr(".chip.contents .icon", "stroke").as_deref(),
         Some(muted.as_str()),
         "an idle chip's icon is the quiet shade",
     );
 
-    // And a chip whose thing is in force takes the accent, icon and all.
-    reader.press_chord("mod+shift+b");
+    // And a chip whose thing is in force takes the accent, icon and all. This
+    // was the Mark chip until the bar stopped having one — a mark is set once
+    // and read from the Contents panel, so a permanent button for it was a
+    // permanent button for something nobody presses twice in an hour, and the
+    // app has never had one. Contents is the same shape: a chip with an icon,
+    // a word, and an on state.
+    reader.press_chord("mod+b");
     assert_eq!(
-        reader.harness.attr(".chip.mark .icon", "stroke").as_deref(),
+        reader.harness.attr(".chip.contents .icon", "stroke").as_deref(),
         Some(accent.as_str()),
     );
 
     // The panel's tabs too, which are the other place a label stands alone.
-    reader.press_chord("mod+b");
     assert!(reader.harness.query(".tab .icon").is_some(), "the tabs carry them");
 }
 
@@ -425,4 +429,24 @@ fn a_press_anywhere_else_puts_the_page_field_away() {
     assert!(!typing(&reader));
     assert_eq!(reader.state().label, "1");
     assert_eq!(reader.state().page, 1);
+}
+
+/// And the page field, for the same reason: Backspace is a command rather
+/// than a key on a Mac. See `a_query_can_be_corrected_as_well_as_typed` in
+/// `tests/search.rs`, which is the same fault in the other field.
+#[test]
+fn a_typed_page_can_be_corrected() {
+    let mut reader = Reader::open(&Reader::book());
+    reader.press_chord("mod+alt+g");
+    reader.type_text("123");
+    assert_eq!(
+        reader.harness.attr(".page-field", "value").as_deref(),
+        Some("123"),
+    );
+    reader.press("Backspace");
+    assert_eq!(
+        reader.harness.attr(".page-field", "value").as_deref(),
+        Some("12"),
+        "a digit typed by mistake can be taken back",
+    );
 }

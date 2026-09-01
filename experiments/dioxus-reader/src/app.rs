@@ -330,12 +330,13 @@ pub const FOLLOWING_OFF: &str =
 /// now: ⌘T puts the toolbar down, and presenting puts everything down. See
 /// [`Viewer::chrome`].
 pub const TOOLBAR: f64 = 46.0;
-const NOTICE: f64 = 30.0;
-const HAIRLINE: f64 = 2.0;
+/// The toolbar's own bottom border, and the only hairline left: the notice
+/// line used to be a row of the flex column under it and had one too.
+const HAIRLINE: f64 = 1.0;
 
 /// What the chrome costs with all of it on screen, which is what a window
 /// opens with.
-pub const CHROME: f64 = TOOLBAR + NOTICE + HAIRLINE;
+pub const CHROME: f64 = TOOLBAR + HAIRLINE;
 
 /// How far one press of an arrow moves the page.
 const LINE: f64 = 60.0;
@@ -375,6 +376,9 @@ const TEXT_CACHE: usize = 8;
 /// page cannot be told about a double click and has to count one — see
 /// [`Viewer::begin_sweep`]. Two windows disagreeing about what a double click
 /// is would be worse than either answer.
+/// How long a message stays on the notice line. `ui.notice` in the app.
+const NOTICE_LASTS: std::time::Duration = std::time::Duration::from_millis(4200);
+
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// The zoom ladder, in the app's own steps.
@@ -720,8 +724,15 @@ impl Pane {
 /// out.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Menu {
-    /// Under the title: open, open beside, a window, close.
+    /// Under the document's name: what can be done with the document that is
+    /// open — mark it, highlight in it, print it, copy what it is called.
     Document,
+    /// Under "Open…": every way to bring a *different* document onto the
+    /// screen, and the shelf of what was read before. Kept apart from
+    /// [`Menu::Document`] for the app's own reason — a menu opened by pressing
+    /// the name of the paper you are reading should not be four items about
+    /// papers you are not.
+    Open,
     /// Under the theme's name: every theme installed, the one in use ticked.
     Theme,
     /// Under the zoom: fit, spread, rotation, margins.
@@ -734,6 +745,7 @@ impl Menu {
     pub fn label(self) -> &'static str {
         match self {
             Menu::Document => "Document",
+            Menu::Open => "Open",
             Menu::Theme => "Theme",
             Menu::View => "View",
         }
@@ -787,6 +799,17 @@ pub struct Viewer {
     /// The panel on the left, and what it is showing. All three are settings,
     /// so a reader who reads with the contents open gets them back.
     pub sidebar_open: bool,
+    /// **Whether the panel on screen is one the search borrowed.** A count in
+    /// the find bar is the answer to "is it in here" and the list behind it is
+    /// the answer to "which one did I mean" — the app makes the count the way
+    /// through to the list, and this reader does too. What the app does not
+    /// have is a way back: it opens the panel and leaves it open, because
+    /// closing something the reader can see is the sort of tidying that loses
+    /// people their place. Here the panel came up on its own, so it goes away
+    /// on its own — one Escape takes the bar down and the panel with it, and
+    /// only when the panel was shut to begin with. A reader who was already
+    /// reading with the contents open keeps them.
+    results_borrowed: bool,
     pub sidebar_width: f64,
     /// The pointer's `client_x` and the panel's width when the edge was
     /// picked up — everything `drag_sidebar` needs and nothing it has to ask
@@ -1043,6 +1066,7 @@ impl Viewer {
             scroll_top: 0.0,
             across: 0.5,
             sidebar_open: false,
+            results_borrowed: false,
             sidebar_width: 252.0,
             resize_from: None,
             tab: Tab::Contents,
@@ -1257,9 +1281,28 @@ impl Viewer {
 
     /// Open or shut the panel, and remember which.
     pub fn toggle_sidebar(&mut self) {
-        self.sidebar_open = !self.sidebar_open;
-        self.store
-            .set(vec![("show_sidebar".into(), json!(self.sidebar_open))]);
+        // A panel the reader has now taken hold of is theirs, whoever opened
+        // it: closing the find bar must not take away something that was
+        // asked for in between. See `results_borrowed`.
+        self.results_borrowed = false;
+        self.set_sidebar(!self.sidebar_open, true);
+    }
+
+    /// The panel, opened or shut — and whether that is a fact about the
+    /// reader or only about what is on screen for the moment.
+    ///
+    /// `remember` is the whole of the difference: a panel the reader opened is
+    /// a setting and comes back next time, and a panel the search borrowed is
+    /// neither.
+    fn set_sidebar(&mut self, open: bool, remember: bool) {
+        if self.sidebar_open == open {
+            return;
+        }
+        self.sidebar_open = open;
+        if remember {
+            self.store
+                .set(vec![("show_sidebar".into(), json!(open))]);
+        }
         // The document is now a different width, and the reader should be
         // looking at the same words afterwards — which is exactly what
         // `resize` promises, so this goes through it rather than around it.
@@ -1337,17 +1380,24 @@ impl Viewer {
 
     /// What the chrome costs on screen right now.
     ///
-    /// The notice line stays when the toolbar goes, deliberately: the message
-    /// that says how to get the toolbar back is written on it, and a line that
-    /// disappeared along with the thing it explains would be a joke at the
-    /// reader's expense. Presenting is the case where everything goes, which
-    /// is what presenting *is*.
+    /// **Only the toolbar costs anything now.** The notice used to be a row
+    /// of the flex column under it, so it took 30px off the document whether
+    /// or not it had anything to say — which meant a window that had once
+    /// been told a zoom percentage wore that percentage along its bottom edge
+    /// for the rest of the session. It is a pill over the document now, the
+    /// way the app has always had it, and it goes away by itself. See
+    /// [`Viewer::notice`] and the "notice-timeout" arm in [`Reader`].
+    ///
+    /// It still outlives the toolbar, which is the part that was right: the
+    /// message saying how to get the toolbar back is written on it, and a
+    /// line that disappeared along with the thing it explains would be a joke
+    /// at the reader's expense. Presenting is the case where everything goes,
+    /// which is what presenting *is*.
     pub fn chrome(&self) -> f64 {
-        if self.presenting {
+        if self.presenting || !self.toolbar {
             return 0.0;
         }
-        let toolbar = if self.toolbar { TOOLBAR } else { 0.0 };
-        toolbar + NOTICE + HAIRLINE
+        TOOLBAR + HAIRLINE
     }
 
     /// The window is this big. What the document gets is the rest.
@@ -2783,6 +2833,25 @@ impl Viewer {
         }
     }
 
+    /// Show the list behind the count.
+    ///
+    /// **The count in the find bar is the way through to the results**, which
+    /// is `el.findStatus`'s click handler in `main.ts` and the reasoning it
+    /// carries: "3 of 128" answers *is it in here* and not *which one did I
+    /// mean*, and the second question is the one somebody searching a long
+    /// document is usually asking. An empty count is not a way to anything, so
+    /// it does nothing and does not look pressable either.
+    pub fn show_results(&mut self) {
+        if self.search.state().total == 0 {
+            return;
+        }
+        if !self.sidebar_open {
+            self.set_sidebar(true, false);
+            self.results_borrowed = true;
+        }
+        self.tab = Tab::Results;
+    }
+
     /// Take the find bar down, and the index with it.
     ///
     /// **The index goes when the bar does**, which is the app's policy and its
@@ -2795,6 +2864,14 @@ impl Viewer {
         self.find_query.clear();
         self.search.forget();
         self.scan += 1;
+        // A panel that came up to hold the results goes back down with them,
+        // so that one Escape undoes the whole of what one search did. See
+        // `results_borrowed`, which is what keeps this from shutting a panel
+        // the reader had open before any of this started.
+        if self.results_borrowed {
+            self.results_borrowed = false;
+            self.set_sidebar(false, false);
+        }
         if self.tab == Tab::Results {
             self.tab = if self.headings.is_empty() {
                 Tab::Pages
@@ -3896,7 +3973,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     // window. Nothing polls, and in the harness the same wake makes the next
     // `pump()` run it, which is what lets this be tested with no thread and
     // no window at all.
-    let watching = use_hook(|| {
+    let (watching, notifying) = use_hook(|| {
         // This window's mailbox, joined to the process's switchboard under
         // this window's name. Both come from whoever made the window; a
         // harness provides them and a window with neither watches nothing.
@@ -3954,6 +4031,15 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             loop {
                 let news = listening.next().await;
                 match news.event.as_str() {
+                    // Four seconds after something was said, said by a
+                    // thread of its own. It clears the line only if the line
+                    // still carries what it was started for.
+                    "notice-timeout" => {
+                        let said = news.payload.as_str().unwrap_or_default();
+                        if viewer.read().notice == said {
+                            viewer.write().notice.clear();
+                        }
+                    }
                     "themes-changed" => {
                         if let Ok(themes) = serde_json::from_value(news.payload) {
                             viewer.write().themes_changed(themes);
@@ -4019,11 +4105,54 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             }
         });
         // Held for the life of the reader. Dropping it stops nothing — see
-        // `Config::watch` — but this is where it will be asked to.
-        held
+        // `Config::watch` — but this is where it will be asked to. The
+        // mailbox comes back out with it because the notice timer below
+        // wants to post into it, and a hook cannot be declared inside
+        // another hook's initialiser.
+        (held, post)
     });
     // Read so that the handle is plainly alive rather than plainly unused.
     let _ = watching.is_some();
+
+    // **The notice puts itself away after four seconds**, which is what
+    // `ui.notice` in the app does with a `setTimeout` and what this line had
+    // no way of doing: it was a row of the window with the last thing said
+    // still on it, so a zoom percentage stayed along the bottom edge until
+    // something else was said.
+    //
+    // A thread rather than a timer, because there is no runtime here to hold
+    // one — nothing in this reader is async except the mailbox. It sleeps and
+    // posts, which is the same door `watch.rs` uses to reach a window from a
+    // thread of its own, and the "notice-timeout" arm above throws the
+    // message away if what is on the line is no longer the message this timer
+    // was started for. So a second notice does not vanish with the first
+    // one's four seconds — and a message said twice in a row keeps the first
+    // timer rather than restarting it, which is the one case this is
+    // imprecise about and costs at most four seconds of a sentence that is
+    // still true.
+    {
+        let notifying = notifying.clone();
+        let mut last = String::new();
+        use_effect(move || {
+            let said = viewer.read().notice.clone();
+            if said == last {
+                return;
+            }
+            last = said.clone();
+            if said.is_empty() {
+                return;
+            }
+            let notifying = notifying.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(NOTICE_LASTS);
+                notifying.send(crate::emit::News {
+                    event: "notice-timeout".into(),
+                    target: None,
+                    payload: serde_json::Value::String(said),
+                });
+            });
+        });
+    }
 
     let held = viewer.read();
     let scroll_top = held.scroll_top;
@@ -4066,12 +4195,13 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     } else {
         Vec::new()
     };
-    let shelf_icon = if held.empty() { "folder" } else { "document" };
-    let shelf_name = if held.empty() {
-        "Open…".to_string()
-    } else {
-        held.store.title().to_string()
-    };
+    // The title button exists only where there is a document, so this is the
+    // document's name and nothing else. It used to double as the "Open…"
+    // button for a window with none — one button rather than two, on the
+    // reasoning that the menu behind it was one menu. It is two menus now, and
+    // Open… is a button of its own that is there whether or not anything is
+    // open, which is what the app does and is the plainer answer.
+    let shelf_name = held.store.title().to_string();
     let find_query = held.find_query.clone();
     let find_count = held.find_count();
     let find_options = held.search.options();
@@ -4089,9 +4219,9 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let rotation = held.layout.view().rotation;
     let key_open = held.chord_for(Action::Open);
     let key_new_window = held.chord_for(Action::NewWindow);
-    let key_close = held.chord_for(Action::CloseWindow);
-    let key_settings = held.chord_for(Action::Settings);
     let key_markup = held.chord_for(Action::Markup);
+    let key_mark = held.chord_for(Action::Mark);
+    let key_print = held.chord_for(Action::Print);
     let key_fit_width = held.chord_for(Action::FitWidth);
     let key_fit_page = held.chord_for(Action::FitPage);
     let key_actual = held.chord_for(Action::ActualSize);
@@ -4155,7 +4285,6 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         ),
         None => format!("{}|whole", view.rotation),
     };
-    let trimming = held.trims_margins();
     let chosen = chosen.clone();
     drop(held);
 
@@ -4273,552 +4402,688 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 // What is left is the two things that are still true of a
                 // window with nothing in it: how to put something in it, and
                 // what it looks like.
-                if !empty {
-                button {
-                    // Not `.sidebar`, which is the panel itself: a selector
-                    // that matches the button *and* the thing the button
-                    // opens is a test that cannot tell them apart.
-                    class: if sidebar_open { "chip contents on" } else { "chip contents" },
-                    onclick: move |_| viewer.write().toggle_sidebar(),
-                    Icon { name: "contents", stroke: if sidebar_open { ink_on.clone() } else { ink.clone() } }
-                    "Contents"
-                }
-                }
-                // What the document is called — its own `/Title` where that
-                // is worth having, and the file's name where it is not, see
-                // `store::worth_calling` — and the button the document's own
-                // menu hangs off, which is where the app puts it too.
-                // **Every menu hangs inside an anchor of its own now, and
-                // that is the whole of where a menu appears.** They were one
-                // layer pinned to the ends of the toolbar — the Document menu
-                // to the left edge, the other two to the right — on the
-                // reasoning that a measured offset would need keeping in step
-                // by hand and there is no way to ask an element where it is
-                // from here. Both halves of that were true and the conclusion
-                // was wrong: an absolutely positioned child of a
-                // `position: relative` wrapper needs no measurement at all,
-                // and it is *the browser* that keeps it in step. The View
-                // menu came down under the page field, three chips to the
-                // right of the button that opened it.
                 //
-                // Out of the flow, so the 46px row is still 46px whatever is
-                // hanging off it — which is what the layer was for and is not
-                // a reason to have one.
-                div { class: "anchor",
+                // **Three groups, and the middle one is why.** This was one
+                // flat row with a spacer in it, so the page readout ended up
+                // wherever the row ran out of chips — which was the far right,
+                // beside the cog, and a page counter at the edge of the window
+                // is a page counter nobody looks at. The app puts navigation in
+                // the middle of the bar and this is that, group for group:
+                // `.bar-left` gives way because it holds a title and a title
+                // has somewhere to shrink to, `.bar-center` never gives way,
+                // and `.bar-right` grows against the left so the two sides
+                // share the slack and the middle stays near the middle.
+                div { class: "bar-group bar-left",
+                    if !empty {
                     button {
-                        class: if menu == Some(Menu::Document) { "chip title on" } else { "chip title" },
-                        onmousedown: move |event| event.stop_propagation(),
-                        onclick: move |_| viewer.write().show_menu(Menu::Document),
-                        // With a document it is the document's name and the
-                        // menu is that document's; with none it is the app's
-                        // `#open` button, which is the same menu minus the
-                        // items about a document. One button rather than two,
-                        // because the menu behind it is one menu and a second
-                        // button would be a second place for it to be wrong.
-                        Icon {
-                            name: shelf_icon,
-                            stroke: if menu == Some(Menu::Document) { ink_on.clone() } else { crate::palette::hex(wearing.faint()) },
-                        }
-                        "{shelf_name}"
+                        // Not `.sidebar`, which is the panel itself: a selector
+                        // that matches the button *and* the thing the button
+                        // opens is a test that cannot tell them apart.
+                        class: if sidebar_open { "chip contents on" } else { "chip contents" },
+                        onclick: move |_| viewer.write().toggle_sidebar(),
+                        Icon { name: "contents", stroke: if sidebar_open { ink_on.clone() } else { ink.clone() } }
+                        "Contents"
                     }
-                    if menu == Some(Menu::Document) {
-                        div { class: "menu document", role: "menu", "aria-label": "Document",
-                            // A press inside a menu is not a press outside it: the root
-                            // puts the menu away, and the item's own click comes after
-                            // the press. This was on the layer these three used to share.
-                            onmousedown: move |event| event.stop_propagation(),
-                            button {
-                                class: "menu-item",
-                                onclick: {
-                                    let pick = pick.clone();
-                                    let frame = frame.clone();
-                                    move |_| {
-                                        viewer.write().close_menu();
-                                        if let Some(path) = pick.choose() {
-                                            if viewer.write().open_here(&path) {
-                                                let title =
-                                                    viewer.read().store.title().to_string();
-                                                frame.ask(Ask::Showing { path, title });
-                                            }
-                                        }
-                                    }
-                                },
-                                span { class: "menu-label", "Open document…" }
-                                span { class: "menu-key", "{key_open}" }
-                            }
-                            // The two-documents-at-once route in one step,
-                            // which is the app's own wording and its own
-                            // reason: pick the second and it arrives beside
-                            // the first rather than on top of it. A menu
-                            // item and not a key, because it is not a key
-                            // in `keys.ts` either.
-                            button {
-                                class: "menu-item",
-                                onclick: {
-                                    let pick = pick.clone();
-                                    let frame = frame.clone();
-                                    move |_| {
-                                        viewer.write().close_menu();
-                                        if let Some(path) = pick.choose() {
-                                            frame.ask(Ask::NewWindowOn(path));
-                                        }
-                                    }
-                                },
-                                span { class: "menu-label", "Open in a new window…" }
-                            }
-                            div { class: "menu-rule" }
-                            button {
-                                class: "menu-item",
-                                onclick: {
-                                    let frame = frame.clone();
-                                    move |_| {
-                                        viewer.write().close_menu();
-                                        frame.ask(Ask::NewWindow);
-                                    }
-                                },
-                                span { class: "menu-label", "New window" }
-                                span { class: "menu-key", "{key_new_window}" }
-                            }
-                            button {
-                                class: "menu-item",
-                                onclick: {
-                                    let frame = frame.clone();
-                                    move |_| {
-                                        viewer.write().close_menu();
-                                        frame.ask(Ask::Close);
-                                    }
-                                },
-                                span { class: "menu-label", "Close window" }
-                                span { class: "menu-key", "{key_close}" }
-                            }
-                            if !empty {
-                            div { class: "menu-rule" }
-                            // The gesture the app calls Close, and the one
-                            // place a document can be put down without the
-                            // window going with it. It is a menu item rather
-                            // than a chip in the bar — the app has room for
-                            // both and this bar does not — and it has no key,
-                            // because it has none in `keys.ts` either: closing
-                            // a document is a decision rather than a
-                            // movement, and ⌘W already means the window.
-                            button {
-                                class: "menu-item",
-                                "data-item": "close-document",
-                                onclick: {
-                                    let frame = frame.clone();
-                                    move |_| {
-                                        viewer.write().close_menu();
-                                        viewer.write().close_document();
-                                        // The desk, the restore list and the
-                                        // document watch all belong to the
-                                        // process, and an empty path is how
-                                        // this window says it is showing
-                                        // none. See [`Ask::Showing`].
-                                        frame.ask(Ask::Showing {
-                                            path: String::new(),
-                                            title: String::new(),
-                                        });
-                                    }
-                                },
-                                span { class: "menu-tick", "" }
-                                span { class: "menu-label", "Close document" }
-                            }
-                            div { class: "menu-rule" }
-                            // The one visible thing pointing at markup, and
-                            // the app learned the hard way that it has to
-                            // exist: there, ⌘⇧H was the only way in for a
-                            // while, and nobody found the feature after it
-                            // was built. Beside "Mark this page", which is
-                            // the other thing in this app called marking and
-                            // is not this one.
-                            button {
-                                class: "menu-item",
-                                "data-item": "markup",
-                                onclick: move |_| {
-                                    viewer.write().close_menu();
-                                    if !viewer.write().open_markup() {
-                                        viewer.write().notice =
-                                            "Select something first, and this marks it.".into();
-                                    }
-                                },
-                                span { class: "menu-tick", "" }
-                                span { class: "menu-label", "Highlight the selection" }
-                                span { class: "menu-key", "{key_markup}" }
-                            }
-                            }
-                            div { class: "menu-rule" }
-                            // The app has a Settings button of its own in the
-                            // bar; there is no room for one here and this is
-                            // where a menu that already says "what this
-                            // window is" belongs.
-                            button {
-                                class: "menu-item",
-                                onclick: move |_| viewer.write().open_settings(),
-                                span { class: "menu-tick", "" }
-                                span { class: "menu-label", "Settings…" }
-                                span { class: "menu-key", "{key_settings}" }
-                            }
-                            // And the shelf, which is the app's own last
-                            // section of this menu. It is the same list the
-                            // start screen shows and it is here for the
-                            // reader who has a document open: the start
-                            // screen is unreachable without first putting
-                            // that one down, and "the paper I was reading
-                            // yesterday" should not cost a trip through the
-                            // file picker to find again.
-                            if !recents.is_empty() {
-                                div { class: "menu-rule" }
-                                div { class: "menu-section", "Recently read" }
-                                for entry in recents.iter().cloned() {
-                                    button {
-                                        key: "{entry.path}",
-                                        class: "menu-item",
-                                        "data-item": "recent",
-                                        onclick: {
-                                            let frame = frame.clone();
-                                            let path = entry.path.clone();
-                                            move |_| {
-                                                let path = path.clone();
-                                                viewer.write().close_menu();
-                                                if viewer.write().open_here(&path) {
-                                                    let title = viewer
-                                                        .read()
-                                                        .store
-                                                        .title()
-                                                        .to_string();
-                                                    frame.ask(Ask::Showing { path, title });
-                                                }
-                                            }
-                                        },
-                                        // A drawing rather than the empty tick
-                                        // column every other item carries: the
-                                        // app's own `ui.menuItem({icon:
-                                        // "document"})`, and it is what makes
-                                        // this section read as a shelf rather
-                                        // than as four more commands.
-                                        span { class: "menu-tick",
-                                            Icon { name: "document", stroke: crate::palette::hex(wearing.faint()) }
-                                        }
-                                        span { class: "menu-label", "{entry.title}" }
-                                        span { class: "menu-key", "p. {entry.page}" }
-                                    }
-                                }
-                            }
-                        }
                     }
-                }
-                div { class: "spacer" }
-                if !empty {
-                button {
-                    class: if marked { "chip mark on" } else { "chip mark" },
-                    onclick: move |_| { let page = viewer.read().page(); viewer.write().mark_page(page); },
-                    Icon { name: "mark", stroke: if marked { ink_on.clone() } else { ink.clone() } }
-                    if marked { "Marked" } else { "Mark" }
-                }
-                button {
-                    // On means the reader asked, not that anything was found:
-                    // a document with nothing to trim keeps the switch and
-                    // says so on the notice line. See [`Viewer::set_trim`].
-                    class: if trimming { "chip trim on" } else { "chip trim" },
-                    onclick: move |_| { let on = viewer.read().trims_margins(); viewer.write().set_trim(!on); },
-                    Icon { name: "crop", stroke: if trimming { ink_on.clone() } else { ink.clone() } }
-                    if trimming { "Trimmed" } else { "Trim" }
-                }
-                // Two buttons that were a cycle and are now a list. The chip
-                // still *says* what is in force — the harness reads the zoom
-                // and the theme off these two and a reader reads them the same
-                // way — and what changed is that clicking one shows the
-                // choices instead of stepping to the next of them.
-                // The three of them in one sunk group, minus on the left and
-                // plus on the right, which is `.zoom-group` in the app. Three
-                // quiet words in a row of quiet words read as three more
-                // labels; a stepper with the readout between its two ends
-                // reads as one control, and it is the same three elements.
-                div { class: "zoom-group",
-                    button {
-                        class: "chip zoom-out",
-                        "aria-label": "Zoom out",
-                        onclick: move |_| viewer.write().zoom(false),
-                        Icon { name: "minus", stroke: ink.clone() }
-                    }
+                    // **The way to another document, which is not the same
+                    // question as what can be done with this one.** Both used
+                    // to hang off the title, which is the shape the app had
+                    // before it split them and is a strange one once you say
+                    // it out loud: a menu opened by pressing the name of the
+                    // paper you are reading, four of whose items are about
+                    // papers you are not. The split is the app's own and its
+                    // reasoning is worth keeping — the picker, a second
+                    // window and the shelf all answer "open something"; a
+                    // mark, a highlight and a print belong to the document
+                    // already on screen.
+                    //
+                    // **Every menu hangs inside an anchor of its own, and
+                    // that is the whole of where a menu appears.** They were
+                    // one layer pinned to the ends of the toolbar — the
+                    // Document menu to the left edge, the other two to the
+                    // right — on the reasoning that a measured offset would
+                    // need keeping in step by hand and there is no way to ask
+                    // an element where it is from here. Both halves of that
+                    // were true and the conclusion was wrong: an absolutely
+                    // positioned child of a `position: relative` wrapper needs
+                    // no measurement at all, and it is *the browser* that
+                    // keeps it in step.
+                    //
+                    // Out of the flow, so the 46px row is still 46px whatever
+                    // is hanging off it — which is what the layer was for and
+                    // is not a reason to have one.
                     div { class: "anchor",
                         button {
-                            class: if menu == Some(Menu::View) { "chip fit on" } else { "chip fit" },
+                            class: if menu == Some(Menu::Open) { "chip open on" } else { "chip open" },
                             onmousedown: move |event| event.stop_propagation(),
-                            onclick: move |_| viewer.write().show_menu(Menu::View),
-                            "{zoom}"
+                            onclick: move |_| viewer.write().show_menu(Menu::Open),
+                            Icon {
+                                name: "folder",
+                                stroke: if menu == Some(Menu::Open) { ink_on.clone() } else { ink.clone() },
+                            }
+                            "Open…"
                         }
-                        if menu == Some(Menu::View) {
-                            div { class: "menu view", role: "menu", "aria-label": "View",
+                        if menu == Some(Menu::Open) {
+                            div { class: "menu open", role: "menu", "aria-label": "Open",
                                 // A press inside a menu is not a press outside it: the root
                                 // puts the menu away, and the item's own click comes after
                                 // the press. This was on the layer these three used to share.
                                 onmousedown: move |event| event.stop_propagation(),
                                 button {
-                                    class: if fit == Fit::Width { "menu-item on" } else { "menu-item" },
-                                    onclick: move |_| { viewer.write().set_fit(Fit::Width); viewer.write().close_menu(); },
-                                    span { class: "menu-tick", {if fit == Fit::Width { "✓" } else { "" }} }
-                                    span { class: "menu-label", "Fit width" }
-                                    span { class: "menu-key", "{key_fit_width}" }
-                                }
-                                button {
-                                    class: if fit == Fit::Page { "menu-item on" } else { "menu-item" },
-                                    onclick: move |_| { viewer.write().set_fit(Fit::Page); viewer.write().close_menu(); },
-                                    span { class: "menu-tick", {if fit == Fit::Page { "✓" } else { "" }} }
-                                    span { class: "menu-label", "Fit page" }
-                                    span { class: "menu-key", "{key_fit_page}" }
-                                }
-                                button {
-                                    class: if fit == Fit::Actual { "menu-item on" } else { "menu-item" },
-                                    onclick: move |_| { viewer.write().actual_size(); viewer.write().close_menu(); },
-                                    span { class: "menu-tick", {if fit == Fit::Actual { "✓" } else { "" }} }
-                                    span { class: "menu-label", "Actual size" }
-                                    span { class: "menu-key", "{key_actual}" }
-                                }
-                                div { class: "menu-rule" }
-                                button {
-                                    class: if spread == Spread::Single { "menu-item on" } else { "menu-item" },
-                                    onclick: move |_| { viewer.write().set_spread(Spread::Single); viewer.write().close_menu(); },
-                                    span { class: "menu-tick", {if spread == Spread::Single { "✓" } else { "" }} }
-                                    span { class: "menu-label", "One page" }
-                                }
-                                button {
-                                    class: if spread == Spread::Two { "menu-item on" } else { "menu-item" },
-                                    onclick: move |_| { viewer.write().set_spread(Spread::Two); viewer.write().close_menu(); },
-                                    span { class: "menu-tick", {if spread == Spread::Two { "✓" } else { "" }} }
-                                    span { class: "menu-label", "Two pages" }
-                                }
-                                button {
-                                    class: if spread == Spread::Cover { "menu-item on" } else { "menu-item" },
-                                    onclick: move |_| { viewer.write().set_spread(Spread::Cover); viewer.write().close_menu(); },
-                                    span { class: "menu-tick", {if spread == Spread::Cover { "✓" } else { "" }} }
-                                    span { class: "menu-label", "Two pages, cover alone" }
-                                }
-                                div { class: "menu-rule" }
-                                button {
                                     class: "menu-item",
-                                    onclick: move |_| { viewer.write().rotate(-1); viewer.write().close_menu(); },
-                                    span { class: "menu-tick", "" }
-                                    span { class: "menu-label", "Rotate left" }
-                                    span { class: "menu-key", "{key_rotate_left}" }
-                                }
-                                button {
-                                    class: "menu-item",
-                                    onclick: move |_| { viewer.write().rotate(1); viewer.write().close_menu(); },
-                                    span { class: "menu-tick", {if rotation != 0 { "•" } else { "" }} }
-                                    span { class: "menu-label", "Rotate right" }
-                                    span { class: "menu-key", "{key_rotate_right}" }
-                                }
-                            }
-                        }
-                    }
-                    button {
-                        class: "chip zoom-in",
-                        "aria-label": "Zoom in",
-                        onclick: move |_| viewer.write().zoom(true),
-                        Icon { name: "plus", stroke: ink.clone() }
-                    }
-                }
-                }
-                div { class: "anchor",
-                    button {
-                        class: if menu == Some(Menu::Theme) { "chip theme on" } else { "chip theme" },
-                        onmousedown: move |event| event.stop_propagation(),
-                        onclick: move |_| viewer.write().show_menu(Menu::Theme),
-                        Icon { name: "theme", stroke: if menu == Some(Menu::Theme) { ink_on.clone() } else { ink.clone() } }
-                        "{theme_name}"
-                    }
-                    if menu == Some(Menu::Theme) {
-                        div { class: "menu theme", role: "menu", "aria-label": "Theme",
-                            // A press inside a menu is not a press outside it: the root
-                            // puts the menu away, and the item's own click comes after
-                            // the press. This was on the layer these three used to share.
-                            onmousedown: move |event| event.stop_propagation(),
-                            for (index, name) in themes.iter().cloned().enumerate() {
-                                button {
-                                    key: "{index}:{name}",
-                                    class: if index == theme_index { "menu-item on" } else { "menu-item" },
-                                    onclick: move |_| {
-                                        viewer.write().set_theme(index);
-                                        viewer.write().close_menu();
+                                    "data-item": "open",
+                                    onclick: {
+                                        let pick = pick.clone();
+                                        let frame = frame.clone();
+                                        move |_| {
+                                            viewer.write().close_menu();
+                                            if let Some(path) = pick.choose() {
+                                                if viewer.write().open_here(&path) {
+                                                    let title =
+                                                        viewer.read().store.title().to_string();
+                                                    frame.ask(Ask::Showing { path, title });
+                                                }
+                                            }
+                                        }
                                     },
-                                    span { class: "menu-tick", {if index == theme_index { "✓" } else { "" }} }
-                                    span { class: "menu-label", "{name}" }
+                                    span { class: "menu-tick", "" }
+                                    span { class: "menu-label", "Open document…" }
+                                    span { class: "menu-key", "{key_open}" }
                                 }
-                            }
-                        }
-                    }
-                }
-                // The page field, which is a field rather than a readout for
-                // the app's own reason: stepping is fine for nudging and
-                // hopeless for arriving, and a reader with a citation in
-                // front of them has a number to type. What it shows is the
-                // page's *label* — see [`Viewer::label`].
-                // **The box is the width of the number in it, and that is a
-                // workaround wearing a design's clothes.** Blitz lays a text
-                // input's own text out through parley and never gives parley
-                // an alignment — `create_text_editor` in
-                // `blitz-dom/src/layout/construct.rs` copies the font size,
-                // the line height and the brush and stops, and it calls
-                // `editor.set_width(None)`, so there is no box to align
-                // within either. `text-align: center` on an input does
-                // nothing at all, which is what left the page number pinned
-                // against the left wall of a box wide enough for four digits.
-                //
-                // Centring it is therefore not available; making the box the
-                // size of what is in it is, and it is the better answer
-                // anyway — the field grows as digits are typed and the number
-                // never sits in a puddle of empty box. The button and the
-                // field take the same width so that opening the field moves
-                // nothing.
-                if !empty {
-                div { class: "pill",
-                    // **A readout that becomes a field, rather than a field
-                    // that is always one**, which is where this parts company
-                    // with the app — and it is Blitz's focus rule that decides
-                    // it, not taste. The keyboard is handed back to the
-                    // innermost element asking for it (see
-                    // [`give_keyboard_back`]), so a field that is always in
-                    // the toolbar either always asks — and then every
-                    // keystroke in the reader goes into it — or stops asking
-                    // while still holding the focus, which is the same dead
-                    // keyboard one level along. The find bar has neither
-                    // problem because its field *stops existing* when the bar
-                    // closes, and the focus goes with it. This is that
-                    // mechanism, borrowed.
-                    if typing_page {
-                    input {
-                        class: if page_fresh { "page-field fresh" } else { "page-field" },
-                        style: "width: {page_box}px;",
-                        r#type: "text",
-                        value: "{page_field}",
-                        // Not the root's business: see its `onmousedown`.
-                        // A press inside the field is somebody putting the
-                        // caret somewhere, not somebody leaving — and putting
-                        // the caret somewhere is also the end of the
-                        // "everything is selected" state, exactly as a click
-                        // into a selected field is anywhere else. `oninput`
-                        // above depends on that: it can only take the label
-                        // off the front while the caret is still at the
-                        // front.
-                        onmousedown: move |event| {
-                            event.stop_propagation();
-                            if viewer.read().page_fresh {
-                                viewer.write().page_fresh = false;
-                            }
-                        },
-                        "aria-label": "Go to page",
-                        "data-keyboard": "goto",
-                        onmounted: move |event| {
-                            let node = event.data();
-                            let task = node.set_focus(true);
-                            spawn(async move { let _ = task.await; });
-                        },
-                        // **This is the other half of the emulated
-                        // select-all, and it is here rather than in the
-                        // keydown because of where the caret ends up.**
-                        // Cancelling the keystroke and writing the character
-                        // into the value attribute works — Blitz's
-                        // `set_text` replaces the editor's string — but
-                        // `set_text` does not touch the *selection*, and a
-                        // field that has just been built has its caret at
-                        // offset 0. So the second digit landed in front of
-                        // the first and "50" was typed as "05", which parses
-                        // to page 5 and is the sort of fault that passes
-                        // every test written in one digit.
-                        //
-                        // Letting the editor do its own insertion moves the
-                        // caret for us. Fresh means the caret was at the
-                        // front, so whatever arrived is at the front of the
-                        // value, and taking the old label off the end leaves
-                        // exactly what was typed — with the caret now behind
-                        // it, where the next digit wants it.
-                        oninput: move |event| {
-                            let typed = event.value();
-                            let held = viewer.read();
-                            let (fresh, was) = (held.page_fresh, held.page_typed.clone());
-                            drop(held);
-                            if fresh {
-                                let first = typed.strip_suffix(&was).unwrap_or(&typed);
-                                let first = first.to_string();
-                                viewer.write().type_page(&first);
-                            } else {
-                                viewer.write().type_page(&typed);
-                            }
-                        },
-                        // The same two rules the find field has, and for the
-                        // same two reasons: a plain key typed here would
-                        // otherwise bubble to the root and scroll the
-                        // document, and Blitz applies a keystroke to a focused
-                        // field whatever modifier is held down.
-                        onkeydown: move |event| {
-                            let key = event.key();
-                            let modifiers = event.modifiers();
-                            let plain = !modifiers.meta() && !modifiers.ctrl() && !modifiers.alt();
-                            match key {
-                                Key::Enter => {
-                                    event.stop_propagation();
-                                    viewer.write().commit_page();
+                                // The two-documents-at-once route in one step,
+                                // which is the app's own wording and its own
+                                // reason: pick the second and it arrives beside
+                                // the first rather than on top of it. A menu
+                                // item and not a key, because it is not a key
+                                // in `keys.ts` either.
+                                button {
+                                    class: "menu-item",
+                                    onclick: {
+                                        let pick = pick.clone();
+                                        let frame = frame.clone();
+                                        move |_| {
+                                            viewer.write().close_menu();
+                                            if let Some(path) = pick.choose() {
+                                                frame.ask(Ask::NewWindowOn(path));
+                                            }
+                                        }
+                                    },
+                                    span { class: "menu-tick", "" }
+                                    span { class: "menu-label", "Open document in new window…" }
                                 }
-                                // **A menu is outermost and this field owns
-                                // the keyboard, which is a contradiction only
-                                // Blitz makes.** The app puts the ordering in
-                                // one document-level capturing handler; here
-                                // the keyboard belongs to the innermost
-                                // element asking for it, so a field that has
-                                // it has to defer to the menu itself. See
-                                // `Action::Dismiss`, which is the same list in
-                                // the same order for the case where no field
-                                // has the keyboard at all.
-                                Key::Escape => {
-                                    event.stop_propagation();
-                                    if !viewer.write().close_menu() {
-                                        viewer.write().cancel_page();
+                                button {
+                                    class: "menu-item",
+                                    onclick: {
+                                        let frame = frame.clone();
+                                        move |_| {
+                                            viewer.write().close_menu();
+                                            frame.ask(Ask::NewWindow);
+                                        }
+                                    },
+                                    span { class: "menu-tick", "" }
+                                    span { class: "menu-label", "New window" }
+                                    span { class: "menu-key", "{key_new_window}" }
+                                }
+                                // And the shelf, which is the app's own last
+                                // section of this menu. It is the same list
+                                // the start screen shows and it is here for
+                                // the reader who has a document open: the
+                                // start screen is unreachable without first
+                                // putting that one down, and "the paper I was
+                                // reading yesterday" should not cost a trip
+                                // through the file picker to find again.
+                                if !recents.is_empty() {
+                                    div { class: "menu-rule" }
+                                    div { class: "menu-section", "Recently read" }
+                                    for entry in recents.iter().cloned() {
+                                        button {
+                                            key: "{entry.path}",
+                                            class: "menu-item",
+                                            "data-item": "recent",
+                                            onclick: {
+                                                let frame = frame.clone();
+                                                let path = entry.path.clone();
+                                                move |_| {
+                                                    let path = path.clone();
+                                                    viewer.write().close_menu();
+                                                    if viewer.write().open_here(&path) {
+                                                        let title = viewer
+                                                            .read()
+                                                            .store
+                                                            .title()
+                                                            .to_string();
+                                                        frame.ask(Ask::Showing { path, title });
+                                                    }
+                                                }
+                                            },
+                                            // A drawing rather than the empty tick
+                                            // column every other item carries: the
+                                            // app's own `ui.menuItem({icon:
+                                            // "document"})`, and it is what makes
+                                            // this section read as a shelf rather
+                                            // than as four more commands.
+                                            span { class: "menu-tick",
+                                                Icon { name: "document", stroke: crate::palette::hex(wearing.faint()) }
+                                            }
+                                            span { class: "menu-label", "{entry.title}" }
+                                            span { class: "menu-key", "p. {entry.page}" }
+                                        }
                                     }
                                 }
-                                // Backspace on a field whose contents are
-                                // all "selected" empties it, which is what
-                                // Backspace on a real selection does. The
-                                // editor's own would delete what is before
-                                // the caret, and the caret is at the front,
-                                // so without this it does nothing at all.
-                                Key::Backspace | Key::Delete
-                                    if plain && viewer.read().page_fresh =>
-                                {
-                                    event.stop_propagation();
-                                    event.prevent_default();
-                                    viewer.write().type_page("");
-                                }
-                                _ if plain => event.stop_propagation(),
-                                Key::Character(ref typed)
-                                    if matches!(typed.as_str(), "a" | "c" | "v" | "x" | "z") => {}
-                                _ => event.prevent_default(),
+                            }
+                        }
+                    }
+                    // The two window verbs, in the bar only while there is
+                    // nothing else in it. This is the app's own rule — see
+                    // `#shell:not([data-empty="true"]) #new-window` in
+                    // `styles.css` — and the reason is that a window with a
+                    // document in it has better things to spend the room on,
+                    // while a window with none has ⌘N and ⌘W and no way of
+                    // knowing it.
+                    if empty {
+                    button {
+                        class: "chip new-window",
+                        onclick: {
+                            let frame = frame.clone();
+                            move |_| frame.ask(Ask::NewWindow)
+                        },
+                        Icon { name: "window", stroke: ink.clone() }
+                        "New window"
+                    }
+                    button {
+                        class: "chip close-window",
+                        onclick: {
+                            let frame = frame.clone();
+                            move |_| frame.ask(Ask::Close)
+                        },
+                        Icon { name: "close", stroke: ink.clone() }
+                        "Close window"
+                    }
+                    }
+                    if !empty {
+                    // The gesture the app calls Close, and the one place a
+                    // document can be put down without the window going with
+                    // it. A button rather than a menu item, which is where
+                    // the app keeps it: it was under the title here, and a
+                    // reader looking for how to put a document down does not
+                    // look inside a menu named after the document.
+                    button {
+                        class: "chip close-doc",
+                        "data-item": "close-document",
+                        onclick: {
+                            let frame = frame.clone();
+                            move |_| {
+                                viewer.write().close_menu();
+                                viewer.write().close_document();
+                                // The desk, the restore list and the document
+                                // watch all belong to the process, and an
+                                // empty path is how this window says it is
+                                // showing none. See [`Ask::Showing`].
+                                frame.ask(Ask::Showing {
+                                    path: String::new(),
+                                    title: String::new(),
+                                });
                             }
                         },
+                        Icon { name: "close", stroke: ink.clone() }
+                        "Close"
                     }
-                    } else {
+                    // What the document is called — its own `/Title` where
+                    // that is worth having, and the file's name where it is
+                    // not, see `store::worth_calling` — and the button the
+                    // document's own menu hangs off, which is where the app
+                    // puts it too.
+                    div { class: "anchor",
+                        button {
+                            class: if menu == Some(Menu::Document) { "chip title on" } else { "chip title" },
+                            onmousedown: move |event| event.stop_propagation(),
+                            onclick: move |_| viewer.write().show_menu(Menu::Document),
+                            Icon {
+                                name: "document",
+                                stroke: if menu == Some(Menu::Document) { ink_on.clone() } else { crate::palette::hex(wearing.faint()) },
+                            }
+                            "{shelf_name}"
+                        }
+                        if menu == Some(Menu::Document) {
+                            div { class: "menu document", role: "menu", "aria-label": "Document",
+                                onmousedown: move |event| event.stop_propagation(),
+                                // The page marked, which used to be a chip in
+                                // the bar and is not one in the app's: a mark
+                                // is set once and read from the Contents
+                                // panel, so a permanent button for it is a
+                                // permanent button for something nobody
+                                // presses twice in an hour. It ticks, which
+                                // is what the chip's "on" state was saying.
+                                button {
+                                    class: "menu-item",
+                                    "data-item": "mark",
+                                    onclick: move |_| {
+                                        viewer.write().close_menu();
+                                        let page = viewer.read().page();
+                                        viewer.write().mark_page(page);
+                                    },
+                                    span { class: "menu-tick", {if marked { "✓" } else { "" }} }
+                                    span { class: "menu-label", "Mark this page" }
+                                    span { class: "menu-key", "{key_mark}" }
+                                }
+                                // The one visible thing pointing at markup, and
+                                // the app learned the hard way that it has to
+                                // exist: there, ⌘⇧H was the only way in for a
+                                // while, and nobody found the feature after it
+                                // was built. Beside "Mark this page", which is
+                                // the other thing in this app called marking and
+                                // is not this one.
+                                button {
+                                    class: "menu-item",
+                                    "data-item": "markup",
+                                    onclick: move |_| {
+                                        viewer.write().close_menu();
+                                        if !viewer.write().open_markup() {
+                                            viewer.write().notice =
+                                                "Select something first, and this marks it.".into();
+                                        }
+                                    },
+                                    span { class: "menu-tick", "" }
+                                    span { class: "menu-label", "Highlight the selection" }
+                                    span { class: "menu-key", "{key_markup}" }
+                                }
+                                div { class: "menu-rule" }
+                                // Printing prints nothing: the document goes
+                                // to a program that does. See [`Printer`].
+                                button {
+                                    class: "menu-item",
+                                    "data-item": "print",
+                                    onclick: {
+                                        let printer = printer.clone();
+                                        move |_| {
+                                            viewer.write().close_menu();
+                                            let path = viewer.read().document.path().to_string();
+                                            if path.is_empty() {
+                                                return;
+                                            }
+                                            if let Err(said) = printer.print(&path) {
+                                                viewer.write().notice = said;
+                                            }
+                                        }
+                                    },
+                                    span { class: "menu-tick", "" }
+                                    span { class: "menu-label", "Print…" }
+                                    span { class: "menu-key", "{key_print}" }
+                                }
+                                div { class: "menu-rule" }
+                                // Two ways of taking the document with you,
+                                // which is the app's own pair. The name is
+                                // what the toolbar shows; the path is what
+                                // another program will want.
+                                button {
+                                    class: "menu-item",
+                                    "data-item": "copy-name",
+                                    onclick: {
+                                        let clip = clip.clone();
+                                        move |_| {
+                                            viewer.write().close_menu();
+                                            let name = viewer.read().store.title().to_string();
+                                            clip.put(&name);
+                                            viewer.write().notice = "Name copied.".into();
+                                        }
+                                    },
+                                    span { class: "menu-tick", "" }
+                                    span { class: "menu-label", "Copy name" }
+                                }
+                                button {
+                                    class: "menu-item",
+                                    "data-item": "copy-path",
+                                    onclick: {
+                                        let clip = clip.clone();
+                                        move |_| {
+                                            viewer.write().close_menu();
+                                            let path = viewer.read().document.path().to_string();
+                                            clip.put(&path);
+                                            viewer.write().notice = "Path copied.".into();
+                                        }
+                                    },
+                                    span { class: "menu-tick", "" }
+                                    span { class: "menu-label", "Copy path" }
+                                }
+                            }
+                        }
+                    }
+                    }
+                }
+                // The middle of the bar, and the only thing in it: where you
+                // are, with a step either side of it. The two buttons are the
+                // app's `#prev-page` and `#next-page` — a page is turned by a
+                // key or by scrolling far more often than by pressing an
+                // arrow, but the pair is what makes the number between them
+                // read as a control rather than as a readout.
+                div { class: "bar-group bar-center",
+                    if !empty {
                     button {
-                        class: "page-now",
-                        style: "width: {page_box}px;",
-                        "aria-label": "Go to page",
-                        onclick: move |_| viewer.write().open_page_field(),
-                        "{page_field}"
+                        class: "chip page-previous",
+                        "aria-label": "Previous page",
+                        onclick: move |_| {
+                            let previous = viewer.read().page().saturating_sub(1).max(1);
+                            viewer.write().go_to_page(previous);
+                        },
+                        Icon { name: "up", stroke: ink.clone() }
+                    }
+                    // The page field, which is a field rather than a readout for
+                    // the app's own reason: stepping is fine for nudging and
+                    // hopeless for arriving, and a reader with a citation in
+                    // front of them has a number to type. What it shows is the
+                    // page's *label* — see [`Viewer::label`].
+                    // **The box is the width of the number in it, and that is a
+                    // workaround wearing a design's clothes.** Blitz lays a text
+                    // input's own text out through parley and never gives parley
+                    // an alignment — `create_text_editor` in
+                    // `blitz-dom/src/layout/construct.rs` copies the font size,
+                    // the line height and the brush and stops, and it calls
+                    // `editor.set_width(None)`, so there is no box to align
+                    // within either. `text-align: center` on an input does
+                    // nothing at all, which is what left the page number pinned
+                    // against the left wall of a box wide enough for four digits.
+                    //
+                    // Centring it is therefore not available; making the box the
+                    // size of what is in it is, and it is the better answer
+                    // anyway — the field grows as digits are typed and the number
+                    // never sits in a puddle of empty box. The button and the
+                    // field take the same width so that opening the field moves
+                    // nothing.
+                    div { class: "pill",
+                        // **A readout that becomes a field, rather than a field
+                        // that is always one**, which is where this parts company
+                        // with the app — and it is Blitz's focus rule that decides
+                        // it, not taste. The keyboard is handed back to the
+                        // innermost element asking for it (see
+                        // [`give_keyboard_back`]), so a field that is always in
+                        // the toolbar either always asks — and then every
+                        // keystroke in the reader goes into it — or stops asking
+                        // while still holding the focus, which is the same dead
+                        // keyboard one level along. The find bar has neither
+                        // problem because its field *stops existing* when the bar
+                        // closes, and the focus goes with it. This is that
+                        // mechanism, borrowed.
+                        if typing_page {
+                        input {
+                            class: if page_fresh { "page-field fresh" } else { "page-field" },
+                            style: "width: {page_box}px;",
+                            r#type: "text",
+                            value: "{page_field}",
+                            // Not the root's business: see its `onmousedown`.
+                            // A press inside the field is somebody putting the
+                            // caret somewhere, not somebody leaving — and putting
+                            // the caret somewhere is also the end of the
+                            // "everything is selected" state, exactly as a click
+                            // into a selected field is anywhere else. `oninput`
+                            // above depends on that: it can only take the label
+                            // off the front while the caret is still at the
+                            // front.
+                            onmousedown: move |event| {
+                                event.stop_propagation();
+                                if viewer.read().page_fresh {
+                                    viewer.write().page_fresh = false;
+                                }
+                            },
+                            "aria-label": "Go to page",
+                            "data-keyboard": "goto",
+                            onmounted: move |event| {
+                                let node = event.data();
+                                let task = node.set_focus(true);
+                                spawn(async move { let _ = task.await; });
+                            },
+                            // **This is the other half of the emulated
+                            // select-all, and it is here rather than in the
+                            // keydown because of where the caret ends up.**
+                            // Cancelling the keystroke and writing the character
+                            // into the value attribute works — Blitz's
+                            // `set_text` replaces the editor's string — but
+                            // `set_text` does not touch the *selection*, and a
+                            // field that has just been built has its caret at
+                            // offset 0. So the second digit landed in front of
+                            // the first and "50" was typed as "05", which parses
+                            // to page 5 and is the sort of fault that passes
+                            // every test written in one digit.
+                            //
+                            // Letting the editor do its own insertion moves the
+                            // caret for us. Fresh means the caret was at the
+                            // front, so whatever arrived is at the front of the
+                            // value, and taking the old label off the end leaves
+                            // exactly what was typed — with the caret now behind
+                            // it, where the next digit wants it.
+                            oninput: move |event| {
+                                let typed = event.value();
+                                let held = viewer.read();
+                                let (fresh, was) = (held.page_fresh, held.page_typed.clone());
+                                drop(held);
+                                if fresh {
+                                    let first = typed.strip_suffix(&was).unwrap_or(&typed);
+                                    let first = first.to_string();
+                                    viewer.write().type_page(&first);
+                                } else {
+                                    viewer.write().type_page(&typed);
+                                }
+                            },
+                            // The same two rules the find field has, and for the
+                            // same two reasons: a plain key typed here would
+                            // otherwise bubble to the root and scroll the
+                            // document, and Blitz applies a keystroke to a focused
+                            // field whatever modifier is held down.
+                            onkeydown: move |event| {
+                                let key = event.key();
+                                let modifiers = event.modifiers();
+                                let plain = !modifiers.meta() && !modifiers.ctrl() && !modifiers.alt();
+                                match key {
+                                    Key::Enter => {
+                                        event.stop_propagation();
+                                        viewer.write().commit_page();
+                                    }
+                                    // **A menu is outermost and this field owns
+                                    // the keyboard, which is a contradiction only
+                                    // Blitz makes.** The app puts the ordering in
+                                    // one document-level capturing handler; here
+                                    // the keyboard belongs to the innermost
+                                    // element asking for it, so a field that has
+                                    // it has to defer to the menu itself. See
+                                    // `Action::Dismiss`, which is the same list in
+                                    // the same order for the case where no field
+                                    // has the keyboard at all.
+                                    Key::Escape => {
+                                        event.stop_propagation();
+                                        if !viewer.write().close_menu() {
+                                            viewer.write().cancel_page();
+                                        }
+                                    }
+                                    // Backspace on a field whose contents are
+                                    // all "selected" empties it, which is what
+                                    // Backspace on a real selection does. The
+                                    // editor's own would delete what is before
+                                    // the caret, and the caret is at the front,
+                                    // so without this it does nothing at all.
+                                    Key::Backspace | Key::Delete
+                                        if plain && viewer.read().page_fresh =>
+                                    {
+                                        event.stop_propagation();
+                                        event.prevent_default();
+                                        viewer.write().type_page("");
+                                    }
+                                    _ if plain => event.stop_propagation(),
+                                    Key::Character(ref typed)
+                                        if matches!(typed.as_str(), "a" | "c" | "v" | "x" | "z") => {}
+                                    _ => event.prevent_default(),
+                                }
+                            },
+                        }
+                        } else {
+                        button {
+                            class: "page-now",
+                            style: "width: {page_box}px;",
+                            "aria-label": "Go to page",
+                            onclick: move |_| viewer.write().open_page_field(),
+                            "{page_field}"
+                        }
+                        }
+                        span { class: "of", "/ {pages}" }
+                    }
+                    button {
+                        class: "chip page-next",
+                        "aria-label": "Next page",
+                        onclick: move |_| {
+                            let next = viewer.read().page() + 1;
+                            viewer.write().go_to_page(next);
+                        },
+                        Icon { name: "down", stroke: ink.clone() }
                     }
                     }
-                    span { class: "of", "/ {pages}" }
                 }
-                }
-                // The cog, at the right end of the bar where the app puts it
-                // and where every application that has one puts it. It was
-                // only ever an item in the Document menu here, which is a
-                // strange place to keep the answer to "how do I change
-                // something" and is the same objection the Keyboard page
-                // answers by being a key of its own.
-                button {
-                    class: "chip settings",
-                    "aria-label": "Settings",
-                    onclick: move |_| viewer.write().open_settings(),
-                    Icon { name: "settings", stroke: ink.clone() }
+                div { class: "bar-group bar-right",
+                    if !empty {
+                    // The app's `#find`, which this bar did not have: ⌘F was
+                    // the only way in, and a shortcut is not a way in for
+                    // somebody who does not already know it is there.
+                    button {
+                        class: if find_open { "chip find on" } else { "chip find" },
+                        onclick: move |_| viewer.write().open_find(),
+                        Icon { name: "search", stroke: if find_open { ink_on.clone() } else { ink.clone() } }
+                        "Search"
+                    }
+                    }
+                    if !empty {
+                    // Two buttons that were a cycle and are now a list. The chip
+                    // still *says* what is in force — the harness reads the zoom
+                    // and the theme off these two and a reader reads them the same
+                    // way — and what changed is that clicking one shows the
+                    // choices instead of stepping to the next of them.
+                    // The three of them in one sunk group, minus on the left and
+                    // plus on the right, which is `.zoom-group` in the app. Three
+                    // quiet words in a row of quiet words read as three more
+                    // labels; a stepper with the readout between its two ends
+                    // reads as one control, and it is the same three elements.
+                    div { class: "zoom-group",
+                        button {
+                            class: "chip zoom-out",
+                            "aria-label": "Zoom out",
+                            onclick: move |_| viewer.write().zoom(false),
+                            Icon { name: "minus", stroke: ink.clone() }
+                        }
+                        div { class: "anchor",
+                            button {
+                                class: if menu == Some(Menu::View) { "chip fit on" } else { "chip fit" },
+                                onmousedown: move |event| event.stop_propagation(),
+                                onclick: move |_| viewer.write().show_menu(Menu::View),
+                                "{zoom}"
+                            }
+                            if menu == Some(Menu::View) {
+                                div { class: "menu view", role: "menu", "aria-label": "View",
+                                    // A press inside a menu is not a press outside it: the root
+                                    // puts the menu away, and the item's own click comes after
+                                    // the press. This was on the layer these three used to share.
+                                    onmousedown: move |event| event.stop_propagation(),
+                                    button {
+                                        class: if fit == Fit::Width { "menu-item on" } else { "menu-item" },
+                                        onclick: move |_| { viewer.write().set_fit(Fit::Width); viewer.write().close_menu(); },
+                                        span { class: "menu-tick", {if fit == Fit::Width { "✓" } else { "" }} }
+                                        span { class: "menu-label", "Fit width" }
+                                        span { class: "menu-key", "{key_fit_width}" }
+                                    }
+                                    button {
+                                        class: if fit == Fit::Page { "menu-item on" } else { "menu-item" },
+                                        onclick: move |_| { viewer.write().set_fit(Fit::Page); viewer.write().close_menu(); },
+                                        span { class: "menu-tick", {if fit == Fit::Page { "✓" } else { "" }} }
+                                        span { class: "menu-label", "Fit page" }
+                                        span { class: "menu-key", "{key_fit_page}" }
+                                    }
+                                    button {
+                                        class: if fit == Fit::Actual { "menu-item on" } else { "menu-item" },
+                                        onclick: move |_| { viewer.write().actual_size(); viewer.write().close_menu(); },
+                                        span { class: "menu-tick", {if fit == Fit::Actual { "✓" } else { "" }} }
+                                        span { class: "menu-label", "Actual size" }
+                                        span { class: "menu-key", "{key_actual}" }
+                                    }
+                                    div { class: "menu-rule" }
+                                    button {
+                                        class: if spread == Spread::Single { "menu-item on" } else { "menu-item" },
+                                        onclick: move |_| { viewer.write().set_spread(Spread::Single); viewer.write().close_menu(); },
+                                        span { class: "menu-tick", {if spread == Spread::Single { "✓" } else { "" }} }
+                                        span { class: "menu-label", "One page" }
+                                    }
+                                    button {
+                                        class: if spread == Spread::Two { "menu-item on" } else { "menu-item" },
+                                        onclick: move |_| { viewer.write().set_spread(Spread::Two); viewer.write().close_menu(); },
+                                        span { class: "menu-tick", {if spread == Spread::Two { "✓" } else { "" }} }
+                                        span { class: "menu-label", "Two pages" }
+                                    }
+                                    button {
+                                        class: if spread == Spread::Cover { "menu-item on" } else { "menu-item" },
+                                        onclick: move |_| { viewer.write().set_spread(Spread::Cover); viewer.write().close_menu(); },
+                                        span { class: "menu-tick", {if spread == Spread::Cover { "✓" } else { "" }} }
+                                        span { class: "menu-label", "Two pages, cover alone" }
+                                    }
+                                    div { class: "menu-rule" }
+                                    button {
+                                        class: "menu-item",
+                                        onclick: move |_| { viewer.write().rotate(-1); viewer.write().close_menu(); },
+                                        span { class: "menu-tick", "" }
+                                        span { class: "menu-label", "Rotate left" }
+                                        span { class: "menu-key", "{key_rotate_left}" }
+                                    }
+                                    button {
+                                        class: "menu-item",
+                                        onclick: move |_| { viewer.write().rotate(1); viewer.write().close_menu(); },
+                                        span { class: "menu-tick", {if rotation != 0 { "•" } else { "" }} }
+                                        span { class: "menu-label", "Rotate right" }
+                                        span { class: "menu-key", "{key_rotate_right}" }
+                                    }
+                                }
+                            }
+                        }
+                        button {
+                            class: "chip zoom-in",
+                            "aria-label": "Zoom in",
+                            onclick: move |_| viewer.write().zoom(true),
+                            Icon { name: "plus", stroke: ink.clone() }
+                        }
+                    }
+                    }
+                    div { class: "anchor",
+                        button {
+                            class: if menu == Some(Menu::Theme) { "chip theme on" } else { "chip theme" },
+                            onmousedown: move |event| event.stop_propagation(),
+                            onclick: move |_| viewer.write().show_menu(Menu::Theme),
+                            Icon { name: "theme", stroke: if menu == Some(Menu::Theme) { ink_on.clone() } else { ink.clone() } }
+                            "{theme_name}"
+                        }
+                        if menu == Some(Menu::Theme) {
+                            div { class: "menu theme", role: "menu", "aria-label": "Theme",
+                                // A press inside a menu is not a press outside it: the root
+                                // puts the menu away, and the item's own click comes after
+                                // the press. This was on the layer these three used to share.
+                                onmousedown: move |event| event.stop_propagation(),
+                                for (index, name) in themes.iter().cloned().enumerate() {
+                                    button {
+                                        key: "{index}:{name}",
+                                        class: if index == theme_index { "menu-item on" } else { "menu-item" },
+                                        onclick: move |_| {
+                                            viewer.write().set_theme(index);
+                                            viewer.write().close_menu();
+                                        },
+                                        span { class: "menu-tick", {if index == theme_index { "✓" } else { "" }} }
+                                        span { class: "menu-label", "{name}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // and where every application that has one puts it. It was
+                    // only ever an item in the Document menu here, which is a
+                    // strange place to keep the answer to "how do I change
+                    // something" and is the same objection the Keyboard page
+                    // answers by being a key of its own.
+                    button {
+                        class: "chip settings",
+                        "aria-label": "Settings",
+                        onclick: move |_| viewer.write().open_settings(),
+                        Icon { name: "settings", stroke: ink.clone() }
+                    }
                 }
             }
             }
@@ -4899,7 +5164,18 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             }
                         },
                     }
-                    div { class: "find-count", "{find_count}" }
+                    // The count, and the way to the list behind it — see
+                    // [`Viewer::show_results`]. A button rather than a
+                    // readout, and one that only looks pressable when it has
+                    // something to show, which is `.find-status:not(:empty)`
+                    // in the app said with a class because Blitz has no `:empty`.
+                    button {
+                        class: if find_count.is_empty() { "find-count" } else { "find-count ready" },
+                        "aria-label": "Show every match",
+                        onmousedown: move |event| event.stop_propagation(),
+                        onclick: move |_| viewer.write().show_results(),
+                        "{find_count}"
+                    }
                     button {
                         class: "chip find-previous",
                         "aria-label": "Previous match",
@@ -5026,8 +5302,16 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             // The line the toolbar's own way back is written on, which is
             // why it outlives the toolbar. Presenting is the case where
             // nothing is on screen at all.
-            if !presenting {
-                div { class: "notice", "{notice}" }
+            if !presenting && !notice.is_empty() {
+                // Over the document and centred near its lower edge, which is
+                // the app's own `.notice`. Two elements rather than one
+                // because centring is done by the outer row: the app reaches
+                // the middle with `left: 50%` and a `translateX(-50%)`, and a
+                // transform is not something to lean on in Blitz when a flex
+                // row does it with no transform at all.
+                div { class: "notice-line",
+                    div { class: "notice", "{notice}" }
+                }
             }
             // What a document being dragged over the window looks like. Over
             // everything but Settings, and outside `.body` so that it covers

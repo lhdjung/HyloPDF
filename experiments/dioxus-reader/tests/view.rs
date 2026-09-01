@@ -70,6 +70,31 @@ fn expected_crop() -> (f64, f64, f64, f64) {
     )
 }
 
+/// Throw the "Trim the margins" switch, which is the whole of the interface
+/// for it.
+///
+/// **The toolbar used to carry a Trim chip and does not any more.** The app
+/// has never had one, and the reason is what the chip was: trimming is
+/// something somebody turns on for a scanned book and leaves on, not a thing
+/// pressed twice in an hour — and a permanent button for it took a place in
+/// the bar that the page controls wanted. It is the fourth field on the
+/// Reading page and the first switch on it.
+fn trim(reader: &mut Reader) {
+    reader.press_chord("mod+,");
+    reader.click(".switch");
+    reader.press("Escape");
+    reader.settle();
+}
+
+/// Whether the switch is on, asked of the window it lives in.
+fn trimming(reader: &mut Reader) -> bool {
+    reader.press_chord("mod+,");
+    let on = reader.harness.attr(".switch", "aria-checked").as_deref() == Some("true");
+    reader.press("Escape");
+    reader.settle();
+    on
+}
+
 #[test]
 fn trimming_changes_the_shape_of_the_page_and_putting_them_back_restores_it() {
     let mut reader = margined();
@@ -77,8 +102,7 @@ fn trimming_changes_the_shape_of_the_page_and_putting_them_back_restores_it() {
     // 792 by 612, which is the page as the document has it.
     assert!((whole - 792.0 / 612.0).abs() < 0.02, "{whole}");
 
-    reader.click(".chip.trim");
-    reader.settle();
+    trim(&mut reader);
 
     let (_, _, width, height) = expected_crop();
     let trimmed = page_ratio(&reader);
@@ -90,17 +114,16 @@ fn trimming_changes_the_shape_of_the_page_and_putting_them_back_restores_it() {
         "trimmed to {trimmed}, expected about {want}"
     );
     assert!(trimmed > whole, "this document's margins are wider than tall");
-    assert_eq!(reader.harness.text_content(".chip.trim"), "Trimmed");
+    assert!(trimming(&mut reader), "the switch is on");
     assert!(
         reader.state().notice.contains("trimmed"),
         "{:?}",
         reader.state().notice
     );
 
-    reader.click(".chip.trim");
-    reader.settle();
+    trim(&mut reader);
     assert!((page_ratio(&reader) - whole).abs() < 0.001);
-    assert_eq!(reader.harness.text_content(".chip.trim"), "Trim");
+    assert!(!trimming(&mut reader), "and off again");
 }
 
 #[test]
@@ -119,8 +142,7 @@ fn a_trimmed_page_puts_its_ink_where_its_margins_were() {
         "the ink starts a fifth of the way in: {inset_before}"
     );
 
-    reader.click(".chip.trim");
-    reader.settle();
+    trim(&mut reader);
     let rect = reader.harness.layout_rect(".page");
     let band = middle_strip(&reader);
     let shot = reader.screenshot();
@@ -137,8 +159,7 @@ fn a_trimmed_page_puts_its_ink_where_its_margins_were() {
 #[test]
 fn the_trim_switch_is_remembered_and_the_crop_is_not() {
     let mut reader = margined();
-    reader.click(".chip.trim");
-    reader.settle();
+    trim(&mut reader);
     let trimmed = page_ratio(&reader);
 
     // The same config directory, which is what makes this a second run of the
@@ -151,7 +172,7 @@ fn the_trim_switch_is_remembered_and_the_crop_is_not() {
         },
     );
     again.settle();
-    assert_eq!(again.harness.text_content(".chip.trim"), "Trimmed");
+    assert!(trimming(&mut again), "the switch came back on");
     // Measured again on this document rather than restored from the last one:
     // the answer is the same because the document is, which is the whole
     // reason the crop is not written down.
@@ -233,8 +254,7 @@ fn a_link_follows_the_page_it_is_drawn_on() {
 #[test]
 fn a_document_can_be_turned_and_trimmed_at_once() {
     let mut reader = margined();
-    reader.click(".chip.trim");
-    reader.settle();
+    trim(&mut reader);
     let trimmed = page_ratio(&reader);
 
     reader.press_chord("mod+r");
@@ -249,8 +269,7 @@ fn a_document_can_be_turned_and_trimmed_at_once() {
     // is made on the document rather than on the page as the reader has it.
     let mut other = margined();
     other.press_chord("mod+r");
-    other.click(".chip.trim");
-    other.settle();
+    trim(&mut other);
     assert!(
         (page_ratio(&other) - both).abs() < 0.01,
         "turn then trim is trim then turn: {} against {both}",

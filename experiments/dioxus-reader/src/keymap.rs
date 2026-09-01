@@ -156,10 +156,14 @@ pub struct Spec {
     /// What it does, in the words the Keyboard page uses.
     pub label: &'static str,
     pub group: Group,
-    /// Needs a document open. Everything else answers on the start screen
-    /// too — which this reader does not have yet, so nothing reads this and
-    /// it is carried because dropping a column from a ported table is how a
-    /// port starts drifting from the thing it is a port of.
+    /// Needs a document open. Everything else answers on the start screen too.
+    ///
+    /// It was carried unread for two phases, on the grounds that dropping a
+    /// column from a ported table is how a port starts drifting — and it is
+    /// read now, because there is a start screen. `Reader`'s key handler in
+    /// `app.rs` is the one place that asks, and `tests/keys.rs` checks every
+    /// flag against `src/keys.ts` rather than four of them, because a wrong
+    /// answer here is a key that is silently ignored.
     pub needs_document: bool,
     /// The keys it ships with, on every platform.
     pub keys: &'static [&'static str],

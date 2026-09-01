@@ -214,6 +214,15 @@ pub struct State {
     /// What the document is called, off the toolbar: its own `/Title` where
     /// that is worth having, and the file's name where it is not.
     pub title: String,
+    /// Whether the window is showing the start screen rather than a document.
+    pub empty: bool,
+    /// The recently-read list on the start screen, as it reads: the name and
+    /// the page, one string a row. Empty when there is no start screen, which
+    /// is what the reader would say too.
+    pub recents: Vec<String>,
+    /// What the drop hint says while something is being dragged over the
+    /// window, or nothing at all. See [`crate::app::Viewer::dragging`].
+    pub dragging: Option<String>,
     /// Whether the toolbar is on screen. ⌘T puts it away and presenting takes
     /// it with everything else — see [`crate::app::Viewer::chrome`]. Nearly
     /// every other field here is read *off* the toolbar, so a test that hides
@@ -281,6 +290,49 @@ impl Reader {
     pub fn deliver(&mut self, news: crate::emit::News) {
         self.post.send(news);
         self.settle();
+    }
+
+    /// A document dragged over the window, exactly as winit reports it —
+    /// `true` for one this reader would open, `false` for anything else.
+    ///
+    /// The news `main.rs` turns `WindowEvent::DragEntered` into. What it
+    /// skips is winit, which is the same line [`Reader::deliver`] draws for
+    /// the watcher: there is no window here, and the half that is worth
+    /// testing is what the reader does about the news.
+    pub fn drag_over(&mut self, takeable: bool) {
+        self.deliver(crate::emit::News {
+            event: "drag-over".into(),
+            target: None,
+            payload: serde_json::Value::Bool(takeable),
+        });
+    }
+
+    /// The drag left the window without anything being let go.
+    pub fn drag_left(&mut self) {
+        self.deliver(crate::emit::News {
+            event: "drag-left".into(),
+            target: None,
+            payload: serde_json::Value::Null,
+        });
+    }
+
+    /// Something was let go on the window that this reader will not open.
+    pub fn drag_refused(&mut self) {
+        self.deliver(crate::emit::News {
+            event: "drag-refused".into(),
+            target: None,
+            payload: serde_json::Value::Null,
+        });
+    }
+
+    /// A document let go on the window, or handed to it by the process —
+    /// which are the same news, because they are the same thing happening.
+    pub fn hand_over(&mut self, path: &str) {
+        self.deliver(crate::emit::News {
+            event: "open-document".into(),
+            target: None,
+            payload: serde_json::Value::String(path.to_string()),
+        });
     }
 
     /// The whole theme set, again — what a saved theme file causes.
@@ -405,6 +457,16 @@ impl Reader {
             "{}/../../tests/fixtures/book.pdf",
             env!("CARGO_MANIFEST_DIR")
         )
+    }
+
+    /// A window with nothing in it — the start screen, as ⌘N gives it and as
+    /// closing a document leaves it.
+    ///
+    /// Over [`crate::render::Nothing`], which is the same document the real
+    /// empty window holds: there is no "no document" state to fake, and that
+    /// is the whole reason the empty document exists.
+    pub fn empty(options: Options) -> Self {
+        Self::over(crate::render::nothing(), options)
     }
 
     pub fn open_with(path: &str, options: Options) -> Self {
@@ -918,9 +980,15 @@ impl Reader {
             zoom: self.text(".chip.fit"),
             theme: self.text(".chip.theme"),
             notice: self.text(".notice"),
+            // Guarded, because `attr` panics on a selector that matches
+            // nothing and a window showing the start screen has no `.pages`
+            // in it at all. Every other reader here goes through `text`,
+            // which has been guarded all along for the same reason one level
+            // down: the toolbar is not always on screen either.
             scroll: self
                 .harness
-                .attr(".pages", "data-scroll")
+                .query(".pages")
+                .and_then(|_| self.harness.attr(".pages", "data-scroll"))
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(0.0),
             mounted,
@@ -941,6 +1009,20 @@ impl Reader {
                 .map(str::to_string),
             toolbar: self.harness.query(".toolbar").is_some(),
             presenting: self.harness.query(".root.presenting").is_some(),
+            empty: self.harness.query(".start").is_some(),
+            // Read as one string a row, the way somebody looking at the list
+            // would read it: "book.pdf p. 12". Two fields would be two
+            // parallel arrays and one assertion apiece; a row is the thing on
+            // the screen.
+            recents: self
+                .text_all(".recent-open")
+                .into_iter()
+                .map(|row| row.split_whitespace().collect::<Vec<_>>().join(" "))
+                .collect(),
+            dragging: self
+                .harness
+                .query(".drop-hint")
+                .map(|_| self.text(".drop-hint-word")),
         }
     }
 

@@ -243,6 +243,52 @@ fn what_needs_a_document_open_is_only_what_moves_around_inside_one() {
     assert!(!needs_document(Action::Dismiss));
 }
 
+/// And every one of them agrees with the app's own table.
+///
+/// **This flag decides behaviour now**, which it did not when the four
+/// assertions above were written: there was no window without a document in
+/// it, so nothing ever asked. With a start screen, a flag that is wrong one
+/// way is a key that does nothing on a document and wrong the other way is a
+/// key that scrolls a layout of no pages — and neither shows up as anything
+/// but a reader pressing a key and being ignored.
+///
+/// So it is checked against `src/keys.ts` the way `tests/icons.rs` checks the
+/// drawings and `settings.test.mjs` checks the settings table: by reading the
+/// app's file. The two lists are the same actions apart from this reader's
+/// own three, which have no row over there to disagree with.
+#[test]
+fn every_flag_agrees_with_the_app_s_own_table() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/keys.ts");
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    // The file is a list of object literals. An action's own text runs from
+    // its `id:` to the next one, and `needsDocument: true` inside that run is
+    // the flag — there is no `false` written anywhere, absent being the
+    // default on both sides.
+    let mut checked = 0;
+    for spec in every() {
+        let id = spec.id.as_str();
+        let Some(at) = source.find(&format!("id: \"{id}\"")) else {
+            // This reader's own — `next-theme`, `spread`, `copy`. See the
+            // module comment: a key the app never had to write down.
+            continue;
+        };
+        let rest = &source[at..];
+        let end = rest[1..]
+            .find("id: \"")
+            .map(|next| next + 1)
+            .unwrap_or(rest.len());
+        let theirs = rest[..end].contains("needsDocument: true");
+        assert_eq!(
+            needs_document(spec.id),
+            theirs,
+            "{id} disagrees with the app about needing a document",
+        );
+        checked += 1;
+    }
+    assert!(checked > 30, "only {checked} actions were found over there");
+}
+
 /* -------------------------------------------------------------- in words */
 
 #[test]

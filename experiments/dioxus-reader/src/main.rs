@@ -1,20 +1,20 @@
 //! The reader, run.
 //!
 //! ```text
-//! cargo run --release                          # the 400-page fixture
+//! cargo run --release                          # what you were reading last
 //! cargo run --release -- ~/paper.pdf           # a document of your own
 //! cargo run --release -- --measure 60          # read it, and say what it cost
 //! ```
 //!
 //! With no path it opens whatever was open when the reader was last put down,
-//! and `tests/fixtures/book.pdf` from the app beside it when there was
-//! nothing. `reopen_last_document = false` in `settings.toml` turns that off,
-//! which is the app's own setting — and so does `--measure` or `--quit`,
-//! because every number in `PROGRESS.md` was taken on that fixture and a
-//! measuring run that quietly used a different document would not be
-//! comparable with any of them. A path that is not there is said so plainly
-//! rather than being handed to pdfium, which reports it as a Debug-printed
-//! `io::Error`.
+//! and **the start screen** when there was nothing. `reopen_last_document =
+//! false` in `settings.toml` turns the restoring off, which is the app's own
+//! setting — and so does `--measure` or `--quit`, which additionally open
+//! `tests/fixtures/book.pdf` from the app beside it, because every number in
+//! `PROGRESS.md` was taken on that fixture and a measuring run that quietly
+//! used a different document, or none, would not be comparable with any of
+//! them. A path that is not there is said so plainly rather than being handed
+//! to pdfium, which reports it as a Debug-printed `io::Error`.
 //!
 //! `--measure N` scrolls through N screenfuls on its own and prints what the
 //! session cost — pages drawn, milliseconds each, texture resident, RSS. That
@@ -106,33 +106,55 @@ fn main() {
         (None, true) => Vec::new(),
         (None, false) => store::reopening_all(&config.dir),
     };
-    let path = session.first().cloned().unwrap_or_else(|| {
+    // **Nothing to open is now the start screen rather than the fixture.**
+    // It was the fixture because there was nowhere else for a window with
+    // nothing in it to go — a launch on a machine that had never read
+    // anything opened a 400-page test document nobody asked for, which is a
+    // strange first impression for a reader to make. A measuring run is the
+    // exception and keeps the fixture, for the reason it is exempt from the
+    // restore above: every number in `PROGRESS.md` was taken on it, and a
+    // measuring run of an empty window would measure nothing and say it had.
+    let fixture = || {
         format!(
             "{}/../../tests/fixtures/book.pdf",
             env!("CARGO_MANIFEST_DIR")
         )
-    });
+    };
+    let path = match (session.first(), measuring) {
+        (Some(path), _) => Some(path.clone()),
+        (None, true) => Some(fixture()),
+        (None, false) => None,
+    };
 
     // Opened once here for the message below and then dropped: the window
     // opens it again through `Session::window`, which is the one path a
     // window's document comes down. Two opens of the same file cost the same
     // milliseconds twice and buy a launch that says what went wrong before a
     // window exists to say it in.
-    match render::open(&path) {
-        Ok(document) => println!(
-            "reader: {} pages in {path}, opened in {:.0}ms | {:.0}MB resident before any window",
+    match path.as_deref().map(render::open) {
+        Some(Ok(document)) => println!(
+            "reader: {} pages in {}, opened in {:.0}ms | {:.0}MB resident before any window",
             document.pages(),
+            path.as_deref().unwrap_or_default(),
             document.opened_in(),
             stats::rss_mb(),
         ),
-        Err(err) => {
+        None => println!(
+            "reader: nothing to open — the start screen | {:.0}MB resident before any window",
+            stats::rss_mb(),
+        ),
+        Some(Err(err)) => {
             eprintln!("{err}");
             // The one mistake worth a second sentence, because the documented
             // invocation used to be `-- book.pdf` and the fixture is not in
             // the directory cargo is run from.
-            if named.is_some() && !std::path::Path::new(&path).exists() {
+            let named_missing = named.is_some()
+                && path
+                    .as_deref()
+                    .is_some_and(|path| !std::path::Path::new(path).exists());
+            if named_missing {
                 eprintln!(
-                    "Run it with no path at all to open the 400-page fixture the numbers were taken on."
+                    "Run it with no path at all to open whatever you were reading last."
                 );
             }
             std::process::exit(1);
@@ -175,7 +197,11 @@ fn main() {
     // Each is placed as it is made, so the second cascades off the first —
     // the app has to remember the spots instead, because showing a window on
     // macOS moves it and its windows are shown later.
-    if let Some(spec) = session_maker.window(&path) {
+    let launch = match path.as_deref() {
+        Some(path) => session_maker.window(path),
+        None => session_maker.empty_window(),
+    };
+    if let Some(spec) = launch {
         windows.open(spec);
     }
     for beside in session.iter().skip(1) {
@@ -227,6 +253,28 @@ fn main() {
         let handle = AppHandle::new(exchange.clone());
         shell.on_theme(move |label| {
             let _ = handle.emit_to(label, "appearance-changed", ());
+        });
+    }
+    {
+        // A document dragged over a window and let go on it. Everything about
+        // it is the window's to answer — the hint it shows, and opening the
+        // file through the same `open_here` that ⌘O uses — so all this does is
+        // carry winit's word down the mailbox, which is the shape of every
+        // other line in this block.
+        let handle = AppHandle::new(exchange.clone());
+        shell.on_drop(move |label, drag| {
+            let _ = match drag {
+                dioxus_reader::shell::Drag::Over(takeable) => {
+                    handle.emit_to(label, "drag-over", takeable)
+                }
+                dioxus_reader::shell::Drag::Left => handle.emit_to(label, "drag-left", ()),
+                dioxus_reader::shell::Drag::Refused => {
+                    handle.emit_to(label, "drag-refused", ())
+                }
+                dioxus_reader::shell::Drag::Drop(path) => {
+                    handle.emit_to(label, "open-document", path)
+                }
+            };
         });
     }
     {

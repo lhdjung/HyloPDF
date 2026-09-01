@@ -24,9 +24,10 @@ taken from the commit history — and that order is the engine.** Layout,
 rendering, search, links, the library, windows, selection. The *interface* the
 engine is reached through was never an item, so its absence never showed up as
 an unfinished one: no menus, no way to open a second document, no settings
-window, no Keyboard page. Progress against each item was real and progress
-towards parity was being overstated by about the size of the thing nobody was
-counting.
+window, no Keyboard page, no start screen. Progress against each item was real
+and progress towards parity was being overstated by about the size of the
+thing nobody was counting. All five of those are built now, and every one of
+them was found by looking at the app rather than at this list.
 
 Two smaller versions of the same fault, both now fixed and both worth
 recognising by shape. The toolbar's theme and fit chips *cycled*, because a
@@ -47,6 +48,17 @@ timed in a way nobody would sit in front of. No test asks that question, so
 the only thing that finds them is reading with it. See "Four grievances from
 reading with it" and the five after it, below.
 
+**And the largest of them was not a grievance at all, because there was
+nothing on screen to have one about.** The reader had no window with nothing
+in it — no start screen, no shelf, no way to put a document down — and three
+separate entries in this file explain something *else* by naming that absence
+as the reason: ⌘N, `Handover::Fill`, and a column of the keymap that nothing
+read. Each of those explanations was correct. Together they are the same
+lesson one size up: a missing piece of interface does not appear on a list of
+unfinished items, it appears as a shape the rest of the application has been
+built around, and the way to find it is to build the piece and watch three
+other things come loose. See "The window with nothing in it", near the end.
+
 **And the round that fixed those four did not make the reader look right**,
 which is the sharpest version of the lesson so far. Three of the five that came
 back had been sitting underneath the fixes, and one of them was the *cause* of
@@ -62,24 +74,25 @@ where that comparison actually stands.
 
 ```
 cd dioxus-reader
-cargo run --release                          # the 400-page fixture
+cargo run --release                          # what you were reading last
 cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 329 tests, about a minute and a half
+cargo test                                   # 354 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
-With no path it opens **whatever was open when it was last put down**, and
-the app's own `tests/fixtures/book.pdf` when there was nothing. See Phase 3
-item 7 — and note that `--measure` and `--quit` deliberately do *not* restore:
-every number below was taken on that fixture, and a measuring run that quietly
-used whatever had last been read would not be comparable with any of them.
-(The fixture used to be documented as `-- book.pdf`, which is a path relative
-to wherever cargo was run from and was therefore usually not there — and
-pdfium reports a missing file as a Debug-printed `io::Error`. Both halves of
-that are fixed.)
+With no path it opens **whatever was open when it was last put down**, and the
+**start screen** when there was nothing — see "The window with nothing in it"
+near the end of this file. `--measure` and `--quit` deliberately do *not*
+restore, and open the app's own `tests/fixtures/book.pdf` instead: every number
+below was taken on that fixture, and a measuring run that quietly used whatever
+had last been read, or nothing at all, would not be comparable with any of
+them. (The fixture used to be documented as `-- book.pdf`, which is a path
+relative to wherever cargo was run from and was therefore usually not there —
+and pdfium reports a missing file as a Debug-printed `io::Error`. Both halves
+of that are fixed.)
 
 **The keys are the app's own**, because `keys.ts` and `keys.toml` are ported —
 see Phase 3 item 2. `j`/`k` and the arrows move a line, `d`/`u` half a screen,
@@ -113,6 +126,15 @@ the same thing; "Open in a new window…" beside it is the app's own wording for
 the app's own gesture. Each menu item shows the key that asks for the same
 thing, read off the keymap rather than written beside it, so a rebound key is
 what it shows. See "The menus, and opening a document" below.
+
+**A window can be empty, and an empty window is the start screen**: the app's
+own, with the last six documents read and the page each was left on, a button
+that opens one and a × that takes one off the list. ⌘N gives one, "Close
+document" in the Document menu leaves one, a launch with nothing remembered
+begins on one, and a PDF dragged onto any window is caught and opened. The
+same list is the last section of the Document menu, for the reader who has a
+document open and wants yesterday's paper back without going through the
+picker. See "The window with nothing in it", near the end.
 
 **One thing is a setting and nothing else.** One page at a time is
 `scroll_mode = "paged"` in `settings.toml`, with no key and no chip, which is
@@ -1364,12 +1386,14 @@ or deleted is not reopened and failed on at every launch for ever, and
 for the app's own reason — two sides that each assume the other checked it are
 two sides that disagree about whether the window has anything in it.
 
-*What is deliberately not built is the shelf.* `library.toml` holds
-twenty-four recently-read documents with their titles and where you were in
-each, and there is nowhere here to show them: the app has a start screen and
-this reader always has a document open. Building one would be inventing an
-interface rather than porting it. The list is kept and pruned correctly, which
-is what the day there is a start screen needs.
+*What was deliberately not built is the shelf, and it is built now.*
+`library.toml` holds twenty-four recently-read documents with their titles and
+where you were in each, and when this was written there was nowhere to show
+them: the app has a start screen and this reader always had a document open.
+The list was kept and pruned correctly against the day there was one, which is
+the day this paragraph is about — see "The window with nothing in it" at the
+end of this file. `Store::recents` is the whole of what that day needed, and
+it turned out to be `library::prune` and a `map`.
 
 *And the write is still a whole file.* `remember` re-reads and rewrites
 `library.toml` for every position it records — which is the app's design and
@@ -1588,6 +1612,13 @@ before anything is painted at all.
 and fails as a webview that never reports in.
 
 #### The one thing that has no equivalent, and it is the start screen
+
+**This section is superseded.** It is kept as it was written because the
+finding it records was correct and is the clearest statement of what one
+missing panel had done to the shape of the application; see "The window with
+nothing in it" at the end of this file, where the start screen is built and
+all three of the consequences below come loose. What follows is the state
+before that.
 
 `Desk::hand_over` has three answers — bring that window forward, fill an empty
 window, make one — and **the middle one is unreachable in this reader**. The
@@ -2105,9 +2136,11 @@ already recorded one level away:
 
 **⌘O opens a different document in this window**, which is what the app's ⌘O
 does — `openDialog` calls `this.open(path)` — and ⇧⌘O is a menu item and not a
-key there either. This is the one place where the port's "there is no empty
-window" finding does *not* apply: ⌘N gives a second window on the document in
-front because there is no start screen, and ⌘O was never about empty windows.
+key there either. This used to be the one place where the port's "there is no
+empty window" finding did *not* apply — ⌘N gave a second window on the
+document in front, and ⌘O was never about empty windows. There is a start
+screen now and ⌘N is an empty one; ⌘O is unchanged, which is the half of that
+sentence that was always about ⌘O rather than about the finding.
 `Viewer::open_here` is `document_changed` plus the library entry, because a
 recompile is the same document and this is a different one: the marks, the
 title and the remembered place all move, and the fit, zoom, spread, rotation,
@@ -2555,7 +2588,8 @@ not make.
 ### What is not built
 
 No theme editor. There is still no text *layer*, and there is not going to be
-one: item 10 is what that was for.
+one: item 10 is what that was for. (There was no start screen either, when
+this was written. See "The window with nothing in it", below.)
 
 **Phase 3 is complete.** Eleven items, and the last one came out ahead of the
 thing it was porting.
@@ -2709,6 +2743,168 @@ what the two slots are for. `follow_system_theme` stayed on throughout, which
 is the other half: following the machine is not the reader overruling it.
 
 `tests/prefs.rs` is 14 and `src/store.rs` has four of its own; 339 in total.
+
+---
+
+## The window with nothing in it
+
+The largest single thing the interface did not have, and the one whose absence
+had reached furthest into the rest of the reader. Three entries in this file
+named it as the reason for something else being the way it was, each of them
+correctly, and each of them is now out of date:
+
+- `Session::another` said "**this is where the port stops being a port**",
+  because ⌘N in the app gives an empty window and here there was nowhere to
+  put one, so it opened a second window on the document already in front of
+  somebody.
+- `Desk::hand_over` carried a comment saying its middle arm — `Fill`, for a
+  window with nothing in it — was **unreachable in this reader**, and that
+  the day a window could be empty was the day it would be needed.
+- `Spec::needs_document` in `keymap.rs` was carried unread for two phases,
+  because there was no window without a document for the flag to mean anything
+  in.
+
+All three were true. What they add up to is that "no start screen" was not one
+missing panel; it was a shape the whole application had been built around, and
+the way to find that out was to build the panel and watch three other things
+come loose.
+
+**What is there now** is the app's own `#welcome`, item for item: the name, one
+line under it, one filled button, the last six documents read with the page
+each was left on and a × to take one off, and the sentence saying a document
+can simply be dropped on the window. It stands where the document would rather
+than over it — the app lays it over the viewer and reveals it with a
+`[data-empty]` selector, which is a webview arrangement for a webview reason,
+and here it replaces the region, which is the same picture and one fewer thing
+on screen.
+
+**And a document of no pages is how there is no document.** `render::Nothing`
+is a `PageSource` whose `pages()` is 0, and it is the whole of the mechanism.
+The alternative was `Option<Arc<dyn PageSource>>` threaded through the viewer,
+the layout, the search, the sidebar and every component under them — several
+hundred arms whose every branch says "there is no document, do nothing", which
+is what a document of no pages already says. The layout has no boxes, the
+mounting window holds nothing, the search finds nothing, the sidebar has
+nothing to draw. One predicate, `Viewer::empty`, decides what is on the
+screen; everything above it goes on being written for a document.
+
+### What came loose, and what it now does
+
+**⌘N is an empty window**, which is the app's own answer and no longer a
+difference to explain. Two places in one book at once is still one gesture:
+"Open in a new window…" under the document's own name, with the document
+already there.
+
+**A document handed over lands in a window that is showing nothing.**
+`Handover::Fill` finally happens, and the path it takes is the one every other
+piece of news takes — the window's mailbox — so the bookkeeping afterwards is
+⌘O's own: the desk, the restore list, the watch and the window's title are all
+set by the single call that sets them for ⌘O. `Desk` had to learn about
+windows rather than only about documents for this: `idle()` used to look at
+the front window alone, not as a shortcut but because there was no list of
+windows-showing-nothing to walk, there being none.
+
+**Closing a document is a gesture**, and it is the one that empties the
+restore list. `AGENTS.md` draws that distinction for the app — a window closed
+because the app is quitting was open at the end, a document the reader put
+down is one they have finished with — and here it is an `Ask::Showing` with an
+empty path, which every one of the three things outside the window takes in
+its stride.
+
+**A launch with nothing remembered is the start screen**, not the 400-page
+fixture. Opening a test document nobody asked for was a strange first
+impression, and it was only ever there because there was nowhere else for a
+window to go. `--measure` and `--quit` keep the fixture, for the same reason
+they already refuse to restore: the numbers in this file were taken on it.
+
+**The keyboard knows.** `needs_document` is read now, in one place, and
+`tests/keys.rs` checks **every** flag against `src/keys.ts` rather than four of
+them — because a flag that is wrong one way is a key that does nothing on a
+document and wrong the other way is a key that scrolls a layout of no pages,
+and neither shows up as anything but a reader pressing a key and being
+ignored.
+
+*Which turned up four keys the app leaves unflagged that are plainly about a
+document*: `find`, `find-next`, `find-previous` and `mark`. ⌘F on the app's own
+start screen puts up a bar whose placeholder reads "Search this document" over
+a window that has none; ⌘⇧B says "Marked page 0". The table here is left
+agreeing with the app, because that table is a port and the gate is what keeps
+it one; the three guards are in `Viewer::open_find`, `step_match` and
+`mark_page`, each with a line saying so. It is worth raising over there.
+
+### Dropping a document on the window
+
+"Or drop a PDF anywhere in this window" is the last line of that screen and it
+is a promise. In the app the webview keeps it, through `dragover` and `drop`;
+here there is no webview and no DOM event — winit reports it on the *window*,
+which is the right place for it in both applications, because what is being
+dropped is a file and files are the Rust side's business.
+
+`Shell::on_drop` is the fourth hook of its shape after `on_resized`,
+`on_theme` and `on_swap`, and it carries three states rather than one:
+`DragEntered` with whether there is a document among the paths, `DragLeft`,
+and `DragDropped` with the one path that will be opened. The paths are
+filtered before they leave the shell, so the hint can say *this will not be
+caught* while there is still time to not let go — which is the difference
+between a hint that means something and a hint that appears for every drag
+across the screen. `DragMoved` is deliberately unanswered: it fires per pixel
+and says nothing `DragEntered` has not.
+
+**And the hint itself was got wrong first, which reading with it found.** The
+first version was a solid `--accent-soft` over the whole window with the words
+in a pill — correct, legible, and a curtain drawn across the one thing
+somebody dragging a file wants to see, which is the window they are dragging
+onto. The app's own is a dashed accent border inset ten pixels over a veil of
+the theme's paper: the window saying it will catch this, rather than something
+standing in front of it. That is what is there now, with `--veil` mixed in
+`variables()` as an eight-digit hex rather than written as `color-mix`, so
+that what reaches the renderer is a colour and not a function it may or may
+not implement.
+
+### And two smaller things the bar was missing
+
+The **cog** is at the right end of the toolbar, where the app puts it and
+where every application that has one puts it. It was only ever an item in the
+Document menu here, which is a strange place to keep the answer to "how do I
+change something" — the same objection the Keyboard page answers by being a
+key of its own. `icons.rs` grew the app's own cog for it, and `tests/icons.rs`
+grew a row.
+
+The **shelf is in the Document menu** as well as on the start screen, which is
+the app's own last section of that menu. The start screen is unreachable
+without first putting a document down, and "the paper I was reading yesterday"
+should not cost a trip through the file picker to find again.
+
+### What it was checked with
+
+`tests/shelf.rs` is fourteen tests and `tests/keys.rs` gained the gate above;
+**354 in total**. The one thing the harness cannot reach is winit's own delivery
+of `DragDropped`, so the wire was run for real: the reader was launched with an
+empty config directory, came up on the start screen, and a second launch naming
+a document exited quietly while the first window filled with it — which is
+`Handover::Fill`, the `open-document` news, `open_here` and `Ask::Showing`, end
+to end, in a process with a window in it.
+
+### What is still not at parity
+
+Reading the app's `index.html` beside this, what is left is smaller than what
+went:
+
+- **The theme editor.** Still the largest, still not built; the Appearance page
+  shows every theme as a swatch and cannot make one.
+- **The toolbar peek handle.** ⌘T puts the bar away and the notice line names
+  the key that brings it back, which is the app's fallback rather than its
+  answer: there, a strip along the top edge brings the bar down on hover.
+- **The page pill**, the floating readout the app shows while scrolling with
+  the toolbar hidden.
+- **The three-group toolbar.** The app centres the page navigation with
+  previous/next buttons either side of the field; here the field sits at the
+  right end of one flat row and there are no page buttons. This is a layout
+  decision rather than a missing feature, and it is worth making deliberately.
+- **The notice line takes 30px whether or not it says anything.** In the app it
+  is hidden when empty. Here it is a row in a flex column and the room is
+  reserved, which is a grey band across the bottom of every screenshot in this
+  file.
 
 ---
 

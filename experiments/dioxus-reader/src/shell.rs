@@ -214,6 +214,44 @@ type Resized = Box<dyn FnMut(&str)>;
 /// [`Shell::on_theme`].
 type Themed = Box<dyn FnMut(&str)>;
 
+/// A file dragged over a window, or let go over one. See [`Shell::on_drop`].
+type Dropped = Box<dyn FnMut(&str, Drag)>;
+
+/// What is happening with a file over a window.
+///
+/// The paths winit hands over are filtered to documents this reader can open
+/// before they get here, so `Over(true)` is "this will be caught" and
+/// `Over(false)` is "this will not" — which is the difference between a hint
+/// that means something and a hint that appears for every drag across the
+/// screen. `Drop` carries the one path that is going to be opened, because a
+/// reader dropping four files on one window means one document and three they
+/// will have to drop again; the app takes the first the same way.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Drag {
+    /// Over the window, and whether there is a document in it.
+    Over(bool),
+    /// Gone, without anything being let go.
+    Left,
+    /// Let go, on this document.
+    Drop(String),
+    /// Let go, on something this reader will not open. A case of its own
+    /// rather than [`Drag::Left`] with the hint taken down, because the reader
+    /// did something and deserves to be told why nothing happened — "That is
+    /// not a PDF" is the app's own sentence for it.
+    Refused,
+}
+
+/// Whether a dragged path is something this reader would open.
+///
+/// By extension and nothing else. The alternative is opening the file to find
+/// out, and this runs on the thread drawing the window every time a pointer
+/// carrying a file crosses it.
+fn is_document(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+}
+
 pub struct Shell {
     inner: BlitzApplication<DioxusNativeWindowRenderer>,
     proxy: BlitzShellProxy,
@@ -239,6 +277,9 @@ pub struct Shell {
     resized: Option<Resized>,
     /// That the machine went light or dark. See [`Shell::on_theme`].
     themed: Option<Themed>,
+    /// That a document is being dragged over a window, or has been let go
+    /// over one. See [`Shell::on_drop`].
+    dropped: Option<Dropped>,
     /// Raised before the first window of a quit goes.
     leaving: Option<Box<dyn FnMut()>>,
     /// Whether winit has told us surfaces can be created yet. A window made
@@ -276,6 +317,7 @@ impl Shell {
             focus: None,
             resized: None,
             themed: None,
+            dropped: None,
             leaving: None,
             started: false,
             trace: true,
@@ -346,6 +388,25 @@ impl Shell {
     /// both from the same cell.
     pub fn on_theme(&mut self, themed: impl FnMut(&str) + 'static) {
         self.themed = Some(Box::new(themed));
+    }
+
+    /// Say what happens when a document is dragged onto a window.
+    ///
+    /// **The one gesture the start screen advertises and nothing answered.**
+    /// "Or drop a PDF anywhere in this window" is the app's own last line of
+    /// that screen, and it is a promise; in the app the webview makes it good
+    /// through `dragover`/`drop`, and here there is no webview and no DOM
+    /// event — winit reports it on the window, which is exactly the right
+    /// place for it, because what is being dropped is a *file* and files are
+    /// the Rust side's business in both applications.
+    ///
+    /// Three states rather than one, because the hint is half the gesture: a
+    /// window that says nothing while a file is over it gives the reader no
+    /// way to know it will be caught. [`Drag::Over`] carries what would be
+    /// opened, so a folder or a `.txt` can be turned away before it is let
+    /// go rather than after.
+    pub fn on_drop(&mut self, dropped: impl FnMut(&str, Drag) + 'static) {
+        self.dropped = Some(Box::new(dropped));
     }
 
     /// Say what happens when a window opens a different document in itself.
@@ -652,6 +713,24 @@ impl ApplicationHandler for Shell {
         // …and the machine going light or dark, which nothing else in this
         // process hears. See [`Shell::on_theme`].
         let themed = matches!(event, WindowEvent::ThemeChanged(_));
+        // …and a document being dragged onto the window. Read *before* the
+        // event is handed on, like the two above it, because `window_event`
+        // takes the event by value. `DragMoved` is deliberately not answered:
+        // it fires for every pixel the pointer travels and says nothing that
+        // `DragEntered` has not already said, so answering it would be one
+        // emit per frame for the whole of a drag.
+        let dragging = match event {
+            WindowEvent::DragEntered { ref paths, .. } => {
+                Some(Drag::Over(paths.iter().any(|path| is_document(path))))
+            }
+            WindowEvent::DragLeft { .. } => Some(Drag::Left),
+            WindowEvent::DragDropped { ref paths, .. } => paths
+                .iter()
+                .find(|path| is_document(path))
+                .map(|path| Drag::Drop(path.to_string_lossy().into_owned()))
+                .or(Some(Drag::Refused)),
+            _ => None,
+        };
         self.inner.window_event(event_loop, window_id, event);
         if resized {
             if let (Some(label), Some(tell)) =
@@ -665,6 +744,13 @@ impl ApplicationHandler for Shell {
                 (self.labels.get(&window_id).cloned(), self.themed.as_mut())
             {
                 tell(&label);
+            }
+        }
+        if let Some(drag) = dragging {
+            if let (Some(label), Some(tell)) =
+                (self.labels.get(&window_id).cloned(), self.dropped.as_mut())
+            {
+                tell(&label, drag);
             }
         }
         if moved_focus {
@@ -717,7 +803,14 @@ impl ApplicationHandler for Shell {
                     // `Session::window` spells it for a window that was born
                     // on one.
                     if let Some(view) = self.inner.windows.get(id) {
-                        view.window.set_title(&format!("{title} — HyloPDF"));
+                        // …and wears the application's own name when it is
+                        // showing nothing, rather than " — HyloPDF" with a
+                        // hole where a document used to be.
+                        view.window.set_title(&if title.is_empty() {
+                            "HyloPDF".to_string()
+                        } else {
+                            format!("{title} — HyloPDF")
+                        });
                     }
                     if let (Some(label), Some(swap)) =
                         (self.labels.get(id).cloned(), self.swap.as_mut())

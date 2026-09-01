@@ -50,6 +50,7 @@ fn every_icon_is_the_app_s_own_drawing() {
     let shared = [
         "contents", "pages", "search", "minus", "plus", "close", "document", "fitWidth", "mark",
         "window", "folder", "theme", "up", "down", "book", "sidebar", "keyboard", "info",
+        "settings",
     ];
     for name in shared {
         let ours = dioxus_reader::icons::path(name)

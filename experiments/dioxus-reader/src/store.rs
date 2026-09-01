@@ -237,6 +237,30 @@ pub fn called(path: &str, declared: &str) -> String {
     }
 }
 
+/// A document's file name, which is what the shelf calls it when the document
+/// itself says nothing worth using.
+fn file_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
+/// One row of the recently-read list: what to call it, where it is, and where
+/// the reader stopped.
+///
+/// The name is settled here rather than at the row, because the library
+/// already holds what [`called`] decided when the document was opened and a
+/// row that worked it out again would be a second opinion about the same
+/// question. An entry written before this reader knew about titles has an
+/// empty one, which is why the fallback is here at all.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recent {
+    pub path: String,
+    pub title: String,
+    pub page: usize,
+}
+
 /// What was open when the reader was last put down, if it is still there and
 /// the reader wants it back.
 ///
@@ -655,6 +679,74 @@ impl Store {
             return None;
         }
         place.filter(|at| at.page > 1 || at.offset > 0.0)
+    }
+
+    /// The document has been put down, and this window is showing none.
+    ///
+    /// **Nothing is written, and that is the whole of the method.** Every
+    /// other transition in this file goes through [`Store::opened`], which
+    /// calls `library::touch` — and touching a document is what puts it at the
+    /// front of the recently-read list. A close that went through the same
+    /// door would write an entry keyed by the empty string and move it to the
+    /// top of the shelf, which is a row nobody can open standing where the
+    /// last thing read should be.
+    ///
+    /// What *is* written happens above this, in
+    /// [`crate::app::Viewer::close_document`]: the reader's place in the
+    /// document being put down, through `remember`, while the store still
+    /// points at it.
+    pub fn closed(&mut self) {
+        self.file.clear();
+        self.title.clear();
+        self.marks.clear();
+        self.journal.clear();
+    }
+
+    /// Whether this window has a document in it, as the library sees it.
+    pub fn showing_nothing(&self) -> bool {
+        self.file.is_empty()
+    }
+
+    /// The last few documents read, most recent first, for the start screen
+    /// and for the Open menu.
+    ///
+    /// `prune` is the app's own and is why this is not simply `load().files`:
+    /// a document that has been moved or deleted is dropped rather than
+    /// offered, because a row that cannot be opened is worse than a shorter
+    /// list. The one currently open is left out by the caller rather than
+    /// here — the start screen has no document to leave out, and the Open menu
+    /// does.
+    ///
+    /// Read from the file on every call rather than kept in memory. It is a
+    /// few kilobytes of TOML, it is asked for when a menu opens or a document
+    /// closes rather than per frame, and the alternative is a copy that goes
+    /// stale the moment the *other* window reads something — which is the
+    /// staleness `session.rs` already documents between two windows and the
+    /// one place it would actually show.
+    pub fn recents(&self) -> Vec<Recent> {
+        library::prune(&library::load(&self.dir))
+            .files
+            .into_iter()
+            .map(|entry| Recent {
+                title: if entry.title.is_empty() {
+                    file_name(&entry.path)
+                } else {
+                    entry.title
+                },
+                page: entry.page.max(1) as usize,
+                path: entry.path,
+            })
+            .collect()
+    }
+
+    /// Take a document off that list.
+    ///
+    /// The app's own gesture — the × that appears on a row of the start
+    /// screen when the pointer is over it — and it forgets the marks and the
+    /// place along with the row, because the entry *is* those things. There is
+    /// no undo in the app either.
+    pub fn forget(&self, path: &str) {
+        let _ = library::forget(&self.dir, path);
     }
 
     /// What to call this document: its own title where that is worth having,

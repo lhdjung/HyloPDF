@@ -769,6 +769,11 @@ pub struct Viewer {
     chosen: Chosen,
     /// One line at the bottom of the window, which is `notice()` in `ui.ts`.
     pub notice: String,
+    /// A document is being dragged over this window, and whether it is one
+    /// this reader would open — `#drop-hint` in the app, arriving from winit
+    /// rather than from the DOM. `None` is nothing over the window, which is
+    /// almost always.
+    pub dragging: Option<bool>,
     /// Every key the reader can press, and what it asks for. Built once from
     /// the defaults with `keys.toml` over the top; see [`crate::keymap`].
     pub keymap: Keymap,
@@ -1077,6 +1082,7 @@ impl Viewer {
             place: None,
             edition: 0,
             notice: String::new(),
+            dragging: None,
             keymap,
             pending: String::new(),
             generation: 0,
@@ -2725,6 +2731,14 @@ impl Viewer {
     /// Put a pin in a page or take it out — the same gesture doing the same
     /// thing, which is what `toggle_mark` is.
     pub fn mark_page(&mut self, page: usize) {
+        // No page to put a pin in. `open_find`'s note again, and this is the
+        // third of the four keys the app leaves unflagged that are plainly
+        // about a document — `mark`, `find`, `find-next`, `find-previous`.
+        // Without it ⌘⇧B on the start screen says "Marked page 0", and says it
+        // about the document whose entry the store has just let go of.
+        if self.empty() {
+            return;
+        }
         let title = self.section_for(page);
         let marked = self.store.toggle_mark(page, &title);
         self.notice = if marked {
@@ -2746,6 +2760,17 @@ impl Viewer {
 
     /// Put the find bar up. Nothing is searched for until something is typed.
     pub fn open_find(&mut self) {
+        // Nothing to search. **This is one line more than the app has**, and
+        // it is a deliberate difference rather than an oversight either way:
+        // `find` is not `needsDocument` in `keys.ts`, so ⌘F on the app's own
+        // start screen puts up a bar that will never find anything, with a
+        // placeholder reading "Search this document" over a window that has
+        // none. The flag is left agreeing with the app — `tests/keys.rs`
+        // checks every one of them — because that table is a port and this is
+        // a judgement about one key.
+        if self.empty() {
+            return;
+        }
         // The colour popover is about a passage, and somebody opening the
         // find bar has moved on from it. Closing it here rather than leaving
         // Escape to do it keeps that key's order the one it claims to be:
@@ -2830,6 +2855,13 @@ impl Viewer {
 
     /// Move to the next match, or the one before, and go there.
     pub fn step_match(&mut self, forwards: bool) {
+        // Nothing to step through, and nothing to say about it: "No matches"
+        // on a start screen is an answer to a question nobody asked. The
+        // second half of `open_find`'s note — the app leaves ⌘G, ⌘⇧G and ⌘F
+        // unflagged, and all three of them are about a document.
+        if self.empty() {
+            return;
+        }
         if self.search.matches().is_empty() {
             self.notice = if self.search.state().textless {
                 "There is no text in this document to search".into()
@@ -3387,9 +3419,96 @@ impl Viewer {
         // which keeps one place per document — so this cannot be skipped on
         // the grounds that the scroll has not moved since the last one.
         self.store.remember(self.layout.anchor(self.scroll_top));
+        let declared = opened.title();
         self.document = opened;
-        let declared = self.document.title();
         let place = self.store.opened(path, &declared);
+        self.take_up(place);
+        true
+    }
+
+    /// The document is put down and this window is showing none.
+    ///
+    /// **The gesture the app calls Close**, and it is not the same as closing
+    /// the window: the window stays, the toolbar keeps the things that are
+    /// not about a document, and what is in front of the reader is the start
+    /// screen. In the app it is also the one gesture that empties the restore
+    /// list, which is `AGENTS.md`'s own distinction — a window that goes
+    /// because the app is quitting was open at the end, and a document the
+    /// reader put down is one they have finished with. Here that is the
+    /// caller's to say, because the list belongs to the process (see
+    /// [`Ask::Showing`] with an empty path).
+    ///
+    /// Everything [`Viewer::open_here`] clears is cleared, for the same
+    /// reasons, and the document put in its place is [`crate::render::Nothing`]
+    /// — see there for why this is a document of no pages rather than no
+    /// document at all.
+    pub fn close_document(&mut self) {
+        if self.empty() {
+            return;
+        }
+        // Where they got to, written while the store still points at the file
+        // it is about. Exactly as `open_here` does it, and for the same
+        // reason: this is the last moment either half is true.
+        self.store.remember(self.layout.anchor(self.scroll_top));
+        // **And written now rather than eventually**, which is the one place
+        // in this reader that waits for the scribe. Everywhere else the delay
+        // is the whole design — a place arrives on every wheel event and the
+        // last one wins — but the screen this is about to put up says, on its
+        // own first row, where the reader stopped in the document they are
+        // putting down. Reading that off the file before the file has caught
+        // up shows the page they were on the last time they *opened* it, and
+        // the number is stale exactly when it is most looked at.
+        crate::store::flush();
+        self.document = crate::render::nothing();
+        self.store.closed();
+        self.take_up(None);
+        // Nothing to say. The screen that arrives says what it is.
+        self.notice = String::new();
+    }
+
+    /// Whether this window has a document in it.
+    ///
+    /// One predicate, asked in the two places it decides something: what the
+    /// toolbar carries, and whether the body is the document or the start
+    /// screen. Everything else in this file goes on being written for a
+    /// document, because a document of no pages answers every question
+    /// already — see [`crate::render::Nothing`].
+    pub fn empty(&self) -> bool {
+        self.document.pages() == 0
+    }
+
+    /// The last few documents read, for the start screen and the Open menu,
+    /// with the one already open left out.
+    ///
+    /// Left out because reopening it here would be a no-op, which is the app's
+    /// own reasoning about the same list: opening it in a *second* window is
+    /// what its own title menu is for. Six, which is the app's number for the
+    /// start screen; the menu takes what it wants of them.
+    pub fn recents(&self) -> Vec<crate::store::Recent> {
+        let open = self.document.path();
+        self.store
+            .recents()
+            .into_iter()
+            .filter(|entry| entry.path != open)
+            .take(6)
+            .collect()
+    }
+
+    /// Take a document off the recently-read list, and off the shelf.
+    pub fn forget(&mut self, path: &str) {
+        self.store.forget(path);
+        self.generation += 1;
+    }
+
+    /// Everything a window has to put down when the document under it changes,
+    /// and everything it has to pick up again.
+    ///
+    /// Shared by [`Viewer::open_here`] and [`Viewer::close_document`] because
+    /// the list is identical and the list is the part that is easy to get
+    /// wrong — a cache left pointing into the document that was there a moment
+    /// ago is a rectangle drawn over the wrong page, and it took closing a
+    /// document to notice that the two paths had to agree.
+    fn take_up(&mut self, place: Option<crate::layout::Anchor>) {
         self.headings = self.document.outline();
         self.labels = self.document.labels();
         // A different document has different markup, and its own answer to
@@ -3432,7 +3551,6 @@ impl Viewer {
         self.revealed = false;
         self.reveal_thumb();
         self.notice = String::new();
-        true
     }
 
     /// The next theme in the list, which is what `t` is bound to.
@@ -3734,6 +3852,18 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 Press::Nothing => viewer.write().pending.clear(),
                 Press::Act(action) => {
                     viewer.write().pending.clear();
+                    // **An action about a document does nothing when there is
+                    // none.** `keys.ts` has carried `needsDocument` since the
+                    // keyboard was ported and this reader has carried
+                    // `needs_document` beside it, unread, because there was no
+                    // window without a document in it to read it for. The
+                    // start screen is what makes it mean something: without
+                    // this, `j` on the start screen scrolls a layout of no
+                    // pages, ⌘F puts up a find bar over nothing, and ⌘⇧H
+                    // offers to highlight a selection that cannot exist.
+                    if crate::keymap::needs_document(action) && viewer.read().empty() {
+                        return;
+                    }
                     perform(viewer, action, screen, &frame, &clip, &pick, &printer);
                 }
             }
@@ -3819,6 +3949,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         let listening = post.clone();
         let sizing = screen.clone();
         let watching_appearance = appearance.clone();
+        let opening = frame.clone();
         spawn(async move {
             loop {
                 let news = listening.next().await;
@@ -3832,6 +3963,37 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                         let path = news.payload.as_str().unwrap_or_default().to_string();
                         let restarted = viewer.write().document_changed(&path);
                         scan(restarted);
+                    }
+                    // A document is over the window, and whether it is one
+                    // this reader would open. Both answers are worth having:
+                    // a hint that says "drop to open" over a folder is a
+                    // promise nothing keeps.
+                    "drag-over" => {
+                        let takeable = news.payload.as_bool().unwrap_or(true);
+                        viewer.write().dragging = Some(takeable);
+                    }
+                    "drag-left" => viewer.write().dragging = None,
+                    // Let go on something that is not a document. The app's
+                    // own sentence, said on the app's own line.
+                    "drag-refused" => {
+                        let mut held = viewer.write();
+                        held.dragging = None;
+                        held.notice = "That is not a PDF.".into();
+                    }
+                    // A document handed to this window by the process: a
+                    // second launch, "Open with", a double-click in the
+                    // Finder. It arrives here rather than at a new window
+                    // because this window is showing nothing — see
+                    // `Desk::hand_over` — and the bookkeeping afterwards is
+                    // ⌘O's own, because this is ⌘O with somebody else
+                    // choosing the file.
+                    "open-document" => {
+                        let path = news.payload.as_str().unwrap_or_default().to_string();
+                        viewer.write().dragging = None;
+                        if !path.is_empty() && viewer.write().open_here(&path) {
+                            let title = viewer.read().store.title().to_string();
+                            opening.ask(Ask::Showing { path, title });
+                        }
                     }
                     // The window changed size, which nothing else in this
                     // process will tell the layout — Blitz resizes its own
@@ -3870,7 +4032,6 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let scroll_left = held.scroll_left();
     let wearing = held.palette();
     let theme_name = held.theme_name();
-    let title = held.store.title().to_string();
     // Which draft of the document is being drawn — in every page's key, so
     // that a recompile replaces the nodes and the textures with them. See
     // `Viewer::edition`.
@@ -3888,6 +4049,29 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let find_open = held.find_open;
     let presenting = held.presenting;
     let toolbar_on = held.toolbar && !held.presenting;
+    // Whether this window has a document in it, which decides two things: what
+    // the toolbar carries, and whether the body is the document or the start
+    // screen. See [`Viewer::empty`].
+    let empty = held.empty();
+    // A document over the window, if there is one. See [`Viewer::dragging`].
+    let dragging = held.dragging;
+    // What the button the Document menu hangs off is called: the document's
+    // name, or the app's own "Open…" when there is none.
+    // The shelf, read once for this render. It is a file on the disk, so it is
+    // read when the Document menu is open and not otherwise — a menu that is
+    // shut costs nothing, which is the same bargain every other menu in this
+    // bar strikes.
+    let recents = if held.menu == Some(Menu::Document) {
+        held.recents()
+    } else {
+        Vec::new()
+    };
+    let shelf_icon = if held.empty() { "folder" } else { "document" };
+    let shelf_name = if held.empty() {
+        "Open…".to_string()
+    } else {
+        held.store.title().to_string()
+    };
     let find_query = held.find_query.clone();
     let find_count = held.find_count();
     let find_options = held.search.options();
@@ -4083,6 +4267,13 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             },
             if toolbar_on {
             div { class: "toolbar",
+                // **Everything in this bar that is about a document is gone
+                // when there is none**, which is `#shell[data-empty="true"]`
+                // in the app's stylesheet doing the same thing by selector.
+                // What is left is the two things that are still true of a
+                // window with nothing in it: how to put something in it, and
+                // what it looks like.
+                if !empty {
                 button {
                     // Not `.sidebar`, which is the panel itself: a selector
                     // that matches the button *and* the thing the button
@@ -4091,6 +4282,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     onclick: move |_| viewer.write().toggle_sidebar(),
                     Icon { name: "contents", stroke: if sidebar_open { ink_on.clone() } else { ink.clone() } }
                     "Contents"
+                }
                 }
                 // What the document is called — its own `/Title` where that
                 // is worth having, and the file's name where it is not, see
@@ -4117,11 +4309,17 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                         class: if menu == Some(Menu::Document) { "chip title on" } else { "chip title" },
                         onmousedown: move |event| event.stop_propagation(),
                         onclick: move |_| viewer.write().show_menu(Menu::Document),
+                        // With a document it is the document's name and the
+                        // menu is that document's; with none it is the app's
+                        // `#open` button, which is the same menu minus the
+                        // items about a document. One button rather than two,
+                        // because the menu behind it is one menu and a second
+                        // button would be a second place for it to be wrong.
                         Icon {
-                            name: "document",
+                            name: shelf_icon,
                             stroke: if menu == Some(Menu::Document) { ink_on.clone() } else { crate::palette::hex(wearing.faint()) },
                         }
-                        "{title}"
+                        "{shelf_name}"
                     }
                     if menu == Some(Menu::Document) {
                         div { class: "menu document", role: "menu", "aria-label": "Document",
@@ -4193,6 +4391,38 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                                 span { class: "menu-label", "Close window" }
                                 span { class: "menu-key", "{key_close}" }
                             }
+                            if !empty {
+                            div { class: "menu-rule" }
+                            // The gesture the app calls Close, and the one
+                            // place a document can be put down without the
+                            // window going with it. It is a menu item rather
+                            // than a chip in the bar — the app has room for
+                            // both and this bar does not — and it has no key,
+                            // because it has none in `keys.ts` either: closing
+                            // a document is a decision rather than a
+                            // movement, and ⌘W already means the window.
+                            button {
+                                class: "menu-item",
+                                "data-item": "close-document",
+                                onclick: {
+                                    let frame = frame.clone();
+                                    move |_| {
+                                        viewer.write().close_menu();
+                                        viewer.write().close_document();
+                                        // The desk, the restore list and the
+                                        // document watch all belong to the
+                                        // process, and an empty path is how
+                                        // this window says it is showing
+                                        // none. See [`Ask::Showing`].
+                                        frame.ask(Ask::Showing {
+                                            path: String::new(),
+                                            title: String::new(),
+                                        });
+                                    }
+                                },
+                                span { class: "menu-tick", "" }
+                                span { class: "menu-label", "Close document" }
+                            }
                             div { class: "menu-rule" }
                             // The one visible thing pointing at markup, and
                             // the app learned the hard way that it has to
@@ -4215,6 +4445,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                                 span { class: "menu-label", "Highlight the selection" }
                                 span { class: "menu-key", "{key_markup}" }
                             }
+                            }
                             div { class: "menu-rule" }
                             // The app has a Settings button of its own in the
                             // bar; there is no room for one here and this is
@@ -4227,10 +4458,57 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                                 span { class: "menu-label", "Settings…" }
                                 span { class: "menu-key", "{key_settings}" }
                             }
+                            // And the shelf, which is the app's own last
+                            // section of this menu. It is the same list the
+                            // start screen shows and it is here for the
+                            // reader who has a document open: the start
+                            // screen is unreachable without first putting
+                            // that one down, and "the paper I was reading
+                            // yesterday" should not cost a trip through the
+                            // file picker to find again.
+                            if !recents.is_empty() {
+                                div { class: "menu-rule" }
+                                div { class: "menu-section", "Recently read" }
+                                for entry in recents.iter().cloned() {
+                                    button {
+                                        key: "{entry.path}",
+                                        class: "menu-item",
+                                        "data-item": "recent",
+                                        onclick: {
+                                            let frame = frame.clone();
+                                            let path = entry.path.clone();
+                                            move |_| {
+                                                let path = path.clone();
+                                                viewer.write().close_menu();
+                                                if viewer.write().open_here(&path) {
+                                                    let title = viewer
+                                                        .read()
+                                                        .store
+                                                        .title()
+                                                        .to_string();
+                                                    frame.ask(Ask::Showing { path, title });
+                                                }
+                                            }
+                                        },
+                                        // A drawing rather than the empty tick
+                                        // column every other item carries: the
+                                        // app's own `ui.menuItem({icon:
+                                        // "document"})`, and it is what makes
+                                        // this section read as a shelf rather
+                                        // than as four more commands.
+                                        span { class: "menu-tick",
+                                            Icon { name: "document", stroke: crate::palette::hex(wearing.faint()) }
+                                        }
+                                        span { class: "menu-label", "{entry.title}" }
+                                        span { class: "menu-key", "p. {entry.page}" }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 div { class: "spacer" }
+                if !empty {
                 button {
                     class: if marked { "chip mark on" } else { "chip mark" },
                     onclick: move |_| { let page = viewer.read().page(); viewer.write().mark_page(page); },
@@ -4341,6 +4619,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                         Icon { name: "plus", stroke: ink.clone() }
                     }
                 }
+                }
                 div { class: "anchor",
                     button {
                         class: if menu == Some(Menu::Theme) { "chip theme on" } else { "chip theme" },
@@ -4392,6 +4671,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 // never sits in a puddle of empty box. The button and the
                 // field take the same width so that opening the field moves
                 // nothing.
+                if !empty {
                 div { class: "pill",
                     // **A readout that becomes a field, rather than a field
                     // that is always one**, which is where this parts company
@@ -4527,6 +4807,19 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     }
                     span { class: "of", "/ {pages}" }
                 }
+                }
+                // The cog, at the right end of the bar where the app puts it
+                // and where every application that has one puts it. It was
+                // only ever an item in the Document menu here, which is a
+                // strange place to keep the answer to "how do I change
+                // something" and is the same objection the Keyboard page
+                // answers by being a key of its own.
+                button {
+                    class: "chip settings",
+                    "aria-label": "Settings",
+                    onclick: move |_| viewer.write().open_settings(),
+                    Icon { name: "settings", stroke: ink.clone() }
+                }
             }
             }
             // Not a popover and not over anything: the root is a flex column,
@@ -4654,13 +4947,17 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 }
             }
             div { class: "body",
-            if sidebar_open && !presenting {
+            if empty {
+                Start { viewer, pick: pick.clone(), frame: frame.clone() }
+            }
+            if sidebar_open && !presenting && !empty {
                 Sidebar {
                     viewer,
                     document: Handle(document.clone()),
                     chosen: chosen.clone(),
                 }
             }
+            if !empty {
             div {
                 class: "viewer",
                 onmounted: move |_| resize_from_window(viewer),
@@ -4725,16 +5022,130 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 }
             }
             }
+            }
             // The line the toolbar's own way back is written on, which is
             // why it outlives the toolbar. Presenting is the case where
             // nothing is on screen at all.
             if !presenting {
                 div { class: "notice", "{notice}" }
             }
+            // What a document being dragged over the window looks like. Over
+            // everything but Settings, and outside `.body` so that it covers
+            // the panel and the toolbar too: the promise is "anywhere in this
+            // window", which is the app's own wording and has to be true of
+            // the whole window.
+            if let Some(takeable) = dragging {
+                div { class: if takeable { "drop-hint" } else { "drop-hint refused" },
+                    span { class: "drop-hint-word",
+                        {if takeable { "Drop to open" } else { "That is not a PDF" }}
+                    }
+                }
+            }
             // And Settings, over all of it. Last in the root so that it is
             // last in paint order too — Blitz paints by the rules, and a
             // scrim that comes before the document is a scrim behind it.
             crate::prefs::Settings { viewer }
+        }
+    }
+}
+
+/// The window with nothing in it: what a reader sees before there is a
+/// document, and after they have put one down.
+///
+/// **The largest piece of interface this reader did not have**, and its
+/// absence had reached into three other places before it was built. ⌘N opened
+/// a second window on the document already in front of somebody, because
+/// there was nowhere else for a new window to land. A document handed over by
+/// the system could never fill an idle window, because no window was ever
+/// idle — `Handover::Fill` in `windows.rs` carried a comment saying it was
+/// unreachable *until there is a start screen*. And there was no way to close
+/// a document at all, only to close the window it was in. All three are
+/// answered by there being something to show.
+///
+/// It is the app's own screen, item for item: the name, one line under it,
+/// the button that opens a document, the last six read with the page each was
+/// left on, and the sentence saying a document can simply be dropped on the
+/// window. The one thing that is not the app's is where it sits — the app
+/// lays it over the document region and shows it with a `[data-empty]`
+/// selector, which is a webview arrangement for a webview reason (the viewer
+/// stays in the DOM and keeps its scroll). Here it *replaces* the document
+/// region, which is the same picture and one fewer thing on screen.
+#[component]
+fn Start(viewer: Signal<Viewer>, pick: Pick, frame: Frame) -> Element {
+    // Read once for the render, like everything else the toolbar reads: this
+    // is a file on the disk, and the alternative is reading it per row.
+    let recents = viewer.read().recents();
+    let ink = crate::palette::hex(viewer.read().palette().muted());
+    let open = {
+        let pick = pick.clone();
+        let frame = frame.clone();
+        move |_| {
+            let Some(path) = pick.choose() else { return };
+            if viewer.write().open_here(&path) {
+                let title = viewer.read().store.title().to_string();
+                frame.ask(Ask::Showing { path, title });
+            }
+        }
+    };
+    rsx! {
+        div { class: "start",
+            div { class: "start-inner",
+                h1 { class: "start-name", "HyloPDF" }
+                p { class: "start-sub", "A calm place to read." }
+                button {
+                    class: "start-open",
+                    onclick: open,
+                    Icon { name: "folder", stroke: crate::palette::hex(viewer.read().palette().background) }
+                    "Open a document"
+                }
+                if !recents.is_empty() {
+                    div { class: "recents",
+                        div { class: "recents-title", "Recently read" }
+                        for entry in recents {
+                            div {
+                                key: "{entry.path}",
+                                class: "recent",
+                                button {
+                                    class: "recent-open",
+                                    // The whole row opens it. The × beside it
+                                    // is a button of its own rather than a
+                                    // click this one has to tell apart by
+                                    // where it landed.
+                                    onclick: {
+                                        let path = entry.path.clone();
+                                        let frame = frame.clone();
+                                        move |_| {
+                                            let path = path.clone();
+                                            if viewer.write().open_here(&path) {
+                                                let title = viewer.read().store.title().to_string();
+                                                frame.ask(Ask::Showing { path, title });
+                                            }
+                                        }
+                                    },
+                                    Icon { name: "document", stroke: ink.clone() }
+                                    span { class: "recent-name", "{entry.title}" }
+                                    // Where they stopped, in a column of its
+                                    // own — on every row rather than only the
+                                    // ones past page one, so the list has a
+                                    // straight edge. The app's own reasoning,
+                                    // and its own words.
+                                    span { class: "recent-page", "p. {entry.page}" }
+                                }
+                                button {
+                                    class: "recent-forget",
+                                    "aria-label": "Remove from this list",
+                                    onclick: {
+                                        let path = entry.path.clone();
+                                        move |_| viewer.write().forget(&path)
+                                    },
+                                    Icon { name: "close", stroke: ink.clone() }
+                                }
+                            }
+                        }
+                    }
+                }
+                p { class: "start-hint", "Or drop a PDF anywhere in this window" }
+            }
         }
     }
 }

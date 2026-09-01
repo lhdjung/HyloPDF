@@ -352,3 +352,58 @@ pub trait PageSource: Send + Sync {
 pub fn open(path: &str) -> Result<Arc<dyn PageSource>, String> {
     Ok(Arc::new(crate::pdfium::Document::open(path)?))
 }
+
+/// A window with nothing in it.
+///
+/// **The start screen is the reason this exists**, and it is the cheaper of
+/// the two ways to have one. The other is `Option<Arc<dyn PageSource>>`
+/// threaded through the viewer, the layout, the search, the sidebar and every
+/// component under them — several hundred `if let` arms whose every branch is
+/// "there is no document, do nothing", which is what a document of no pages
+/// already says. Here `pages()` is 0, the layout has no boxes, the mounting
+/// window holds nothing, `page()` is 0, the search finds nothing and the
+/// sidebar has nothing to draw. Everything above carries on being written for
+/// a document, and one predicate — [`crate::app::Viewer::empty`] — decides
+/// what is on the screen.
+///
+/// It is also the honest shape. A window that is showing nothing is not a
+/// window whose renderer is absent; the renderer is right there and the answer
+/// to every question is that there is nothing to say.
+pub struct Nothing;
+
+impl PageSource for Nothing {
+    fn pages(&self) -> usize {
+        0
+    }
+
+    /// Never asked, there being no page to ask about — and US Letter rather
+    /// than zero because a size of nothing is the shape that divides by zero
+    /// somewhere downstream if the first half of that sentence ever stops
+    /// being true.
+    fn size_of(&self, _index: usize) -> Size {
+        Size {
+            width: 612.0,
+            height: 792.0,
+        }
+    }
+
+    fn render(
+        &self,
+        _index: usize,
+        _width: u32,
+        _height: u32,
+        _view: View,
+        _take: &mut dyn FnMut(Bitmap),
+    ) -> Result<(), String> {
+        Err("there is no document open".to_string())
+    }
+
+    fn opened_in(&self) -> f64 {
+        0.0
+    }
+}
+
+/// The document a window shows when it is showing none.
+pub fn nothing() -> Arc<dyn PageSource> {
+    Arc::new(Nothing)
+}

@@ -76,6 +76,14 @@ pub fn variables(theme: &Palette) -> String {
         // that has thought about one has thought about the other. The
         // current match is the accent, so that stepping through matches is
         // visible without reading the count.
+        // The theme's paper with an alpha on it, which is what the drop hint
+        // is drawn over: the window has to stay visible under it. Written as
+        // an eight-digit hex rather than through `color-mix`, so that what
+        // reaches the renderer is a colour and not a function it may or may
+        // not implement.
+        " --veil: {}e0;",
+        hex(theme.background),
+    ) + &format!(
         " --found: {}; --found-now: {}; --found-ink: {};",
         hex(theme.selection_area),
         hex(theme.accent),
@@ -192,11 +200,20 @@ body { margin: 0;
 .menu-item.on { color: var(--accent); }
 /* A column of its own so the labels line up whether or not a row is ticked. */
 .menu-tick { flex: 0 0 12px; color: var(--accent); }
+/* …and a drawing where a shelf row has one, which needs the four extra
+   pixels an icon is wider than a tick. */
+.menu-tick .icon { width: 16px; height: 16px; margin-left: -2px; }
 .menu-label { flex: 1 1 auto; white-space: nowrap; }
 /* The chord, read off the keymap rather than written here — see
    `Viewer::chord_for`. Quiet, because it is an aside and not the item. */
 .menu-key { flex: 0 0 auto; color: var(--faint); font-size: 12.5px; }
 .menu-rule { height: 1px; margin: 5px 8px; background: var(--line); }
+/* A heading over a run of items — the app's `ui.section`, and the Document
+   menu's shelf is the one place that has one. Quieter and a size smaller than
+   an item, and it is not a row you can point at. */
+.menu-section {
+  padding: 6px 8px 4px; color: var(--faint); font-size: 12px;
+}
 
 /* The title is a button now, because the document's menu hangs off it. It
    keeps the chip's shape and the title's own colour and truncation. */
@@ -458,6 +475,110 @@ body { margin: 0;
    and nothing else, and every re-key — a zoom step, a jump, a theme, a turn —
    makes a page whose texture has not arrived. See `variables` above. */
 .page { background: var(--page); box-shadow: 0 1px 3px rgba(0,0,0,0.16), 0 8px 24px rgba(0,0,0,0.10); }
+
+/* A document being dragged over the window — the app's `#drop-hint`, and the
+   half of "or drop a PDF anywhere in this window" that makes the sentence
+   true. Over the whole window rather than over the document, because that is
+   what the sentence promises, and `z-index` under Settings alone: a drag over
+   a window whose Settings are open is not a drag onto the document. */
+.drop-hint {
+  position: absolute; top: 10px; left: 10px; right: 10px; bottom: 10px;
+  z-index: 15; display: flex; align-items: center; justify-content: center;
+  /* The app's own shape, and reading with it is what settled it: a solid
+     ground reads as a curtain drawn over the window, and the one thing
+     somebody dragging a file wants to see is the window they are dragging it
+     onto. So it is a dashed border inset from the edges — the window itself
+     saying it will catch this — over a veil of the theme's paper rather than
+     the paper itself. `--veil` is that colour with an alpha on it, mixed in
+     `variables` rather than written as `color-mix`, which Stylo's support for
+     is not something to find out about from a screenshot. */
+  border: 2px dashed var(--accent); border-radius: 16px;
+  background: var(--veil); color: var(--accent);
+  font-size: 16px; font-weight: 500;
+}
+/* Something that will not open. The same frame, so the hint does not jump
+   when a folder crosses the window, and the theme's own muted ink rather than
+   a red of its own: fourteen themes have no error colour between them, and
+   inventing one here would be the only colour in this application that no
+   theme chose. */
+.drop-hint.refused { border-color: var(--faint); color: var(--muted); }
+/* The word itself carries no ground of its own; it is the frame that says
+   what will happen and the word that says what it is. */
+.drop-hint-word { padding: 0 8px; }
+
+/* -------------------------------------------------- the window with nothing
+   in it
+
+   The app's `#welcome`, and it stands where the document would. Centred in
+   both axes, on the theme's own paper rather than on `--ground`: the ground
+   is the shade a page stands on, and with no page there is nothing for it to
+   set off. */
+.start {
+  flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+  background: var(--paper); overflow: scroll; scrollbar-width: thin;
+}
+/* The app's `min(460px, 82vw)`. Blitz resolves `min()` and `vw`, and the
+   narrow half matters: a window dragged down to its minimum still has a list
+   in it rather than a list with its right-hand column off the edge. */
+.start-inner { width: min(460px, 82vw); }
+.start-name {
+  margin: 0; text-align: center;
+  font-size: 30px; font-weight: 600; letter-spacing: -0.01em; color: var(--text);
+}
+.start-sub {
+  margin: 6px 0 22px; text-align: center; color: var(--muted); font-size: 15.5px;
+}
+/* The one filled button in this application, and the app's `.btn-primary`.
+   Everything else in the chrome is a quiet chip on a transparent ground,
+   which is right for a bar of them and wrong for a screen whose whole purpose
+   is one action. */
+.start-open {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; height: 38px; border: 0; border-radius: 10px;
+  background: var(--accent); color: var(--paper);
+  font-size: 14px; font-weight: 500;
+}
+.start-hint { margin-top: 22px; text-align: center; color: var(--faint); }
+
+.recents { margin-top: 26px; }
+.recents-title { padding: 0 8px 6px; color: var(--muted); font-size: 13px; }
+/* A row is the button and the × beside it, and the × is a sibling rather than
+   a child: a button inside a button is not a shape either the DOM or a
+   pointer knows what to do with, and the app gets away with a `<span>` there
+   only because it is listening for a click and stopping it. */
+.recent { display: flex; align-items: center; border-radius: 9px; }
+.recent:hover { background: var(--hover); }
+.recent-open {
+  display: flex; align-items: center; gap: 10px;
+  flex: 1 1 auto; min-width: 0; height: 34px; padding: 0 4px 0 10px;
+  border: 0; background: transparent; color: var(--text); font-size: 13.5px;
+  text-align: left;
+}
+/* The name takes what is left and the page number keeps its column. `min-width:
+   0` on both this and the row above it, because a flex item's floor is its
+   content and a long title would otherwise push the page number off the end
+   rather than being cut. */
+.recent-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+/* Right-aligned and tabular, so a three-digit page lines up with a one-digit
+   one. Quieter and a size smaller than the name: it is a page reference in
+   the margin rather than part of the title. */
+.recent-page {
+  flex: 0 0 auto; min-width: 3.4em; text-align: right;
+  color: var(--faint); font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+/* Always there rather than revealed on hover, which is where this parts
+   company with the app. `.recent:hover .recent-forget { visibility: visible }`
+   is a rule about an ancestor's state, and Stylo resolves it correctly — but
+   Blitz takes a state-only snapshot of the node the pointer is on, so the
+   descendant is not re-resolved and the × appears on the first hover after
+   something else forces a restyle rather than on this one. A control that
+   appears late is worse than a control that is quietly always there. */
+.recent-forget {
+  flex: 0 0 auto; display: flex; align-items: center;
+  height: 26px; padding: 0 8px; margin-right: 4px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--faint);
+}
+.recent-forget:hover { background: var(--sunk); color: var(--text); }
 
 .notice {
   flex: 0 0 auto; height: 30px; display: flex; align-items: center;

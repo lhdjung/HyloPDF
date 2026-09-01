@@ -65,15 +65,46 @@ impl Session {
     /// the app's own reason: two files arriving in the same instant must not
     /// both be handed to the same window.
     pub fn window(&self, path: &str) -> Option<WindowSpec> {
-        let document = match render::open(path) {
-            Ok(document) => document,
-            Err(refused) => {
-                eprintln!("{refused}");
-                return None;
-            }
+        self.window_on(Some(path))
+    }
+
+    /// A window with nothing in it.
+    ///
+    /// **This is what ⌘N means now, and it is the app's own answer.** It used
+    /// to be a second window on whatever the front one was reading, because
+    /// there was nowhere to show a window with nothing in it — the note that
+    /// stood here said so in as many words, and called it the cheaper of two
+    /// answers. It was cheaper because the expensive one had not been built:
+    /// there is a start screen now (see [`crate::app::Start`]), so an empty
+    /// window is a window with the shelf in it, which is what somebody
+    /// pressing ⌘N is usually after. Two places in one book at once is still
+    /// one gesture — "Open in a new window…" under the document's own name,
+    /// with the document already there.
+    pub fn empty_window(&self) -> Option<WindowSpec> {
+        self.window_on(None)
+    }
+
+    /// One window, on a document or on nothing.
+    ///
+    /// The two used to be one function that could not answer the second
+    /// question, and the difference between them turns out to be four lines:
+    /// what to open, what to record on the desk, what to call the window and
+    /// what to hand the component. Everything else — the label, the mailbox,
+    /// the config, the contexts — is the same because it is about a window
+    /// rather than about a document.
+    fn window_on(&self, path: Option<&str>) -> Option<WindowSpec> {
+        let document = match path {
+            Some(path) => match render::open(path) {
+                Ok(document) => document,
+                Err(refused) => {
+                    eprintln!("{refused}");
+                    return None;
+                }
+            },
+            None => render::nothing(),
         };
         let label = self.desk.name();
-        self.desk.set(&label, Some(path));
+        self.desk.set(&label, path);
         // What the next launch comes back to, written as each window opens.
         let _ = crate::library::set_open(&self.dir, &self.desk.open());
 
@@ -84,9 +115,12 @@ impl Session {
         // decides it — see `store::worth_calling`. It is settled here because
         // a window's title is an attribute given to the builder, and pdfium
         // answers at open, so there is nothing to gain by waiting.
-        let called = store::called(path, &document.title());
+        let called = match path {
+            Some(path) => format!("{} — HyloPDF", store::called(path, &document.title())),
+            None => "HyloPDF".to_string(),
+        };
         let attributes = WindowAttributes::default()
-            .with_title(format!("{called} — HyloPDF"))
+            .with_title(called)
             .with_surface_size(LogicalSize::new(self.size.0, self.size.1));
 
         let config = Config {
@@ -129,10 +163,19 @@ impl Session {
     /// The document's own name is not asked for again here. It was read when
     /// the reader opened it and it is on the toolbar already; asking pdfium a
     /// second time would mean opening the file a second time to do it.
+    /// An empty path is a window showing *nothing*, which is the reader having
+    /// put a document down — see [`crate::app::Viewer::close_document`]. All
+    /// three of the things below take it in their stride and one of them
+    /// depends on it: the restore list is read off the desk, so a document
+    /// closed by hand is a document the next launch does not put back, which
+    /// is exactly the distinction `AGENTS.md` draws between a window closed
+    /// and an app quit. The watch is dropped along with it, because there is
+    /// no longer a file this window cares about being rewritten.
     pub fn showing(&self, label: &str, path: &str) {
-        self.desk.set(label, Some(path));
+        let showing = (!path.is_empty()).then_some(path);
+        self.desk.set(label, showing);
         let _ = crate::library::set_open(&self.dir, &self.desk.open());
-        self.watching.document(label, Some(path));
+        self.watching.document(label, showing);
     }
 
     /// A document handed to us by the system — a second launch, "Open with",
@@ -147,34 +190,42 @@ impl Session {
                 self.remote.show(&label);
                 None
             }
-            // Unreachable in this reader and kept because the rule is right —
-            // see [`Desk::hand_over`]. A window that exists and is showing
-            // nothing has nothing to hand a document to *through*, so until
-            // there is a start screen this is a window of its own as well.
-            Handover::Fill(_) | Handover::Spawn => self.window(path),
+            // **The arm that was unreachable until there was a start screen.**
+            // A window sitting on the shelf is exactly the window a
+            // double-clicked document should land in, and making a second one
+            // beside it is the "nothing is ever displaced" rule taken one step
+            // too far: nothing is displaced by filling a window that is
+            // showing nothing.
+            //
+            // The document goes down the mailbox rather than into the window,
+            // because a window is a component and news is the only way to
+            // reach one — the same door a recompile and a resize come through.
+            // The window then does its own `Ask::Showing`, so the desk, the
+            // restore list, the watch and the window's title are all set by
+            // the one path that sets them for ⌘O.
+            Handover::Fill(label) => {
+                self.exchange.post(crate::emit::News {
+                    event: "open-document".into(),
+                    target: Some(label.clone()),
+                    payload: serde_json::Value::String(path.to_string()),
+                });
+                self.remote.show(&label);
+                None
+            }
+            Handover::Spawn => self.window(path),
         }
     }
 
     /// ⌘N, the Dock's "New Window", and a second launch with no document
     /// named: a window on whatever the front one is reading.
     ///
-    /// **This is where the port stops being a port**, and the reason is the
-    /// start screen. In the app a new window is an empty one, because there
-    /// is something to show in an empty window; here there is not, so the
-    /// choice is between a file picker and the document already in front of
-    /// somebody — and the second is both the cheaper answer and a thing
-    /// readers actually want, which is two places in one book at once. The
-    /// picker is a door of its own (`Pick`, which is `rfd` through
-    /// `blitz-shell`) and it is built — it is what "Open in a new window…"
-    /// under the document's name asks, exactly as in the app, where ⌘N is
-    /// likewise not the picker.
+    /// **This used to be where the port stopped being a port**, and the
+    /// reason was the start screen: in the app a new window is an empty one
+    /// because there is something to show in an empty window, and here there
+    /// was not, so ⌘N gave a second window on the document already in front of
+    /// somebody. That is no longer a difference — see [`Self::empty_window`].
     pub fn another(&self) -> Option<WindowSpec> {
-        let showing = self
-            .desk
-            .front()
-            .and_then(|label| self.desk.document_of(&label))
-            .or_else(|| self.desk.open().into_iter().next())?;
-        self.window(&showing)
+        self.empty_window()
     }
 
     /// What a window gives back when it goes: its entry in the library, its

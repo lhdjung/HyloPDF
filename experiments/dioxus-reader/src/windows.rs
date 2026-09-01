@@ -70,6 +70,14 @@ struct Inner {
     /// were made. The order is what `library.toml` records, so a session
     /// comes back in the order it was left.
     showing: Mutex<Vec<(String, String)>>,
+    /// Every window that exists, in the order they were made — which is not
+    /// the same list as `showing`, and the difference is the whole point of
+    /// it: a window with nothing in it is a window, and it is exactly the one
+    /// a handed-over document should go to.
+    ///
+    /// It was not needed while a window was always made *for* a document,
+    /// because then the two lists were the same list. See [`Desk::idle`].
+    made: Mutex<Vec<String>>,
     /// Which window has the keyboard, as winit last reported it.
     front: Mutex<Option<String>>,
     exiting: AtomicBool,
@@ -82,11 +90,42 @@ impl Desk {
     }
 
     /// The name for the next window: `main` for the first, then `reader-1`.
+    ///
+    /// Minting a name is also how a window is entered on the desk, because
+    /// this is the one thing every window goes through and it happens before
+    /// the window exists. A window whose document then fails to open is
+    /// entered and never removed — which is a label in a list and no window
+    /// behind it, so a document handed to it would go nowhere. `Session` calls
+    /// [`Desk::gone`] on that path for the same reason it calls it on a close.
     pub fn name(&self) -> String {
-        match self.0.next.fetch_add(1, Ordering::Relaxed) {
+        let label = match self.0.next.fetch_add(1, Ordering::Relaxed) {
             0 => MAIN.to_string(),
             n => format!("reader-{n}"),
-        }
+        };
+        self.0
+            .made
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(label.clone());
+        label
+    }
+
+    /// A window that is not there any more, or never was.
+    pub fn gone(&self, window: &str) {
+        self.0
+            .made
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|label| label != window);
+    }
+
+    /// Every window, in the order they were made.
+    pub fn windows(&self) -> Vec<String> {
+        self.0
+            .made
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Record what a window is showing, and report the whole list as it now
@@ -164,15 +203,26 @@ impl Desk {
     }
 
     /// A window with nothing in it, the one with the keyboard first.
+    ///
+    /// **The one with the keyboard first, and then any of them**, which is
+    /// the app's own rule stated in full. It used to be the front window
+    /// alone, which was not a shortcut: there was no list of windows that are
+    /// not showing anything to walk, because there were no such windows. Now
+    /// that closing a document leaves one, a reader with two windows open and
+    /// the empty one behind the full one would otherwise get a third.
     fn idle(&self) -> Option<String> {
-        let held = self.0.showing.lock().unwrap_or_else(|e| e.into_inner());
-        let taken = |label: &str| held.iter().any(|(known, _)| known == label);
+        let busy: Vec<String> = {
+            let held = self.0.showing.lock().unwrap_or_else(|e| e.into_inner());
+            held.iter().map(|(label, _)| label.clone()).collect()
+        };
         if let Some(front) = self.front() {
-            if !taken(&front) {
+            if !busy.contains(&front) {
                 return Some(front);
             }
         }
-        None
+        self.windows()
+            .into_iter()
+            .find(|label| !busy.contains(label))
     }
 
     /// The app is going. Raised before the first window closes, by everything
@@ -196,6 +246,7 @@ impl Desk {
     /// this" from "goodbye". So a close can forget any window but the last,
     /// and quitting with one document open still comes back to it.
     pub fn closing(&self, window: &str) -> Option<Vec<String>> {
+        self.gone(window);
         if self.is_leaving() {
             return None;
         }

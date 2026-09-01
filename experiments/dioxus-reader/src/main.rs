@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use dioxus_reader::app::Config;
 use dioxus_reader::app::CHROME;
-use dioxus_reader::emit::{AppHandle, Exchange};
+use dioxus_reader::emit::{AppHandle, Emitter, Exchange};
 use dioxus_reader::session::Session;
 use dioxus_reader::shell::{Remote, Shell};
 use dioxus_reader::windows::Desk;
@@ -198,8 +198,26 @@ fn main() {
         shell.on_close(move |label| session.tidy(label));
     }
     {
+        // ⌘O: the window kept its identity and changed what is in it, which
+        // is the one thing no other path does — every other document arriving
+        // in this app arrives with a window of its own.
+        let session = session_maker.clone();
+        shell.on_swap(move |label, path| session.showing(label, path));
+    }
+    {
         let desk = desk.clone();
         shell.on_focus(move |label| desk.focused(label.as_deref()));
+    }
+    {
+        // The window changed size, and the document's layout is the one thing
+        // in it that will not hear about that on its own — see
+        // `Shell::on_resized`. It goes down the mailbox rather than into the
+        // window because a component is the only thing that can read the
+        // signal, and news is how a component is reached.
+        let handle = AppHandle::new(exchange.clone());
+        shell.on_resized(move |label| {
+            let _ = handle.emit_to(label, "window-resized", ());
+        });
     }
     {
         // Raised before the first window of a quit goes, which is the whole

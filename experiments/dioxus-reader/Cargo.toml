@@ -46,13 +46,14 @@ harness = [
 dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
 dioxus-core = "0.7"
 dioxus-native = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["system-fonts", "html", "svg"] }
-# `clipboard` is arboard, and it is here for one key: ⌘C. The trait method is
-# on `ShellProvider` either way — it is the *implementation* that is behind the
-# feature, and without it every copy silently returns `Err` and the reader
-# pastes whatever it had an hour ago. Nothing else in the default set is taken:
-# `file-dialog` waits for the picker and `accessibility` for the item that is
-# about it.
-blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget", "clipboard"] }
+# `clipboard` is arboard, and it is here for one key: ⌘C. `file-dialog` is
+# `rfd`, and it is here for ⌘O — the picker was the one door in the assessment's
+# table that had no implementation on either side. Both trait methods are on
+# `ShellProvider` either way; it is the *implementation* that is behind the
+# feature, and without it every copy silently returns `Err` and every Open
+# silently chooses nothing. `accessibility` is still not taken — that is the
+# item it is about.
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget", "clipboard", "file-dialog"] }
 blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget", "system-fonts", "svg"] }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }

@@ -116,6 +116,25 @@ impl Session {
         Some(WindowSpec::new(label, vdom, attributes))
     }
 
+    /// A window is showing a different document now, because the reader
+    /// pressed ⌘O in it.
+    ///
+    /// The three things that belong to the process rather than to the window,
+    /// in the order `Session::window` does them for a new one: who is showing
+    /// what, what the next launch comes back to, and which file this window's
+    /// watch is following. The window title is the fourth, and it is the
+    /// window's own — there is nothing here that can reach it, and it is set
+    /// where every other window attribute is.
+    ///
+    /// The document's own name is not asked for again here. It was read when
+    /// the reader opened it and it is on the toolbar already; asking pdfium a
+    /// second time would mean opening the file a second time to do it.
+    pub fn showing(&self, label: &str, path: &str) {
+        self.desk.set(label, Some(path));
+        let _ = crate::library::set_open(&self.dir, &self.desk.open());
+        self.watching.document(label, Some(path));
+    }
+
     /// A document handed to us by the system — a second launch, "Open with",
     /// the command line — put where [`Desk::hand_over`] says it goes.
     ///

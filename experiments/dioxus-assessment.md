@@ -460,7 +460,8 @@ step was chosen to be testable:
 
 1. themes, settings, the settings window, the theme editor — *themes and
    settings done; the two windows are interface and are now the oldest thing
-   outstanding here*
+   outstanding here. The theme **menu** is built (2026-09-01) and is not the
+   same thing: choosing among the fourteen is not editing one*
 2. the keyboard: the action table, chords, `keys.toml`, the Keyboard page —
    *done but for the Keyboard page, which is a settings window; `keys.rs` is
    mounted from the app like `theme.rs`, and `keys.ts` is ported as
@@ -530,6 +531,20 @@ step was chosen to be testable:
     hole that shaped the current design is gone. Rebuild it as it should have
     been: create, edit and delete real annotations; keep the journal only for
     what a rebuilt document lost.
+
+**And the interface the list does not have was taken next, out of order.**
+The eleven items are the order the app was *built* in, which is the order of
+its engine — and the engine is not what somebody comparing the two apps sees
+first. Menus and a way to open a second document were on no item and therefore
+were never going to be reached by working down this list; the theme chip cycled
+through fourteen themes one keystroke at a time and there was no ⌘O at all,
+and both of those read as "unfinished" rather than as "not on the plan".
+Done, 2026-09-01: three toolbar menus, ⌘O and "Open in a new window…", each
+menu item's chord read off the keymap, and the thumbnail column following a
+sidebar drag. See `PROGRESS.md`, "The menus, and opening a document", and the
+section at the top of that file about why this was missing. **The settings
+window and the Keyboard page are the same category and are what is left of
+it**, along with markup.
 
 **And the platform work was taken out of order, before item 11.**
 `dioxus-fit.md` argued for it and the argument is about sequence rather than

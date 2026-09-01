@@ -146,9 +146,16 @@ fn the_toolbar_is_clickable() {
     // a test that quietly starts clicking something else.
     reader.click(".chip.zoom-in");
     assert!(reader.state().zoom.ends_with('%'));
+    // The fit and the theme are menus now rather than a step and a cycle —
+    // see `app::Menu`. The chip still says what is in force, which is what
+    // `state()` reads off it; clicking it shows the choices.
     reader.click(".chip.fit");
+    assert_eq!(reader.state().menu.as_deref(), Some("view"));
+    reader.click_nth(".menu.view .menu-item", 0);
     assert_eq!(reader.state().zoom, "Fit width");
+    assert_eq!(reader.state().menu, None, "choosing closes the menu");
     reader.click(".chip.theme");
+    reader.click_nth(".menu.theme .menu-item", 1);
     assert_eq!(reader.state().theme, "Hylo Dark");
 }
 

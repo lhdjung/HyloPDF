@@ -104,6 +104,15 @@ pub struct Options {
     /// the watcher would; this is for the one test that has to prove the
     /// watcher is really wired to it.
     pub watch: bool,
+    /// What the picker answers with, in order — one path per Open, and
+    /// nothing left means the reader cancelled.
+    ///
+    /// **The one door in this crate a test must not be able to open for
+    /// real**: `Pick`'s default is the system's own file dialog, which is a
+    /// modal window that would sit there until somebody clicked it. Same
+    /// shape and same reason as [`crate::app::Clip`], one step further —
+    /// a clipboard takes something away, a modal window takes the run.
+    pub picks: Vec<String>,
     /// Where this reader's settings and themes live.
     ///
     /// **A directory of its own per reader, and that is not fastidiousness.**
@@ -135,6 +144,7 @@ impl Default for Options {
             theme: None,
             keys: BTreeMap::new(),
             settings: Vec::new(),
+            picks: Vec::new(),
             watch: false,
             config: scratch_config(),
         }
@@ -198,6 +208,10 @@ pub struct State {
     /// it with everything else — see [`crate::app::Viewer::chrome`]. Nearly
     /// every other field here is read *off* the toolbar, so a test that hides
     /// it is asserting on an empty string unless it means to.
+    /// Which toolbar menu is down — "document", "theme", "view" — and nothing
+    /// when none is. Read off the panel's own class, which is what a reader
+    /// sees, rather than off the state behind it.
+    pub menu: Option<String>,
     pub toolbar: bool,
     /// Full screen with nothing else on it.
     pub presenting: bool,
@@ -216,6 +230,11 @@ pub struct Reader {
     width: u32,
     height: u32,
     scale: f64,
+    /// The window's size as the reader itself asks for it. A `Cell` rather
+    /// than the two numbers above because [`Screen`] is a closure the
+    /// component holds and reads whenever it likes — which is the whole shape
+    /// of the thing in the app, where it reads winit. See [`Reader::resize`].
+    sizing: Rc<std::cell::Cell<(f64, f64, f64)>>,
     opened: Rc<RefCell<Vec<String>>>,
     /// The mailbox the reader's watch task listens on. See [`Reader::deliver`].
     post: crate::emit::Post,
@@ -254,6 +273,26 @@ impl Reader {
             event: "themes-changed".into(),
             target: None,
             payload: serde_json::to_value(themes).expect("themes are serialisable"),
+        });
+    }
+
+    /// The window is a different size, exactly as dragging its edge makes it.
+    ///
+    /// Three things happen and all three are what winit and the shell do:
+    /// Blitz's own viewport moves, so the chrome is laid out against the new
+    /// window; the number the reader reads when it asks how big the window is
+    /// moves with it; and the news goes down the mailbox, which is the half
+    /// `Shell::on_resized` supplies in the app. Leave any one of them out and
+    /// this tests something other than the fault it exists for.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+        self.sizing.set((width as f64, height as f64, self.scale));
+        self.harness.set_viewport_size(width, height);
+        self.deliver(crate::emit::News {
+            event: "window-resized".into(),
+            target: Some(crate::windows::MAIN.into()),
+            payload: serde_json::Value::Null,
         });
     }
 
@@ -364,11 +403,13 @@ impl Reader {
         // numbers instead. Nothing else the reader consumes is required: the
         // shell provider is asked for with `try_consume_context`, and without
         // one a page simply does not ask for a frame it is not going to get.
-        let (width, height, scale) = (
+        let sizing = Rc::new(std::cell::Cell::new((
             options.width as f64,
             options.height as f64,
             options.scale as f64,
-        );
+        )));
+        let asked_size = sizing.clone();
+        let scale = options.scale as f64;
         // Where a link out of the document would have gone, written down
         // instead of opened. The default is the system browser and is right in
         // the app; a suite that took it would open a browser window on
@@ -384,9 +425,14 @@ impl Reader {
         // clipboard is somebody's and taking it is worse than adding a window.
         let copied: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let copying = copied.clone();
+        // …and what the picker will answer with, taken from the front of the
+        // list one Open at a time.
+        let picks: Rc<RefCell<std::collections::VecDeque<String>>> =
+            Rc::new(RefCell::new(options.picks.iter().cloned().collect()));
+        let picking = picks.clone();
         vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(posting);
-            provide_context(Screen::fixed(width, height, scale));
+            provide_context(Screen::new(move || asked_size.get()));
             provide_context(Away::new(move |url| {
                 recorder.borrow_mut().push(url.to_string());
             }));
@@ -395,6 +441,9 @@ impl Reader {
             }));
             provide_context(crate::app::Clip::new(move |text| {
                 copying.borrow_mut().push(text.to_string());
+            }));
+            provide_context(crate::app::Pick::new(move || {
+                picking.borrow_mut().pop_front()
             }));
         });
 
@@ -425,6 +474,7 @@ impl Reader {
             width: options.width,
             height: options.height,
             scale,
+            sizing,
             opened,
             post,
             asks,
@@ -609,6 +659,16 @@ impl Reader {
     pub fn wheel(&mut self, by: f64) {
         let (x, y) = (self.width as f32 / 2.0, self.height as f32 / 2.0);
         self.harness.wheel_at(x, y, 0.0, -by);
+        self.settle();
+    }
+
+    /// Turn the wheel *across* the document, which on a Mac is two fingers
+    /// sideways and ⇧-wheel both — AppKit turns the second into the first
+    /// before winit sees it. Positive reads rightwards. Nothing moves unless
+    /// the reader has zoomed past the width of the window.
+    pub fn wheel_across(&mut self, by: f64) {
+        let (x, y) = (self.width as f32 / 2.0, self.height as f32 / 2.0);
+        self.harness.wheel_at(x, y, -by, 0.0);
         self.settle();
     }
 
@@ -823,6 +883,10 @@ impl Reader {
             hits: self.harness.query_all(".hit").len(),
             results: self.numbered(".result", "data-result"),
             title: self.text(".title"),
+            menu: ["document", "theme", "view"]
+                .into_iter()
+                .find(|which| self.harness.query(&format!(".menu.{which}")).is_some())
+                .map(str::to_string),
             toolbar: self.harness.query(".toolbar").is_some(),
             presenting: self.harness.query(".root.presenting").is_some(),
         }

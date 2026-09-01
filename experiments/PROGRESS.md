@@ -15,6 +15,51 @@ change for it — see "The platform work" near the end of this file. Five
 upstream *faults* were found and all five are worked around here, with a test
 each that will fail the day they are fixed.
 
+## What "done" has meant here, and what it has not
+
+Every item below is done in the sense its own entry claims, and the tests say
+so. The list still does not add up to an app anybody would use instead of the
+Tauri one, and the reason is the list. **It is the order the app was built in,
+taken from the commit history — and that order is the engine.** Layout,
+rendering, search, links, the library, windows, selection. The *interface* the
+engine is reached through was never an item, so its absence never showed up as
+an unfinished one: no menus, no way to open a second document, no settings
+window, no Keyboard page. Progress against each item was real and progress
+towards parity was being overstated by about the size of the thing nobody was
+counting.
+
+Two smaller versions of the same fault, both now fixed and both worth
+recognising by shape. The toolbar's theme and fit chips *cycled*, because a
+list needs a menu and there were no menus — so "themes work" was true and
+choosing one was fourteen keystrokes. And dragging the sidebar deliberately
+deferred the relayout, which was right for the document and wrong for the
+thumbnails directly under the pointer; the entry for it argued the saving and
+never asked which half the reader was looking at.
+
+**The four grievances after those are the same shape again**, and they are
+the clearest statement of it: a page wider than the window pinned to the left
+of it with the rest unreachable, every undrawn page flashing white on a dark
+theme, the page field emptying itself, and a toolbar that wore the same grey
+under all fourteen themes. Every one of those was a *correct answer* — the
+layout centred what fitted, the renderer drew the right pixels, the field took
+the right number, the shade was derived from the theme — placed, coloured or
+timed in a way nobody would sit in front of. No test asks that question, so
+the only thing that finds them is reading with it. See "Four grievances from
+reading with it" and the five after it, below.
+
+**And the round that fixed those four did not make the reader look right**,
+which is the sharpest version of the lesson so far. Three of the five that came
+back had been sitting underneath the fixes, and one of them was the *cause* of
+a fault the first round had answered somewhere else: the window's size never
+reached the layout at all, so the centring that round added was correct and
+never seen. A fix verified in a harness whose window is one size for the life
+of the test is a fix verified against the wrong window. Reading with it is not
+a step at the end; it is the only instrument that has ever found any of
+these.
+
+**So the measure to use is the app beside it, not this file.** What follows is
+where that comparison actually stands.
+
 ```
 cd dioxus-reader
 cargo run --release                          # the 400-page fixture
@@ -22,7 +67,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 277 tests, about a minute and a half
+cargo test                                   # 302 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -60,11 +105,19 @@ the reader is worn as soon as it is saved, and a paper recompiled by LaTeX
 underneath it is reopened at the page you were on. Both are the app's own
 `watch.rs`, compiled here unchanged — see Phase 3 item 8.
 
-**Two things are settings and nothing else.** Trimming the margins is the
-chip marked Trim in the toolbar — the app puts it in a menu, and there are no
-menus here yet — and one page at a time is `scroll_mode = "paged"` in
-`settings.toml` with no key and no chip at all, which is the brief's own
-instruction about it. See Phase 3 item 6.
+**There are three menus in the toolbar**, off the document's name, the zoom
+and the theme: open a document or a window, the fit and the spread and the
+rotations, and all fourteen themes with the one in use ticked. ⌘O opens a
+different document in this window and the first item of the document menu is
+the same thing; "Open in a new window…" beside it is the app's own wording for
+the app's own gesture. Each menu item shows the key that asks for the same
+thing, read off the keymap rather than written beside it, so a rebound key is
+what it shows. See "The menus, and opening a document" below.
+
+**One thing is a setting and nothing else.** One page at a time is
+`scroll_mode = "paged"` in `settings.toml`, with no key and no chip, which is
+the brief's own instruction about it. Trimming the margins is the chip marked
+Trim. See Phase 3 item 6.
 
 ## The numbers
 
@@ -674,7 +727,7 @@ silence to somebody pressing ⌘P.
 
 Three actions are this experiment's and are in a list of their own so that the
 app's table stays exactly the app's: `t` for the next theme and `s` for
-spreads, both of which exist only because there are no menus yet, and ⌘C, which
+spreads, both of which were built because there were no menus, and ⌘C, which
 is there because the selection is this reader's own rather than a webview's —
 see item 10. The test that holds the table against the shipped `keys.toml`
 asserts none of them is in it.
@@ -825,6 +878,13 @@ the settings write already used, just applied to the layout as well as the
 write. `the_document_does_not_relayout_until_the_drag_ends` is the regression
 test: the `.page` rect is unchanged through a mousedown and a move with the
 button still down, and only changes once `mouse_up_at` lands.
+
+*The `#ffffff` in that paragraph was the other half of the same complaint and
+is gone.* Deferring the relayout stopped the drag causing the flash; it left
+every other re-key — a zoom step, a jump, a theme, a turn — causing it, and
+those cannot be deferred, because the new size is the whole point of them.
+`.page` is `var(--page)` now, which is the theme's paper under a recolouring
+theme. See "Four grievances from reading with it" near the end of this file.
 
 ### A click cost the reader its keyboard, and had since Phase 1
 
@@ -1524,8 +1584,10 @@ That decides ⌘N, which in the app is an empty window. Here it is **a second
 window on what the front one is reading** — which is not a compromise: two
 places in one book at once is a thing readers want, and the app's own "Open in
 a new window…" is the picker version of the same gesture. The picker itself is
-a door of its own (`rfd`, in the assessment's table) and belongs with the menus,
-which are not built. The `Fill` arm is kept because the rule is right and
+a door of its own (`rfd`, in the assessment's table); it was built with the
+menus — see "The menus, and opening a document" — and ⌘N is unchanged by it,
+because ⌘N was never the gesture that wanted one. The `Fill` arm is kept
+because the rule is right and
 because a window whose document failed to open is that case arriving by the
 back door.
 
@@ -1756,7 +1818,7 @@ only for ⌘⇧C — a quote with its page number attached, which is the one thi
 browser will not do for itself. Here the selection is the reader's own, so
 plain copying has to be an action like everything else. `keymap::EXTRA` now has
 three entries rather than two, and this one is different in kind from the other
-two: `t` and `s` exist because there are no menus yet and would go away on a
+two: `t` and `s` were built because there were no menus and would go away on a
 merge, and `copy` would have to *join* the app's table. It is the clearest
 thing this port has found that leaving the webview costs — a key nobody ever
 had to write down.
@@ -1780,7 +1842,9 @@ that is behind the feature, so every copy would have silently returned `Err`
 and the reader would have pasted whatever it had an hour ago. Turning it on
 took the release binary from 13,054,096 to 13,054,192 bytes, which is arboard
 reduced to a few calls into `NSPasteboard` by LTO. `file-dialog` is the other
-half of that default set and stays off until there is a picker to use it.
+half of that default set; it was turned on when ⌘O was built, and it costs
+rather more — about 1MB, because `rfd` is a real dependency and not a few
+calls into a system object.
 
 #### What is tested, and how
 
@@ -1975,14 +2039,274 @@ a cold machine every time — and the two places to look are a `Drop` for
 `pdfium::Open` that takes `library()` before the document goes, and the font
 context.
 
+### The menus, and opening a document — done, and not on the list at all
+
+Taken out of order for the reason at the top of this file: these were the two
+things somebody comparing this with the app noticed first, and neither was an
+item, so neither was ever going to be reached by working down the list.
+
+**Three menus, in a layer of their own.** `Menu` in `app.rs` is which one is
+down and the panels are a sibling of the toolbar rather than a child of it —
+a menu inside a 46px row is a panel taller than its parent, and the layer is
+out of the flow so the column above it is exactly what it was. What is in them
+is the app's: the document's name carries open, open beside, a window and
+close; the zoom carries the three fits, the three spreads and the two
+rotations; the theme carries all fourteen. The chips still *say* what is in
+force, which is what the harness reads off them and how a reader reads them
+too — what changed is that clicking one shows the choices rather than stepping
+to the next of them.
+
+**Every menu item's chord is read off the keymap** (`Viewer::chord_for`),
+never written beside the item. It is the reason the app's Keyboard page was
+rewritten to be drawn from the keymap: a hand-written chord cannot show a
+rebound one, and the table it replaced had already drifted. A reader who
+unbinds ⌘O sees an item with no chord on it, which is true.
+
+Three things about them are Blitz's rather than taste, and two are traps
+already recorded one level away:
+
+- *A menu needs a non-zero `z-index` to be **hit-tested*** ahead of what it is
+  drawn over. Same fault as `.sidebar-resize`, and a menu that paints and
+  cannot be clicked is worse than no menu.
+- *A press inside a menu must not reach the root*, which is what dismisses it
+  — and the three buttons a menu hangs off must stop propagation too, or the
+  press closes the menu on the way down and the click opens it straight back
+  up. Clicking an open menu's own button would then be the one gesture that
+  did nothing.
+- *Escape cannot be ordered from one place.* The app puts the whole dismissal
+  order in one document-level capturing handler; here the keyboard belongs to
+  the innermost element asking for it, so a field that has it has to defer to
+  the menu itself. `Action::Dismiss` has the order for when no field has the
+  keyboard, and the find field and the page field each check the menu first.
+
+**⌘O opens a different document in this window**, which is what the app's ⌘O
+does — `openDialog` calls `this.open(path)` — and ⇧⌘O is a menu item and not a
+key there either. This is the one place where the port's "there is no empty
+window" finding does *not* apply: ⌘N gives a second window on the document in
+front because there is no start screen, and ⌘O was never about empty windows.
+`Viewer::open_here` is `document_changed` plus the library entry, because a
+recompile is the same document and this is a different one: the marks, the
+title and the remembered place all move, and the fit, zoom, spread, rotation,
+panel and theme stay, because those are settings.
+
+**The picker is `blitz-shell`'s**, behind its `file-dialog` feature, which is
+`rfd`. It costs 1MB — 12MB of binary to 13MB. It is reached through `Pick`, a
+context holding one closure, for the reason `Clip` is one and one step further:
+the real answer is a modal window belonging to the operating system, and a
+suite that opened one would sit there until somebody clicked it. `tests/menus.rs`
+answers with a path and tests everything downstream of the answer.
+
+**Three things outside the window have to hear about a swap and none of them
+is the window's**: the desk, which is what the restore list is read from; the
+watch, which is following the file that was open a moment ago; and the
+window's own title. `Ask::Showing { path, title }` is all three, answered by
+`Shell::on_swap` and `Session::showing`. The name travels with the path
+because the reader has already worked it out and asking pdfium again would
+mean opening the file again.
+
+**And the thumbnails follow the drag now.** The document's relayout is still
+deferred to the end of a sidebar drag, and the entry that decided that
+(`drag_sidebar`) was right about the document and never asked about the
+column: a thumbnail is a twenty-fifth of a page in area and it is the thing
+directly under the pointer. `relay_column` is live; the pages are not.
+
+*Nine tests in `tests/menus.rs`, one more in `tests/sidebar.rs`.* Everything
+here goes through Blitz's real event pipeline and real hit-testing, which is
+what the harness is.
+
+#### The one thing in this section a person still has to check
+
+**The picker has never been seen to open.** `Pick`'s default calls
+`ShellProvider::open_file_dialog`, and every test stubs it — correctly, since
+the real one is a modal window. Driving the real app to check it did not work
+either, and the reason is worth recording beside what `AGENTS.md` already says
+about foreground testing: **plain keys sent by System Events reach this app and
+modified chords do not.** `j` scrolled the document; ⌘O and ⌘B, sent the same
+way with the window frontmost and clicked into, did nothing at all — the app
+never saw them, which the diagnostic in `Pick` confirmed by never printing.
+So: press ⌘O in a running reader by hand, once, before this is believed.
+
+#### And a `MissingTextureBinding` seen once, on a cold binary
+
+The launch immediately after a fresh `cargo build --release` died with
+`MissingTextureBinding(TextureId(2))` — the fault item 9 recorded and fixed by
+sizing the viewport from the window before the first frame. It has not come
+back in nineteen launches since, including six with a focus change and a
+screen capture thrown at the first seconds. The difference on the run that
+died was that everything was cold: first render, first shader compile. That
+would change the frame ordering the `fresh` flag depends on, which is exactly
+the shape of the original fault. Recorded rather than fixed, because one
+observation is not a diagnosis — and the place to look is `page.rs`'s `fresh`,
+not anything added here.
+
+### Four grievances from reading with it — done, and none of them was on the list either
+
+The menus above came from the same place these did: reading with the thing.
+All four are a correct answer badly placed, badly coloured, or out of reach,
+which is the class of fault a suite that asks "does it work" will never raise.
+
+**A page wider than the window was pinned to the left of it, with the rest
+unreachable.** `#viewer` in the app is `overflow: auto` and `#pages` is
+`margin: 0 auto` — a page narrower than the window is centred by the box model
+and a wider one scrolls. Blitz has neither, and the pages here are placed
+absolutely against a box `layout.rs` sizes, so both halves had to be
+arithmetic and only the first half had been written. At 200% the page sat
+twenty pixels from the left edge with a fifth of it off the screen and no
+gesture that would reach it.
+
+`Viewer::across` is the fix and the shape is the part worth keeping: **a
+fraction, not an offset** — where the middle of the window sits across the
+content, half by default. An offset would have to be recomputed at each of
+the dozen places that relay the document out; a fraction is resolved against
+whatever the content is now, so a page that has just become wider than the
+window arrives with its middle in the middle, and a reader who zooms back out
+to something that fits gets it centred rather than left where they had
+panned. The other axis of a trackpad pans it, and ⇧-wheel with it — AppKit
+turns the second into the first before winit sees either.
+
+**Every undrawn page was white, whatever the theme.** `.page { background:
+#ffffff }`, and a page whose texture has not arrived draws as that and nothing
+else — so a zoom step, a jump, a theme change or a turn, all of which re-key
+every mounted page, flashed white rectangles on a dark theme. `--page` is the
+theme's paper under a recolouring theme and white under one that is not,
+which is the colour the page is about to be. It does not make pdfium faster;
+it makes the frame before pdfium answers the right colour, which is the whole
+of what a reader was seeing.
+
+**The page field opened empty.** The app selects the field's contents
+(`el.pageNumber.select()`); this emptied it instead, and the entry for it said
+that came to the same thing for anybody who then types. It does not — the
+number vanishing is the reader losing the one thing the field was showing
+them. There is no imperative door onto parley's selection (it will select all
+when a keystroke asks and not otherwise), so it is emulated: the field opens
+holding the page it is on, `page_fresh` is the "all of it is selected" state,
+and the first thing typed replaces the lot.
+
+*The interesting half is where that replacement had to go.* Cancelling the
+keystroke and writing the character in through the `value` attribute works —
+Blitz's `set_text` replaces the editor's string — but `set_text` does not
+touch the *selection*, and a field just built has its caret at offset 0. So
+the second digit landed in front of the first and "50" was typed as "05",
+which parses to page 5 and passes every test written in one digit. Letting the
+editor do its own insertion moves the caret; the replacement then happens in
+`oninput`, where fresh means the caret was at the front and taking the old
+label off the end of the new value leaves exactly what was typed. A click
+inside the field ends the fresh state, which is both what a click into a
+selected field does anywhere else and what keeps that arithmetic true.
+
+And **a press anywhere else puts the field away**, which is the field's own
+`blur` handler in `main.ts`. It had none, so the field held the keyboard until
+Escape or Enter and a reader who clicked away was typing into something they
+were no longer looking at.
+
+**The toolbar wore a grey rather than the theme.** `--muted` was mixed halfway
+between paper and ink, and halfway between any two colours is a mid-grey — so
+Mark, Trim, the zoom and the two steppers came out very nearly the same under
+all fourteen themes, which reads as the theme not having loaded. `--text-soft`
+in `themes.ts` is `mix(text, bg, 0.26)`; `Palette::muted` is now that number
+said from the other end, and `faint` with it. `tests/chrome.rs` asserts the
+distance from the theme's own ink rather than a hex value, so it is a claim
+about every theme rather than about one.
+
+`tests/chrome.rs` is the nine tests for all of it.
+
+### And five more, from reading with it again — four of which the first round had not touched
+
+The round above fixed what it said it fixed and the reader still did not look
+right, which is worth naming: **three of these five were sitting under the
+fixes, and one of them was the *cause* of a fault the first round had answered
+somewhere else.**
+
+**The window's size never reached the layout.** The largest of them, and behind
+two of the five complaints. Blitz answers `WindowEvent::SurfaceResized` by
+moving its own viewport and asking for a redraw, and tells nobody — so the
+chrome followed the window and `Viewer::layout` kept the viewport it was handed
+when the window was mounted, at `onmounted`, once, for the life of the window.
+A window opened at 1100 and dragged to 1600 laid its pages out for 1100 inside
+a `.viewer` that was now 1600: the page centred in a `.pages` box narrower than
+the window, which on screen is a page against the left of the screen, and Fit
+width fitting a width the window no longer had.
+
+**So the first round's centring was right and invisible.** `Viewer::across`
+does centre the page, and every test of it passed, because a harness window
+never changes size. Nothing in the suite had ever resized one — which is the
+same shape as the menus and the four above: not a wrong answer, an answer
+computed against something that had stopped being true.
+
+The wire is the one every other piece of news uses. `Shell::on_resized` is
+winit's half, `main.rs` turns it into an emit, and the `window-resized` arm in
+the mailbox task refits from `Screen` — which in the app reads winit and in the
+harness reads a `Cell` that `Reader::resize` sets. There is no `ResizeObserver`
+here and `get_client_rect` cannot be called from inside an event, so news is
+the only door. What is *not* measured is what a live drag costs: each step
+re-keys every mounted page and that is a pdfium render each, the same as the
+app's, and the placeholder is at least the theme's paper now rather than white.
+
+**The panel's hairline was outside its width**, so the document was laid out
+for a viewport one pixel wider than the box it was drawn into: every page flush
+against the panel with its far edge a pixel over the window. `box-sizing:
+border-box`, and it is the resize fault in miniature — the layout's idea of the
+viewport and the viewport disagreeing.
+
+**A menu came down at the end of the toolbar rather than under its button.**
+The menus shipped as one layer pinned to the bar's two ends, on the reasoning
+that a measured offset would need keeping in step by hand and there is no way
+to ask an element where it is from here. Both halves of that were true and the
+conclusion was wrong: an absolutely positioned child of a `position: relative`
+wrapper needs no measurement, and it is the browser that keeps it in step. The
+View menu — whose button sits between Trim and the theme — came down under the
+page field, three chips to the right of what had been clicked. `.anchor` is the
+wrapper; the panel is still out of the flow, so the 46px row is still 46px.
+
+**`text-align` does nothing to a text input, and the page number sat against
+the left wall of its box.** `create_text_editor` in Blitz copies the font size,
+the line height and the brush into parley and stops — no alignment — and calls
+`editor.set_width(None)`, so there is no box to align within either. Parley has
+`set_alignment`; nothing calls it. Centring is therefore not available, so the
+box is made to fit instead: `page_box` is the padding, the border and the
+number, and the readout and the field take the same width so opening one moves
+nothing. It is a workaround, and it is also the better answer — the number
+never sits in a puddle of empty box.
+
+*And the selection was invisible.* The emulated select-all from the round above
+was real and nothing on screen said so, so the field opened looking like a
+field somebody had clicked into and the first digit replacing all of it came as
+a surprise. `.page-field.fresh` is the theme's own selection colours — the pair
+a swept passage on the page is drawn in — and `--found-ink` is what that
+needed. The platform's blue focus ring went with it, for the accent border the
+app uses: it belonged to no theme here, and under Hylo Ember it was the one
+cold thing on screen.
+
+**The toolbar was still grey, and the accent was still the only colour in it.**
+The round above set `--muted` to the app's own `--text-soft` and that was
+correct and beside the point: every theme in this app names a near-monochrome
+text colour — `#2f3237`, `#e9eaee`, `#f8f8f2` — so *any* shade of it is a grey,
+in the app as much as here. What carries a theme in the bar is the accent, and
+it was arriving as one bright word among the grey with nothing under it. So
+`--accent-soft` (a fifth of the way from paper to accent) is the ground a chip
+in force stands on, which is `.btn.on` in `styles.css` said exactly; and minus,
+the readout and plus are one sunk `.zoom-group` rather than three more quiet
+words in a row of quiet words.
+
+What is still missing is the other half of the app's bar: **every button in
+`index.html` carries a `data-icon`**, and none here does. That is the next
+thing to do to this toolbar and it is not a colour problem.
+
+`tests/chrome.rs` is fifteen tests now.
+
 ### What is not built
 
-No markup, no settings window, no Keyboard page, and no file picker — and of
+No markup, no settings window, no Keyboard page and no theme editor — and of
 the library, everything but the markup journal, which waits for the item that
-is about markup. The picker is the reason ⌘N opens a second window on the
-document already in front rather than asking for one; see item 9. There is
-still no text *layer*, and there is not going to be one: item 10 is what that
-was for.
+is about markup. **Five of the app's forty-three keyboard actions still answer
+"not built yet"**: dark mode, the settings window, the Keyboard page, print,
+and markup. There is still no text *layer*, and there is not going to be one:
+item 10 is what that was for.
+
+The settings window and the Keyboard page are item 1's other half and have
+been the oldest thing outstanding since Phase 3 began. They are also the last
+large piece of interface, which — see the top of this file — is the category
+that was not on the list.
 
 ---
 

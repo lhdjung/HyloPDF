@@ -64,8 +64,36 @@ impl Palette {
         mix(self.background, self.text, 0.16)
     }
 
+    /// The colour the toolbar's own labels are written in.
+    ///
+    /// **0.74 of the way to the ink, not 0.55, and the difference is the
+    /// whole of what a theme is for.** A shade halfway between paper and ink
+    /// is a mid-grey whatever the two ends are, so Mark, Trim, the zoom and
+    /// the two steppers came out very nearly the same colour under all
+    /// fourteen themes — the chrome reading as though the theme had not
+    /// loaded. `--text-soft` in `themes.ts` is `mix(text, bg, 0.26)`, which
+    /// is this number said from the other end, and it keeps enough of the
+    /// ink for the theme to be legible in the bar.
     pub fn muted(&self) -> Rgb {
-        mix(self.background, self.text, 0.55)
+        mix(self.background, self.text, 0.74)
+    }
+
+    /// The quieter one still: the document's name, the "/ 400" beside the
+    /// page number, a chord in a menu. `--text-faint` in `themes.ts`, which
+    /// is `mix(text, bg, 0.52)` and the same number from the other end.
+    pub fn faint(&self) -> Rgb {
+        mix(self.background, self.text, 0.48)
+    }
+
+    /// What an undrawn page is. See `--page` in `styles.rs`: a page that a
+    /// recolouring theme has not reached yet is the theme's paper, and a page
+    /// nothing is recolouring is the paper the printer used.
+    pub fn page(&self) -> Rgb {
+        if self.recolor {
+            self.background
+        } else {
+            [0xff, 0xff, 0xff]
+        }
     }
 }
 

@@ -340,6 +340,64 @@ impl Clip {
     }
 }
 
+/// Which document the reader chose, when they were asked.
+///
+/// A context holding one closure, for the reason [`Clip`] is one: the thing it
+/// stands for is a modal window belonging to the operating system, and a test
+/// that opened one would sit there until somebody clicked it. `blitz-shell`
+/// already carries the picker — `open_file_dialog` on the shell provider,
+/// behind its `file-dialog` feature, which is `rfd` — so this is a door in the
+/// shell like the clipboard beside it rather than a dependency of its own.
+///
+/// `None` means the reader cancelled, which is a different answer from a path
+/// that could not be opened and is the one case that says nothing at all.
+#[derive(Clone)]
+pub struct Pick(Rc<dyn Fn() -> Option<String>>);
+
+impl PartialEq for Pick {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Pick {
+    pub fn new(choose: impl Fn() -> Option<String> + 'static) -> Self {
+        Pick(Rc::new(choose))
+    }
+
+    /// The default: the system's own picker, filtered to PDFs.
+    ///
+    /// It blocks the thread it is called on, which is the thread drawing the
+    /// window — and that is right rather than a compromise: the picker is
+    /// modal, so there is nothing behind it for a frame to show. It is also
+    /// the only shape `ShellProvider` offers.
+    pub fn from_the_system(shell: Option<Arc<dyn blitz_traits::shell::ShellProvider>>) -> Self {
+        Pick::new(move || {
+            // Said once rather than silently choosing nothing, which is
+            // `Clip`'s rule and the same reason: a reader who presses ⌘O and
+            // gets no window cannot tell a shell that provided no picker from
+            // a picker they cancelled.
+            let shell = shell.as_ref().or_else(|| {
+                eprintln!("there is no picker to choose a document with");
+                None
+            })?;
+            let filter = blitz_traits::shell::FileDialogFilter {
+                name: "PDF".to_string(),
+                extensions: vec!["pdf".to_string()],
+            };
+            shell
+                .open_file_dialog(false, Some(filter))
+                .into_iter()
+                .next()
+                .map(|path| path.to_string_lossy().into_owned())
+        })
+    }
+
+    pub fn choose(&self) -> Option<String> {
+        (self.0)()
+    }
+}
+
 /// What the *window* can be asked to do, which is not the page's business.
 ///
 /// A context holding one closure, for the reason [`Screen`] and [`Away`] are
@@ -363,6 +421,22 @@ pub enum Ask {
     Close,
     /// All of them, and the app with them.
     Quit,
+    /// This document, in a window of its own — ⇧⌘O, and the menu item under
+    /// it. Answered by `hand_over`, so a document already open somewhere is
+    /// brought forward rather than opened twice.
+    NewWindowOn(String),
+    /// This window is showing a different document now: where it is, and what
+    /// to call it.
+    ///
+    /// Three things outside the reader have to be told and none of them is
+    /// the reader's to reach. The desk, which is what the restore list is
+    /// read from, and the watch, which is following the file that was open a
+    /// moment ago — both belong to the process. And the window's own title,
+    /// which belongs to winit. The name travels with the path because the
+    /// reader has already worked it out (`store::called`, which is
+    /// `worth_calling` deciding between a document's `/Title` and its file
+    /// name) and asking pdfium again would mean opening the file again.
+    Showing { path: String, title: String },
     /// Full screen, on or off. Presenting is this and the chrome taken away,
     /// and the second half is the page's own — see [`Viewer::present`].
     FullScreen(bool),
@@ -405,11 +479,61 @@ fn name_of(fit: Fit) -> &'static str {
     }
 }
 
+/// The toolbar's three menus.
+///
+/// **This is the piece the port had been doing without, and the chips were
+/// standing in for it.** Fourteen themes reached by pressing `t` fourteen
+/// times, three spread modes on `s`, and a fit chip that could only ever mean
+/// *fit width* are all the same shape: a list of choices with no room to show
+/// itself. `keymap::EXTRA`'s first two entries exist because of it and say so
+/// in their own comment — "this reader has no menus yet".
+///
+/// Three rather than one, because that is where the app's are and what they
+/// are about: what document is open, what it looks like, and how it is laid
+/// out.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Menu {
+    /// Under the title: open, open beside, a window, close.
+    Document,
+    /// Under the theme's name: every theme installed, the one in use ticked.
+    Theme,
+    /// Under the zoom: fit, spread, rotation, margins.
+    View,
+}
+
+impl Menu {
+    /// What the button that opens it is called, which is also what the menu
+    /// is called to a screen reader.
+    pub fn label(self) -> &'static str {
+        match self {
+            Menu::Document => "Document",
+            Menu::Theme => "Theme",
+            Menu::View => "View",
+        }
+    }
+}
+
 /// Everything the reader is looking at, and everything that changes it.
 pub struct Viewer {
     pub document: Arc<dyn PageSource>,
     pub layout: Layout,
     pub scroll_top: f64,
+    /// Where the window sits across the document, as the fraction of the
+    /// content its middle is over. Half, always, until somebody pans.
+    ///
+    /// **A fraction rather than an offset, and that is what makes the page
+    /// stay centred.** `#pages` in the app is `margin: 0 auto` inside a
+    /// `#viewer` that is `overflow: auto`, so a page narrower than the window
+    /// is centred by the box model and a page wider than it scrolls. Here the
+    /// pages are placed absolutely against a box `layout.rs` sizes, so both
+    /// halves are arithmetic — and a stored *offset* would have to be
+    /// recomputed at every one of the dozen places that relay the document
+    /// out. A fraction needs recomputing nowhere: [`Viewer::scroll_left`]
+    /// resolves it against whatever the content is now, so a page that has
+    /// just become wider than the window arrives with its middle in the
+    /// middle, which is the answer for a zoom step and the answer for a
+    /// window made narrower.
+    across: f64,
     /// The settings table and the themes, which is everything this reader
     /// remembers between runs. It is not a signal and does not need to be:
     /// every change to it goes through a method here, and this whole struct
@@ -438,6 +562,15 @@ pub struct Viewer {
     /// what root's `onmousemove` checks before touching the signal at all.
     resize_from: Option<(f64, f64)>,
     pub tab: Tab,
+    /// Which toolbar menu is down, if any. `None` almost always.
+    ///
+    /// **One at a time, and the state is the reader's rather than the
+    /// button's**, which is `showPopover` in `ui.ts` and the same reason:
+    /// opening a second menu has to close the first, and nothing that lives
+    /// inside one menu can know about another. Escape closes it, and so does
+    /// a press anywhere the menu is not — see the root's `onmousedown` and
+    /// [`Menu`].
+    pub menu: Option<Menu>,
     /// Where the thumbnail column has been scrolled to. Ours for the reason
     /// the document's own scroll offset is ours — see the module comment.
     pub thumb_scroll: f64,
@@ -529,12 +662,26 @@ pub struct Viewer {
     /// toolbar, and what they have typed.
     ///
     /// The field shows the current page's label when nobody is typing in it,
-    /// and what has been typed when somebody is. Two states rather than one
-    /// because the app selects the field's contents when it is focused and
-    /// there is no way to say that here — so arriving *empties* it instead,
-    /// which comes to the same thing for anybody who then types.
+    /// and what has been typed when somebody is.
+    ///
+    /// **It arrives holding the page it is on, and the first thing typed
+    /// replaces the lot** — which is what selecting the contents comes to for
+    /// anybody who then types, and it is what the app does
+    /// (`el.pageNumber.select()`). It used to arrive empty, because
+    /// `select()` has no equivalent here: parley will select all when it is
+    /// *asked by a keystroke* and there is no imperative door onto it from a
+    /// component. So the selection is emulated one level up — `page_fresh`
+    /// below is the "everything in here is selected" state, and the keydown
+    /// handler in `Reader` is where it is spent. The reason the empty field
+    /// was wrong is not that it was harder to use: it is that the number
+    /// disappearing is the reader losing the one thing the field was showing
+    /// them.
     pub typing_page: bool,
     pub page_typed: String,
+    /// Whether what is in the field is the page it opened on rather than
+    /// anything the reader has typed — the emulated "all of it is selected".
+    /// See [`Viewer::typing_page`].
+    pub page_fresh: bool,
     /// The index, the matches, and where the reader is in them. See
     /// [`crate::search`]: it knows nothing about this struct, which is what
     /// lets the whole of it be tested with no document and no window.
@@ -632,10 +779,12 @@ impl Viewer {
         let mut viewer = Viewer {
             layout: Layout::new(sizes),
             scroll_top: 0.0,
+            across: 0.5,
             sidebar_open: false,
             sidebar_width: 252.0,
             resize_from: None,
             tab: Tab::Contents,
+            menu: None,
             thumb_scroll: 0.0,
             column: Column::default(),
             headings: document.outline(),
@@ -649,6 +798,7 @@ impl Viewer {
             future: Vec::new(),
             typing_page: false,
             page_typed: String::new(),
+            page_fresh: false,
             search: Search::new(),
             find_open: false,
             find_query: String::new(),
@@ -871,13 +1021,27 @@ impl Viewer {
     /// pointer — flexbox gives the `.viewer` box the room it has left for
     /// free — and `finish_resize_sidebar` is the one relayout the drag
     /// deferred, once, at wherever it landed.
+    ///
+    /// **The column of thumbnails is the exception, and it was wrong to
+    /// treat it as one of the pages.** A thumbnail is a fifth of a page
+    /// across and a twenty-fifth of one in area, so the whole visible column
+    /// costs less to draw than a single page of the document does — and it is
+    /// the thing directly under the pointer, so a panel whose pictures stay
+    /// the size they were while its edge moves is the one place the deferral
+    /// is visible as a fault rather than as a saving. `relay_column` is
+    /// therefore live and the document's relayout is still deferred: the two
+    /// halves of what was one decision, taken separately now.
     pub fn drag_sidebar(&mut self, client_x: f64) {
         let Some((start_x, start_width)) = self.resize_from else {
             return;
         };
         let width = (start_width + (client_x - start_x))
             .clamp(crate::sidebar::MIN_WIDTH, crate::sidebar::MAX_WIDTH);
+        if width == self.sidebar_width {
+            return;
+        }
         self.sidebar_width = width;
+        self.relay_column();
     }
 
     /// The pointer let go: the one relayout the drag deferred, and the one
@@ -986,6 +1150,41 @@ impl Viewer {
         self.refit();
         self.generation += 1;
         on || self.full_screen
+    }
+
+    /// How to ask for this action from the keyboard, as it should be read —
+    /// ⌘O on a Mac, Ctrl+O elsewhere — or nothing where it is not bound.
+    ///
+    /// **Read off the keymap rather than written beside the menu item**, for
+    /// the reason the app's Keyboard page is drawn from the keymap: a menu
+    /// that states its own shortcut cannot show a rebound one, and the
+    /// hand-written table this replaces in the app had already drifted. A
+    /// reader who unbinds ⌘O in `keys.toml` sees a menu item with no chord on
+    /// it, which is true.
+    pub fn chord_for(&self, action: Action) -> String {
+        self.keymap
+            .by_action
+            .get(&action)
+            .and_then(|bindings| bindings.first())
+            .map(|binding| crate::keymap::describe_binding(binding, self.keymap.mac()))
+            .unwrap_or_default()
+    }
+
+    /// Put a menu down, or take the one that is down away. Asking for the
+    /// menu that is already open closes it, which is what clicking its own
+    /// button means.
+    pub fn show_menu(&mut self, menu: Menu) {
+        self.menu = if self.menu == Some(menu) {
+            None
+        } else {
+            Some(menu)
+        };
+    }
+
+    /// Whatever is down, put away. Answers whether there was anything, so
+    /// that Escape can fall through to the next thing when there was not.
+    pub fn close_menu(&mut self) -> bool {
+        self.menu.take().is_some()
     }
 
     pub fn show_tab(&mut self, tab: Tab) {
@@ -1576,18 +1775,23 @@ impl Viewer {
         }
     }
 
-    /// Put the reader in the page field, empty. `focusPageNumber` in
-    /// `main.ts`, which selects the field's contents instead — see
-    /// [`Viewer::typing_page`] for why emptying it is the same gesture here.
+    /// Put the reader in the page field, holding the page they are on with
+    /// all of it selected. `focusPageNumber` in `main.ts`, which is
+    /// `focus()` and then `select()`; see [`Viewer::typing_page`] for what
+    /// stands in for the second half.
     pub fn open_page_field(&mut self) {
         self.typing_page = true;
-        self.page_typed.clear();
+        self.page_typed = self.label(self.page());
+        self.page_fresh = true;
     }
 
+    /// The reader typed into the field: whatever is in it now.
     pub fn type_page(&mut self, text: &str) {
         self.typing_page = true;
         self.page_typed = text.to_string();
+        self.page_fresh = false;
     }
+
 
     /// Go where the field says, or say that it says nowhere.
     ///
@@ -1597,7 +1801,12 @@ impl Viewer {
     pub fn commit_page(&mut self) {
         let typed = std::mem::take(&mut self.page_typed);
         self.typing_page = false;
-        if typed.trim().is_empty() {
+        // Nothing was typed: the field is holding the page it opened on, and
+        // Enter on that means "never mind" rather than "go where I already
+        // am" — which would otherwise put an entry in the history for a jump
+        // that went nowhere.
+        let untouched = std::mem::take(&mut self.page_fresh);
+        if untouched || typed.trim().is_empty() {
             return;
         }
         match self.page_for_label(&typed) {
@@ -1611,6 +1820,7 @@ impl Viewer {
     pub fn cancel_page(&mut self) {
         self.typing_page = false;
         self.page_typed.clear();
+        self.page_fresh = false;
     }
 
     /// What a mark on this page would be called: the section it falls in.
@@ -2161,14 +2371,129 @@ impl Viewer {
         restarted
     }
 
+    /// A different document, in this window. ⌘O, and the menu item under it.
+    ///
+    /// **The app's ⌘O replaces the document in the window it was pressed in**
+    /// — `openDialog` calls `this.open(path)` — and ⇧⌘O is the one that asks
+    /// for a window. That is the split kept here, and it is worth saying why
+    /// it survives the thing that changed everything else about windows in
+    /// this port: there is no start screen, so there is no empty window, so
+    /// [`crate::session::Session::another`] gives ⌘N a second window on the
+    /// document already in front. None of that bears on ⌘O, which was never
+    /// about empty windows — it is the reader saying *this one instead*.
+    ///
+    /// What has to go is everything read out of the old file and everything
+    /// pointing into it, which is [`Viewer::document_changed`]'s list, and
+    /// **what has to go with it here is the library entry**: a recompile is
+    /// the same document and this is a different one, so the marks, the
+    /// title and the remembered place all move. What stays is the reader's
+    /// own — the fit, the zoom, the spread, the rotation, the panel, the
+    /// theme — because those are settings and a setting is not a property of
+    /// a document.
+    ///
+    /// Answers whether it opened, because the caller has bookkeeping of its
+    /// own to do — see [`Ask::Showing`] — and a document that would not open
+    /// leaves this window showing the one it had.
+    ///
+    /// The find bar is closed rather than searched again, which is where this
+    /// parts company with `document_changed`: a query asked of a paper is not
+    /// a query asked of the next book, and the matches were positions in a
+    /// document nobody is looking at any more.
+    pub fn open_here(&mut self, path: &str) -> bool {
+        if path == self.document.path() {
+            self.notice = "That document is already open here.".into();
+            return false;
+        }
+        let opened = match crate::render::open(path) {
+            Ok(document) => document,
+            Err(refused) => {
+                self.notice = format!("Could not open that document: {refused}");
+                return false;
+            }
+        };
+        // Where the reader was in the document being put down, written before
+        // the store stops pointing at it. `remember` hands it to the scribe,
+        // which keeps one place per document — so this cannot be skipped on
+        // the grounds that the scroll has not moved since the last one.
+        self.store.remember(self.layout.anchor(self.scroll_top));
+        self.document = opened;
+        let declared = self.document.title();
+        let place = self.store.opened(path, &declared);
+        self.headings = self.document.outline();
+        self.labels = self.document.labels();
+        self.links.borrow_mut().clear();
+        self.texts.borrow_mut().clear();
+        self.selection = None;
+        self.sweep_from = None;
+        self.past.clear();
+        self.future.clear();
+        self.search.forget();
+        self.close_find();
+        let sizes = (0..self.document.pages())
+            .map(|index| self.document.size_of(index))
+            .collect();
+        self.layout.replace_sizes(sizes);
+        if self.trimming {
+            self.measure_crop();
+        }
+        // A document with no contents opens on its pages, which is what
+        // `restore` does at startup and what `setDocument` does in the app:
+        // the difference between a panel and an empty box.
+        self.tab = if self.headings.is_empty() {
+            Tab::Pages
+        } else {
+            Tab::Contents
+        };
+        self.edition += 1;
+        self.generation += 1;
+        self.scroll_top = 0.0;
+        self.go_to(place.unwrap_or(crate::layout::Anchor { page: 1, offset: 0.0 }));
+        self.relay_column();
+        self.revealed = false;
+        self.reveal_thumb();
+        self.notice = String::new();
+        true
+    }
+
     /// The next theme in the list, which is what `t` is bound to.
     ///
-    /// Fourteen themes is too many to cycle through in the real app and this
-    /// is not the real app's gesture — the menu is Phase 3's — but it is the
-    /// one keystroke that proves the whole list is loaded and wearable.
+    /// Fourteen themes is too many to cycle through and this is not the app's
+    /// gesture — the Theme menu is, and it is built now (see [`Menu`]) — but
+    /// it is the one keystroke that proves the whole list is loaded and
+    /// wearable, which is what `the_whole_shipped_theme_set_is_wearable`
+    /// presses.
     pub fn next_theme(&mut self) {
         let next = (self.store.theme_index() + 1) % self.store.themes().len().max(1);
         self.set_theme(next);
+    }
+
+    /// How far the document is scrolled across, in CSS pixels — nothing at
+    /// all unless it is wider than the window. See [`Viewer::across`].
+    pub fn scroll_left(&self) -> f64 {
+        let room = self.layout.max_scroll_x();
+        if room <= 0.0 {
+            return 0.0;
+        }
+        (self.across * self.layout.content_width() - self.layout.viewport.width / 2.0)
+            .clamp(0.0, room)
+    }
+
+    /// Move the document across under the window, which is what a trackpad's
+    /// other axis and ⇧-wheel ask for. A no-op when there is nothing to move,
+    /// and it puts the middle back in the middle when there stops being: a
+    /// reader who zooms out to a page that fits should not find it off to one
+    /// side because of where they had panned to.
+    pub fn pan(&mut self, delta: f64) {
+        let room = self.layout.max_scroll_x();
+        if room <= 0.0 {
+            self.across = 0.5;
+            return;
+        }
+        if delta == 0.0 {
+            return;
+        }
+        let to = (self.scroll_left() + delta).clamp(0.0, room);
+        self.across = (to + self.layout.viewport.width / 2.0) / self.layout.content_width();
     }
 
     /// Where the reader would end up, clamped, in CSS pixels.
@@ -2355,6 +2680,16 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             >())
         })
     });
+    // And which document the reader chooses when they are asked for one. See
+    // [`Pick`]: the default is the system's picker through the same shell
+    // provider, and a harness answers with a path of its own.
+    let pick = use_hook(|| {
+        dioxus_core::try_consume_context::<Pick>().unwrap_or_else(|| {
+            Pick::from_the_system(dioxus_core::try_consume_context::<
+                Arc<dyn blitz_traits::shell::ShellProvider>,
+            >())
+        })
+    });
 
     let resize_from_window = {
         let screen = screen.clone();
@@ -2378,6 +2713,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let on_key = {
         let frame = frame.clone();
         let clip = clip.clone();
+        let pick = pick.clone();
         move |event: KeyboardEvent| {
             let (press, screen) = {
                 let held = viewer.read();
@@ -2396,7 +2732,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 Press::Nothing => viewer.write().pending.clear(),
                 Press::Act(action) => {
                     viewer.write().pending.clear();
-                    perform(viewer, action, screen, &frame, &clip);
+                    perform(viewer, action, screen, &frame, &clip, &pick);
                 }
             }
         }
@@ -2479,6 +2815,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             (None, false) => None,
         };
         let listening = post.clone();
+        let sizing = screen.clone();
         spawn(async move {
             loop {
                 let news = listening.next().await;
@@ -2492,6 +2829,15 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                         let path = news.payload.as_str().unwrap_or_default().to_string();
                         let restarted = viewer.write().document_changed(&path);
                         scan(restarted);
+                    }
+                    // The window changed size, which nothing else in this
+                    // process will tell the layout — Blitz resizes its own
+                    // viewport and asks for a redraw, and a redraw of a
+                    // layout computed for the old window is the old layout.
+                    // See `Shell::on_resized`, which is the other half.
+                    "window-resized" => {
+                        let (width, height, _scale) = sizing.get();
+                        viewer.write().fit_window(width, height);
                     }
                     // Nothing else is emitted, and an unknown event is a
                     // version of this crate that has not caught up rather
@@ -2509,6 +2855,9 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
 
     let held = viewer.read();
     let scroll_top = held.scroll_top;
+    // How far across the document sits, which is nothing unless it is wider
+    // than the window. See [`Viewer::across`].
+    let scroll_left = held.scroll_left();
     let wearing = held.palette();
     let theme_name = held.theme_name();
     let title = held.store.title().to_string();
@@ -2530,8 +2879,38 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     let find_options = held.search.options();
     let highlight_all = held.highlight_all;
     let marked = held.store.is_marked(held.page());
+    // What the menus need, read once with the rest of it. The theme list is
+    // names and nothing else — a swatch would have to go through `parseColor`
+    // to be honest about what the renderer can read, which is the app's own
+    // rule and a thing to build when the theme editor is.
+    let menu = held.menu;
+    let themes: Vec<String> = held.store.themes().iter().map(|t| t.name.clone()).collect();
+    let theme_index = held.store.theme_index();
+    let fit = held.layout.fit;
+    let spread = held.layout.spread;
+    let rotation = held.layout.view().rotation;
+    let key_open = held.chord_for(Action::Open);
+    let key_new_window = held.chord_for(Action::NewWindow);
+    let key_close = held.chord_for(Action::CloseWindow);
+    let key_fit_width = held.chord_for(Action::FitWidth);
+    let key_fit_page = held.chord_for(Action::FitPage);
+    let key_actual = held.chord_for(Action::ActualSize);
+    let key_rotate_right = held.chord_for(Action::RotateRight);
+    let key_rotate_left = held.chord_for(Action::RotateLeft);
     let page_field = held.page_field();
+    // How wide the page box is: the padding, the border, and the number in it,
+    // with a floor so that page 1 of a pamphlet is not a slot. See the comment on
+    // `.pill` below — Blitz cannot centre an input's text, so the box is made
+    // to fit rather than the text made to sit in the middle of it.
+    let page_box = (14.0 + 8.5 * page_field.chars().count() as f64).max(28.0);
     let typing_page = held.typing_page;
+    // Whether the field is still showing all of its contents as selected. See
+    // `.page-field.fresh` in `styles.rs`, which is what makes that visible.
+    let page_fresh = held.page_fresh;
+    // How wide the page box is: the padding, the border, and the number in it,
+    // with a floor so that page 1 of a pamphlet is not a slot. See the comment on
+    // `.pill` below — Blitz cannot centre an input's text, so the box is made
+    // to fit rather than the text made to sit in the middle of it.
     let zoom = match held.layout.fit {
         Fit::Width => "Fit width".to_string(),
         Fit::Page => "Fit page".to_string(),
@@ -2609,6 +2988,31 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             // nothing more — `write` marks the signal dirty on every call
             // whether or not anything changed, and every move in the window
             // reaches here.
+            // A press anywhere a menu is not puts the menu away, which is
+            // `showPopover`'s rule in `ui.ts`. Three things stop propagation
+            // rather than being tested for here: the menu itself, and each of
+            // the three buttons a menu hangs off — a press that closed the
+            // menu on its way down would leave the button's own click to open
+            // it straight back up, and clicking the open menu's own button
+            // would be the one gesture that did nothing.
+            // And a press anywhere the page field is not puts *that* away,
+            // which is the field's `blur` handler in `main.ts` — it abandons
+            // what was typed and puts the current page's label back. The
+            // field stops propagation itself, for the same reason the menu
+            // buttons do: a press that closed it on the way down would leave
+            // nothing to click.
+            onmousedown: move |_| {
+                let (menu, typing) = {
+                    let held = viewer.read();
+                    (held.menu.is_some(), held.typing_page)
+                };
+                if menu {
+                    viewer.write().close_menu();
+                }
+                if typing {
+                    viewer.write().cancel_page();
+                }
+            },
             onmousemove: move |event| {
                 let (resizing, sweeping) = {
                     let held = viewer.read();
@@ -2650,11 +3054,106 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     onclick: move |_| viewer.write().toggle_sidebar(),
                     "Contents"
                 }
-                // What the document is called: its own `/Title` where that
-                // is worth having, and the file's name where it is not — see
-                // `store::worth_calling`. It was the page count, which the
-                // pill beside it already says.
-                div { class: "title", "{title}" }
+                // What the document is called — its own `/Title` where that
+                // is worth having, and the file's name where it is not, see
+                // `store::worth_calling` — and the button the document's own
+                // menu hangs off, which is where the app puts it too.
+                // **Every menu hangs inside an anchor of its own now, and
+                // that is the whole of where a menu appears.** They were one
+                // layer pinned to the ends of the toolbar — the Document menu
+                // to the left edge, the other two to the right — on the
+                // reasoning that a measured offset would need keeping in step
+                // by hand and there is no way to ask an element where it is
+                // from here. Both halves of that were true and the conclusion
+                // was wrong: an absolutely positioned child of a
+                // `position: relative` wrapper needs no measurement at all,
+                // and it is *the browser* that keeps it in step. The View
+                // menu came down under the page field, three chips to the
+                // right of the button that opened it.
+                //
+                // Out of the flow, so the 46px row is still 46px whatever is
+                // hanging off it — which is what the layer was for and is not
+                // a reason to have one.
+                div { class: "anchor",
+                    button {
+                        class: if menu == Some(Menu::Document) { "chip title on" } else { "chip title" },
+                        onmousedown: move |event| event.stop_propagation(),
+                        onclick: move |_| viewer.write().show_menu(Menu::Document),
+                        "{title}"
+                    }
+                    if menu == Some(Menu::Document) {
+                        div { class: "menu document", role: "menu", "aria-label": "Document",
+                            // A press inside a menu is not a press outside it: the root
+                            // puts the menu away, and the item's own click comes after
+                            // the press. This was on the layer these three used to share.
+                            onmousedown: move |event| event.stop_propagation(),
+                            button {
+                                class: "menu-item",
+                                onclick: {
+                                    let pick = pick.clone();
+                                    let frame = frame.clone();
+                                    move |_| {
+                                        viewer.write().close_menu();
+                                        if let Some(path) = pick.choose() {
+                                            if viewer.write().open_here(&path) {
+                                                let title =
+                                                    viewer.read().store.title().to_string();
+                                                frame.ask(Ask::Showing { path, title });
+                                            }
+                                        }
+                                    }
+                                },
+                                span { class: "menu-label", "Open document…" }
+                                span { class: "menu-key", "{key_open}" }
+                            }
+                            // The two-documents-at-once route in one step,
+                            // which is the app's own wording and its own
+                            // reason: pick the second and it arrives beside
+                            // the first rather than on top of it. A menu
+                            // item and not a key, because it is not a key
+                            // in `keys.ts` either.
+                            button {
+                                class: "menu-item",
+                                onclick: {
+                                    let pick = pick.clone();
+                                    let frame = frame.clone();
+                                    move |_| {
+                                        viewer.write().close_menu();
+                                        if let Some(path) = pick.choose() {
+                                            frame.ask(Ask::NewWindowOn(path));
+                                        }
+                                    }
+                                },
+                                span { class: "menu-label", "Open in a new window…" }
+                            }
+                            div { class: "menu-rule" }
+                            button {
+                                class: "menu-item",
+                                onclick: {
+                                    let frame = frame.clone();
+                                    move |_| {
+                                        viewer.write().close_menu();
+                                        frame.ask(Ask::NewWindow);
+                                    }
+                                },
+                                span { class: "menu-label", "New window" }
+                                span { class: "menu-key", "{key_new_window}" }
+                            }
+                            button {
+                                class: "menu-item",
+                                onclick: {
+                                    let frame = frame.clone();
+                                    move |_| {
+                                        viewer.write().close_menu();
+                                        frame.ask(Ask::Close);
+                                    }
+                                },
+                                span { class: "menu-label", "Close window" }
+                                span { class: "menu-key", "{key_close}" }
+                            }
+                        }
+                    }
+                }
                 div { class: "spacer" }
                 button {
                     class: if marked { "chip mark on" } else { "chip mark" },
@@ -2669,15 +3168,141 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     onclick: move |_| { let on = viewer.read().trims_margins(); viewer.write().set_trim(!on); },
                     if trimming { "Trimmed" } else { "Trim" }
                 }
-                button { class: "chip fit", onclick: move |_| viewer.write().set_fit(Fit::Width), "{zoom}" }
-                button { class: "chip zoom-out", onclick: move |_| viewer.write().zoom(false), "−" }
-                button { class: "chip zoom-in", onclick: move |_| viewer.write().zoom(true), "+" }
-                button { class: "chip theme", onclick: move |_| viewer.write().next_theme(), "{theme_name}" }
+                // Two buttons that were a cycle and are now a list. The chip
+                // still *says* what is in force — the harness reads the zoom
+                // and the theme off these two and a reader reads them the same
+                // way — and what changed is that clicking one shows the
+                // choices instead of stepping to the next of them.
+                // The three of them in one sunk group, minus on the left and
+                // plus on the right, which is `.zoom-group` in the app. Three
+                // quiet words in a row of quiet words read as three more
+                // labels; a stepper with the readout between its two ends
+                // reads as one control, and it is the same three elements.
+                div { class: "zoom-group",
+                    button { class: "chip zoom-out", onclick: move |_| viewer.write().zoom(false), "−" }
+                    div { class: "anchor",
+                        button {
+                            class: if menu == Some(Menu::View) { "chip fit on" } else { "chip fit" },
+                            onmousedown: move |event| event.stop_propagation(),
+                            onclick: move |_| viewer.write().show_menu(Menu::View),
+                            "{zoom}"
+                        }
+                        if menu == Some(Menu::View) {
+                            div { class: "menu view", role: "menu", "aria-label": "View",
+                                // A press inside a menu is not a press outside it: the root
+                                // puts the menu away, and the item's own click comes after
+                                // the press. This was on the layer these three used to share.
+                                onmousedown: move |event| event.stop_propagation(),
+                                button {
+                                    class: if fit == Fit::Width { "menu-item on" } else { "menu-item" },
+                                    onclick: move |_| { viewer.write().set_fit(Fit::Width); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", {if fit == Fit::Width { "✓" } else { "" }} }
+                                    span { class: "menu-label", "Fit width" }
+                                    span { class: "menu-key", "{key_fit_width}" }
+                                }
+                                button {
+                                    class: if fit == Fit::Page { "menu-item on" } else { "menu-item" },
+                                    onclick: move |_| { viewer.write().set_fit(Fit::Page); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", {if fit == Fit::Page { "✓" } else { "" }} }
+                                    span { class: "menu-label", "Fit page" }
+                                    span { class: "menu-key", "{key_fit_page}" }
+                                }
+                                button {
+                                    class: if fit == Fit::Actual { "menu-item on" } else { "menu-item" },
+                                    onclick: move |_| { viewer.write().actual_size(); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", {if fit == Fit::Actual { "✓" } else { "" }} }
+                                    span { class: "menu-label", "Actual size" }
+                                    span { class: "menu-key", "{key_actual}" }
+                                }
+                                div { class: "menu-rule" }
+                                button {
+                                    class: if spread == Spread::Single { "menu-item on" } else { "menu-item" },
+                                    onclick: move |_| { viewer.write().set_spread(Spread::Single); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", {if spread == Spread::Single { "✓" } else { "" }} }
+                                    span { class: "menu-label", "One page" }
+                                }
+                                button {
+                                    class: if spread == Spread::Two { "menu-item on" } else { "menu-item" },
+                                    onclick: move |_| { viewer.write().set_spread(Spread::Two); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", {if spread == Spread::Two { "✓" } else { "" }} }
+                                    span { class: "menu-label", "Two pages" }
+                                }
+                                button {
+                                    class: if spread == Spread::Cover { "menu-item on" } else { "menu-item" },
+                                    onclick: move |_| { viewer.write().set_spread(Spread::Cover); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", {if spread == Spread::Cover { "✓" } else { "" }} }
+                                    span { class: "menu-label", "Two pages, cover alone" }
+                                }
+                                div { class: "menu-rule" }
+                                button {
+                                    class: "menu-item",
+                                    onclick: move |_| { viewer.write().rotate(-1); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", "" }
+                                    span { class: "menu-label", "Rotate left" }
+                                    span { class: "menu-key", "{key_rotate_left}" }
+                                }
+                                button {
+                                    class: "menu-item",
+                                    onclick: move |_| { viewer.write().rotate(1); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", {if rotation != 0 { "•" } else { "" }} }
+                                    span { class: "menu-label", "Rotate right" }
+                                    span { class: "menu-key", "{key_rotate_right}" }
+                                }
+                            }
+                        }
+                    }
+                    button { class: "chip zoom-in", onclick: move |_| viewer.write().zoom(true), "+" }
+                }
+                div { class: "anchor",
+                    button {
+                        class: if menu == Some(Menu::Theme) { "chip theme on" } else { "chip theme" },
+                        onmousedown: move |event| event.stop_propagation(),
+                        onclick: move |_| viewer.write().show_menu(Menu::Theme),
+                        "{theme_name}"
+                    }
+                    if menu == Some(Menu::Theme) {
+                        div { class: "menu theme", role: "menu", "aria-label": "Theme",
+                            // A press inside a menu is not a press outside it: the root
+                            // puts the menu away, and the item's own click comes after
+                            // the press. This was on the layer these three used to share.
+                            onmousedown: move |event| event.stop_propagation(),
+                            for (index, name) in themes.iter().cloned().enumerate() {
+                                button {
+                                    key: "{index}:{name}",
+                                    class: if index == theme_index { "menu-item on" } else { "menu-item" },
+                                    onclick: move |_| {
+                                        viewer.write().set_theme(index);
+                                        viewer.write().close_menu();
+                                    },
+                                    span { class: "menu-tick", {if index == theme_index { "✓" } else { "" }} }
+                                    span { class: "menu-label", "{name}" }
+                                }
+                            }
+                        }
+                    }
+                }
                 // The page field, which is a field rather than a readout for
                 // the app's own reason: stepping is fine for nudging and
                 // hopeless for arriving, and a reader with a citation in
                 // front of them has a number to type. What it shows is the
                 // page's *label* — see [`Viewer::label`].
+                // **The box is the width of the number in it, and that is a
+                // workaround wearing a design's clothes.** Blitz lays a text
+                // input's own text out through parley and never gives parley
+                // an alignment — `create_text_editor` in
+                // `blitz-dom/src/layout/construct.rs` copies the font size,
+                // the line height and the brush and stops, and it calls
+                // `editor.set_width(None)`, so there is no box to align
+                // within either. `text-align: center` on an input does
+                // nothing at all, which is what left the page number pinned
+                // against the left wall of a box wide enough for four digits.
+                //
+                // Centring it is therefore not available; making the box the
+                // size of what is in it is, and it is the better answer
+                // anyway — the field grows as digits are typed and the number
+                // never sits in a puddle of empty box. The button and the
+                // field take the same width so that opening the field moves
+                // nothing.
                 div { class: "pill",
                     // **A readout that becomes a field, rather than a field
                     // that is always one**, which is where this parts company
@@ -2694,9 +3319,25 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     // mechanism, borrowed.
                     if typing_page {
                     input {
-                        class: "page-field",
+                        class: if page_fresh { "page-field fresh" } else { "page-field" },
+                        style: "width: {page_box}px;",
                         r#type: "text",
                         value: "{page_field}",
+                        // Not the root's business: see its `onmousedown`.
+                        // A press inside the field is somebody putting the
+                        // caret somewhere, not somebody leaving — and putting
+                        // the caret somewhere is also the end of the
+                        // "everything is selected" state, exactly as a click
+                        // into a selected field is anywhere else. `oninput`
+                        // above depends on that: it can only take the label
+                        // off the front while the caret is still at the
+                        // front.
+                        onmousedown: move |event| {
+                            event.stop_propagation();
+                            if viewer.read().page_fresh {
+                                viewer.write().page_fresh = false;
+                            }
+                        },
                         "aria-label": "Go to page",
                         "data-keyboard": "goto",
                         onmounted: move |event| {
@@ -2704,9 +3345,37 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             let task = node.set_focus(true);
                             spawn(async move { let _ = task.await; });
                         },
+                        // **This is the other half of the emulated
+                        // select-all, and it is here rather than in the
+                        // keydown because of where the caret ends up.**
+                        // Cancelling the keystroke and writing the character
+                        // into the value attribute works — Blitz's
+                        // `set_text` replaces the editor's string — but
+                        // `set_text` does not touch the *selection*, and a
+                        // field that has just been built has its caret at
+                        // offset 0. So the second digit landed in front of
+                        // the first and "50" was typed as "05", which parses
+                        // to page 5 and is the sort of fault that passes
+                        // every test written in one digit.
+                        //
+                        // Letting the editor do its own insertion moves the
+                        // caret for us. Fresh means the caret was at the
+                        // front, so whatever arrived is at the front of the
+                        // value, and taking the old label off the end leaves
+                        // exactly what was typed — with the caret now behind
+                        // it, where the next digit wants it.
                         oninput: move |event| {
                             let typed = event.value();
-                            viewer.write().type_page(&typed);
+                            let held = viewer.read();
+                            let (fresh, was) = (held.page_fresh, held.page_typed.clone());
+                            drop(held);
+                            if fresh {
+                                let first = typed.strip_suffix(&was).unwrap_or(&typed);
+                                let first = first.to_string();
+                                viewer.write().type_page(&first);
+                            } else {
+                                viewer.write().type_page(&typed);
+                            }
                         },
                         // The same two rules the find field has, and for the
                         // same two reasons: a plain key typed here would
@@ -2722,9 +3391,34 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                                     event.stop_propagation();
                                     viewer.write().commit_page();
                                 }
+                                // **A menu is outermost and this field owns
+                                // the keyboard, which is a contradiction only
+                                // Blitz makes.** The app puts the ordering in
+                                // one document-level capturing handler; here
+                                // the keyboard belongs to the innermost
+                                // element asking for it, so a field that has
+                                // it has to defer to the menu itself. See
+                                // `Action::Dismiss`, which is the same list in
+                                // the same order for the case where no field
+                                // has the keyboard at all.
                                 Key::Escape => {
                                     event.stop_propagation();
-                                    viewer.write().cancel_page();
+                                    if !viewer.write().close_menu() {
+                                        viewer.write().cancel_page();
+                                    }
+                                }
+                                // Backspace on a field whose contents are
+                                // all "selected" empties it, which is what
+                                // Backspace on a real selection does. The
+                                // editor's own would delete what is before
+                                // the caret, and the caret is at the front,
+                                // so without this it does nothing at all.
+                                Key::Backspace | Key::Delete
+                                    if plain && viewer.read().page_fresh =>
+                                {
+                                    event.stop_propagation();
+                                    event.prevent_default();
+                                    viewer.write().type_page("");
                                 }
                                 _ if plain => event.stop_propagation(),
                                 Key::Character(ref typed)
@@ -2736,6 +3430,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     } else {
                     button {
                         class: "page-now",
+                        style: "width: {page_box}px;",
                         "aria-label": "Go to page",
                         onclick: move |_| viewer.write().open_page_field(),
                         "{page_field}"
@@ -2798,9 +3493,13 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                                     event.stop_propagation();
                                     viewer.write().step_match(!modifiers.shift());
                                 }
+                                // The menu first, for the reason the page
+                                // field gives above.
                                 Key::Escape => {
                                     event.stop_propagation();
-                                    viewer.write().close_find();
+                                    if !viewer.write().close_menu() {
+                                        viewer.write().close_find();
+                                    }
                                 }
                                 _ if plain => event.stop_propagation(),
                                 // A chord with a modifier on it is not
@@ -2884,12 +3583,22 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     // scroller negates it, so this negates it too rather than
                     // scrolling the opposite way from every other window on
                     // the machine.
-                    let delta = -match event.delta() {
-                        WheelDelta::Pixels(delta) => delta.y,
-                        WheelDelta::Lines(delta) => delta.y * LINE,
-                        WheelDelta::Pages(delta) => delta.y * viewer.read().layout.viewport.height,
+                    let (across, down) = match event.delta() {
+                        WheelDelta::Pixels(delta) => (delta.x, delta.y),
+                        WheelDelta::Lines(delta) => (delta.x * LINE, delta.y * LINE),
+                        WheelDelta::Pages(delta) => {
+                            let height = viewer.read().layout.viewport.height;
+                            (delta.x * height, delta.y * height)
+                        }
                     };
-                    viewer.write().nudge(delta);
+                    // The other axis, which only ever has anything in it when
+                    // the reader has zoomed past the width of the window.
+                    // macOS turns ⇧-wheel into one of these before winit sees
+                    // it, so this is both gestures.
+                    if across != 0.0 {
+                        viewer.write().pan(-across);
+                    }
+                    viewer.write().nudge(-down);
                 },
                 div {
                     class: "pages",
@@ -2911,7 +3620,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             chosen: chosen.clone(),
                             index: placed.index,
                             top: placed.top - scroll_top,
-                            left: placed.left,
+                            left: placed.left - scroll_left,
                             width: placed.width,
                             height: placed.height,
                             hits: placed.hits,
@@ -3112,6 +3821,7 @@ fn perform(
     screen: f64,
     frame: &Frame,
     clip: &Clip,
+    pick: &Pick,
 ) {
     // Every movement goes through the viewer rather than through an offset,
     // because in paged mode an offset is not where a reader ends up: the page
@@ -3186,6 +3896,14 @@ fn perform(
             // Escape typed *into* the field never reaches here — the field
             // stops it — so this is the case where the field is open and the
             // pointer took the focus elsewhere.
+            // A menu is the outermost thing of all — it is over everything
+            // else and it is the thing the pointer is inside — so it goes
+            // first, ahead of the field somebody may have opened underneath
+            // it. The app says the same: its document-level handler stands
+            // down for `dismiss` alone while a menu is up.
+            if viewer.write().close_menu() {
+                return;
+            }
             let (typing, finding, selected, presenting, full) = {
                 let held = viewer.read();
                 (
@@ -3248,6 +3966,20 @@ fn perform(
         // The window's own three, which the page can only ask for. See
         // [`Frame`]: what answers is the shell in the app and a list in the
         // harness, and the reader's side is the same either way.
+        // The picker, through `Pick` rather than through the shell directly,
+        // because a modal window belonging to the operating system is the one
+        // door in this crate a test must not be able to open. The other thing
+        // a chosen document can mean — a window of its own — is a menu item
+        // and not a key, which is the app's own arrangement: there is no
+        // `open-new-window` in `keys.ts` either.
+        Action::Open => {
+            if let Some(path) = pick.choose() {
+                if viewer.write().open_here(&path) {
+                    let title = viewer.read().store.title().to_string();
+                    frame.ask(Ask::Showing { path, title });
+                }
+            }
+        }
         Action::NewWindow => frame.ask(Ask::NewWindow),
         Action::CloseWindow => frame.ask(Ask::Close),
         Action::Quit => frame.ask(Ask::Quit),

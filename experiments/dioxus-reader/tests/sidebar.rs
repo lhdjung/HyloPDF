@@ -334,6 +334,41 @@ fn the_document_does_not_relayout_until_the_drag_ends() {
     );
 }
 
+/// **The thumbnails are the exception, and they follow the pointer.** The
+/// document's relayout is deferred because it is a pdfium render and a
+/// texture upload per mounted page; a thumbnail is a twenty-fifth of a page
+/// in area, and it is the thing directly under the pointer while the edge is
+/// being dragged. A column whose pictures stay the size they were while its
+/// own edge moves is the one place the deferral reads as a fault.
+#[test]
+fn the_thumbnails_follow_the_drag() {
+    let mut reader = book();
+    reader.press_chord("mod+b");
+    reader.click(".tab[data-tab='pages']");
+    let before = reader.harness.layout_rect(".thumb-picture");
+
+    let (x, y) = reader.harness.center_of(".sidebar-resize");
+    reader.harness.mouse_down_at(x, y);
+    reader.harness.move_mouse_to(x + 120.0, y);
+    reader.settle();
+    let mid_drag = reader.harness.layout_rect(".thumb-picture");
+    assert!(
+        mid_drag.width > before.width + 60.0,
+        "the thumbnail is wider while the pointer is still down: {} -> {}",
+        before.width,
+        mid_drag.width,
+    );
+
+    reader.harness.mouse_up_at(x + 120.0, y);
+    reader.settle();
+    let after = reader.harness.layout_rect(".thumb-picture");
+    assert_eq!(
+        (after.width, after.height),
+        (mid_drag.width, mid_drag.height),
+        "and letting go changes nothing further",
+    );
+}
+
 #[test]
 fn a_mark_is_a_toggle_and_survives_being_closed() {
     let config;

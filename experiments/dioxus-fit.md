@@ -353,8 +353,20 @@ Unchanged from the assessment's own risk table, minus one row:
   negotiable, and this is written against public fields on an alpha API.
 - **Time.** Three to five months was the estimate and roughly four fifths of it
   is spent. The remaining fifth is markup — which is where it stops being a port
-  — plus the settings window, the Keyboard page, the file picker, the start
-  screen, and the platform work. That is not a small fifth.
+  — plus the settings window, the Keyboard page and the start screen. The
+  platform work is done, and so are the menus and the file picker (2026-09-01).
+  That is not a small fifth.
+- **What the fifth is made of, and why it kept being underestimated.** All of
+  it is *interface*, and interface was never on the item list: the eleven items
+  are the order the app's engine was built in. Every estimate taken off that
+  list has therefore been an estimate of the engine. See the top of
+  `PROGRESS.md`.
+- **And a tail of the same thing that no item will ever name.** Four faults
+  found by reading with it on 2026-09-01 — a zoomed page pinned to the left
+  edge with the rest unreachable, undrawn pages flashing white, the page field
+  emptying itself, a toolbar the same grey under every theme — were each a
+  correct answer badly placed or badly coloured, and no test asks that
+  question. Budget for finding them by using it, not by finishing the list.
 - **Blitz's own pace.** Production readiness is "sometime in 2026" by the
   project's account and the WPT `css` subsuite is at 48%. Nothing here needs the
   other 52%, but the API moves and the cost is paid in the shell.

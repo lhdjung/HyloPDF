@@ -249,11 +249,15 @@ pub const ACTIONS: &[Spec] = &[
 /// of their own so that [`ACTIONS`] stays exactly the app's and the test which
 /// says so stays exact.
 ///
-/// The first two exist because this reader has no menus yet: fourteen themes
-/// and three spread modes need *some* gesture, and one key each is the
-/// smallest one. The app reaches them through a menu and would gain nothing
-/// from a key. If the experiment is ever merged those two go away rather than
-/// joining the table.
+/// The first two were built because this reader had no menus, and they have
+/// outlived that: fourteen themes and three spread modes are in the Theme and
+/// View menus now (see [`crate::app::Menu`]), which is where the app reaches
+/// them and is the thing this experiment was missing. They are kept because
+/// a key that steps to the next of something is a different gesture from a
+/// list — `t` is how the theme test walks all fourteen — and they cost one
+/// row each. If the experiment is ever merged they go away rather than
+/// joining the table: the app has no key for either and would gain nothing
+/// from one.
 ///
 /// **`copy` is the other kind of extra, and it would have to join it.** ⌘C is
 /// not in the app's table because it is not the app's key: the webview owns

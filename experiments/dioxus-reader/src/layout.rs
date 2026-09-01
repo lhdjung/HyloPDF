@@ -633,6 +633,19 @@ impl Layout {
         (self.content_height - self.viewport.height).max(0.0)
     }
 
+    /// How far there is to go across, which is nothing at all unless the
+    /// reader has zoomed past the width of the window.
+    ///
+    /// `#viewer` in the app is `overflow: auto` and `#pages` is
+    /// `margin: 0 auto`, which is these two facts in CSS: a page narrower
+    /// than the window is centred in it, and a page wider than the window
+    /// scrolls. Blitz has neither — the pages are placed absolutely against a
+    /// box this file sizes — so both are arithmetic here. See
+    /// [`crate::app::Viewer::across`].
+    pub fn max_scroll_x(&self) -> f64 {
+        (self.content_width - self.viewport.width).max(0.0)
+    }
+
     /// Where a rectangle on a page lands on the screen: CSS pixels, from the
     /// top left of that page's box.
     ///

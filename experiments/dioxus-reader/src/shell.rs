@@ -108,6 +108,14 @@ struct Wanted(Option<String>);
 /// This window, closed, from inside one of its own event handlers.
 struct CloseOne(WindowId);
 
+/// This window is showing a different document now — the path and the name.
+///
+/// Deferred through the proxy like every other ask, and for the ordinary
+/// reason: it arrives from a Dioxus handler, inside a borrow of the very
+/// window it is about. What answers it is [`Shell::on_swap`], because the
+/// shell does not know what a document is.
+struct Swapped(WindowId, String, String);
+
 /// Bring the window with this name forward — what a document that is already
 /// open answers with, rather than opening a second copy of itself. See
 /// [`crate::windows::Handover::Front`].
@@ -195,6 +203,13 @@ type Factory = Box<dyn FnMut(Option<String>) -> Option<WindowSpec>>;
 /// What a window gives back when it goes, by name. See [`Shell::on_close`].
 type Tidy = Box<dyn FnMut(&str)>;
 
+/// A window's name and the document it has swapped to. See [`Shell::on_swap`].
+type Swap = Box<dyn FnMut(&str, &str)>;
+
+/// A window's name, said again every time the window changes size. See
+/// [`Shell::on_resized`].
+type Resized = Box<dyn FnMut(&str)>;
+
 pub struct Shell {
     inner: BlitzApplication<DioxusNativeWindowRenderer>,
     proxy: BlitzShellProxy,
@@ -211,8 +226,13 @@ pub struct Shell {
     /// mailbox and its document watch. The shell knows none of that and does
     /// not want to — see the module comment.
     tidy: Option<Tidy>,
+    /// What a window has swapped its document for, by name. See
+    /// [`Shell::on_swap`].
+    swap: Option<Swap>,
     /// Which window has the keyboard, reported as winit says so.
     focus: Option<Box<dyn FnMut(Option<String>)>>,
+    /// That a window changed size. See [`Shell::on_resized`].
+    resized: Option<Resized>,
     /// Raised before the first window of a quit goes.
     leaving: Option<Box<dyn FnMut()>>,
     /// Whether winit has told us surfaces can be created yet. A window made
@@ -246,7 +266,9 @@ impl Shell {
             factory: None,
             labels: std::collections::HashMap::new(),
             tidy: None,
+            swap: None,
             focus: None,
+            resized: None,
             leaving: None,
             started: false,
             trace: true,
@@ -277,6 +299,38 @@ impl Shell {
     /// reader. See [`crate::windows::Desk::closing`].
     pub fn on_quit(&mut self, leaving: impl FnMut() + 'static) {
         self.leaving = Some(Box::new(leaving));
+    }
+
+    /// Say what happens when a window changes size.
+    ///
+    /// **Blitz answers a resize itself and tells nobody**, which is the whole
+    /// of a fault a reader sees as two: `WindowEvent::SurfaceResized` sets the
+    /// document's own viewport and asks for a redraw, so the *chrome* follows
+    /// the window and the *document* does not — `Viewer::layout` keeps the
+    /// viewport it was given when the window was mounted. A window opened at
+    /// 1100 and then dragged wider leaves the pages laid out for 1100 inside a
+    /// `.viewer` that is now 1600: the page sits left of centre because it is
+    /// centred in a `.pages` box narrower than the window, and Fit width fits
+    /// a width the window no longer has.
+    ///
+    /// There is no `ResizeObserver` here and `get_client_rect` cannot be
+    /// called from inside an event — see `Reader`'s first comment — so the
+    /// news comes the way every other piece of news does, through the window's
+    /// mailbox. This is only the half winit can see; `main.rs` is where it is
+    /// turned into an emit.
+    pub fn on_resized(&mut self, resized: impl FnMut(&str) + 'static) {
+        self.resized = Some(Box::new(resized));
+    }
+
+    /// Say what happens when a window opens a different document in itself.
+    ///
+    /// Two things outside the window have to hear about it and neither is the
+    /// window's: the desk, which is where the restore list is read from, and
+    /// the watch, which is following the file that was open a moment ago.
+    /// Both belong to the process — see `session.rs` — which is why this is a
+    /// closure here rather than something the reader does for itself.
+    pub fn on_swap(&mut self, swapped: impl FnMut(&str, &str) + 'static) {
+        self.swap = Some(Box::new(swapped));
     }
 
     /// Say where "which window is in front" should be written down.
@@ -388,6 +442,16 @@ impl Shell {
                     crate::app::Ask::Quit => BlitzShellEvent::embedder_event(Quit),
                     crate::app::Ask::FullScreen(on) => {
                         BlitzShellEvent::embedder_event(FullScreen(id, on))
+                    }
+                    // The picker's two answers. A window of its own goes
+                    // through the same door the Dock menu and a second launch
+                    // use, so a document already open is brought forward
+                    // rather than opened twice.
+                    crate::app::Ask::NewWindowOn(path) => {
+                        BlitzShellEvent::embedder_event(Wanted(Some(path)))
+                    }
+                    crate::app::Ask::Showing { path, title } => {
+                        BlitzShellEvent::embedder_event(Swapped(id, path, title))
                     }
                 };
                 proxy.send_event(event);
@@ -539,7 +603,22 @@ impl ApplicationHandler for Shell {
                 ..
             } | WindowEvent::KeyboardInput { .. }
         );
+        // A resize, which Blitz answers for the chrome and nobody answers for
+        // the document. See [`Shell::on_resized`]. The scale factor counts as
+        // one: a window dragged to a screen of a different density is the same
+        // number of CSS pixels changing under the same layout.
+        let resized = matches!(
+            event,
+            WindowEvent::SurfaceResized(_) | WindowEvent::ScaleFactorChanged { .. }
+        );
         self.inner.window_event(event_loop, window_id, event);
+        if resized {
+            if let (Some(label), Some(tell)) =
+                (self.labels.get(&window_id).cloned(), self.resized.as_mut())
+            {
+                tell(&label);
+            }
+        }
         if moved_focus {
             if let Some(view) = self.inner.windows.get_mut(&window_id) {
                 crate::app::give_keyboard_back(&mut view.doc.inner_mut());
@@ -582,6 +661,20 @@ impl ApplicationHandler for Shell {
                     if let Some(view) = id.and_then(|id| self.inner.windows.get(&id)) {
                         view.window.set_minimized(false);
                         view.window.focus_window();
+                    }
+                    continue;
+                }
+                if let Some(Swapped(id, path, title)) = payload.downcast_ref::<Swapped>() {
+                    // The window wears the document's name, spelled the way
+                    // `Session::window` spells it for a window that was born
+                    // on one.
+                    if let Some(view) = self.inner.windows.get(id) {
+                        view.window.set_title(&format!("{title} — HyloPDF"));
+                    }
+                    if let (Some(label), Some(swap)) =
+                        (self.labels.get(id).cloned(), self.swap.as_mut())
+                    {
+                        swap(&label, path);
                     }
                     continue;
                 }

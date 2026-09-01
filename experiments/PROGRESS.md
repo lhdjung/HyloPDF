@@ -119,6 +119,13 @@ what it shows. See "The menus, and opening a document" below.
 the brief's own instruction about it. Trimming the margins is the chip marked
 Trim. See Phase 3 item 6.
 
+**Every key in the app's table answers.** ⌘D is dark mode — the other half of
+the pair the reader chose, not a default — and the machine's own light and
+dark is followed until the reader says otherwise. ⌘P hands the document to a
+program that prints and F1 is the Keyboard page. See "After Phase 3" below,
+which is also where the `SIGSEGV` this file used to record as unexplained is
+explained.
+
 ## The numbers
 
 One machine, one sitting, macOS 15 on Apple silicon, release builds, a
@@ -539,6 +546,15 @@ the library's lock, not the document's, because a per-document lock is exactly
 what was already there and exactly what does not help. It costs nothing
 measurable and it is the thing to remember if pages are ever drawn off the main
 thread.
+
+**And a lock in front of every call is not a lock in front of every call**, as
+a `SIGSEGV` a fortnight later showed: `FPDF_CloseDocument` is reached through
+`PdfDocument`'s own `Drop`, which runs wherever the last owner dies and takes
+no lock, and what it corrupts is a process-wide map in pdfium rather than the
+document being closed. See "After Phase 3" below for the crash report that
+names it and the four-line fix. The general form is worth keeping in front of
+this paragraph: **a `Drop` is a call site, and it is the one call site that
+does not appear at the place it happens.**
 
 ### What is tested
 
@@ -2020,7 +2036,15 @@ this was written on cannot run the function that reads the file. Windows still
 answers nothing: `GetProcessMemoryInfo` means a dependency for one number, and
 the test already knows what to do with silence.
 
-#### One thing seen once and not since
+#### One thing seen once and not since — solved, later; see "After Phase 3"
+
+**It was the first candidate below, and this section's own last paragraph
+named the fix.** Left as written because the reasoning is what is worth
+keeping: the crash came back a fortnight later, twice in six runs of the
+suite, and macOS had written a crash report that ended the guessing in one
+line. `FPDF_CloseDocument` from `Drop`, outside the lock, corrupting a
+process-wide map in pdfium keyed by the document being closed. What follows is
+what could honestly be said before that report existed.
 
 A single `SIGSEGV` out of the test binary, on the first run after the IME tests
 were written, with two of the five having passed. It has not come back in
@@ -2530,14 +2554,161 @@ not make.
 
 ### What is not built
 
-No theme editor and no `follow_system_theme` — the last needs a signal this
-reader does not get, and a switch that writes a setting nothing reads is
-worse than no switch. **Two of the app's forty-three keyboard actions still
-answer "not built yet"**: dark mode and print. There is still no text
-*layer*, and there is not going to be one: item 10 is what that was for.
+No theme editor. There is still no text *layer*, and there is not going to be
+one: item 10 is what that was for.
 
 **Phase 3 is complete.** Eleven items, and the last one came out ahead of the
 thing it was porting.
+
+---
+
+## After Phase 3: dark mode, help, print — and the last empty arm
+
+Three of the app's forty-three keyboard actions still answered "not built
+yet", and the sentence was carried by a catch-all at the bottom of `perform`
+that turned the keyboard into a live list of what was left. **The list is
+empty and the catch-all is gone**, which is worth more than the three
+features: an action added to `keymap.rs` and not handled in `app.rs` is now a
+compile error rather than a sentence in the notice line.
+
+The three were the three that are about something *outside* the document, and
+that is why they were last rather than because they are hard.
+
+### Dark mode, and the machine's own light and dark
+
+The reader had fourteen themes, a menu to choose one from and a `t` that
+cycled; what it did not have was the one gesture the brief asks for by name —
+"dark mode that is easy to toggle (via UI or shortcuts)". Two settings for it
+were already being written, because `Store::wear` has recorded `light_theme`
+and `dark_theme` beside `theme` since Phase 3 item 1: which slot a theme fills
+is read off its own paper, because that is the only thing that actually makes
+a theme dark. Nothing read them back.
+
+Now ⌘D does, and it moves between **the pair the reader chose** rather than
+between two defaults — Sepia by day and Tokyo Night by night is the case the
+two slots exist for, and it is a test.
+
+**`follow_system_theme` was listed as needing a signal this reader does not
+get. It does get one**: winit's `WindowEvent::ThemeChanged`, which macOS has
+answered since winit 0.28, plus `Window::theme()` for the startup question.
+Both go through `Appearance`, which is `Screen`'s sibling in every respect —
+a context holding one closure, answered by the shell out of the real window
+and by the harness out of a cell, because a component that asks winit what
+the system appearance is cannot be built without winit and the harness has no
+window. The event carries nothing: it says there is a new answer and the
+reader asks, exactly as a resize does, so one place answers the question and
+the startup path uses it too.
+
+**The one place this is not a port is the shape of the answer.** The app's
+`darkOutside()` is `matchMedia`, which always says light or dark because a
+webview is a browser; `Window::theme()` is an `Option`, and the absence is
+real. Read as "light" it would move every reader on a platform that does not
+report an appearance to the light theme at every launch, and turn following
+off the first time they chose a dark one. So `Store::outside` is
+`Option<bool>` all the way down and every rule is written against `Some` —
+which is a test of its own, because it is the half that is easy to write the
+wrong way round.
+
+Three rules came across unchanged and they are what make the switch feel like
+a decision rather than a mode:
+
+- Following is asked **before the first frame**, not after mounting, so a dark
+  machine never sees a white page on the way in. It is the same call as the
+  viewport question above it and for the same reason.
+- Choosing a theme whose darkness disagrees with the machine **stops
+  following**, and says so, and writes it down. Left following, the machine's
+  next word would take the choice straight back off them. ⌘D is that same
+  rule arriving through the same door, which is why `toggle_dark` goes
+  *through* `set_theme` rather than around it.
+- Choosing another theme of the darkness already in force says nothing about
+  the machine and leaves the switch alone.
+
+The two switches are on the Appearance page. The following one shows **the
+setting, not the setting narrowed by whether it can do anything today** — a
+control that reads back other than what is in the file is the picker lying
+about the page, which is `AGENTS.md`'s rule about swatches one step along. The
+sentence under it is where "this machine does not report an appearance" is
+said.
+
+One line more than the app's, deliberately: `other_half` checks that the slot
+holds a theme of the darkness it is the slot *for*. A theme file whose paper
+was edited from dark to light is still named by `dark_theme`, and the app
+trusts the name — so ⌘D hands back a light theme, records it in the other
+slot, and the pair repairs itself after having done nothing anybody could see.
+
+### Help, and print
+
+Help is the Keyboard page, which is the app's own answer and the reason that
+page is a key at all: "Help" behind a cog is a strange place to keep the
+answer to "what can this thing do". One line, now that the Settings window
+exists.
+
+Print prints nothing. It hands the document to a program that does —
+`open -a Preview`, Edge by absolute path on Windows, `xdg-open` on Linux —
+and the app's reasoning under those choices is the part worth having: the
+point of *naming* a program is that it is **not us**, because the system's
+default handler for a PDF may well be this reader, and handing a document to
+ourselves to print it is a loop. It is a `Printer` context beside `Clip` and
+`Pick`, for the reason those are contexts: `cargo test` must not be able to
+open Preview on four hundred pages.
+
+### And the `SIGSEGV` that was seen once is understood
+
+`PROGRESS.md` has carried "seen once and not understood: a single `SIGSEGV`
+from the test binary, not reproduced in thirty runs since", with two
+candidates. It came back — twice in six full runs of the suite, in two
+different test binaries, with no panic and no assertion — and this time macOS
+had written a crash report, which named it outright:
+
+```
+__tree_remove(…)
+CPDF_Document::~CPDF_Document()
+FPDF_CloseDocument
+<PdfDocument as Drop>::drop
+drop_in_place<dioxus_reader::pdfium::Open>
+drop_in_place<dioxus_reader::harness::Reader>
+```
+
+It was the first candidate, and the reason it took a report to see is that the
+call is invisible in the source. **Nothing in this crate calls
+`FPDF_CloseDocument`** — `PdfDocument`'s own `Drop` does, whenever the last
+`Arc<dyn PageSource>` goes, on whatever thread that happens to be. Every other
+call into pdfium in `pdfium.rs` is taken behind the process-wide lock, and
+this one is not written down anywhere to be taken behind anything.
+
+What it corrupts is not the document being closed. **pdfium keeps a
+process-wide map of stock fonts keyed by `CPDF_Document*`**, and
+`~CPDF_Document` erases its own entry from it; erase a node from a red-black
+tree while another thread is inserting one and the tree is broken, after which
+any thread that walks it dies. So the crash lands in a test that was opening a
+document, caused by a test that was finishing one — which is exactly why it
+looked random, moved between binaries, and would not reproduce alone.
+
+The fix is an `impl Drop for Document` that takes the library lock and closes
+the document inside it, which is `release()`'s one line again; the `Open` that
+drops afterwards has nothing left to close. Eight consecutive clean runs of
+the suite against two failures in the six before it — evidence rather than
+proof, which is what a race allows.
+
+The rule it leaves is general and worth carrying to anything wrapping a C
+library behind a lock: **a `Drop` is a call site, and it is the one call site
+that does not appear at the place it happens.** The second candidate in that
+note — CJK font fallback on several threads — is not ruled out by this and is
+also not needed to explain anything any more.
+
+### And this one was checked in the real app, because it had to be
+
+`Window::theme()` and `WindowEvent::ThemeChanged` are the window's, so the
+harness proves the rules and proves nothing about the wire. Both halves were
+run for real: the reader was left set to Sepia with following on, the machine
+was in dark mode, and it launched wearing Hylo Dark — so the startup question
+is answered before the first frame, and the answer is written down. Then the
+machine was switched to light and back with the reader open, and it moved to
+**Sepia** and back to Hylo Dark — not to Hylo Light, which is the pair doing
+what the two slots are for. `follow_system_theme` stayed on throughout, which
+is the other half: following the machine is not the reader overruling it.
+
+`tests/prefs.rs` is 14 and `src/store.rs` has four of its own; 339 in total.
 
 ---
 

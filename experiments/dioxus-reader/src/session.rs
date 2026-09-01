@@ -164,8 +164,10 @@ impl Session {
     /// choice is between a file picker and the document already in front of
     /// somebody — and the second is both the cheaper answer and a thing
     /// readers actually want, which is two places in one book at once. The
-    /// picker is a door of its own (`rfd`, in the assessment's table) and
-    /// belongs with the menus, which are not built.
+    /// picker is a door of its own (`Pick`, which is `rfd` through
+    /// `blitz-shell`) and it is built — it is what "Open in a new window…"
+    /// under the document's name asks, exactly as in the app, where ⌘N is
+    /// likewise not the picker.
     pub fn another(&self) -> Option<WindowSpec> {
         let showing = self
             .desk

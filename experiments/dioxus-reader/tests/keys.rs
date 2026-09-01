@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use dioxus::html::{Code, Key, Modifiers};
 use dioxus_reader::harness::{Options, Reader};
 use dioxus_reader::keymap::{
-    chords_of, default_keys, describe_binding, describe_chord, every, label, needs_document,
+    chords_of, default_keys, describe_binding, describe_chord, every, needs_document,
     parse_binding, parse_chord, Action, Keymap, Press, ACTIONS, EXTRA, GROUPS,
 };
 
@@ -442,15 +442,29 @@ fn the_keys_a_vim_shaped_reader_reaches_for() {
     );
 }
 
-/// The arms `perform` does not have are as much a part of this as the ones it
-/// does: an action in the table that this reader cannot do says so, which
-/// turns the keyboard into a live list of what Phase 3 has left to build.
+/// **Every action in the table answers**, which used to be the interesting
+/// thing this file said the other way round: for most of Phase 3 an action
+/// this reader could not do fell through to a catch-all saying so, and the
+/// keyboard was a live list of what was left. Nothing is left, so the
+/// catch-all is gone and this presses the last three to go.
 #[test]
-fn a_key_bound_to_something_unbuilt_says_so() {
+fn every_action_in_the_table_answers() {
     let mut reader = Reader::open(&Reader::book());
+
+    // ⌘P hands the document to a program that prints. Nothing here opens one
+    // — see `Printer` — and what is checked is that the path went somewhere.
     reader.press_chord("mod+p");
-    assert_eq!(
-        reader.state().notice,
-        format!("{} is not built yet", label(Action::Print))
-    );
+    assert_eq!(reader.printed(), vec![Reader::book()]);
+    assert_eq!(reader.state().notice, "", "and it says nothing about it");
+
+    // F1 is the Keyboard page, which is the list of everything above.
+    reader.press("F1");
+    assert_eq!(reader.harness.text_content(".nav-item.on"), "Keyboard");
+    reader.press("Escape");
+
+    // ⌘D is the other half of the theme the reader chose. `tests/prefs.rs`
+    // is where the pair, the machine and the switch are.
+    reader.press_chord("mod+d");
+    assert_eq!(reader.state().theme, "Hylo Dark");
+
 }

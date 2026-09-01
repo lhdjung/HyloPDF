@@ -9,10 +9,10 @@
 //! and it is tolerable between two documents and not between a switch and the
 //! thing the switch is about.
 //!
-//! What is not here, and is not pretended: the theme editor, and
-//! `follow_system_theme`. The first is a page of its own and the second needs
-//! a signal this reader does not yet get — a switch that writes a setting
-//! nothing reads is worse than no switch.
+//! What is not here, and is not pretended: the theme editor, which is a page
+//! of its own. `follow_system_theme` used to be beside it for want of a
+//! signal; the signal is `WindowEvent::ThemeChanged` and the switch is on the
+//! Appearance page now — see [`crate::app::Appearance`].
 
 use dioxus::prelude::*;
 
@@ -454,10 +454,35 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
             )
         })
         .collect();
+    let dark = held.store.dark_now();
+    let following = held.store.flag("follow_system_theme");
+    // What the machine says, which is the difference between a switch that
+    // does something and a switch that cannot: a platform reporting nothing
+    // has no light and dark to follow, and saying so is better than leaving
+    // an inert switch on the page.
+    let machine = held.store.outside();
     drop(held);
+    let mac = keymap::this_machine();
 
     rsx! {
         h2 { class: "pane-title", "Appearance" }
+        Field {
+            label: "Dark mode",
+            note: format!("Swaps between the light theme and the dark theme you last chose, so this comes back to your pair rather than to a default. {}", if mac { "⌘D" } else { "Ctrl+D" }),
+            Toggle { on: dark, onchange: move |on| viewer.write().set_dark(on) }
+        }
+        Field {
+            label: "Light or dark follow system",
+            note: match machine {
+                Some(_) => "Follows the machine's own appearance. Choosing a theme that disagrees with it turns this off.".to_string(),
+                None => "This machine does not report an appearance, so there is nothing to follow.".to_string(),
+            },
+            // The setting, not the setting narrowed by whether it can do
+            // anything today: a switch that reads back other than what is in
+            // the file is the picker lying about the page, and the note above
+            // is where "there is nothing to follow" belongs.
+            Toggle { on: following, onchange: move |on| viewer.write().set_follow_system(on) }
+        }
         Note { text: "A theme is a file. These are the ones in your themes folder, and the ones that ship are written there on every run so they can be read and copied." }
         div { class: "theme-grid",
             for (index, name, colours) in themes {

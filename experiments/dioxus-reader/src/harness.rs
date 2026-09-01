@@ -113,6 +113,15 @@ pub struct Options {
     /// shape and same reason as [`crate::app::Clip`], one step further —
     /// a clipboard takes something away, a modal window takes the run.
     pub picks: Vec<String>,
+    /// What the machine says about light and dark before the reader opens.
+    ///
+    /// `None` is a machine that will not say, which is winit's own `None` and
+    /// this harness's default — so a test that does not care about appearance
+    /// gets a reader that follows nothing, whatever `follow_system_theme`
+    /// happens to be. `openApp({ appearance: "dark" })` in the app's harness
+    /// is the twin, and it defaults to light rather than to nothing, because
+    /// a browser has no third answer.
+    pub appearance: Option<bool>,
     /// Where this reader's settings and themes live.
     ///
     /// **A directory of its own per reader, and that is not fastidiousness.**
@@ -146,6 +155,7 @@ impl Default for Options {
             settings: Vec::new(),
             picks: Vec::new(),
             watch: false,
+            appearance: None,
             config: scratch_config(),
         }
     }
@@ -235,6 +245,9 @@ pub struct Reader {
     /// component holds and reads whenever it likes — which is the whole shape
     /// of the thing in the app, where it reads winit. See [`Reader::resize`].
     sizing: Rc<std::cell::Cell<(f64, f64, f64)>>,
+    /// What the machine says about light and dark, read the same way and for
+    /// the same reason. See [`Reader::set_appearance`].
+    outside: Rc<std::cell::Cell<Option<bool>>>,
     opened: Rc<RefCell<Vec<String>>>,
     /// The mailbox the reader's watch task listens on. See [`Reader::deliver`].
     post: crate::emit::Post,
@@ -248,6 +261,9 @@ pub struct Reader {
     /// the real one is the machine's clipboard, and a suite that took it would
     /// empty the clipboard of whoever is running `cargo test`.
     copied: Rc<RefCell<Vec<String>>>,
+    /// Every document this reader handed over to print. See
+    /// [`crate::app::Printer`].
+    printed: Rc<RefCell<Vec<String>>>,
 }
 
 impl Reader {
@@ -291,6 +307,22 @@ impl Reader {
         self.harness.set_viewport_size(width, height);
         self.deliver(crate::emit::News {
             event: "window-resized".into(),
+            target: Some(crate::windows::MAIN.into()),
+            payload: serde_json::Value::Null,
+        });
+    }
+
+    /// The machine went light or dark, exactly as changing it in System
+    /// Settings does.
+    ///
+    /// Two halves, as [`Reader::resize`] has: the answer the reader gets when
+    /// it asks moves, and the news goes down the mailbox — which is
+    /// `Shell::on_theme` in the app. Leave the first out and the reader asks
+    /// and hears the old answer; leave the second out and it never asks.
+    pub fn set_appearance(&mut self, dark: Option<bool>) {
+        self.outside.set(dark);
+        self.deliver(crate::emit::News {
+            event: "appearance-changed".into(),
             target: Some(crate::windows::MAIN.into()),
             payload: serde_json::Value::Null,
         });
@@ -344,6 +376,12 @@ impl Reader {
 
     /// Everything this reader has copied, in order — see [`crate::app::Clip`].
     /// Nothing reaches the machine's own clipboard.
+    /// Every document this reader handed to a program that prints, in order.
+    /// Nothing was opened; see [`crate::app::Printer`].
+    pub fn printed(&self) -> Vec<String> {
+        self.printed.borrow().clone()
+    }
+
     pub fn copied(&self) -> Vec<String> {
         self.copied.borrow().clone()
     }
@@ -409,6 +447,8 @@ impl Reader {
             options.scale as f64,
         )));
         let asked_size = sizing.clone();
+        let outside = Rc::new(std::cell::Cell::new(options.appearance));
+        let asked_appearance = outside.clone();
         let scale = options.scale as f64;
         // Where a link out of the document would have gone, written down
         // instead of opened. The default is the system browser and is right in
@@ -425,6 +465,11 @@ impl Reader {
         // clipboard is somebody's and taking it is worse than adding a window.
         let copied: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let copying = copied.clone();
+        // …and what it handed to a program that prints, for the same reason
+        // one step further again: a clipboard takes something away, a picker
+        // takes the run, and printing takes somebody's paper.
+        let printed: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let printing = printed.clone();
         // …and what the picker will answer with, taken from the front of the
         // list one Open at a time.
         let picks: Rc<RefCell<std::collections::VecDeque<String>>> =
@@ -433,6 +478,7 @@ impl Reader {
         vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(posting);
             provide_context(Screen::new(move || asked_size.get()));
+            provide_context(crate::app::Appearance::new(move || asked_appearance.get()));
             provide_context(Away::new(move |url| {
                 recorder.borrow_mut().push(url.to_string());
             }));
@@ -441,6 +487,10 @@ impl Reader {
             }));
             provide_context(crate::app::Clip::new(move |text| {
                 copying.borrow_mut().push(text.to_string());
+            }));
+            provide_context(crate::app::Printer::new(move |path| {
+                printing.borrow_mut().push(path.to_string());
+                Ok(())
             }));
             provide_context(crate::app::Pick::new(move || {
                 picking.borrow_mut().pop_front()
@@ -475,10 +525,12 @@ impl Reader {
             height: options.height,
             scale,
             sizing,
+            outside,
             opened,
             post,
             asks,
             copied,
+            printed,
         };
         reader.focus_root();
         reader.settle();
@@ -929,6 +981,25 @@ impl Reader {
                     // ours.
                     .and_then(|attrs| attrs.iter().find(|attr| &*attr.name.local == attribute))
                     .map(|attr| attr.value.to_string())
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    /// What every node matching `selector` says, in document order.
+    ///
+    /// [`Reader::attribute_all`]'s twin, and public for the same reason: a
+    /// test outside this crate cannot walk the DOM. The Settings window is
+    /// what wants it — a switch has no text of its own, so which switch is
+    /// which is read off the labels beside them, in order.
+    pub fn text_all(&self, selector: &str) -> Vec<String> {
+        self.harness
+            .query_all(selector)
+            .into_iter()
+            .map(|node| {
+                let doc = self.harness.base();
+                doc.get_node(node)
+                    .map(|node| node.text_content())
                     .unwrap_or_default()
             })
             .collect()

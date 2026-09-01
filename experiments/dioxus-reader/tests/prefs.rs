@@ -200,3 +200,164 @@ fn a_theme_is_chosen_from_its_own_swatch() {
     reader.click_nth(".theme-card", 1);
     assert_eq!(reader.state().theme, "Hylo Dark");
 }
+
+/* --------------------------------------------------- dark mode, and the machine */
+
+/// Which of the Appearance page's switches is on, by its label.
+fn switched(reader: &Reader, label: &str) -> bool {
+    let labels = reader.text_all(".field-label");
+    let index = labels
+        .iter()
+        .position(|found| found == label)
+        .unwrap_or_else(|| panic!("no field called {label}: {labels:?}"));
+    reader.attribute_all("[role='switch']", "aria-checked")[index] == "true"
+}
+
+/// The Appearance page, with the switches on it.
+fn appearance(reader: &mut Reader) {
+    reader.press_chord("mod+,");
+    reader.click_nth(".nav-item", 1);
+    assert_eq!(page(reader), "Appearance");
+}
+
+#[test]
+fn dark_mode_is_a_key_and_a_switch_and_they_are_the_same_thing() {
+    let mut reader = Reader::open(&Reader::book());
+    assert_eq!(reader.state().theme, "Hylo Light");
+
+    // ⌘D, which until now answered "Dark mode is not built yet".
+    reader.press_chord("mod+d");
+    assert_eq!(reader.state().theme, "Hylo Dark");
+    reader.press_chord("mod+d");
+    assert_eq!(reader.state().theme, "Hylo Light");
+
+    // And the switch on the Appearance page, which is the same call.
+    appearance(&mut reader);
+    assert!(!switched(&reader, "Dark mode"));
+    reader.click_nth("[role='switch']", 0);
+    assert!(switched(&reader, "Dark mode"));
+    reader.press("Escape");
+    assert_eq!(reader.state().theme, "Hylo Dark");
+}
+
+#[test]
+fn dark_mode_returns_to_the_pair_the_reader_chose() {
+    // Sepia by day and Tokyo Night by night, which is the whole reason there
+    // are two remembered slots rather than one remembered theme.
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            settings: vec![
+                ("theme".into(), "sepia".into()),
+                ("light_theme".into(), "sepia".into()),
+                ("dark_theme".into(), "tokyo-night".into()),
+            ],
+            ..Options::default()
+        },
+    );
+    assert_eq!(reader.state().theme, "Sepia");
+    reader.press_chord("mod+d");
+    assert_eq!(reader.state().theme, "Tokyo Night");
+    reader.press_chord("mod+d");
+    assert_eq!(reader.state().theme, "Sepia", "not Hylo Light");
+}
+
+#[test]
+fn a_dark_machine_is_read_in_the_dark_from_the_first_frame() {
+    // Not "the theme changes shortly after launch": the reader asks the
+    // window before it lays anything out, so a dark machine never sees a
+    // white page on the way in. There is no frame here in which it is light.
+    let reader = Reader::open_with(
+        &Reader::book(),
+        Options { appearance: Some(true), ..Options::default() },
+    );
+    assert_eq!(reader.state().theme, "Hylo Dark");
+}
+
+#[test]
+fn the_machine_changing_its_mind_is_followed_and_then_is_not() {
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options { appearance: Some(false), ..Options::default() },
+    );
+    assert_eq!(reader.state().theme, "Hylo Light");
+
+    // Evening.
+    reader.set_appearance(Some(true));
+    assert_eq!(reader.state().theme, "Hylo Dark");
+    reader.set_appearance(Some(false));
+    assert_eq!(reader.state().theme, "Hylo Light");
+
+    // Now the reader overrules it, by pressing ⌘D at noon. Following stops,
+    // and the reader is told where the switch is — otherwise the machine's
+    // next word would take the choice straight back off them.
+    reader.press_chord("mod+d");
+    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert!(
+        reader.state().notice.contains("No longer following"),
+        "{}",
+        reader.state().notice
+    );
+    appearance(&mut reader);
+    assert!(!switched(&reader, "Light or dark follow system"));
+    reader.press("Escape");
+
+    // …and the machine going light again leaves them where they are.
+    reader.set_appearance(Some(false));
+    assert_eq!(reader.state().theme, "Hylo Dark");
+}
+
+#[test]
+fn following_can_be_switched_back_on_and_takes_effect_at_once() {
+    // A switch that says "follow the system" and leaves a light theme up on a
+    // dark machine has not been believed by anybody.
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            appearance: Some(true),
+            settings: vec![("follow_system_theme".into(), false.into())],
+            ..Options::default()
+        },
+    );
+    assert_eq!(reader.state().theme, "Hylo Light", "not following, so not moved");
+
+    appearance(&mut reader);
+    assert!(!switched(&reader, "Light or dark follow system"));
+    reader.click_nth("[role='switch']", 1);
+    assert!(switched(&reader, "Light or dark follow system"));
+    reader.press("Escape");
+    assert_eq!(reader.state().theme, "Hylo Dark");
+}
+
+#[test]
+fn a_machine_that_will_not_say_leaves_the_reader_alone() {
+    // winit answers `Option<Theme>` and the `None` is real. Read as "light"
+    // it would move every reader on such a platform to the light theme at
+    // every launch, and turn following off the first time they chose a dark
+    // one — which is why `Store::outside` is an `Option` all the way down.
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            settings: vec![
+                ("theme".into(), theme::DEFAULT_DARK.into()),
+                ("dark_theme".into(), theme::DEFAULT_DARK.into()),
+            ],
+            ..Options::default()
+        },
+    );
+    assert_eq!(reader.state().theme, "Hylo Dark");
+    reader.set_appearance(None);
+    assert_eq!(reader.state().theme, "Hylo Dark");
+
+    appearance(&mut reader);
+    // The switch still reads the setting rather than what the setting can do
+    // today — a control that reads back other than what is in the file is the
+    // picker lying about the page. The sentence under it is where the
+    // machine's silence is said.
+    assert!(switched(&reader, "Light or dark follow system"));
+    let notes = reader.text_all(".field-note");
+    assert!(
+        notes.iter().any(|note| note.contains("does not report an appearance")),
+        "{notes:?}"
+    );
+}

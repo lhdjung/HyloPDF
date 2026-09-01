@@ -11,8 +11,12 @@
 //! tests through today. It is behind the `harness` feature, which `cargo test`
 //! turns on and `cargo build` does not, so nothing it needs is in the binary.
 //!
-//! What is not built: no markup, no settings *window*, no Keyboard page, and
-//! no file picker.
+//! What is not built: the theme editor, and nothing else on the app's own
+//! list of things a reader can ask for. Every one of the app's forty-three
+//! keyboard actions answers here — the last three to arrive were dark mode,
+//! help and print, which are the three that are about something outside the
+//! document — so an action added to [`keymap`] and not handled in [`app`] is
+//! a compile error rather than a sentence in the notice line.
 //!
 //! What *is* built, beyond opening a document and reading it: the document's
 //! own links, with the page labels and the go-to field that belong to the same

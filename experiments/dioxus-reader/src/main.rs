@@ -220,6 +220,16 @@ fn main() {
         });
     }
     {
+        // The machine went light or dark. Same shape as the resize above and
+        // for the same reason — the event says only that there is a new
+        // answer, and the reader asks the window for it. See
+        // `Shell::on_theme`.
+        let handle = AppHandle::new(exchange.clone());
+        shell.on_theme(move |label| {
+            let _ = handle.emit_to(label, "appearance-changed", ());
+        });
+    }
+    {
         // Raised before the first window of a quit goes, which is the whole
         // of what tells a window closed by the reader from a window closed
         // because the app is going. See `windows::Desk::closing`.

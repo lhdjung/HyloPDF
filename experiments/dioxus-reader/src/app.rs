@@ -87,6 +87,104 @@ impl PartialEq for Handle {
     }
 }
 
+/// What handing the document to something that prints does.
+///
+/// A context holding one closure, for the reason [`Away`] is one, and it is
+/// the same answer the app arrives at from the other side: this application
+/// does not print, it hands the file to one that does. `print_document` in
+/// the app's `lib.rs` is `open -a Preview` on macOS, Edge by absolute path on
+/// Windows and `xdg-open` on Linux, and the reasoning under those choices is
+/// worth having rather than restating — the point of naming a program is that
+/// it is **not us**, because the system's default handler for a PDF may well
+/// be this reader, and handing a document to ourselves to print it is a loop.
+///
+/// A test must not be able to open Preview, which is why this is a door at
+/// all: `cargo test` printing four hundred pages would be a worse trespass
+/// than [`Clip`]'s.
+/// What handing a document over came to: nothing, or a sentence for the
+/// notice line.
+type Handover = Rc<dyn Fn(&str) -> Result<(), String>>;
+
+#[derive(Clone)]
+pub struct Printer(Handover);
+
+impl PartialEq for Printer {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Printer {
+    pub fn new(print: impl Fn(&str) -> Result<(), String> + 'static) -> Self {
+        Printer(Rc::new(print))
+    }
+
+    /// The default: the platform's own, exactly as the app names them.
+    pub fn to_the_system() -> Self {
+        Printer::new(|path| {
+            let file = std::path::PathBuf::from(path);
+            if !file.exists() {
+                let name = file
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string());
+                return Err(format!("{name} is no longer there."));
+            }
+
+            #[cfg(target_os = "macos")]
+            let mut command = {
+                let mut command = std::process::Command::new("open");
+                command.arg("-a").arg("Preview").arg(&file);
+                command
+            };
+
+            // Edge by absolute path, because it is not on `PATH` and because
+            // naming it is the whole point: `ShellExec_RunDLL` alone opens the
+            // file with the *default* handler, which after installing this
+            // reader may be this reader.
+            #[cfg(target_os = "windows")]
+            let mut command = {
+                let edge = std::env::var("ProgramFiles(x86)")
+                    .or_else(|_| std::env::var("ProgramFiles"))
+                    .map(|root| {
+                        std::path::PathBuf::from(root)
+                            .join(r"Microsoft\Edge\Application\msedge.exe")
+                    })
+                    .ok()
+                    .filter(|path| path.exists());
+                match edge {
+                    Some(edge) => {
+                        let mut command = std::process::Command::new(edge);
+                        command.arg(&file);
+                        command
+                    }
+                    None => {
+                        let mut command = std::process::Command::new("rundll32.exe");
+                        command.arg("shell32.dll,ShellExec_RunDLL").arg(&file);
+                        command
+                    }
+                }
+            };
+
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            let mut command = {
+                let mut command = std::process::Command::new("xdg-open");
+                command.arg(&file);
+                command
+            };
+
+            command
+                .spawn()
+                .map(|_| ())
+                .map_err(|err| format!("Could not hand the document over to print: {err}"))
+        })
+    }
+
+    pub fn print(&self, path: &str) -> Result<(), String> {
+        (self.0)(path)
+    }
+}
+
 /// Where the reader's settings and themes live, and what to wear for this run.
 ///
 /// A path rather than an open [`Store`], because a component's props have to
@@ -179,6 +277,48 @@ impl Screen {
         (self.0)()
     }
 }
+
+/// Whether the machine is in dark mode, asked of whatever knows.
+///
+/// [`Screen`]'s sibling, and for the same reason: a component that asks winit
+/// what the system appearance is cannot be built without winit, and the
+/// harness has no window. The shell answers it out of `Window::theme()`, the
+/// harness out of a cell a test can set, and nothing else answers it at all.
+///
+/// It answers `Option<bool>` where the app's `matchMedia` answers `bool`,
+/// because winit says `Option<Theme>` and the absence is real: a platform
+/// that does not report an appearance must leave the reader wearing what they
+/// chose rather than be read as "light". See [`crate::store::Store::outside`].
+#[derive(Clone)]
+pub struct Appearance(Rc<dyn Fn() -> Option<bool>>);
+
+impl PartialEq for Appearance {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Appearance {
+    pub fn new(dark: impl Fn() -> Option<bool> + 'static) -> Self {
+        Appearance(Rc::new(dark))
+    }
+
+    /// A machine that will not say, which is what a shell that has not
+    /// provided one leaves behind and what most tests want.
+    pub fn unknown() -> Self {
+        Appearance::new(|| None)
+    }
+
+    pub fn get(&self) -> Option<bool> {
+        (self.0)()
+    }
+}
+
+/// Said when a theme chosen by hand has taken the reader off following the
+/// machine. It names the window the switch is in, because a switch that moved
+/// without being touched is one the reader has to be able to find.
+pub const FOLLOWING_OFF: &str =
+    "No longer following the system's light and dark. Settings has the switch.";
 
 /// The toolbar's height, the notice line's, and the hairline between them and
 /// the document.
@@ -2985,8 +3125,8 @@ impl Viewer {
 
     /// Wear the theme at `index` in the list, and remember it.
     pub fn set_theme(&mut self, index: usize) {
-        let name = self.store.wear(index);
-        if name.is_empty() {
+        let worn = self.store.wear(index);
+        if worn.name.is_empty() {
             return;
         }
         // Every mounted page reads this on its next paint, and the next paint
@@ -2994,8 +3134,72 @@ impl Viewer {
         // recoloured by a compute pass over it rather than drawn again, which
         // is the whole difference from `keyFor()` carrying the theme.
         self.chosen.set(self.store.palette());
-        self.notice = self.store.complaint.clone().unwrap_or(name);
+        // Three things could be said and one line says one of them, so they
+        // are in the order of how much the reader needs to know: a colour the
+        // renderer cannot read is a theme that is not going to look like
+        // itself; having just been taken off following the machine is a
+        // switch that has moved without being touched; and otherwise the name
+        // of what is now being read in.
+        self.notice = match (self.store.complaint.clone(), worn.stopped_following) {
+            (Some(complaint), _) => complaint,
+            (None, true) => FOLLOWING_OFF.into(),
+            (None, false) => worn.name,
+        };
         self.generation += 1;
+    }
+
+    /// ⌘D, and the switch on the Appearance page.
+    ///
+    /// The theme moves to the other half of the pair the reader has already
+    /// chosen — see [`Store::other_half`] — and going through `set_theme`
+    /// rather than around it is what makes the keystroke stop the app
+    /// following the machine, which is right: pressing ⌘D at noon is a reader
+    /// saying they want the dark theme *now*, and following would take it
+    /// away again at the machine's next word.
+    pub fn toggle_dark(&mut self) {
+        self.set_dark(!self.store.dark_now());
+    }
+
+    pub fn set_dark(&mut self, on: bool) {
+        match self.store.other_half(on) {
+            Some(index) => self.set_theme(index),
+            // It takes deleting half the themes directory to reach this, and
+            // saying nothing would read as a broken key.
+            None => {
+                self.notice = format!(
+                    "There is no {} theme in your themes folder.",
+                    if on { "dark" } else { "light" }
+                );
+            }
+        }
+    }
+
+    /// The machine's light or dark, at startup and whenever it changes.
+    ///
+    /// `followSystemTheme` in `main.ts`, and called at startup for the reason
+    /// that file gives: the machine can have changed its mind while the app
+    /// was shut. What is *not* the app's is `None` — a webview always answers
+    /// this question and a window does not, so a platform that will not say
+    /// leaves the reader wearing what they chose. See [`Store::outside`].
+    pub fn follow_system(&mut self, dark: Option<bool>) {
+        self.store.set_outside(dark);
+        if let Some(index) = self.store.following() {
+            self.set_theme(index);
+        }
+    }
+
+    /// The switch itself. Turning it on takes effect at once rather than at
+    /// the machine's next change, because a switch that says "follow the
+    /// system" and leaves a light theme up on a dark machine has not been
+    /// believed by anybody.
+    pub fn set_follow_system(&mut self, on: bool) {
+        self.store
+            .set(vec![("follow_system_theme".into(), serde_json::json!(on))]);
+        if on {
+            if let Some(index) = self.store.following() {
+                self.set_theme(index);
+            }
+        }
     }
 
     /* ------------------------------------- what changed on the disk */
@@ -3034,9 +3238,9 @@ impl Viewer {
             self.chosen.set(self.store.palette());
             self.notice = self.store.complaint.clone().unwrap_or_default();
         } else if let Some(index) = self.store.replacement_for(&before) {
-            let name = self.store.wear(index);
+            let worn = self.store.wear(index);
             self.chosen.set(self.store.palette());
-            self.notice = format!("{} is gone. Now reading in {name}.", before.name);
+            self.notice = format!("{} is gone. Now reading in {}.", before.name, worn.name);
         }
         self.generation += 1;
     }
@@ -3419,12 +3623,24 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             // guessed, and it is the one `main.rs` defaults to.
             .unwrap_or_else(|| Screen::fixed(1100.0, 900.0, 1.0))
     });
+    // …and what it says about light and dark, which is asked in the same
+    // breath and for the same reason. See [`Appearance`].
+    let appearance = use_hook(|| {
+        dioxus_core::try_consume_context::<Appearance>().unwrap_or_else(Appearance::unknown)
+    });
     let mut viewer = use_signal(|| {
         let mut store = Store::at(&config.dir);
         if let Some(index) = config.theme {
             store.wear_for_now(index);
         }
         let mut viewer = Viewer::new(document.0.clone(), chosen.clone(), store);
+        // **Before the first frame, like the viewport above it**, and for the
+        // reader's sake rather than the renderer's: a machine in dark mode
+        // must never see a white page on the way in, which is the sentence
+        // `followSystemTheme` in `main.ts` is written under. It costs one
+        // question of the window and, on the ordinary launch where nothing
+        // has changed, nothing else.
+        viewer.follow_system(appearance.get());
         // **Sized before the first frame, not on mount.** It was laid out at
         // the default viewport and corrected by `onmounted`, which meant every
         // page in the window was drawn at one size, re-keyed, and drawn again
@@ -3448,6 +3664,12 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     // answers these against winit, and a harness writes them down.
     let frame =
         use_hook(|| dioxus_core::try_consume_context::<Frame>().unwrap_or_else(Frame::unanswered));
+    // And what hands the document to something that prints. See [`Printer`]:
+    // the default is the platform's own program, and a harness writes the
+    // path down instead of opening one.
+    let printer = use_hook(|| {
+        dioxus_core::try_consume_context::<Printer>().unwrap_or_else(Printer::to_the_system)
+    });
     // And where a copied passage goes. See [`Clip`]: the default is the
     // system's clipboard through the shell provider Blitz hands every window,
     // and a harness provides its own so that `cargo test` does not empty
@@ -3493,6 +3715,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         let frame = frame.clone();
         let clip = clip.clone();
         let pick = pick.clone();
+        let printer = printer.clone();
         move |event: KeyboardEvent| {
             let (press, screen) = {
                 let held = viewer.read();
@@ -3511,7 +3734,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 Press::Nothing => viewer.write().pending.clear(),
                 Press::Act(action) => {
                     viewer.write().pending.clear();
-                    perform(viewer, action, screen, &frame, &clip, &pick);
+                    perform(viewer, action, screen, &frame, &clip, &pick, &printer);
                 }
             }
         }
@@ -3595,6 +3818,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         };
         let listening = post.clone();
         let sizing = screen.clone();
+        let watching_appearance = appearance.clone();
         spawn(async move {
             loop {
                 let news = listening.next().await;
@@ -3617,6 +3841,13 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     "window-resized" => {
                         let (width, height, _scale) = sizing.get();
                         viewer.write().fit_window(width, height);
+                    }
+                    // The machine went light or dark while the reader was
+                    // reading. Nothing carries the answer — the event says
+                    // only that there is a new one, exactly as a resize does,
+                    // and it is asked of the window. See `Shell::on_theme`.
+                    "appearance-changed" => {
+                        viewer.write().follow_system(watching_appearance.get());
                     }
                     // Nothing else is emitted, and an unknown event is a
                     // version of this crate that has not caught up rather
@@ -4801,12 +5032,15 @@ pub(crate) fn rescan(mut viewer: Signal<Viewer>, token: Option<u64>) {
 /// what `main.ts` has, and for the same reason: the table decides *which*
 /// action, so nothing here has to know anything about keys.
 ///
-/// **The arms that are missing are the interesting half.** Every action in
-/// the app's table is carried across whether or not this reader can do it, so
-/// a key bound to something unbuilt says so rather than doing nothing —
-/// which turns the keyboard into a live list of what Phase 3 has left. It is
-/// also the honest answer to a reader who presses ⌘P: printing is not there
-/// yet, and silence would be indistinguishable from a broken keymap.
+/// **There are no arms missing, and that is new.** Every action in the app's
+/// table is carried across whether or not this reader can do it, and for most
+/// of Phase 3 the ones it could not do fell through to a catch-all saying so
+/// — which turned the keyboard into a live list of what was left. The list is
+/// empty: all forty-three of the app's actions answer here, and the three
+/// that took longest than the rest were dark mode, help and print, which are
+/// the three that are about something outside the document. The catch-all is
+/// gone with them, so an action added to [`crate::keymap`] and not handled
+/// here is now a compile error rather than a sentence in the notice line.
 fn perform(
     mut viewer: Signal<Viewer>,
     action: Action,
@@ -4814,6 +5048,7 @@ fn perform(
     frame: &Frame,
     clip: &Clip,
     pick: &Pick,
+    printer: &Printer,
 ) {
     // Every movement goes through the viewer rather than through an offset,
     // because in paged mode an offset is not where a reader ends up: the page
@@ -4852,6 +5087,24 @@ fn perform(
         Action::RotateRight => viewer.write().rotate(1),
         Action::RotateLeft => viewer.write().rotate(-1),
         Action::NextTheme => viewer.write().next_theme(),
+        Action::Dark => viewer.write().toggle_dark(),
+        // F1 and ⌘/, and the app's own answer to both: the Keyboard page,
+        // which is the list of everything this reader answers to and is drawn
+        // from the keymap rather than from a list of its own. "Help" behind a
+        // cog is a strange place to keep the answer to "what can this thing
+        // do", which is why it is a key at all.
+        Action::Help => viewer.write().show_pane(Pane::Keyboard),
+        // ⌘P, and it prints nothing: the document is handed to a program that
+        // does. See [`Printer`].
+        Action::Print => {
+            let path = viewer.read().document.path().to_string();
+            if path.is_empty() {
+                return;
+            }
+            if let Err(said) = printer.print(&path) {
+                viewer.write().notice = said;
+            }
+        }
         Action::Sidebar => viewer.write().toggle_sidebar(),
         Action::Mark => {
             let page = viewer.read().page();
@@ -5023,10 +5276,6 @@ fn perform(
                 Spread::Single
             };
             viewer.write().set_spread(next);
-        }
-        not_built => {
-            let said = format!("{} is not built yet", crate::keymap::label(not_built));
-            viewer.write().notice = said;
         }
     }
 }

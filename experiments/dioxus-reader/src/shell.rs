@@ -210,6 +210,10 @@ type Swap = Box<dyn FnMut(&str, &str)>;
 /// [`Shell::on_resized`].
 type Resized = Box<dyn FnMut(&str)>;
 
+/// A window's name, said again every time the machine goes light or dark. See
+/// [`Shell::on_theme`].
+type Themed = Box<dyn FnMut(&str)>;
+
 pub struct Shell {
     inner: BlitzApplication<DioxusNativeWindowRenderer>,
     proxy: BlitzShellProxy,
@@ -233,6 +237,8 @@ pub struct Shell {
     focus: Option<Box<dyn FnMut(Option<String>)>>,
     /// That a window changed size. See [`Shell::on_resized`].
     resized: Option<Resized>,
+    /// That the machine went light or dark. See [`Shell::on_theme`].
+    themed: Option<Themed>,
     /// Raised before the first window of a quit goes.
     leaving: Option<Box<dyn FnMut()>>,
     /// Whether winit has told us surfaces can be created yet. A window made
@@ -269,6 +275,7 @@ impl Shell {
             swap: None,
             focus: None,
             resized: None,
+            themed: None,
             leaving: None,
             started: false,
             trace: true,
@@ -320,6 +327,25 @@ impl Shell {
     /// turned into an emit.
     pub fn on_resized(&mut self, resized: impl FnMut(&str) + 'static) {
         self.resized = Some(Box::new(resized));
+    }
+
+    /// Say what happens when the machine goes light or dark.
+    ///
+    /// The app gets this from `matchMedia`, which is a browser answering a
+    /// question about the operating system. Here it is winit's
+    /// `WindowEvent::ThemeChanged`, and it arrives per window rather than per
+    /// process — every window is told, so every window's reader follows,
+    /// which is the right shape anyway: the theme is a setting, and a setting
+    /// changed in one window is not seen by another until it is opened again
+    /// (`AGENTS.md` says so of the app, and this crate inherits it).
+    ///
+    /// Like a resize, the event carries no answer that is worth carrying: it
+    /// says there is a new one, and the reader asks the window through
+    /// [`crate::app::Appearance`]. That keeps one place answering the
+    /// question — the startup path asks the same way, and a harness answers
+    /// both from the same cell.
+    pub fn on_theme(&mut self, themed: impl FnMut(&str) + 'static) {
+        self.themed = Some(Box::new(themed));
     }
 
     /// Say what happens when a window opens a different document in itself.
@@ -432,6 +458,17 @@ impl Shell {
         // What this window can be asked to do. Every one of them goes back
         // out through the proxy rather than being done here — see the module
         // comment: the ask arrives from inside a borrow of this very window.
+        // What the machine says about light and dark. `None` where the
+        // platform will not say, which winit allows and this reader answers
+        // by leaving the theme alone. See [`crate::app::Appearance`].
+        let appearance = {
+            let window = std::sync::Arc::clone(&view.window);
+            crate::app::Appearance::new(move || {
+                window
+                    .theme()
+                    .map(|theme| theme == winit::window::Theme::Dark)
+            })
+        };
         let frame = {
             let proxy = self.proxy.clone();
             let id = view.window_id();
@@ -464,6 +501,7 @@ impl Shell {
             provide_context(winit_window);
             provide_context(shell_provider);
             provide_context(screen);
+            provide_context(appearance);
             provide_context(frame);
         });
         doc.initial_build();
@@ -611,10 +649,20 @@ impl ApplicationHandler for Shell {
             event,
             WindowEvent::SurfaceResized(_) | WindowEvent::ScaleFactorChanged { .. }
         );
+        // …and the machine going light or dark, which nothing else in this
+        // process hears. See [`Shell::on_theme`].
+        let themed = matches!(event, WindowEvent::ThemeChanged(_));
         self.inner.window_event(event_loop, window_id, event);
         if resized {
             if let (Some(label), Some(tell)) =
                 (self.labels.get(&window_id).cloned(), self.resized.as_mut())
+            {
+                tell(&label);
+            }
+        }
+        if themed {
+            if let (Some(label), Some(tell)) =
+                (self.labels.get(&window_id).cloned(), self.themed.as_mut())
             {
                 tell(&label);
             }

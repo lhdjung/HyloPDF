@@ -458,10 +458,14 @@ on its first run.
 order of the existing commit history, which is a reasonable order because each
 step was chosen to be testable:
 
-1. themes, settings, the settings window, the theme editor — *themes and
-   settings done; the two windows are interface and are now the oldest thing
-   outstanding here. The theme **menu** is built (2026-09-01) and is not the
-   same thing: choosing among the fourteen is not editing one*
+1. themes, settings, the settings window, the theme editor — *themes,
+   settings and the settings window done; the theme **editor** is what is
+   left of this item and of the whole list. The theme **menu** is built and
+   is not the same thing: choosing among the fourteen is not editing one.
+   Dark mode and following the machine's own light and dark landed after
+   Phase 3 — see `PROGRESS.md`, "After Phase 3": `follow_system_theme` was
+   listed here as needing a signal this reader does not get, and the signal
+   is `WindowEvent::ThemeChanged`*
 2. the keyboard: the action table, chords, `keys.toml`, the Keyboard page —
    *done but for the Keyboard page, which is a settings window; `keys.rs` is
    mounted from the app like `theme.rs`, and `keys.ts` is ported as
@@ -555,6 +559,15 @@ Windows is the worst available order. Done: Blitz is a pinned git revision
 rather than a path into a clone, so a fresh checkout builds; `experiment.yml`
 runs the whole suite on three runners; IME is struck; and the memory bound now
 binds on Linux as well as on a Mac. See `PROGRESS.md`, "The platform work".
+
+**And after Phase 3, the three keys that still answered "not built yet".**
+Dark mode, help and print — the three actions that are about something
+*outside* the document, which is why they were last rather than because they
+are hard. The catch-all arm that carried that sentence is gone with them, so
+an action added to the table and not handled is now a compile error. Done,
+2026-09-01; see `PROGRESS.md`. The same pass explained the `SIGSEGV` this
+tree had recorded as seen once and not understood: `FPDF_CloseDocument` runs
+from `Drop`, which is the one call into pdfium not taken behind the lock.
 
 **Phase 4 — the decision.** Same shape as the pdfium write-up: a table of
 measurements, a plain verdict, and either a merge or a parked branch with its

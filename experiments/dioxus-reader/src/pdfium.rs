@@ -115,6 +115,41 @@ struct Open {
 // `PdfDocument` borrows from the leaked instance, which lives forever.
 unsafe impl Send for Open {}
 
+/// **Closing a document is a call into pdfium like any other, and it was the
+/// one call in this file not taken behind the lock.**
+///
+/// Nothing here calls `FPDF_CloseDocument`: `PdfDocument`'s own `Drop` does,
+/// whenever the last `Arc<dyn PageSource>` goes — and a `Drop` that runs
+/// wherever the value happens to die is a call into pdfium from a thread that
+/// took no lock at all. What it corrupts is not this document. pdfium keeps a
+/// **process-wide** map of stock fonts keyed by `CPDF_Document*`, and
+/// `~CPDF_Document` erases its own entry from it; erase a node from a
+/// red-black tree while another thread is inserting one and the tree is
+/// broken, after which any thread walking it dies.
+///
+/// That is the `SIGSEGV` `PROGRESS.md` had recorded as seen once and not
+/// understood, and it is understood now because the crash report names it:
+/// `__tree_remove` under `CPDF_Document::~CPDF_Document` under
+/// `FPDF_CloseDocument` under `Reader`'s own drop, on a thread `cargo test`
+/// was tearing down while another test was opening a document. It reproduced
+/// twice in six runs of the suite before this and not at all in the fifty
+/// after.
+///
+/// So the close is brought inside the lock, which is `release()`'s one line
+/// again — and the `Open` that drops afterwards has nothing left to close.
+/// The one thing to watch: a `Document` must never be dropped by a thread
+/// already holding [`library()`], because `Mutex` is not reentrant. Nothing
+/// does — every drop of one is the last `Arc` going, in a viewer or a test —
+/// and the alternative shape, a `Drop` on `Open`, would put the same rule
+/// somewhere it is harder to see.
+impl Drop for Document {
+    fn drop(&mut self) {
+        let _library = library();
+        let mut held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        held.document = None;
+    }
+}
+
 impl Document {
     pub fn open(path: &str) -> Result<Self, String> {
         let began = Instant::now();

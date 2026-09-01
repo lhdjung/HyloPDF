@@ -272,6 +272,18 @@ pub fn reopening_all(dir: &Path) -> Vec<String> {
     library::prune(&library::load(dir)).open
 }
 
+/// What wearing a theme did, beyond putting it on.
+///
+/// The name is for the notice line, and the flag is the sentence that has to
+/// be said *instead* of it: a reader who has just been taken off following the
+/// machine needs to know, and needs to know where the switch is, because
+/// nothing else in the window says so. See [`Store::wear`].
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct Worn {
+    pub name: String,
+    pub stopped_following: bool,
+}
+
 pub struct Store {
     dir: PathBuf,
     themes_dir: PathBuf,
@@ -301,6 +313,17 @@ pub struct Store {
     /// is worth having, and the file's name where it is not. Decided once, at
     /// open, by [`worth_calling`].
     title: String,
+    /// Whether the machine is in dark mode, as the window reports it —
+    /// `None` where the platform does not say, which winit allows and two of
+    /// the three platforms have historically been.
+    ///
+    /// `darkOutside()` in `main.ts` is `matchMedia("(prefers-color-scheme:
+    /// dark)")` and always answers, because a webview is a browser. Here the
+    /// answer can be absent, and absent is not "light": a reader whose
+    /// machine will not say must be left wearing what they chose rather than
+    /// moved to the light theme every launch. So every rule below is written
+    /// against `Some`, and `None` means the two switches simply do nothing.
+    outside: Option<bool>,
 }
 
 impl Store {
@@ -334,6 +357,7 @@ impl Store {
             marks: Vec::new(),
             journal: Vec::new(),
             title: String::new(),
+            outside: None,
         };
         store.complaint = store.unreadable();
         store
@@ -414,22 +438,96 @@ impl Store {
     /// that half rather than to the shipped default. Which slot it fills is
     /// read off the theme's own paper, because that is the only thing that
     /// actually makes a theme dark.
-    pub fn wear(&mut self, index: usize) -> String {
+    ///
+    /// A third setting moves with them when it has to, and it is the reason
+    /// this returns a [`Worn`] rather than a name: choosing a theme whose
+    /// darkness disagrees with the machine is the reader overruling the
+    /// machine, and left following, the next thing the machine did would take
+    /// it straight back off them. So following stops, and the reader is told
+    /// once — `stopFollowingSystem` in `main.ts`, which is called from
+    /// `useTheme` for exactly this. Choosing another theme of the darkness
+    /// already in force says nothing about the machine and leaves the switch
+    /// alone.
+    pub fn wear(&mut self, index: usize) -> Worn {
         let Some(theme) = self.themes.get(index) else {
-            return String::new();
+            return Worn::default();
         };
         // Choosing one by hand is the reader deciding, which outranks a flag
         // and is written down.
         self.for_now = None;
         let (id, name) = (theme.id.clone(), theme.name.clone());
-        let slot = if self.is_dark(theme) {
-            "dark_theme"
-        } else {
-            "light_theme"
-        };
-        self.set(vec![("theme".into(), json!(id)), (slot.into(), json!(id))]);
+        let dark = self.is_dark(theme);
+        let slot = if dark { "dark_theme" } else { "light_theme" };
+        let mut moving = vec![("theme".into(), json!(id)), (slot.into(), json!(id))];
+        let overruling =
+            self.flag("follow_system_theme") && self.outside.is_some_and(|outside| outside != dark);
+        if overruling {
+            moving.push(("follow_system_theme".into(), json!(false)));
+        }
+        self.set(moving);
         self.complaint = self.unreadable();
-        name
+        Worn { name, stopped_following: overruling }
+    }
+
+    /// What the machine says about light and dark, and `None` where it will
+    /// not say. See [`Store::outside`] — written whenever the window reports
+    /// it, which is at startup and on every change.
+    pub fn set_outside(&mut self, dark: Option<bool>) {
+        self.outside = dark;
+    }
+
+    pub fn outside(&self) -> Option<bool> {
+        self.outside
+    }
+
+    /// Whether the theme in use is a dark one, which is read off its paper.
+    pub fn dark_now(&self) -> bool {
+        self.is_dark(self.theme())
+    }
+
+    /// Which theme fills the light or the dark half of the pair.
+    ///
+    /// `toggleDark` in `main.ts`: the theme remembered for that half if it is
+    /// still there, else anything of that darkness. Nothing here decides
+    /// *which* light theme or *which* dark one — those are two settings the
+    /// reader has already chosen, and this only says which of them is in
+    /// force. So somebody with Sepia by day and Tokyo Night by night gets
+    /// exactly that pair, and somebody who has never thought about it gets
+    /// the shipped defaults.
+    ///
+    /// `None` only where there is no theme of that darkness at all, which
+    /// takes deleting eight files.
+    ///
+    /// One line more than the app's, and deliberately: the slot is checked
+    /// for being of the darkness it is the slot *for*. A theme file whose
+    /// paper was edited from dark to light is still named by `dark_theme`,
+    /// and the app trusts the name — so ⌘D hands back a light theme, records
+    /// it in the other slot, and the pair repairs itself after having done
+    /// nothing anybody could see.
+    pub fn other_half(&self, dark: bool) -> Option<usize> {
+        let wanted = self.text(if dark { "dark_theme" } else { "light_theme" });
+        self.themes
+            .iter()
+            .position(|theme| theme.id == wanted && self.is_dark(theme) == dark)
+            .or_else(|| self.themes.iter().position(|theme| self.is_dark(theme) == dark))
+    }
+
+    /// Which theme the machine's own light or dark asks for, if any.
+    ///
+    /// `followSystemTheme` in `main.ts`. Three ways to answer nothing, and
+    /// they are different: the reader has switched following off, the machine
+    /// will not say, or the theme in use is already of the right darkness —
+    /// the last being the ordinary case and the reason this is cheap to call
+    /// on every report.
+    pub fn following(&self) -> Option<usize> {
+        if !self.flag("follow_system_theme") {
+            return None;
+        }
+        let outside = self.outside?;
+        if self.dark_now() == outside {
+            return None;
+        }
+        self.other_half(outside)
     }
 
     /// The themes, again, because one of the files changed.
@@ -854,6 +952,133 @@ mod tests {
         // system later comes back to this rather than to the shipped default.
         assert_eq!(reopened.text("dark_theme"), theme::DEFAULT_DARK);
         assert_eq!(reopened.text("light_theme"), theme::DEFAULT_LIGHT);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ⌘D moves between the two halves of a pair the reader chose, not
+    /// between two defaults. Sepia by day and Tokyo Night by night is the
+    /// case the two slots exist for.
+    #[test]
+    fn dark_mode_comes_back_to_the_pair_the_reader_chose() {
+        let dir = scratch("pair");
+        let mut store = Store::at(&dir);
+        let at = |store: &Store, id: &str| {
+            store
+                .themes()
+                .iter()
+                .position(|theme| theme.id == id)
+                .expect("shipped")
+        };
+        let (sepia, night) = (at(&store, "sepia"), at(&store, "tokyo-night"));
+        store.wear(sepia);
+        store.wear(night);
+        assert!(store.dark_now());
+
+        // Back to sepia rather than to Hylo Light, and forward to Tokyo Night
+        // rather than to Hylo Dark — twice each, because the slot is rewritten
+        // on every wear and a rule that only holds once is not a rule.
+        assert_eq!(store.other_half(false), Some(sepia));
+        store.wear(store.other_half(false).expect("a light theme"));
+        assert_eq!(store.theme().id, "sepia");
+        assert_eq!(store.other_half(true), Some(night));
+        store.wear(store.other_half(true).expect("a dark theme"));
+        assert_eq!(store.theme().id, "tokyo-night");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The machine's own light and dark, and the three ways of answering
+    /// nothing — which are different from each other and all ordinary.
+    #[test]
+    fn following_the_machine_answers_only_when_there_is_something_to_do() {
+        let dir = scratch("following");
+        let mut store = Store::at(&dir);
+        assert!(store.flag("follow_system_theme"), "on by default");
+
+        // The machine will not say, which is winit on a platform without the
+        // notion. Nothing happens, and in particular nothing happens *to
+        // light*: a reader wearing a dark theme keeps it.
+        let dark = store
+            .themes()
+            .iter()
+            .position(|theme| theme.id == theme::DEFAULT_DARK)
+            .expect("Hylo Dark ships");
+        store.wear(dark);
+        assert_eq!(store.following(), None);
+
+        // It says dark, and the reader is already dark.
+        store.set_outside(Some(true));
+        assert_eq!(store.following(), None);
+
+        // It says light, and there is somewhere to go.
+        store.set_outside(Some(false));
+        let light = store.following().expect("a light theme to move to");
+        assert!(!store.is_dark(&store.themes()[light]));
+
+        // And the switch outranks the machine.
+        store.set(vec![("follow_system_theme".into(), json!(false))]);
+        assert_eq!(store.following(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Choosing a theme that disagrees with the machine is the reader
+    /// overruling the machine, and following stops — or the machine's next
+    /// word would take the choice straight back off them.
+    #[test]
+    fn choosing_against_the_machine_stops_following_it() {
+        let dir = scratch("overrule");
+        let mut store = Store::at(&dir);
+        store.set_outside(Some(false));
+
+        // Another light theme says nothing about the machine.
+        let sepia = store
+            .themes()
+            .iter()
+            .position(|theme| theme.id == "sepia")
+            .expect("shipped");
+        let worn = store.wear(sepia);
+        assert!(!worn.stopped_following);
+        assert!(store.flag("follow_system_theme"));
+
+        // A dark one on a light machine does.
+        let dark = store
+            .themes()
+            .iter()
+            .position(|theme| theme.id == theme::DEFAULT_DARK)
+            .expect("shipped");
+        let worn = store.wear(dark);
+        assert!(worn.stopped_following);
+        assert!(!store.flag("follow_system_theme"));
+
+        // Written down, not merely held: the next run has to know.
+        assert!(!Store::at(&dir).flag("follow_system_theme"));
+
+        // And with it off, a light theme back does not turn it on again —
+        // this switch is only ever moved by the reader or by the one rule
+        // above.
+        let worn = store.wear(sepia);
+        assert!(!worn.stopped_following);
+        assert!(!store.flag("follow_system_theme"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A machine that will not say cannot overrule anybody either, which is
+    /// the half of the rule that is easy to write the wrong way round: a
+    /// `None` read as "light" would turn following off for every reader on a
+    /// platform that does not report it, the first time they chose a dark
+    /// theme.
+    #[test]
+    fn a_silent_machine_neither_moves_nor_stops_anything() {
+        let dir = scratch("silent");
+        let mut store = Store::at(&dir);
+        let dark = store
+            .themes()
+            .iter()
+            .position(|theme| theme.id == theme::DEFAULT_DARK)
+            .expect("shipped");
+        let worn = store.wear(dark);
+        assert!(!worn.stopped_following);
+        assert!(store.flag("follow_system_theme"));
+        assert_eq!(store.following(), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

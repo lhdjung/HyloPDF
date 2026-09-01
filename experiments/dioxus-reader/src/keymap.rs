@@ -188,13 +188,14 @@ macro_rules! spec {
 use Action as A;
 use Group::{Documents as D, LookingAtIt as L, MovingAround as M};
 
-/// **The app's own table, carried across entry for entry**, including the
-/// actions this reader cannot yet perform — because the point of the port is
-/// that `keys.toml` means the same thing on both sides, and a table missing
-/// half its rows would make a reader's file report the other half as things
-/// HyloPDF cannot do. What is not built simply does not answer; see
-/// `tests/keys.rs`, which asserts that the two tables agree with the shipped
-/// `keys.toml` exactly as `tests/keys.test.mjs` does.
+/// **The app's own table, carried across entry for entry** — because the
+/// point of the port is that `keys.toml` means the same thing on both sides,
+/// and a table missing half its rows would make a reader's file report the
+/// other half as things HyloPDF cannot do. It was carried across including
+/// the actions this reader could not yet perform, which for most of Phase 3
+/// meant several of them answered a sentence saying so; every one answers
+/// properly now. See `tests/keys.rs`, which asserts that the two tables agree
+/// with the shipped `keys.toml` exactly as `tests/keys.test.mjs` does.
 ///
 /// The comments explaining *why* a key is what it is live in `src/keys.ts`
 /// beside the same rows and are not restated here — one copy of a reason is

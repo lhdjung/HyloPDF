@@ -67,7 +67,7 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 302 tests, about a minute and a half
+cargo test                                   # 305 tests, about a minute and a half
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
@@ -2288,11 +2288,40 @@ in force stands on, which is `.btn.on` in `styles.css` said exactly; and minus,
 the readout and plus are one sunk `.zoom-group` rather than three more quiet
 words in a row of quiet words.
 
-What is still missing is the other half of the app's bar: **every button in
-`index.html` carries a `data-icon`**, and none here does. That is the next
-thing to do to this toolbar and it is not a colour problem.
-
 `tests/chrome.rs` is fifteen tests now.
+
+### The icons, which were the other half of the grey bar
+
+Every button in the app's `index.html` carries a `data-icon` and none here did,
+so the bar was a row of words where the app's is a row of small drawings with
+words beside them. That is most of what "the toolbar is grey" was about, and no
+amount of choosing a better grey answers it.
+
+**Inline SVG works here, and not the way it looks like it works.** Blitz does
+not lay an `<svg>` out as elements: `construct.rs` takes the subtree's
+`outer_html`, injects an `xmlns` if it is missing, and hands the string to
+usvg. That is why `dangerous_inner_html` is the right door — the paths from
+`icons.ts` go in as the string they already are — and it is also why **an icon
+cannot inherit its colour**. usvg parses its own document with no cascade
+behind it, so `stroke="currentColor"` resolves to black on every theme, which
+on Hylo Dark is an icon that is not there. The shade travels with the icon
+instead: `Icon` takes a `stroke`, and `color` beside it, because two of these
+drawings fill part of themselves with `currentColor` — the theme circle's dark
+half and the cog's centre — and usvg resolves that against `color` and
+otherwise against black.
+
+The cost is the one thing a browser gives free: an icon does not follow its
+label through `:hover`. It does follow the `on` state, because that is a state
+the component knows about.
+
+**`src/icons.rs` is a copy and `tests/icons.rs` is the gate.** The app's file
+is TypeScript, so it cannot be mounted the way `theme.rs` and `settings.rs`
+are; a copied *drawing* is exactly the kind of copy `AGENTS.md` warns about,
+because both sides draw something and only one is ever looked at. The test
+parses `src/icons.ts` and compares the fourteen shared names character for
+character — the same trick `settings.test.mjs` plays on the settings table.
+One icon is this reader's own and the test says so: `crop`, for the Trim chip,
+which lives in the app's settings and has never needed a drawing there.
 
 ### What is not built
 

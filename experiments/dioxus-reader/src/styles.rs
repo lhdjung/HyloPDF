@@ -34,7 +34,7 @@ use crate::palette::{mix, Palette};
 /// which is the claim `applyTheme` makes in the app and the reason a five-line
 /// theme file is enough.
 pub fn variables(theme: &Palette) -> String {
-    let hex = |colour: [u8; 3]| format!("#{:02x}{:02x}{:02x}", colour[0], colour[1], colour[2]);
+    let hex = crate::palette::hex;
     format!(
         "--text: {}; --paper: {}; --accent: {}; --surface: {}; --line: {}; \
          --muted: {}; --faint: {}; --hover: {}; --sunk: {}; --ground: {}; \
@@ -116,10 +116,12 @@ body { margin: 0;
 .spacer { flex: 1 1 auto; }
 
 .chip {
+  display: flex; align-items: center; gap: 7px;
   height: 30px; padding: 0 11px; border-radius: 9px; border: 0;
   background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 500;
   white-space: nowrap;
 }
+.icon { flex: 0 0 auto; }
 .chip:hover { background: var(--hover); color: var(--text); }
 /* A chip whose thing is in force. **The colour alone was not enough and was
    the wrong half.** Every theme in this app names a near-monochrome text
@@ -328,6 +330,7 @@ body { margin: 0;
 .sidebar-resize:hover { background: var(--accent); opacity: 0.35; }
 .tabs { display: flex; flex: 0 0 auto; gap: 4px; padding: 8px 8px 6px 8px; }
 .tab {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
   flex: 1 1 auto; height: 26px; border: 0; border-radius: 8px;
   background: transparent; color: var(--muted); font-size: 13px; font-weight: 500;
 }

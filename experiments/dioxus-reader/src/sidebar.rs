@@ -37,7 +37,7 @@ use dioxus::html::geometry::WheelDelta;
 use dioxus::prelude::*;
 use dioxus_native::CustomWidgetAttr;
 
-use crate::app::{Handle, Viewer};
+use crate::app::{Handle, Icon, Viewer};
 use crate::layout::Size;
 use crate::page::{Chosen, PageWidget};
 
@@ -207,6 +207,14 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
     let width = held.sidebar_width;
     let page = held.page();
     let theme_name = held.theme_name();
+    // What a tab's icon is drawn in. See `Icon` in `app.rs`: an inline `<svg>`
+    // reaches usvg with no cascade behind it, so the shade has to travel with
+    // it rather than being inherited from the button.
+    let wearing = held.palette();
+    let (ink, ink_on) = (
+        crate::palette::hex(wearing.muted()),
+        crate::palette::hex(wearing.text),
+    );
     let headings = held.headings.clone();
     let marks: Vec<(usize, String)> = held
         .store
@@ -266,12 +274,14 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                     class: if tab == Tab::Contents { "tab on" } else { "tab" },
                     "data-tab": "contents",
                     onclick: move |_| viewer.write().show_tab(Tab::Contents),
+                    Icon { name: "contents", stroke: if tab == Tab::Contents { ink_on.clone() } else { ink.clone() } }
                     "Contents"
                 }
                 button {
                     class: if tab == Tab::Pages { "tab on" } else { "tab" },
                     "data-tab": "pages",
                     onclick: move |_| viewer.write().show_tab(Tab::Pages),
+                    Icon { name: "pages", stroke: if tab == Tab::Pages { ink_on.clone() } else { ink.clone() } }
                     "Pages"
                 }
                 if searching {
@@ -279,6 +289,7 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                         class: if tab == Tab::Results { "tab on" } else { "tab" },
                         "data-tab": "results",
                         onclick: move |_| viewer.write().show_tab(Tab::Results),
+                        Icon { name: "search", stroke: if tab == Tab::Results { ink_on.clone() } else { ink.clone() } }
                         "Results"
                     }
                 }

@@ -97,6 +97,14 @@ impl Palette {
     }
 }
 
+/// A colour as CSS writes it, which is how it reaches both the stylesheet and
+/// an icon. An inline `<svg>` is parsed by usvg with no cascade behind it, so
+/// a shade it is to be drawn in has to arrive as a string — see `Icon` in
+/// `app.rs`.
+pub fn hex(colour: Rgb) -> String {
+    format!("#{:02x}{:02x}{:02x}", colour[0], colour[1], colour[2])
+}
+
 /// `amount` of `b` in `a`.
 pub fn mix(a: Rgb, b: Rgb, amount: f64) -> Rgb {
     let mut out = [0u8; 3];

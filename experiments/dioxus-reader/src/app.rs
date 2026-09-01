@@ -2903,6 +2903,13 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     // `.pill` below — Blitz cannot centre an input's text, so the box is made
     // to fit rather than the text made to sit in the middle of it.
     let page_box = (14.0 + 8.5 * page_field.chars().count() as f64).max(28.0);
+    // What an icon is drawn in, and why it is a string rather than a class.
+    // An inline `<svg>` here is handed to usvg with no cascade behind it — see
+    // [`Icon`] — so the shade a chip's label resolves to has to be passed down
+    // beside it. Two of them, because a chip whose thing is in force is the
+    // accent and every other chip is the quiet shade.
+    let ink = crate::palette::hex(wearing.muted());
+    let ink_on = crate::palette::hex(wearing.accent);
     let typing_page = held.typing_page;
     // Whether the field is still showing all of its contents as selected. See
     // `.page-field.fresh` in `styles.rs`, which is what makes that visible.
@@ -3052,6 +3059,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     // opens is a test that cannot tell them apart.
                     class: if sidebar_open { "chip contents on" } else { "chip contents" },
                     onclick: move |_| viewer.write().toggle_sidebar(),
+                    Icon { name: "contents", stroke: if sidebar_open { ink_on.clone() } else { ink.clone() } }
                     "Contents"
                 }
                 // What the document is called — its own `/Title` where that
@@ -3079,6 +3087,10 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                         class: if menu == Some(Menu::Document) { "chip title on" } else { "chip title" },
                         onmousedown: move |event| event.stop_propagation(),
                         onclick: move |_| viewer.write().show_menu(Menu::Document),
+                        Icon {
+                            name: "document",
+                            stroke: if menu == Some(Menu::Document) { ink_on.clone() } else { crate::palette::hex(wearing.faint()) },
+                        }
                         "{title}"
                     }
                     if menu == Some(Menu::Document) {
@@ -3158,6 +3170,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 button {
                     class: if marked { "chip mark on" } else { "chip mark" },
                     onclick: move |_| { let page = viewer.read().page(); viewer.write().mark_page(page); },
+                    Icon { name: "mark", stroke: if marked { ink_on.clone() } else { ink.clone() } }
                     if marked { "Marked" } else { "Mark" }
                 }
                 button {
@@ -3166,6 +3179,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     // says so on the notice line. See [`Viewer::set_trim`].
                     class: if trimming { "chip trim on" } else { "chip trim" },
                     onclick: move |_| { let on = viewer.read().trims_margins(); viewer.write().set_trim(!on); },
+                    Icon { name: "crop", stroke: if trimming { ink_on.clone() } else { ink.clone() } }
                     if trimming { "Trimmed" } else { "Trim" }
                 }
                 // Two buttons that were a cycle and are now a list. The chip
@@ -3179,7 +3193,12 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 // labels; a stepper with the readout between its two ends
                 // reads as one control, and it is the same three elements.
                 div { class: "zoom-group",
-                    button { class: "chip zoom-out", onclick: move |_| viewer.write().zoom(false), "−" }
+                    button {
+                        class: "chip zoom-out",
+                        "aria-label": "Zoom out",
+                        onclick: move |_| viewer.write().zoom(false),
+                        Icon { name: "minus", stroke: ink.clone() }
+                    }
                     div { class: "anchor",
                         button {
                             class: if menu == Some(Menu::View) { "chip fit on" } else { "chip fit" },
@@ -3251,13 +3270,19 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             }
                         }
                     }
-                    button { class: "chip zoom-in", onclick: move |_| viewer.write().zoom(true), "+" }
+                    button {
+                        class: "chip zoom-in",
+                        "aria-label": "Zoom in",
+                        onclick: move |_| viewer.write().zoom(true),
+                        Icon { name: "plus", stroke: ink.clone() }
+                    }
                 }
                 div { class: "anchor",
                     button {
                         class: if menu == Some(Menu::Theme) { "chip theme on" } else { "chip theme" },
                         onmousedown: move |event| event.stop_propagation(),
                         onclick: move |_| viewer.write().show_menu(Menu::Theme),
+                        Icon { name: "theme", stroke: if menu == Some(Menu::Theme) { ink_on.clone() } else { ink.clone() } }
                         "{theme_name}"
                     }
                     if menu == Some(Menu::Theme) {
@@ -3640,6 +3665,46 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
             if !presenting {
                 div { class: "notice", "{notice}" }
             }
+        }
+    }
+}
+
+/// One icon, at the size the chrome wants it.
+///
+/// **The colour is an attribute rather than `currentColor`, and that is
+/// Blitz's shape rather than a choice.** An inline `<svg>` is not laid out as
+/// elements here: `construct.rs` takes the subtree's `outer_html` and hands it
+/// to usvg, which has no CSS cascade and no idea what `color` the button it
+/// sits in resolved to. So the theme's own shade goes in as `stroke`, and
+/// what a browser gets for free — an icon that follows its label through
+/// hover and `on` — has to be passed down.
+#[component]
+pub(crate) fn Icon(name: &'static str, #[props(default)] stroke: Option<String>) -> Element {
+    // A name nothing draws is nothing drawn, rather than a panic: the table is
+    // a copy of `icons.ts` and `tests/icons.rs` is what says the two agree.
+    let Some(body) = crate::icons::path(name) else {
+        return rsx! {};
+    };
+    let stroke = stroke.unwrap_or_else(|| "currentColor".to_string());
+    rsx! {
+        svg {
+            class: "icon",
+            view_box: "0 0 24 24",
+            width: "16",
+            height: "16",
+            fill: "none",
+            stroke: "{stroke}",
+            // And `color`, because two of these icons fill part of themselves
+            // with `currentColor` — the theme circle's dark half, and the
+            // cog's centre. usvg resolves that against the `color` property on
+            // the element or an ancestor and falls back to black, which on a
+            // dark theme is a hole in the middle of the icon.
+            color: "{stroke}",
+            stroke_width: "1.7",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            "aria-hidden": "true",
+            dangerous_inner_html: "{body}",
         }
     }
 }

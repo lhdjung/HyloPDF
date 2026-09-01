@@ -227,6 +227,37 @@ fn the_toolbar_wears_the_theme_rather_than_a_grey() {
     }
 }
 
+#[test]
+fn the_toolbar_carries_the_app_s_icons_in_the_theme_s_shades() {
+    // Every button in the app's `index.html` has a `data-icon` and none here
+    // did, which is the other half of a bar that read as grey words. The
+    // colour is asserted because it is the part that has no cascade behind it:
+    // an inline `<svg>` reaches usvg as its own document — see `Icon` — so a
+    // `currentColor` icon comes out black on every theme, which on Hylo Dark
+    // is invisible.
+    let mut reader = wearing("hylo-dark");
+    let style = reader.harness.attr(".root", "style").unwrap_or_default();
+    let muted = value_of(&style, "--muted");
+    let accent = value_of(&style, "--accent");
+
+    assert_eq!(
+        reader.harness.attr(".chip.mark .icon", "stroke").as_deref(),
+        Some(muted.as_str()),
+        "an idle chip's icon is the quiet shade",
+    );
+
+    // And a chip whose thing is in force takes the accent, icon and all.
+    reader.press_chord("mod+shift+b");
+    assert_eq!(
+        reader.harness.attr(".chip.mark .icon", "stroke").as_deref(),
+        Some(accent.as_str()),
+    );
+
+    // The panel's tabs too, which are the other place a label stands alone.
+    reader.press_chord("mod+b");
+    assert!(reader.harness.query(".tab .icon").is_some(), "the tabs carry them");
+}
+
 /* ----------------------------------------------------------- reading it */
 
 fn value_of(style: &str, name: &str) -> String {

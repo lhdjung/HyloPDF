@@ -115,6 +115,7 @@ pub mod gpu;
 /// Phase 2, and it is not in the binary: see the `harness` feature.
 #[cfg(feature = "harness")]
 pub mod harness;
+pub mod icons;
 pub mod keymap;
 pub mod layout;
 pub mod nav;

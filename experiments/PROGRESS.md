@@ -3655,6 +3655,30 @@ the editing keys can be tested at all off a Mac, and it means the tests were
 exercising the half below the fault. Both halves of this bug live between winit
 and the window, which is the one seam the harness is built to do without.
 
+### Markup could be removed, and there was nowhere to do it
+
+This one was not a bug in the feature. `markup::remove` is `FPDFPage_RemoveAnnot`
+and eleven lines, it has had a test since the day markup landed, and it works:
+driving the real app, a passage was marked, the file was rewritten, the mark
+was taken out and the file was rewritten again with it gone. **The only way to
+reach it was a × the width of a full stop**, on a row in the Contents panel —
+and marking a passage with the panel shut and then opening it lands on *Pages*,
+because `show_markup_panel` only moves the tab when the panel is already open.
+So a reader who marked something and wanted it gone had, on screen, nothing.
+
+A mark is a thing on a page, so the way to take it off is on the page: click it
+and it says `Remove highlight`. The question is asked on the *release* and only
+when nothing was swept — `end_sweep`, not `begin_sweep` — because a passage
+that is already marked is exactly the passage somebody wants to select and
+copy, and a popover that opened on the press would take itself down again as
+the sweep went on. Escape puts it away, in the same list as the colour swatches
+and one line below them.
+
+**The general shape is worth keeping**, because it is the third time this port
+has found it: *a feature that is built, correct and tested can still be a
+feature the reader does not have.* The item list said markup was done, the test
+said removal worked, and both were true.
+
 
 ---
 

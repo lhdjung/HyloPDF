@@ -1091,6 +1091,18 @@ pub struct Viewer {
     /// element over the selection's own rectangle, said in a reader that can
     /// simply put the node on the page.
     pub markup_at: Option<(usize, Rect)>,
+    /// The mark the pointer was last clicked on, and what to say about it:
+    /// which page, where on it, what colour it is and how to take it out.
+    ///
+    /// **The whole of what "I cannot remove a highlight" turned out to
+    /// be.** Removal was built, tested and reachable — from a ten-pixel × on
+    /// a row in the Contents panel, behind a tab the panel does not open on.
+    /// A mark is a thing on a page, so the way to take it off is on the page:
+    /// click it and it says so. Nothing about the removal itself changed.
+    pub mark_open: Option<(usize, Rect, MarkKey, String)>,
+    /// Where the last press landed, in the page's own space, so that letting
+    /// go without having swept anywhere can ask what is under it.
+    pressed_on: Option<(usize, f64, f64)>,
     /// Where the content's top left is, in the coordinates a mouse event
     /// arrives in, worked out from the press that began the sweep.
     ///
@@ -1273,6 +1285,8 @@ impl Viewer {
             standing: crate::markup::Standing::default(),
             said_standing: false,
             markup_at: None,
+            mark_open: None,
+            pressed_on: None,
             sweep_from: None,
             pressed: None,
             past: Vec::new(),
@@ -2445,6 +2459,11 @@ impl Viewer {
                 && (y - client.1).abs() <= 2.0
         });
         self.pressed = Some((std::time::Instant::now(), client.0, client.1));
+        // Where the press landed on the page, for [`Viewer::end_sweep`] to
+        // ask what is under it when nothing was swept.
+        self.pressed_on = Some((page, on.0, on.1));
+        // A press anywhere puts away whatever the last one opened.
+        self.mark_open = None;
         if again {
             self.sweep_word(page, on);
             return;
@@ -2486,6 +2505,59 @@ impl Viewer {
         if self.selection.is_some_and(|sweep| sweep.is_empty()) {
             self.selection = None;
         }
+        // **A click on a mark is a question about that mark**, and it is
+        // asked here rather than on the press for one reason: a press is
+        // also where a sweep begins, and a passage that is already marked is
+        // exactly the passage a reader is most likely to want to select and
+        // copy. So the mark answers only when nothing was swept — which is
+        // what a click is. See [`Viewer::mark_open`].
+        if self.selection.is_none() {
+            if let Some((page, x, y)) = self.pressed_on {
+                self.mark_open = self.mark_under(page, x, y);
+            }
+        }
+        self.pressed_on = None;
+    }
+
+    /// The mark under a point on a page, if there is one, ready to be shown.
+    ///
+    /// A mark's quads are in the page's own points from its top left, which
+    /// is the space `place_on` takes — the same trip `note_areas` and
+    /// `highlights` make. The rectangle handed back is the one that was hit,
+    /// so the popover opens under the line that was clicked rather than under
+    /// the first line of a mark that runs over three.
+    fn mark_under(&self, page: usize, x: f64, y: f64) -> Option<(usize, Rect, MarkKey, String)> {
+        let index = page.checked_sub(1)?;
+        self.layout.box_of(index)?;
+        self.markup
+            .iter()
+            .filter(|mark| mark.page == page)
+            .find_map(|mark| {
+                mark.quads
+                    .iter()
+                    .map(|quad| self.layout.place_on(index, *quad))
+                    .find(|area| {
+                        x >= area.left
+                            && x <= area.left + area.width
+                            && y >= area.top
+                            && y <= area.top + area.height
+                    })
+                    .map(|area| {
+                        (
+                            page,
+                            area,
+                            MarkKey::InFile(mark.page, mark.index),
+                            mark.color.clone(),
+                        )
+                    })
+            })
+    }
+
+    /// Put the mark's own popover away. `false` when it was not up, which is
+    /// what lets Escape go on to the next thing it means — the same shape
+    /// [`Viewer::close_markup`] has.
+    pub fn close_mark(&mut self) -> bool {
+        self.mark_open.take().is_some()
     }
 
     /// True while the pointer is down on a page.
@@ -4355,6 +4427,9 @@ struct Placed {
     /// Where the colour popover goes, when it is over this page. See
     /// [`Viewer::markup_at`].
     swatches: Option<Rect>,
+    /// The mark the reader clicked on, when it is on this page. See
+    /// [`Viewer::mark_open`].
+    mark: Option<(Rect, MarkKey, String)>,
 }
 
 /// The element that wants the keyboard, as a selector.
@@ -5047,6 +5122,11 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     .markup_at
                     .filter(|(page, _)| *page == index + 1)
                     .map(|(_, area)| area),
+                mark: held
+                    .mark_open
+                    .as_ref()
+                    .filter(|(page, ..)| *page == index + 1)
+                    .map(|(_, area, key, colour)| (*area, key.clone(), colour.clone())),
             })
         })
         .collect();
@@ -6490,6 +6570,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             notes: placed.notes,
                             selected: placed.selected,
                             swatches: placed.swatches,
+                            mark: placed.mark,
                             colours: markup_colours.clone(),
                             view,
                             viewer,
@@ -6820,6 +6901,10 @@ fn Page(
     /// element over the same rectangle and hands it to `showPopover`, for
     /// want of anywhere else to put one.
     swatches: Option<Rect>,
+    /// The mark the reader clicked on, when it is on this page: the line they
+    /// hit, how to take it out, and the colour it is drawn in. See
+    /// [`Viewer::mark_open`].
+    mark: Option<(Rect, MarkKey, String)>,
     /// The colours it offers. See [`Viewer::markup_colors`].
     colours: Vec<String>,
     /// How this page is turned and how much of it is drawn. In the key as
@@ -6938,6 +7023,35 @@ fn Page(
                                 }
                             },
                         }
+                    }
+                }
+            }
+            // **A mark clicked on says how to take it off.** Removal has
+            // worked since the day markup landed — `FPDFPage_RemoveAnnot`,
+            // eleven lines, and gone from the file for every reader of it —
+            // and it was reachable only from a × the width of a full stop, on
+            // a row in a panel that does not open on the tab the row is on.
+            // A reader who marked a passage and wanted it gone had nothing to
+            // click. See [`Viewer::mark_open`], and `end_sweep`, which is
+            // what decides that a press was a click rather than a sweep.
+            if let Some((area, key, colour)) = mark {
+                div {
+                    class: "mark-popover",
+                    // The same rule the swatches have, and for the same
+                    // reason: a press in here must not reach the page and
+                    // begin a sweep of its own — which would take this very
+                    // popover down again on the way.
+                    onmousedown: move |event| event.stop_propagation(),
+                    style: "position: absolute; top: {area.top + area.height + 8.0}px; left: {area.left}px;",
+                    span { class: "mark-dot", style: "background: {colour};" }
+                    button {
+                        class: "mark-remove",
+                        onclick: move |_| {
+                            let restarted = viewer.write().remove_markup(&key);
+                            viewer.write().close_mark();
+                            rescan(viewer, restarted);
+                        },
+                        "Remove highlight"
                     }
                 }
             }
@@ -7180,6 +7294,11 @@ fn perform(
             // The colour popover, which is a menu in everything but name and
             // sits in the same place in this list.
             if viewer.write().close_markup() {
+                return;
+            }
+            // …and the one a mark clicked on puts up, which is the same kind
+            // of thing in the same place. See [`Viewer::mark_open`].
+            if viewer.write().close_mark() {
                 return;
             }
             // Settings next, and above everything below it: it is a window

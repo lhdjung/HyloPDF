@@ -843,6 +843,24 @@ body { margin: 0;
 }
 .markup-swatch:hover { border-color: var(--accent); }
 
+/* And what a mark already in the document says when it is clicked. The same
+   card as the swatches above it, because it is the same kind of thing in the
+   same place — the difference is that it names what it does rather than
+   showing six colours, since there is exactly one thing to do here. */
+.mark-popover {
+  display: flex; align-items: center; gap: 8px; padding: 7px 9px; z-index: 6;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 11px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.mark-dot {
+  width: 12px; height: 12px; border-radius: 6px; border: 1px solid var(--line);
+}
+.mark-remove {
+  border: 0; background: transparent; padding: 0;
+  color: var(--text); font-size: 13px; white-space: nowrap;
+}
+.mark-remove:hover { color: var(--accent); }
+
 /* The column takes its shape from the pictures in it, and only the rows near
    the view are here at all — see `sidebar.rs`. */
 .thumbs { position: relative; width: 100%; }

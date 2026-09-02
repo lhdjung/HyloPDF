@@ -961,6 +961,19 @@ impl Reader {
         self.sweep(from, to);
     }
 
+    /// One click at a point given as fractions of a page's box.
+    ///
+    /// `click_at` in window coordinates is the general form; this is the one
+    /// a test wants when the thing being clicked is *on a page* — a mark, a
+    /// note, a link — because where the page is on screen is the layout's
+    /// business and not the test's. See [`Reader::point_on`].
+    pub fn click_on_page(&mut self, page: usize, at: (f32, f32)) {
+        let (x, y) = self.point_on(page, at);
+        self.harness.click_at(x, y);
+        self.give_keyboard_back();
+        self.settle();
+    }
+
     /// Two clicks in the same place, quickly enough to be one gesture.
     ///
     /// Blitz decides that from the clock and the distance — under half a

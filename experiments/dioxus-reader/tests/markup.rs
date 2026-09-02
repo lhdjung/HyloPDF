@@ -317,6 +317,71 @@ fn a_mark_can_be_taken_off_from_the_panel() {
 }
 
 #[test]
+fn a_mark_clicked_on_offers_to_come_off_and_does() {
+    // **The whole of what "I cannot remove a highlight" was.** Removal has
+    // worked since the day markup landed and the only way to reach it was a
+    // × the width of a full stop, on a row in a panel that does not open on
+    // the tab the row is on. A mark is a thing on a page; the way to take it
+    // off is on the page.
+    let path = readable("clicked-off");
+    let mut reader = open(&path);
+    reader.sweep_page(1, (0.10, LINE), (0.55, LINE));
+    reader.click(".markup-swatch");
+    assert_eq!(render::open(&path).expect("reopens").markup().len(), 1);
+    assert!(
+        reader.harness.query(".mark-popover").is_none(),
+        "nothing is offered until the mark is clicked",
+    );
+
+    // A click, not a sweep: the press and the release in the same place, over
+    // the words that were marked.
+    reader.click_on_page(1, (0.30, LINE));
+    assert!(
+        reader.harness.query(".mark-popover").is_some(),
+        "clicking the mark asks about the mark",
+    );
+
+    reader.click(".mark-remove");
+    assert_eq!(reader.state().notice, "Mark removed.");
+    assert!(reader.harness.query(".mark-popover").is_none());
+    // Out of the file, which is the sentence the app cannot say.
+    assert!(render::open(&path).expect("reopens").markup().is_empty());
+}
+
+#[test]
+fn a_sweep_across_a_mark_selects_it_rather_than_asking_about_it() {
+    // The reason the question is asked on the release and not on the press:
+    // a passage that is already marked is exactly the passage somebody wants
+    // to select and copy, and a popover that opened when the sweep began
+    // would take itself down again as the sweep went on.
+    let path = readable("swept-over");
+    let mut reader = open(&path);
+    reader.sweep_page(1, (0.10, LINE), (0.55, LINE));
+    reader.click(".markup-swatch");
+
+    reader.sweep_page(1, (0.12, LINE), (0.40, LINE));
+    assert!(
+        reader.harness.query(".selected").is_some(),
+        "the marked words can still be selected",
+    );
+    assert!(
+        reader.harness.query(".mark-popover").is_none(),
+        "and a sweep is not a question about the mark",
+    );
+}
+
+#[test]
+fn a_click_off_the_mark_asks_nothing() {
+    let path = readable("clicked-past");
+    let mut reader = open(&path);
+    reader.sweep_page(1, (0.10, LINE), (0.55, LINE));
+    reader.click(".markup-swatch");
+    // Well below the one line this fixture's pages carry.
+    reader.click_on_page(1, (0.30, 0.70));
+    assert!(reader.harness.query(".mark-popover").is_none());
+}
+
+#[test]
 fn the_key_says_which_of_the_two_things_is_wrong() {
     // "Select something first" and "there is no text in this document" are
     // different sentences, and the second is the one worth saying: no amount

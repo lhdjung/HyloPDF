@@ -381,6 +381,58 @@ impl Shell {
         self.pinched = Some(Box::new(pinched));
     }
 
+    /// **Backspace is a question the window has to have asked to be told the
+    /// answer to**, and nothing in this app had asked it.
+    ///
+    /// See [`ApplicationHandlerExtMacOS`] below for the first half: AppKit
+    /// delivers the editing keys as `doCommandBySelector:` rather than as
+    /// keystrokes, and that reaches a winit application through
+    /// `standard_key_binding`, which this shell forwards. What forwarding it
+    /// did not fix is that **winit only reads a keystroke against the
+    /// standard key bindings when IME is enabled on the window** — `key_down`
+    /// calls `interpretKeyEvents` inside `if ime_capabilities.is_some()`, and
+    /// `interpretKeyEvents` is the only thing that ever calls
+    /// `doCommandBySelector:`. With IME off, Backspace is a keystroke that
+    /// blitz-dom deliberately ignores on this platform and nothing else at
+    /// all.
+    ///
+    /// `blitz-dom` does mean to enable it: `Node::focus` asks the shell for
+    /// IME when the node being focused is a text input. **It is asked one
+    /// moment too early.** A text input's editor is built by
+    /// `create_text_editor` during *layout construction*, and this app focuses
+    /// its fields from `onmounted`, which runs before the first layout — so
+    /// `text_input_data()` is still `None`, the request is not made, and the
+    /// focus never moves away and back to make it again. The find bar, the
+    /// go-to-page field and every field in the Settings window could be typed
+    /// into and nothing could be taken back out.
+    ///
+    /// So the window is asked here instead, whenever the focus has moved and
+    /// has landed on something being typed into. Nothing turns it off again:
+    /// winit's `set_ime_allowed` returns early when IME is already on, so
+    /// `ImeRequest::Disable` does nothing — which is upstream's, not ours, and
+    /// means "enabled once" is the only state this can reach anyway.
+    fn keep_ime_in_step(&mut self, window_id: WindowId) {
+        use winit::window::{ImeCapabilities, ImeEnableRequest, ImeRequest, ImeRequestData};
+        let Some(view) = self.inner.windows.get(&window_id) else {
+            return;
+        };
+        let editing = {
+            let doc = view.doc.inner();
+            doc.get_focussed_node_id()
+                .and_then(|id| doc.get_node(id))
+                .and_then(|node| node.element_data())
+                .is_some_and(|data| data.text_input_data().is_some())
+        };
+        if !editing {
+            return;
+        }
+        if let Some(ask) = ImeEnableRequest::new(ImeCapabilities::new(), ImeRequestData::default()) {
+            // `Err(AlreadyEnabled)` is the ordinary answer from the second
+            // keystroke onwards, and is nothing to report.
+            let _ = view.window.request_ime_update(ImeRequest::Enable(ask));
+        }
+    }
+
     /// Say what happens when the machine goes light or dark.
     ///
     /// The app gets this from `matchMedia`, which is a browser answering a
@@ -843,6 +895,12 @@ impl ApplicationHandler for Shell {
                 view.request_redraw();
             }
         }
+        // Asked on every event rather than only where the focus moved: a
+        // field's editor is not built until the layout after it is mounted,
+        // and a layout happens on a redraw rather than on anything this sees
+        // go past. See [`Shell::keep_ime_in_step`], which does nothing at all
+        // unless something is being typed into.
+        self.keep_ime_in_step(window_id);
     }
 
     /// Blitz's events arrive on a channel now and the proxy only says "there
@@ -944,6 +1002,16 @@ impl ApplicationHandler for Shell {
                 }
             }
             self.inner.handle_blitz_shell_event(event_loop, event);
+        }
+        // A field can arrive without a window event to announce it: ⌘F is a
+        // keystroke, the bar it opens is rendered on the poll that follows,
+        // and the field's editor is not built until the layout after that. So
+        // the question is asked again once the queue is drained, and every
+        // window is asked because a poll names none. See
+        // [`Shell::keep_ime_in_step`].
+        let ids: Vec<WindowId> = self.inner.windows.keys().copied().collect();
+        for id in ids {
+            self.keep_ime_in_step(id);
         }
     }
 }

@@ -3605,6 +3605,59 @@ one of six numbers, and nothing that compares labels could see any of them.
 
 ---
 
+## Five faults a reader found, the sentence they did not want, and the question they asked
+
+Reading with it turned up four things, and fixing them turned up two more. Two
+of the faults were one report — a pinch that blanked the document was one bug
+above another, and the second was only visible once the first was gone. The
+sentence is the reload notice, which is now not said. The question is signing.
+Everything below is done except the last, which is answered.
+
+### Backspace did nothing in any field, and the fix from last round was half of it
+
+**Backspace is not a key on a Mac.** AppKit does not deliver the editing keys
+as keystrokes at all: it reads them against the standard key bindings and calls
+`doCommandBySelector:` with a name — `deleteBackward:` — which winit surfaces
+through `ApplicationHandlerExtMacOS::standard_key_binding`, a callback separate
+from `window_event`. `blitz-dom` knows this and says so, its `Key::Backspace`
+arm being `#[cfg(not(target_os = "macos"))]`. The bar round found that this
+shell answered `macos_handler()` with winit's default `None` and forwarded the
+callback. **It was still dead**, and the second half took an instrumented build
+to see: the shell's forwarding was never called, because
+
+> **winit only reads a keystroke against the standard key bindings when IME is
+> enabled on the window.** `key_down` calls `interpretKeyEvents` inside
+> `if ime_capabilities.is_some()`, and `interpretKeyEvents` is the only thing
+> that ever calls `doCommandBySelector:`.
+
+`blitz-dom` does mean to enable it — `Node::focus` asks the shell for IME when
+the node it is focusing is a text input — and **it asks one moment too early**.
+A text input's editor is built by `create_text_editor` during *layout
+construction*; this reader focuses its fields from `onmounted`, which runs
+before the first layout, so `text_input_data()` is still `None`, the request is
+never made, and the focus never leaves the field and comes back to make it
+again. A window probe put the fault beyond argument: `ImeRequest::Update` came
+back `Err(NotEnabled)` on every keystroke typed into the find bar.
+
+`Shell::keep_ime_in_step` asks the window instead, whenever a text input holds
+the focus — on every window event, because a field's editor does not exist
+until the layout after it is mounted and a layout happens on a redraw rather
+than on anything the shell sees go past, and again after the proxy queue is
+drained, because ⌘F is a keystroke and the bar it opens is rendered on the poll
+that follows. Nothing turns it off again, and that is upstream's doing rather
+than a decision: winit's `set_ime_allowed` returns early when IME is already
+on, so `ImeRequest::Disable` does nothing at all.
+
+**This was invisible to the whole test suite, and would have stayed so.** The
+harness has no AppKit, so `Reader::apple_binding` sends the
+`AppleStandardKeybinding` event itself — which is right, and is the only way
+the editing keys can be tested at all off a Mac, and it means the tests were
+exercising the half below the fault. Both halves of this bug live between winit
+and the window, which is the one seam the harness is built to do without.
+
+
+---
+
 ## Three things to carry forward
 
 1. **Write the test with the feature.** The harness is a quarter-second for
@@ -3622,7 +3675,7 @@ one of six numbers, and nothing that compares labels could see any of them.
    what was on this list *can* be, once the rules are separated from the
    windows they are about.
 
-## Thirteen things worth raising upstream, and none of them is blocking
+## Fifteen things worth raising upstream, and none of them is blocking
 
 - `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
   comment in the source already says it should be. A tenth of every one of
@@ -3730,6 +3783,26 @@ one of six numbers, and nothing that compares labels could see any of them.
   nothing wrong with the face, the file or the shaping: the advances are
   simply the untracked ones. See "The font was the same file and not the same
   type" above, which carries the measurements at every size from 11 to 30.
+- **A text input focused before its first layout never asks for IME**, and on
+  macOS that is the whole of the editing keys. `Node::focus` asks the shell for
+  IME when the node it is focusing has `text_input_data()`, and that is built by
+  `create_text_editor` during *layout construction* — so a field focused from a
+  mount handler, which is the ordinary way to focus a field that has just
+  appeared, is focused a moment before the data exists. Nothing asks again,
+  because the focus does not move. On macOS `interpretKeyEvents` is called only
+  while IME is enabled and is the only thing that ever calls
+  `doCommandBySelector:`, so the result is a field that can be typed into and
+  cannot be corrected: Backspace, ⌥Backspace, ⌘←, every editing key. Asking
+  again on the next layout would fix it. See "Backspace did nothing in any
+  field" above, and `Shell::keep_ime_in_step`, which is this reader's way round.
+- **winit's `set_ime_allowed` cannot turn IME off.** Its first line is
+  `if self.ivars().ime_capabilities.get().is_some() { return; }`, so the disable
+  path — `ImeRequest::Disable`, which calls it with `None` — returns before it
+  reaches anything, and the only state reachable after the first enable is
+  enabled. It is not what this reader wanted fixed, and it is worth knowing:
+  it means "enable when a field has the focus" is the only rule any Blitz
+  application can actually implement, whatever it writes for the other half.
+  winit-appkit 0.31.0-beta.2, `src/view.rs`.
 - **`font-variation-settings` is parsed and dropped.** `stylo_to_parley.rs`
   converts it and hands it on, and `'wght' 100` and `'wght' 900` lay out
   identically — so a variable font's axes cannot be reached from CSS at all,

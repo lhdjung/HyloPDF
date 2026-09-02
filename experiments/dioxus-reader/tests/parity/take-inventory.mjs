@@ -33,7 +33,20 @@ const inventory = await app.page.evaluate(async () => {
     return style.display !== "none" && style.visibility !== "hidden" && !el.hidden;
   };
 
-  const out = { toolbar: {}, menus: {}, sidebar: [], find: {}, theme: {} };
+  const out = { toolbar: {}, menus: {}, sidebar: [], find: {}, theme: {}, rows: {} };
+
+  /** How tall a row of some surface is laid out, to the tenth of a pixel.
+   *
+   * The companion to the widths in `toolbar` above and the same argument: a
+   * row is its padding plus its line, both sides agree about the padding, so
+   * the height is the type. Every surface in the port that floats or lists —
+   * the menus, the sidebar, the Settings window — had been written in the
+   * toolbar's 13.5 where the app writes them in 14.5, and every one of them
+   * came out a row shorter. Nothing that compares labels can see that. */
+  const heightOf = (sel) => {
+    const el = document.querySelector(sel);
+    return el ? +el.getBoundingClientRect().height.toFixed(1) : null;
+  };
 
   // The toolbar, group by group, in document order.
   for (const group of ["bar-left", "bar-center", "bar-right"]) {
@@ -98,12 +111,22 @@ const inventory = await app.page.evaluate(async () => {
     out.menus[id] = await menuOf(id);
   }
 
+  // A menu row, measured with a menu actually open.
+  document.getElementById("theme").click();
+  await settle();
+  out.rows["menu-item"] = heightOf("#popovers .popover-item");
+  out.rows["menu-heading"] = heightOf("#popovers .popover-section");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await settle();
+
   // The sidebar's tabs, and the find bar's controls.
   document.getElementById("contents").click();
   await settle();
   out.sidebar = [...document.querySelectorAll(".sidebar-tabs .tab")]
     .filter(visible)
     .map((tab) => ({ id: tab.id, label: words(tab), icon: tab.dataset.icon ?? null }));
+  out.rows["tab"] = heightOf(".sidebar-tabs .tab");
+  out.rows["outline-item"] = heightOf(".outline-item");
   document.getElementById("contents").click();
   await settle();
 
@@ -132,6 +155,9 @@ const inventory = await app.page.evaluate(async () => {
   await settle();
   const openWindow = document.querySelector(".window");
   if (openWindow) {
+    out.rows["window-bar"] = heightOf(".window-bar");
+    out.rows["nav-item"] = heightOf(".window-nav button");
+    out.rows["switch"] = heightOf(".window-pane .switch");
     const nav = [...openWindow.querySelectorAll(".window-nav button")];
     out.settings.nav = nav.map((item) => words(item));
     for (const item of nav) {

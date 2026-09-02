@@ -43,7 +43,7 @@ pub fn variables(theme: &Palette) -> String {
         // surface.
         "--text: {}; --paper: {}; --accent: {}; --surface: {}; --line: {}; \
          --muted: {}; --faint: {}; --note: {}; --hover: {}; --sunk: {}; \
-         --ground: {}; --accent-soft: {}; --accent-contrast: {}; \
+         --ground: {}; --scrim: {}; --accent-soft: {}; --accent-contrast: {}; \
          --positive: {}; --negative: {}; --negative-contrast: {}; \
          --bar-hover: {}; --bar-sunk: {}; --bar-line: {}; --bar-accent: {};",
         hex(theme.text),
@@ -57,6 +57,7 @@ pub fn variables(theme: &Palette) -> String {
         hex(theme.surface_hover()),
         hex(theme.surface_sunk()),
         hex(theme.ground()),
+        theme.scrim(),
         hex(theme.accent_soft()),
         hex(theme.accent_contrast()),
         hex(theme.positive()),
@@ -290,10 +291,19 @@ body { margin: 0;
    what it is painted over only when it carries a non-zero one, and a menu
    that cannot be clicked is worse than no menu. 5 rather than 1 because it
    is over the toolbar as well as over the document. */
+/* **A menu is written a size larger than the bar it hangs off**, which is
+   `.popover { font-size: 14.5px }` in the app and was missing here — so every
+   menu in this reader was set in the toolbar's 13.5 and came out a list of
+   small grey words. The size is the whole reason a menu reads as somewhere
+   you have arrived rather than as more chrome, and every number below is
+   `.popover`'s: 232 to 340 wide, six of padding, and a shadow, because a menu
+   floats over the document and a border alone does not say so. */
 .menu {
-  position: absolute; top: calc(100% + 8px); z-index: 5; min-width: 190px;
+  position: absolute; top: calc(100% + 8px); z-index: 5;
+  min-width: 232px; max-width: 340px; font-size: 14.5px;
   padding: 6px; border-radius: 12px;
   border: 1px solid var(--line); background: var(--surface);
+  box-shadow: 0 10px 34px rgba(0,0,0,0.16);
 }
 /* Under the left edge of the button, except the two near the right end of the
    bar, which would otherwise run off it. */
@@ -311,41 +321,68 @@ body { margin: 0;
    row set the menu's width and every other row was then laid out one row too
    narrow, which showed as the chord on the right clipped by four pixels.
    These are block-level flex containers and fill the line on their own. */
+/* **Padding rather than a fixed height**, which is `.popover-item` and is not
+   a detail: a row given 30px and no padding is 30px whatever is in it, and a
+   row given seven pixels above and below grows with the type — so the same
+   rule holds at 14.5 here as at 13.5, and the row comes out the app's 35.
+   The ink is the quiet shade until the pointer is on it, which is the app's
+   `--text-soft` over `--text`: a menu of fourteen themes all in full-strength
+   ink reads as fourteen things shouting. */
 .menu-item {
-  display: flex; align-items: center; gap: 8px;
-  height: 30px; padding: 0 8px; border: 0; border-radius: 8px;
-  background: transparent; color: var(--text); font-size: 13.5px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted);
   text-align: left;
 }
-.menu-item:hover { background: var(--hover); }
+.menu-item:hover { background: var(--hover); color: var(--text); }
 .menu-item.on { color: var(--accent); }
-/* A column of its own so the labels line up whether or not a row is ticked. */
-.menu-tick { flex: 0 0 12px; color: var(--accent); }
-/* …and a drawing where a shelf row has one, which needs the four extra
+/* A column of its own so the labels line up whether or not a row is ticked.
+   Fourteen, which is `.popover-item .check`'s own width and the width of the
+   drawing that goes in it. */
+.menu-tick { flex: 0 0 14px; color: var(--accent); }
+/* …and a drawing where a shelf row has one, which needs the two extra
    pixels an icon is wider than a tick. */
 .menu-tick .icon { width: 16px; height: 16px; margin-left: -2px; }
-.menu-label { flex: 1 1 auto; white-space: nowrap; }
+/* `min-width: 0` and `overflow` are what `max-width` on the menu needs: a
+   theme somebody named at length would otherwise push the menu past its cap
+   rather than being cut at it. The app cuts it with an ellipsis, which is a
+   thing this renderer has not got. */
+.menu-label { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
 /* The chord, read off the keymap rather than written here — see
-   `Viewer::chord_for`. Quiet, because it is an aside and not the item. */
-.menu-key { flex: 0 0 auto; color: var(--faint); font-size: 12.5px; }
+   `Viewer::chord_for`. An aside and not the item, and the app's own shade for
+   one — `--text-note`, which is only a little quieter than the label, because
+   the note beside a row is meant to be read. Fading it to `--faint` and
+   shrinking it to 12 made it decoration. */
+.menu-key { flex: 0 0 auto; color: var(--note); }
 .menu-rule { height: 1px; margin: 5px 8px; background: var(--line); }
 /* A row of a menu that holds a control rather than a choice — `.popover-row`
    in the app, where the label carries the weight and the control sits at the
    end of it. */
-.menu-row { display: flex; align-items: center; gap: 10px; padding: 4px 10px; }
-.menu-row-label { flex: 1 1 auto; color: var(--text); font-size: 13.5px; }
-.menu-row-note { color: var(--faint); font-size: 12px; }
-/* A theme, two letters wide, in its own colours — `ui.swatch` in the app. */
+.menu-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; }
+.menu-row-label { flex: 1 1 auto; color: var(--text); }
+/* `--text-note` and the row's own size, which is `.popover-note` in the app
+   and carries its warning with it: "the difference between them is weight
+   rather than size … telling the two apart by fading the note is what made it
+   unreadable". This had it at `--faint` and 12px, which is both of the things
+   that comment says not to do. */
+.menu-row-note { color: var(--note); }
+/* A theme, two letters wide, in its own colours — `ui.swatch` in the app, and
+   its numbers: a wide shallow chip rather than a square, and an inset ring in
+   a neutral grey rather than a border in the theme's line colour, so that a
+   swatch on a dark theme is not outlined in something darker than it. */
 .swatch {
   display: flex; align-items: center; justify-content: center;
-  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 6px;
-  border: 1px solid var(--line); font-size: 11.5px; font-weight: 600;
+  flex: 0 0 auto; width: 22px; height: 16px; border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(127,127,127,0.35);
+  font-size: 11px; font-weight: 600;
 }
 /* A heading over a run of items — the app's `ui.section`, and the Document
-   menu's shelf is the one place that has one. Quieter and a size smaller than
-   an item, and it is not a row you can point at. */
+   menu's shelf is the one place that has one. Told from an item by colour
+   alone, at the menu's own size: `.popover-section` names no size either, and
+   a heading a size smaller than what it heads reads as a footnote over the
+   list rather than as a title on it. */
 .menu-section {
-  padding: 6px 8px 4px; color: var(--faint); font-size: 12px;
+  padding: 8px 10px 4px; color: var(--faint);
 }
 
 /* The title is a button now, because the document's menu hangs off it. It
@@ -595,9 +632,15 @@ body { margin: 0;
    edge and flush against its left. One pixel, and it is the same fault as the
    window resize above in miniature: the layout's idea of the viewport and the
    viewport disagreeing. */
+/* And `font-size: 14.5px`, which is `#sidebar`'s own and was missing: the
+   panel is read the way a menu is read — at arm's length, in a column, a line
+   at a time — so it is written a size larger than the bar, and every list in
+   it inherits that rather than naming a size of its own. A contents list set
+   in 13 is a contents list nobody reads. */
 .sidebar {
   flex: 0 0 auto; display: flex; flex-direction: column; box-sizing: border-box;
-  min-height: 0; background: var(--surface); border-right: 1px solid var(--line);
+  min-height: 0; font-size: 14.5px;
+  background: var(--surface); border-right: 1px solid var(--line);
 }
 /* Centred on the border rather than beside it, so the grab target is wider
    than the one line it visually is. */
@@ -640,10 +683,10 @@ body { margin: 0;
    tab with a shortened word reads as a narrow panel — which is why the label
    is a span of its own and the shrinking happens there. */
 .tab {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
   flex: 1 1 0; min-width: 0; overflow: hidden;
-  height: 26px; padding: 0 6px; border: 0; border-radius: 8px;
-  background: transparent; color: var(--muted); font-size: 13px; font-weight: 500;
+  height: 28px; padding: 0 4px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 500;
 }
 .tab .icon { flex: 0 0 auto; }
 /* `text-overflow: ellipsis` is not implemented — see the note at the top of
@@ -651,23 +694,49 @@ body { margin: 0;
    `.result` use. */
 .tab-label {
   flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap;
+}
+/* **And only where a word can actually be cut.** The mask was on the label
+   itself, and a label is `flex: 0 1 auto` — its box *is* its word — so the
+   last ten pixels of every tab were faded whether or not anything had run out
+   of room, which on a two-tab strip with a hundred and fifteen pixels a tab is
+   simply wrong. It is the same fault `.chip.title` had and the same shape of
+   fix: `sidebar.rs` says `tight` when there are three tabs and the panel is
+   narrower than all three of them labelled. The rows below get away with an
+   unconditional mask because their boxes are the full width of the panel, so
+   the faded band falls on empty ground when the text is short. */
+.tabs.tight .tab-label {
   mask-image: linear-gradient(to right, #000 calc(100% - 10px), transparent);
 }
 .tab:hover { background: var(--hover); color: var(--text); }
-.tab.on { background: var(--sunk); color: var(--text); }
+/* **The tint carries the theme, here as in the bar.** This said `--sunk` and
+   `--text`, which is a grey chip of grey words under every one of the fourteen
+   themes — and it is exactly the fault `.chip.on` had and the same fix:
+   `.tab[aria-selected="true"]` in the app is the accent at a fifth of its
+   strength with the accent written on it. Which tab is open is the one thing
+   this strip exists to say. */
+.tab.on { background: var(--accent-soft); color: var(--accent); }
 
 .panel { flex: 1 1 auto; overflow: hidden; min-height: 0; }
 .thumb-column { position: relative; }
 .sidebar-empty { margin: 10px 12px; color: var(--faint); }
 
+/* Padding rather than a fixed height, and the panel's own size rather than a
+   size of its own — both are `.outline-item` in the app, and both matter for
+   the same reason: a heading is a line of somebody's prose, and a list of them
+   set in 13 in a 26px slot is a list nobody reads. The `padding-left` written
+   on each row in `sidebar.rs` is the indent and overrides the 8 here. */
 .outline-item {
-  display: block; width: 100%; height: 26px; border: 0; border-radius: 7px;
+  display: block; width: 100%; border: 0; border-radius: 7px;
+  padding: 5px 8px;
   background: transparent; color: var(--muted); text-align: left;
-  font-size: 13px; white-space: nowrap; overflow: hidden;
+  white-space: nowrap; overflow: hidden;
   mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
 }
 .outline-item:hover { background: var(--hover); color: var(--text); }
-.outline-item.current { color: var(--accent); }
+/* Where the reader is, said the way every other "this one" in this app says
+   it: the accent under the words as well as in them. Colour alone is what
+   `.chip.on` and `.tab.on` were both wrong about — see `.tab.on`. */
+.outline-item.current { background: var(--accent-soft); color: var(--accent); }
 
 /* The results list. A row is two lines' worth of text on one line, cut off at
    the end rather than wrapped: what places a match is the words in front of
@@ -684,14 +753,19 @@ body { margin: 0;
 .result {
   display: flex; align-items: baseline; justify-content: flex-start; gap: 8px;
   width: 100%; min-width: 0;
-  border: 0; border-radius: 7px; padding: 5px 6px; margin-bottom: 1px;
-  background: transparent; text-align: left; font-size: 13px;
+  border: 0; border-radius: 9px; padding: 7px 10px; margin-bottom: 1px;
+  background: transparent; text-align: left; font-size: 12.5px;
   white-space: nowrap; overflow: hidden;
   mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
 }
-.result:hover { background: var(--hover); }
-.result.current { background: var(--sunk); }
-.result-page { flex: 0 0 auto; color: var(--faint); font-size: 12px; }
+.result:hover { background: var(--hover); color: var(--text); }
+.result.current { background: var(--accent-soft); color: var(--accent); }
+/* `min-width` so that the numbers line up down the column rather than every
+   quote starting at a different place — `.result-page` in the app, in ems
+   because it is a measure of digits and not of pixels. */
+.result-page {
+  flex: 0 0 auto; min-width: 2.2em; color: var(--faint); font-size: 12px;
+}
 .result-line { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); }
 /* `pre`, because the space either side of the match is the whole difference
    between a line that reads as a sentence and "A**needle**in the first page":
@@ -699,7 +773,13 @@ body { margin: 0;
    are cut out of the document precisely at those edges. `results()` keeps a
    single space there deliberately — see `search.rs`. */
 .result-before, .result-after { white-space: pre; }
-.result-hit { color: var(--text); font-weight: 600; }
+/* The matched words, drawn the way a swept passage on the page is drawn: the
+   theme's own selection colours, which is `.result-line mark` in the app. A
+   bold run in the ink colour said "this is the word" in the one way that
+   cannot be told apart from a heading. */
+.result-hit {
+  background: var(--found); color: var(--found-ink); border-radius: 2px;
+}
 
 .marks { padding: 4px 8px 8px 8px; border-bottom: 1px solid var(--line); }
 .marks-title { margin: 2px 4px 6px 4px; color: var(--faint); }
@@ -770,7 +850,20 @@ body { margin: 0;
   border: 0; background: transparent; padding: 0;
   display: flex; flex-direction: column; align-items: center;
 }
-.thumb-picture { background: var(--page); box-shadow: 0 1px 3px rgba(0,0,0,0.16); }
+/* **A ring, not a drop shadow, and the page being read wears it in the
+   accent.** `.thumb canvas` in the app is `0 0 0 1px var(--line)` and
+   `.thumb.current canvas` is `0 0 0 2px var(--accent)`: a hairline round every
+   thumbnail so a white page is told from a white panel, and a coloured one
+   round the page you are on. This had a drop shadow under every picture and
+   nothing at all on the current one — so which page was being read was said
+   by the number under it and by nothing else, at a size where the number is
+   twelve pixels tall in a column three hundred pixels long. A shadow is what
+   a page on the desk has; a thumbnail in a list is not on a desk. */
+.thumb-picture {
+  background: var(--page); border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.thumb.current .thumb-picture { box-shadow: 0 0 0 2px var(--accent); }
 .thumb-number { height: 18px; color: var(--faint); font-size: 12px; }
 .thumb.current .thumb-number { color: var(--accent); }
 /* The document: one box the size of the whole thing, with the pages placed in
@@ -832,7 +925,7 @@ body { margin: 0;
   font-size: 30px; font-weight: 600; letter-spacing: -0.01em; color: var(--text);
 }
 .start-sub {
-  margin: 6px 0 22px; text-align: center; color: var(--muted); font-size: 15.5px;
+  margin: 6px 0 22px; text-align: center; color: var(--note); font-size: 15.5px;
 }
 /* The one filled button in this application, and the app's `.btn-primary`.
    Everything else in the chrome is a quiet chip on a transparent ground,
@@ -844,20 +937,21 @@ body { margin: 0;
   background: var(--accent); color: var(--paper);
   font-size: 14px; font-weight: 500;
 }
-.start-hint { margin-top: 22px; text-align: center; color: var(--faint); }
+.start-hint { margin-top: 22px; text-align: center; color: var(--note); }
 
 .recents { margin-top: 26px; }
-.recents-title { padding: 0 8px 6px; color: var(--muted); font-size: 13px; }
+.recents-title { padding: 0 8px 6px; color: var(--note); }
 /* A row is the button and the × beside it, and the × is a sibling rather than
    a child: a button inside a button is not a shape either the DOM or a
    pointer knows what to do with, and the app gets away with a `<span>` there
    only because it is listening for a click and stopping it. */
 .recent { display: flex; align-items: center; border-radius: 9px; }
 .recent:hover { background: var(--hover); }
+.recent:hover .recent-open { color: var(--text); }
 .recent-open {
   display: flex; align-items: center; gap: 10px;
   flex: 1 1 auto; min-width: 0; height: 34px; padding: 0 4px 0 10px;
-  border: 0; background: transparent; color: var(--text); font-size: 13.5px;
+  border: 0; background: transparent; color: var(--muted);
   text-align: left;
 }
 /* The name takes what is left and the page number keeps its column. `min-width:
@@ -901,9 +995,15 @@ body { margin: 0;
   display: flex; align-items: center; justify-content: center;
   pointer-events: none;
 }
+/* A shadow, because this is the one thing in the reader that floats over the
+   document with nothing behind it — `.notice` in the app carries one, and a
+   pill with a hairline and no shadow reads as a shape drawn on the page
+   rather than as something laid over it. `gap` is for the tick beside "Saved". */
 .notice {
+  display: flex; align-items: center; gap: 8px;
   max-width: 70%; padding: 9px 16px; border-radius: 999px;
   background: var(--surface); border: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.16);
   color: var(--text);
 }
 
@@ -965,23 +1065,39 @@ body { margin: 0;
    which is a flex column filling the window, so the two come to the same
    thing. `z-index` above the menus, because Settings is over everything
    including the bar it was opened from. */
+/* **The scrim is the theme's backdrop at 62%, not black at 34%.** The app says
+   `color-mix(in srgb, var(--bg) 62%, transparent)`, and the difference is not
+   subtle: a black wash over Hylo Light darkens a pale reader into something
+   that looks switched off, and over Hylo Ember it turns a warm room grey. A
+   wash of the app's own ground leaves every theme recognisably itself, which
+   is the point of having themes. `--scrim` is that colour with its alpha
+   already in it, mixed in `palette.rs` where the rest of the shades are.
+   (The app also blurs what is behind it; `backdrop-filter` is not something
+   this renderer has, and a scrim without it is still a scrim.) */
 .window-scrim {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 20;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.34);
+  background: var(--scrim);
 }
+/* `font-size` and `background` are the two that were wrong, and the second is
+   the one you can see: `.window` in the app stands on `--surface`, the shade
+   everything that floats is mixed to, and this had it on `--paper` — the
+   colour of the *page*. On a light theme the two are near enough that nobody
+   would look twice; on a dark one the Settings window came up the colour of a
+   sheet of paper in a dark room. And 14.5px, for the reason the sidebar and
+   the menus have it: this is somewhere you have arrived, not more chrome. */
 .window {
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; font-size: 14.5px;
   width: 860px; height: 600px; max-width: 92%; max-height: 92%;
-  border-radius: 16px; border: 1px solid var(--line);
-  background: var(--paper); color: var(--text);
-  box-shadow: 0 24px 64px rgba(0,0,0,0.28);
+  border-radius: 14px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text);
+  box-shadow: 0 18px 60px rgba(0,0,0,0.28);
 }
 .window-bar {
-  display: flex; align-items: center; flex: 0 0 auto;
-  height: 46px; padding: 0 10px 0 18px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
+  height: 48px; padding: 0 10px 0 18px; border-bottom: 1px solid var(--line);
 }
-.window-title { flex: 1 1 auto; font-size: 14px; font-weight: 600; }
+.window-title { flex: 1 1 auto; font-size: 15px; font-weight: 600; }
 .chip.window-close { width: 30px; padding: 0; justify-content: center; }
 .window-body { flex: 1 1 auto; display: flex; flex-direction: row; min-height: 0; }
 /* A note is a paragraph, not a settings window: it fits what is in it. */
@@ -998,14 +1114,17 @@ body { margin: 0;
 .details-row { display: flex; gap: 12px; padding: 4px 0; }
 .details-label { flex: 0 0 34%; color: var(--faint); font-size: 13px; }
 .details-value { flex: 1 1 0; min-width: 0; color: var(--text); font-size: 13px; }
+/* The nav column is the *sunk* shade, not the surface — `.window-nav` in the
+   app — which is what tells the column from the page beside it now that the
+   window itself is the surface. Its width and padding are the app's too. */
 .window-nav {
-  flex: 0 0 188px; display: flex; flex-direction: column; gap: 2px;
-  padding: 12px 10px; border-right: 1px solid var(--line); background: var(--surface);
+  flex: 0 0 186px; display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 8px; border-right: 1px solid var(--line); background: var(--sunk);
 }
 .nav-item {
   display: flex; align-items: center; gap: 9px;
   height: 32px; padding: 0 10px; border: 0; border-radius: 9px;
-  background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 500;
+  background: transparent; color: var(--muted); font-weight: 500;
   text-align: left;
 }
 .nav-item:hover { background: var(--hover); color: var(--text); }
@@ -1015,19 +1134,26 @@ body { margin: 0;
 /* `scroll`, not `auto` — Blitz has no `auto`, which is the note at the top of
    this file. Reading is the longest page and does not fit in 600px. */
 .window-pane {
-  flex: 1 1 auto; min-width: 0; padding: 18px 22px 24px 22px;
+  flex: 1 1 auto; min-width: 0; padding: 18px 26px 28px 26px;
   overflow: scroll; scrollbar-width: thin;
 }
 /* `letter-spacing` is the app's own `-0.01em`, and it does a second job here:
    the 0.6px of tracking `body` stands in with is right for the 11-16px band
    the rest of this sheet lives in and too much at nineteen. See `body`. */
 .pane-title { margin: 0 0 4px 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
-.pane-lede { margin: 0 0 12px 0; color: var(--faint); font-size: 14px; }
+/* **Every sentence in this window was a shade too quiet and a size too
+   small.** `--text-note` is the app's shade for the small print beside a
+   setting, and `themes.ts` carries the reason next to the number: at 0.38 it
+   fell under 4.5:1 against the paper and "the sentence that explains a switch
+   was harder to read than the switch". These said `--faint`, which is 0.52 —
+   past the point that comment is about — and named sizes of their own under a
+   window that is 14.5. */
+.pane-lede { margin: 0 0 12px 0; color: var(--note); }
 .pane-group {
-  margin: 22px 0 8px 0; font-size: 12.5px; font-weight: 600;
+  margin: 22px 0 8px 0; font-weight: 500;
   color: var(--faint);
 }
-.pane-note { margin: 0 0 12px 0; color: var(--faint); font-size: 13px; line-height: 1.5; }
+.pane-note { margin: 0 0 12px 0; color: var(--note); line-height: 1.5; }
 .pane-actions { display: flex; gap: 8px; margin-top: 16px; }
 /* The three shapes an action button takes, which is `ui.button`'s `kind`. */
 .chip.action { border: 1px solid var(--line); }
@@ -1057,24 +1183,36 @@ body { margin: 0;
 /* One setting. The control sits on the same line as the name and the sentence
    runs under both, which is what keeps a page of switches readable as prose
    rather than as a form. */
-.field { padding: 12px 0; border-bottom: 1px solid var(--line); }
-.field-head { display: flex; align-items: center; gap: 16px; }
-.field-label { flex: 1 1 auto; font-size: 14px; }
+.field { padding: 13px 0; border-bottom: 1px solid var(--line); }
+.field-head { display: flex; align-items: center; gap: 18px; }
+.field-label { flex: 1 1 auto; color: var(--text); font-weight: 500; }
 .field-control { flex: 0 0 auto; display: flex; align-items: center; }
-.field-note { margin: 6px 0 0 0; color: var(--faint); font-size: 12.5px; line-height: 1.5; }
+.field-note { margin: 6px 0 0 0; color: var(--note); font-size: 14px; line-height: 1.5; }
 
+/* Every number is `.switch`'s in the app, and they add up to a smaller,
+   quieter control than this had: 34 by 20 rather than 40 by 23, a knob of 14
+   in the faint ink rather than one of 19 in white under a drop shadow, and a
+   hairline round the track when it is off. What that buys is a switch that
+   reads as *off* when it is off — a white knob on a pale track is a lamp with
+   the light on, and a row of them down the Settings window all looked live. */
 .switch {
-  width: 40px; height: 23px; padding: 2px; border: 0; border-radius: 12px;
-  background: var(--sunk); display: flex; align-items: center;
+  width: 34px; height: 20px; padding: 3px; border: 0; border-radius: 10px;
+  background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line);
+  display: flex; align-items: center;
 }
-.switch.on { background: var(--accent); }
+.switch.on { background: var(--accent); box-shadow: none; }
 .switch-knob {
-  width: 19px; height: 19px; border-radius: 10px; background: var(--paper);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.24);
+  width: 14px; height: 14px; border-radius: 7px; background: var(--faint);
 }
+/* On, the knob is the ink the accent is written in — `--accent-contrast` in
+   the app, which is what keeps it legible on the accent whatever the accent
+   is. */
+.switch.on .switch-knob { background: var(--accent-contrast); }
 /* The knob moves by being pushed, not by being positioned: Blitz has the box
-   model and this needs nothing else. */
-.switch.on .switch-knob { margin-left: 17px; }
+   model and this needs nothing else. Fourteen is the track less its two
+   paddings less the knob, which is the same journey `left: 3px` to
+   `left: 17px` makes in `styles.css`. */
+.switch.on .switch-knob { margin-left: 14px; }
 
 .segmented {
   display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--sunk);

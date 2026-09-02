@@ -488,6 +488,15 @@
     "--selection-area": "#eac8c2",
     "--selection-text": "#2f3237"
   },
+  "rows": {
+    "menu-item": 35,
+    "menu-heading": 33,
+    "tab": 28,
+    "outline-item": null,
+    "window-bar": 48,
+    "nav-item": 32,
+    "switch": 20
+  },
   "settings": {
     "nav": [
       "Reading",

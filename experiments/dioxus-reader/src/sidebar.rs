@@ -69,6 +69,19 @@ pub const MAX_WIDTH: f64 = 480.0;
 /// `styles.rs` for why fading the word out instead was worse.
 const TAB_LABELS_FIT: f64 = 250.0;
 
+/// …and the width at which all *three* of them do, which is the same sum with
+/// one more tab in it.
+///
+/// This is not what decides whether the words are shown — [`TAB_LABELS_FIT`]
+/// is, and it is deliberately the two-tab number, because a Results tab that
+/// arrives should not take the words off the two that were already there.
+/// It decides whether the word is *faded at its end*, which is this reader's
+/// stand-in for the `text-overflow: ellipsis` Blitz has not got. A fade said
+/// unconditionally is a fade over every word that fits — the fault the
+/// document's name in the toolbar had — and here it showed on `Contents` in a
+/// panel with room for it twice over.
+const TAB_LABELS_ROOMY: f64 = 273.0;
+
 /// What is left for a picture once the column has its padding, and the space
 /// under one for its page number.
 pub const PAD: f64 = 10.0;
@@ -262,6 +275,9 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
     let searching = held.find_open;
     // See the note on `.tabs` below: an icon and a word, or an icon.
     let labelled = width >= TAB_LABELS_FIT;
+    // Whether a word could be cut: three tabs in a panel narrow enough that
+    // they do not all fit. See [`TAB_LABELS_ROOMY`].
+    let tight = searching && width < TAB_LABELS_ROOMY;
     let results = if searching {
         held.search.results(crate::search::RESULT_LIMIT)
     } else {
@@ -308,7 +324,7 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
             // last few letters was fading the whole word, and three tabs
             // reading "C", "P", "R" are three tabs nobody can tell apart. An
             // icon on its own is still the thing it is a drawing of.
-            div { class: "tabs",
+            div { class: if tight { "tabs tight" } else { "tabs" },
                 button {
                     class: if tab == Tab::Contents { "tab on" } else { "tab" },
                     "data-tab": "contents",

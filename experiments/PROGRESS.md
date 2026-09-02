@@ -3525,6 +3525,86 @@ complaint.
 
 ---
 
+## Everything that floats or lists was a size too small
+
+The four above were what a reader noticed. This is what reading the two
+stylesheets against each other turned up, and it is one fault with eleven
+faces: **`.popover`, `#sidebar` and `.window` each say `font-size: 14.5px` in
+the app and none of them said anything here**, so every menu, the contents
+list, the results, the thumbnail column and the whole Settings window were
+written in the toolbar's 13.5. A size is not a detail on those surfaces. The
+bar is glanced at and a menu is read; the app writes the second a size larger
+for exactly that reason, and a menu of fourteen themes in 13.5 grey reads as
+more chrome rather than as somewhere you have arrived.
+
+Everything that follows from it was measured the same way, `styles.css` rule
+against `styles.rs` rule:
+
+- **A menu row.** 30px and no padding against `.popover-item`'s `7px 10px`,
+  which is 35 — and the difference is not the five pixels, it is that a fixed
+  height does not grow with the type and padding does. Gap 8 against 10, the
+  tick column 12 against 14, the ink full-strength `--text` against
+  `--text-soft`, no `box-shadow` at all under a thing that floats over a
+  document, and `min-width` 190 against 232.
+- **The sentences.** `--faint` is 0.52 of the way from the ink to the paper and
+  `--text-note` is 0.28, and `themes.ts` carries the reason beside the number:
+  at 0.38 the note "fell under 4.5:1 against the paper … the sentence that
+  explains a switch was harder to read than the switch". Every note in this
+  port — a menu row's, a field's, the pane lede, the start screen's subtitle
+  and hint — was at `--faint` and a size smaller again. That is the other half
+  of "too strong in the chrome, too weak in the notes": the chrome had lost its
+  tracking and the notes had been faded past the point the app's own comment
+  warns about.
+- **The tint that says which one.** `.tab.on` and `.result.current` were
+  `--sunk` and `--text` — a grey chip of grey words under all fourteen themes.
+  This is the third time this fault has been found in this port (`.chip.on` and
+  the toolbar were the first two) and it has the same answer every time: the
+  app tints with `--accent-soft` and writes in `--accent`, because the tint is
+  what carries the theme.
+- **The current thumbnail had nothing on it.** `.thumb canvas` in the app is a
+  hairline ring and `.thumb.current canvas` an accent one; this had a drop
+  shadow under every picture and no ring at all, so which page is being read
+  was said by a twelve-pixel number under a three-hundred-pixel column and by
+  nothing else.
+- **The scrim was black.** `color-mix(in srgb, var(--bg) 62%, transparent)`
+  against `rgba(0,0,0,0.34)`: a black wash over Hylo Light reads as the
+  application having been switched off, and over Hylo Ember it takes the warmth
+  out. `--scrim` is mixed in `palette.rs` now, where the rest of the shades
+  are, because `color-mix` is not something this renderer has and `rgba()` is.
+- **The Settings window stood on the wrong shade** — `--paper`, the colour of
+  the page, where `.window` stands on `--surface`. On a light theme the two are
+  near enough that nobody would look twice; on a dark one the window came up
+  the colour of a sheet of paper in a dark room. Its nav column was the surface
+  where the app's is the sunk shade, which is what tells the column from the
+  page once the window itself is the surface.
+- **And the switch was a lamp with the light on.** 40×23 with a white knob
+  under a drop shadow, against the app's 34×20 with a knob in the faint ink and
+  a hairline round the track. A row of them down the Settings window all looked
+  live whether they were on or not.
+
+### The fade, a second time
+
+`.tab-label` was faded at its end in every panel at every width, and it is
+exactly the fault the document's name had: a `mask-image` is relative to the
+box, and a label that is `flex: 0 1 auto` *is* its word, so the last ten pixels
+of the word are always under the gradient. The rows below it get away with an
+unconditional mask because their boxes are the full width of the panel and the
+faded band falls on empty ground when the text is short — which is worth
+knowing, because it is what makes this a bug about `flex` rather than about
+masks. `TAB_LABELS_ROOMY` is the width at which all three tabs fit labelled,
+and `sidebar.rs` says `tight` only below it.
+
+### The test that would have caught all of it
+
+`app-inventory.json` now carries the **height** of a menu item, a menu heading,
+a tab, a nav item, the window bar and a switch, and `parity.rs` asserts them to
+within two pixels. It is the same argument as the widths one section up, turned
+ninety degrees: a row is its padding plus its line, both readers agree about the
+padding, so the height is the type. Every one of the eleven above shows up in
+one of six numbers, and nothing that compares labels could see any of them.
+
+---
+
 ## Three things to carry forward
 
 1. **Write the test with the feature.** The harness is a quarter-second for

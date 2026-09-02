@@ -71,7 +71,25 @@ impl Palette {
     /// The ground the pages stand on. `--bg` in the app, and it is the one
     /// that shows most: it is the whole window either side of the paper.
     pub fn ground(&self) -> Rgb {
-        mix(self.background, BLACK, if self.dark() { 0.34 } else { 0.07 })
+        mix(
+            self.background,
+            BLACK,
+            if self.dark() { 0.34 } else { 0.07 },
+        )
+    }
+
+    /// The wash over the reader while a window is up, as a CSS colour with its
+    /// alpha in it.
+    ///
+    /// `color-mix(in srgb, var(--bg) 62%, transparent)` in `styles.css`, which
+    /// is the *ground* at 62% and not black at anything: a black scrim over a
+    /// light theme reads as the application having been switched off, and over
+    /// a warm one it takes the warmth out. Written from here rather than in
+    /// the sheet because `color-mix` is not something this renderer has and
+    /// `rgba()` is.
+    pub fn scrim(&self) -> String {
+        let [r, g, b] = self.ground();
+        format!("rgba({r}, {g}, {b}, 0.62)")
     }
 
     /// What floats: a menu, the sidebar, the settings window. `--surface`.
@@ -103,7 +121,11 @@ impl Palette {
     }
 
     pub fn line(&self) -> Rgb {
-        mix(self.background, self.text, if self.dark() { 0.14 } else { 0.17 })
+        mix(
+            self.background,
+            self.text,
+            if self.dark() { 0.14 } else { 0.17 },
+        )
     }
 
     /// The colour the toolbar's own labels are written in — `--text-soft`.
@@ -326,7 +348,8 @@ pub fn resolve(theme: &crate::theme::Theme, keep_colour: bool) -> Palette {
     let link = read(&theme.link).unwrap_or(accent);
     // And absent selection means "derive it from the accent" — a wash of it
     // over the paper, so it reads as a highlight rather than as a block.
-    let selection_area = read(&theme.selection_area).unwrap_or_else(|| mix(background, accent, 0.4));
+    let selection_area =
+        read(&theme.selection_area).unwrap_or_else(|| mix(background, accent, 0.4));
     // The ink on that ground, derived from the ground: whichever of the
     // theme's two extremes it is further from.
     let selection_text = read(&theme.selection_text).unwrap_or_else(|| {
@@ -418,7 +441,10 @@ mod tests {
             toml::from_str("name = \"Bare\"\ntext = \"#ffffff\"\nbackground = \"#202020\"\n")
                 .expect("parses");
         let palette = resolve(&bare, true);
-        assert_eq!(palette.link, palette.accent, "link falls back to the accent");
+        assert_eq!(
+            palette.link, palette.accent,
+            "link falls back to the accent"
+        );
         assert_ne!(palette.accent, FALLBACK.accent);
         assert_ne!(palette.selection_area, palette.background);
         // The ink on a dark selection is the theme's paper, not its ink.

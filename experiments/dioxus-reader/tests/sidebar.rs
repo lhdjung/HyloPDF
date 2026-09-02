@@ -493,6 +493,37 @@ fn nothing_in_the_panel_hangs_over_the_document() {
     }
 }
 
+/// **And a word that fits is not faded.**
+///
+/// The mask over a tab's last ten pixels is this reader's stand-in for the
+/// `text-overflow: ellipsis` Blitz has not got, and it was on the label
+/// itself — which is `flex: 0 1 auto`, so its box *is* its word. Every tab in
+/// every panel was therefore faded at its end, including a two-tab strip with
+/// a hundred and fifteen pixels a tab. It is the same fault the document's
+/// name in the toolbar had, and the same fix: `sidebar.rs` says `tight` only
+/// when there are three tabs and the panel is narrower than all three of them
+/// labelled.
+#[test]
+fn a_tab_is_only_faded_when_its_word_might_not_fit() {
+    let mut reader = Reader::open_with(&fixture::prose_pdf(), Options::default());
+    reader.press_chord("mod+b");
+    assert!(
+        reader.harness.query(".tab-label").is_some(),
+        "the words are shown at the default width",
+    );
+    assert!(
+        reader.harness.query(".tabs.tight").is_none(),
+        "two tabs at 252px have room and were faded anyway",
+    );
+
+    // A third tab arrives with the find bar, and now they do not all fit.
+    reader.press_chord("mod+f");
+    assert!(
+        reader.harness.query(".tabs.tight").is_some(),
+        "three tabs at 252px are cut and were not faded",
+    );
+}
+
 /// And the word gives way before the drawing does — three tabs reading "C",
 /// "P", "R" are three tabs nobody can tell apart, so below the width a word
 /// fits in, the strip is icons.

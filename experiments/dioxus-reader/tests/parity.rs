@@ -146,6 +146,65 @@ fn the_toolbar_is_the_size_of_the_app_s() {
     }
 }
 
+/// **And the surfaces that float or list are the size the app's are.**
+///
+/// The widths above catch the type in the toolbar; this catches it everywhere
+/// else, and by height rather than by width for the same reason: a row is its
+/// padding plus its line, both readers agree about the padding, so the height
+/// is the type. Every one of these was a row shorter — a menu item 30 against
+/// 35, a tab 26 against 28, a switch 23 against 20 — because the port wrote
+/// its menus, its sidebar and its Settings window in the toolbar's 13.5 where
+/// `.popover`, `#sidebar` and `.window` each say 14.5. Which is not a thing
+/// any comparison of *labels* can see, and the reader who reported it could
+/// only say that the port looked smaller.
+#[test]
+fn the_surfaces_are_the_size_of_the_app_s() {
+    let app = app();
+    let want = |name: &str| app["rows"][name].as_f64();
+
+    // A menu, open. Theme is the one every reader sees.
+    let mut menu = reader();
+    menu.click(".chip.theme");
+    for (name, selector) in [
+        ("menu-item", ".menu-item"),
+        ("menu-heading", ".menu-section"),
+    ] {
+        let Some(tall) = want(name) else { continue };
+        assert!(menu.harness.query(selector).is_some(), "no {selector}");
+        let got = menu.harness.layout_rect(selector).height as f64;
+        assert!(
+            (got - tall).abs() <= 2.0,
+            "{name} is {got} tall and the app's is {tall}",
+        );
+    }
+
+    // The sidebar's tab strip.
+    let mut panel = reader();
+    panel.press_chord("mod+b");
+    let tab = panel.harness.layout_rect(".tab").height as f64;
+    let wanted = want("tab").expect("the app's tab");
+    assert!(
+        (tab - wanted).abs() <= 2.0,
+        "a tab is {tab} tall and the app's is {wanted}"
+    );
+
+    // And the Settings window.
+    let mut window = reader();
+    window.press_chord("mod+,");
+    for (name, selector) in [
+        ("window-bar", ".window-bar"),
+        ("nav-item", ".nav-item"),
+        ("switch", ".switch"),
+    ] {
+        let Some(tall) = want(name) else { continue };
+        let got = window.harness.layout_rect(selector).height as f64;
+        assert!(
+            (got - tall).abs() <= 2.0,
+            "{name} is {got} tall and the app's is {tall}",
+        );
+    }
+}
+
 /// Every menu the toolbar opens, item for item and rule for rule.
 ///
 /// The app's own five: Open, the document's name, the zoom readout, Theme and

@@ -4142,15 +4142,16 @@ impl Viewer {
             return None;
         }
         let restarted = self.reopen(path);
-        let renamed = self.store.renamed(&self.document.title());
-        self.notice = if renamed {
-            format!(
-                "Reloaded — the document changed on disk. Now called {}.",
-                self.store.title()
-            )
-        } else {
-            "Reloaded — the document changed on disk.".into()
-        };
+        // Still asked, because asking is what *renames* the document — the
+        // toolbar takes its title from what this writes. What is no longer
+        // done with the answer is announce it. A reader watching a paper
+        // recompile sees the page redraw and the title change, which is the
+        // whole of the news; a line saying "Reloaded — the document changed
+        // on disk" tells somebody who did not know what a reload is that
+        // something they did not do has happened to their file, which is a
+        // sentence that can only worry them. See `reopen`, which had already
+        // reached this conclusion for the other caller.
+        let _ = self.store.renamed(&self.document.title());
         restarted
     }
 

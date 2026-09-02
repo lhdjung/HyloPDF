@@ -3740,6 +3740,18 @@ has found it: *a feature that is built, correct and tested can still be a
 feature the reader does not have.* The item list said markup was done, the test
 said removal worked, and both were true.
 
+### The reload notice, taken out
+
+"Reloaded — the document changed on disk" is what this reader used to say when
+a paper was recompiled underneath it. It is gone. A reader watching a document
+rebuild sees the page redraw and, when the `\title{}` moved, the toolbar
+change — which is the whole of the news. The sentence told somebody who does
+not know what a reload is that something they did not do had happened to their
+file, which can only worry them. `Store::renamed` is still *called*, because
+calling it is what renames the document; what is no longer done is announce it.
+`reopen` had already reached this conclusion for its other caller, and its
+comment said so.
+
 
 ---
 

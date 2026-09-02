@@ -171,3 +171,74 @@ fn scrolling_changes_what_is_drawn() {
         "four screenfuls later the window is not the same picture: {different}"
     );
 }
+
+/* ---------------------------------------------------- a zoom, under a pinch */
+
+/// The size a page's texture is drawn at, off the page's own attribute.
+fn drawn_of(reader: &Reader) -> String {
+    reader
+        .harness
+        .attr(".page", "data-drawn")
+        .expect("a mounted page says what it is drawn at")
+}
+
+/// **A pinch is one gesture, not a hundred zoom steps.**
+///
+/// A trackpad sends a magnification event a frame. Each one changes the size
+/// every page is laid out at, and a page whose size changed is a page whose
+/// texture is registered afresh — which cannot be *drawn* until the frame
+/// after it is registered, see `fresh` in `page.rs`. So the document went
+/// blank for the whole of a pinch and came back when the fingers stopped,
+/// which is what the reader saw and reported.
+///
+/// What holds it together is that the drawn size is frozen for the length of
+/// the gesture and the page is stretched to whatever the layout asks for.
+/// That is the pair this checks: the box grows, the drawn size does not.
+#[test]
+fn a_pinch_stretches_the_page_it_has_rather_than_drawing_a_new_one() {
+    let mut reader = Reader::open_with(&Reader::book(), Options::default());
+    let before_box = reader.harness.layout_rect(".page").width;
+    let before_drawn = drawn_of(&reader);
+
+    for _ in 0..6 {
+        reader.pinch(0.05);
+    }
+    let after_box = reader.harness.layout_rect(".page").width;
+    let after_drawn = drawn_of(&reader);
+
+    assert!(
+        after_box > before_box + 1.0,
+        "the page grew under the fingers: {before_box} → {after_box}",
+    );
+    assert_eq!(
+        after_drawn, before_drawn,
+        "and it is the same texture, stretched, rather than six new ones",
+    );
+}
+
+/// …and when the fingers stop, it is drawn again at the size it now is.
+///
+/// The gesture has no end in it — macOS sends magnification and says nothing
+/// about the last one — so what ends it is the gap after it. See
+/// `ZOOM_SETTLES` and `Viewer::settle_zoom`.
+#[test]
+fn and_when_the_fingers_stop_the_page_is_drawn_at_the_size_it_reached() {
+    let mut reader = Reader::open_with(&Reader::book(), Options::default());
+    for _ in 0..6 {
+        reader.pinch(0.05);
+    }
+    let held = drawn_of(&reader);
+    let grown = reader.harness.layout_rect(".page").width;
+
+    let settled = reader.wait_until(3.0, |reader| drawn_of(reader) != held);
+    assert!(settled, "the gesture settled and the page was drawn again");
+    let (width, _) = drawn_of(&reader)
+        .split_once('x')
+        .map(|(w, h)| (w.to_string(), h.to_string()))
+        .expect("the attribute is <width>x<height>");
+    let width: f64 = width.parse().expect("a number");
+    assert!(
+        (width - grown as f64).abs() <= 1.0,
+        "drawn at {width} for a box of {grown}",
+    );
+}

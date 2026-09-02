@@ -43,6 +43,10 @@ use crate::palette::Palette;
 #[derive(Clone)]
 pub struct Chosen {
     theme: Rc<Cell<Palette>>,
+    /// Whether a zoom gesture is under way, in which case a page keeps the
+    /// texture it has and is stretched to whatever size the layout is asking
+    /// for this frame. See [`Chosen::holding`].
+    holding: Rc<Cell<bool>>,
 }
 
 impl PartialEq for Chosen {
@@ -55,6 +59,7 @@ impl Chosen {
     pub fn new(theme: Palette) -> Self {
         Chosen {
             theme: Rc::new(Cell::new(theme)),
+            holding: Rc::new(Cell::new(false)),
         }
     }
 
@@ -64,6 +69,30 @@ impl Chosen {
 
     pub fn set(&self, theme: Palette) {
         self.theme.set(theme);
+    }
+
+    /// **A pinch is not a hundred zoom steps to be drawn one at a time.**
+    ///
+    /// A trackpad sends a magnification event a frame, and each of them
+    /// changes the size every page is laid out at. Redrawing on each is two
+    /// things going wrong at once: pdfium is asked for a page sixty times a
+    /// second, and — because a texture registered on one frame must not be
+    /// drawn until the next, see `fresh` — every one of those frames paints
+    /// nothing, so the document goes blank for as long as the fingers are
+    /// moving and comes back when they stop.
+    ///
+    /// While this is on, a page that already has a texture keeps it and is
+    /// stretched to the box the layout is asking for, which is what a browser
+    /// does under a pinch and what the reader expects to see: the words grow
+    /// under their fingers, a little soft, and come back sharp when the
+    /// gesture settles. The frozen size is in the component key too — see
+    /// `Reader` — so nothing is re-keyed on the way either.
+    pub fn holding(&self) -> bool {
+        self.holding.get()
+    }
+
+    pub fn hold(&self, holding: bool) {
+        self.holding.set(holding);
     }
 }
 
@@ -213,7 +242,9 @@ impl PageWidget {
     fn ensure_software(&mut self, width: u32, height: u32) -> Option<()> {
         let theme = self.chosen.get();
         if let Some(page) = self.software.as_ref() {
-            if page.width == width && page.height == height && page.theme == theme {
+            if page.theme == theme
+                && (self.chosen.holding() || (page.width == width && page.height == height))
+            {
                 return Some(());
             }
         }
@@ -277,7 +308,13 @@ impl PageWidget {
         if let Some(texture) = self.texture.as_ref() {
             // Size and theme together are what `keyFor()` is: a page that
             // matches both is the page already on the screen.
-            if texture.is(width, height) && texture.wears(&theme) {
+            //
+            // …except under a zoom gesture, where the size is the one thing
+            // deliberately allowed to differ: the texture is kept and
+            // stretched rather than redrawn. See [`Chosen::holding`]. The
+            // theme is still asked, because a theme changed mid-gesture is a
+            // page that is the wrong colour rather than the wrong sharpness.
+            if texture.wears(&theme) && (self.chosen.holding() || texture.is(width, height)) {
                 return Some(());
             }
         }
@@ -433,21 +470,42 @@ impl Widget for PageWidget {
             return scene;
         }
 
-        // A page held under the ceiling is drawn smaller than its box, so the
-        // brush is scaled up to fill it. Everything else lands at 1:1.
+        // A page drawn at a different size from its box — held under the
+        // ceiling, or frozen for the length of a zoom gesture — is scaled to
+        // fill it. Everything else lands at 1:1.
+        //
+        // **The scale goes in the scene transform, not in the brush
+        // transform**, and that is not a preference. `fill` in
+        // `anyrender_vello_hybrid` has two arms, and the one for a
+        // `PaintRef::Resource` ignores `brush_transform` completely: it takes
+        // the shape's *origin*, draws the texture there at its own size, and
+        // stops. Only the other arm — an image the renderer owns — reads it,
+        // which is why the software path below is written the ordinary way
+        // and passes its tests. So the destination rectangle is the
+        // *texture's*, and the scene transform is what stretches it:
+        // `draw_texture_rects` composes it, `effective_path_transform() *
+        // rect.transform`, and that is the one hook there is.
+        //
+        // Getting this wrong is invisible until a page's texture is not the
+        // size of its box, which before the zoom hold only happened above
+        // `MAX_PIXELS`. The reader saw it as a page whose border grew under
+        // their fingers while the print inside stayed exactly where it was.
         let stretch = Affine::scale_non_uniform(
             width as f64 / texture.width as f64,
             height as f64 / texture.height as f64,
         );
         scene.fill(
             Fill::NonZero,
-            Affine::IDENTITY,
+            stretch,
             anyrender::PaintRef::Resource(ImageBrush {
                 image: texture.id(),
                 sampler: ImageSampler::default(),
             }),
-            Some(stretch),
-            &Rect::from_origin_size((0.0, 0.0), (width as f64, height as f64)),
+            None,
+            &Rect::from_origin_size(
+                (0.0, 0.0),
+                (texture.width as f64, texture.height as f64),
+            ),
         );
         scene
     }

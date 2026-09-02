@@ -292,6 +292,21 @@ impl Reader {
         self.settle();
     }
 
+    /// Two fingers moving apart or together on the trackpad, as one event of
+    /// the stream a real gesture is.
+    ///
+    /// The news `main.rs` turns `WindowEvent::PinchGesture` into, delivered
+    /// the way `deliver` delivers everything: there is no window here, and
+    /// what is worth testing is what the reader does about the news. `delta`
+    /// is the change since the last event, which is what macOS reports.
+    pub fn pinch(&mut self, delta: f64) {
+        self.deliver(crate::emit::News {
+            event: "pinched".into(),
+            target: None,
+            payload: serde_json::Value::from(delta),
+        });
+    }
+
     /// A document dragged over the window, exactly as winit reports it —
     /// `true` for one this reader would open, `false` for anything else.
     ///

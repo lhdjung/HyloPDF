@@ -473,6 +473,15 @@ const PILL_LASTS: std::time::Duration = std::time::Duration::from_millis(1100);
 
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// How long a zoom gesture goes on being one after the last event of it.
+///
+/// A trackpad's magnification events arrive about a frame apart and a
+/// ⌃-wheel's rather further, so this is the gap that says the fingers have
+/// stopped rather than paused — long enough that a slow drag is not cut into
+/// three gestures, short enough that the page comes back sharp before the
+/// reader has read a line of it. See [`Viewer::settle_zoom`].
+const ZOOM_SETTLES: std::time::Duration = std::time::Duration::from_millis(180);
+
 /// The zoom ladder, in the app's own steps.
 /// `ZOOM_LADDER` in `main.ts`, and the same sixteen steps: three of them —
 /// 175%, 250% and 600% — had been dropped on the way across, so ⌘+ walked a
@@ -1126,6 +1135,18 @@ pub struct Viewer {
     /// of what tells a second click from a first one. See
     /// [`Viewer::begin_sweep`].
     pressed: Option<(std::time::Instant, f64, f64)>,
+    /// The scale a zoom gesture began at, while one is under way.
+    ///
+    /// A pinch and a ⌃-wheel are a stream rather than a step — see
+    /// [`Viewer::zoom_by`] — and this is what makes the stream one gesture:
+    /// every page keeps the texture it was drawn at when the fingers went
+    /// down and is stretched to whatever the layout says this frame. The
+    /// number is the scale to divide by to get back to that size, which is
+    /// what the component key needs so that nothing is re-keyed either. See
+    /// [`crate::page::Chosen::holding`].
+    zoom_from: Option<f64>,
+    /// Which gesture the settle timer is for; see [`Viewer::settle_zoom`].
+    zoom_token: u64,
     /// Where the reader has jumped from, and where they came back from.
     ///
     /// The distinction the app draws and the reason both lists exist: moving
@@ -1289,6 +1310,8 @@ impl Viewer {
             pressed_on: None,
             sweep_from: None,
             pressed: None,
+            zoom_from: None,
+            zoom_token: 0,
             past: Vec::new(),
             future: Vec::new(),
             typing_page: false,
@@ -1807,6 +1830,11 @@ impl Viewer {
     /// A fixed zoom, typed rather than stepped. The pair that never moves
     /// alone — see [`Viewer::zoom`].
     pub fn set_zoom(&mut self, zoom: f64) {
+        // A zoom asked for outright ends any gesture that was running, or the
+        // pages would hold a stale texture until its timer came round.
+        self.zoom_token += 1;
+        self.zoom_from = None;
+        self.chosen.hold(false);
         let zoom = zoom.clamp(0.25, 6.0);
         self.keeping_place(|layout| {
             layout.fit = Fit::Actual;
@@ -1843,6 +1871,20 @@ impl Viewer {
         if (next - current).abs() < 0.0005 {
             return;
         }
+        // **The gesture begins here and is what keeps the document on the
+        // screen while it lasts.** Every page holds the texture it already
+        // has and is stretched to the size the layout is asking for, so the
+        // words grow under the reader's fingers instead of the document going
+        // blank until they stop. `zoom_from` is the scale that was on when
+        // the fingers went down, which is what the page key divides by to
+        // stay the same key for the whole gesture — see
+        // [`crate::page::Chosen::holding`] for what it costs and why the
+        // alternative is not an option.
+        if self.zoom_from.is_none() {
+            self.zoom_from = Some(current);
+            self.chosen.hold(true);
+        }
+        self.zoom_token += 1;
         self.keeping_place(|layout| {
             layout.fit = Fit::Actual;
             layout.zoom = next;
@@ -1852,6 +1894,37 @@ impl Viewer {
             ("zoom".into(), json!(next)),
             ("fit_mode".into(), json!(name_of(Fit::Actual))),
         ]);
+    }
+
+    /// Which gesture is running, for the timer that ends it.
+    pub fn zoom_gesture(&self) -> Option<u64> {
+        self.zoom_from.map(|_| self.zoom_token)
+    }
+
+    /// How much smaller than the box a page is currently drawn, while a zoom
+    /// gesture is under way: 1.0 when there is none.
+    ///
+    /// The key every page is built with is multiplied by this, so it is the
+    /// size the page had when the gesture began — a number that does not move
+    /// while the gesture does, which is the whole point of it.
+    pub fn zoom_held_at(&self) -> f64 {
+        match (self.zoom_from, self.layout.fit) {
+            (Some(from), Fit::Actual) if self.layout.zoom > 0.0 => from / self.layout.zoom,
+            _ => 1.0,
+        }
+    }
+
+    /// The fingers stopped. Draw the pages again, at the size they are now.
+    ///
+    /// Guarded by the token for the reason [`Viewer::unflash_pill`] is: a
+    /// gesture that went on past the settle is a second timer, and the first
+    /// one must not end it.
+    pub fn settle_zoom(&mut self, token: u64) {
+        if self.zoom_token != token {
+            return;
+        }
+        self.zoom_from = None;
+        self.chosen.hold(false);
     }
 
     /// Whether a picture on a recoloured page is recoloured with it.
@@ -3771,6 +3844,10 @@ impl Viewer {
     }
 
     pub fn set_fit(&mut self, fit: Fit) {
+        // See `set_zoom`: choosing a fit mode ends a gesture too.
+        self.zoom_token += 1;
+        self.zoom_from = None;
+        self.chosen.hold(false);
         self.keeping_place(|layout| layout.fit = fit);
         self.notice = match fit {
             Fit::Width => "Fit width".into(),
@@ -4427,6 +4504,9 @@ struct Placed {
     /// Where the colour popover goes, when it is over this page. See
     /// [`Viewer::markup_at`].
     swatches: Option<Rect>,
+    /// The size the page's texture is keyed on, which is its box except under
+    /// a zoom gesture. See [`Viewer::zoom_held_at`].
+    drawn: (f64, f64),
     /// The mark the reader clicked on, when it is on this page. See
     /// [`Viewer::mark_open`].
     mark: Option<(Rect, MarkKey, String)>,
@@ -4752,6 +4832,12 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             viewer.write().unflash_pill(token);
                         }
                     }
+                    // The fingers stopped moving. See [`Viewer::settle_zoom`].
+                    "zoom-settled" => {
+                        if let Some(token) = news.payload.as_u64() {
+                            viewer.write().settle_zoom(token);
+                        }
+                    }
                     "themes-changed" => {
                         if let Ok(themes) = serde_json::from_value(news.payload) {
                             viewer.write().themes_changed(themes);
@@ -4908,6 +4994,35 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 notifying.clone(),
                 crate::emit::News {
                     event: "pill-timeout".into(),
+                    target: None,
+                    payload: serde_json::Value::from(token),
+                },
+            );
+        });
+    }
+
+    // **And a zoom gesture ends when the fingers stop**, which is the same
+    // shape again and for the same reason: a pinch is a stream of events with
+    // no end in it, so what ends it is the gap after the last one. Until then
+    // every page is stretched rather than redrawn — see
+    // [`crate::page::Chosen::holding`] — and this is what puts them back
+    // sharp.
+    {
+        let notifying = notifying.clone();
+        let mut last = 0u64;
+        use_effect(move || {
+            let Some(token) = viewer.read().zoom_gesture() else {
+                return;
+            };
+            if token == last {
+                return;
+            }
+            last = token;
+            crate::emit::after(
+                ZOOM_SETTLES,
+                notifying.clone(),
+                crate::emit::News {
+                    event: "zoom-settled".into(),
                     target: None,
                     payload: serde_json::Value::from(token),
                 },
@@ -5105,6 +5220,11 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     // "Actual size" is a fit mode *and* a zoom of 1, so it is ticked only when
     // both are true — `showZoomMenu` asks the same two questions.
     let actual_100 = held.layout.fit == Fit::Actual && (zoom_now - 100.0).abs() < 0.5;
+    // What a page is *drawn* at, against what it is *shown* at. The two are
+    // the same number except under a zoom gesture, where the drawn size is
+    // frozen at whatever it was when the fingers went down — see
+    // [`Viewer::zoom_held_at`] and [`crate::page::Chosen::holding`].
+    let held_at = held.zoom_held_at();
     let boxes: Vec<Placed> = mounted
         .iter()
         .filter_map(|&index| {
@@ -5114,6 +5234,10 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                 left: page.left,
                 width: page.width,
                 height: page.height,
+                drawn: (
+                    (page.width * held_at).round(),
+                    (page.height * held_at).round(),
+                ),
                 hits: held.highlights(index + 1),
                 links: held.link_areas(index + 1),
                 notes: held.note_areas(index + 1),
@@ -6557,7 +6681,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             // drawn at, and the theme it is wearing. A change
                             // to any of them is a different node, which is
                             // what gives the old texture back — see `page.rs`.
-                            key: "{placed.index}:{placed.width}x{placed.height}:{theme_name}:{view_key}:{edition}",
+                            key: "{placed.index}:{placed.drawn.0}x{placed.drawn.1}:{theme_name}:{view_key}:{edition}",
                             document: Handle(document.clone()),
                             chosen: chosen.clone(),
                             index: placed.index,
@@ -6571,6 +6695,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                             selected: placed.selected,
                             swatches: placed.swatches,
                             mark: placed.mark,
+                            drawn: placed.drawn,
                             colours: markup_colours.clone(),
                             view,
                             viewer,
@@ -6905,6 +7030,9 @@ fn Page(
     /// hit, how to take it out, and the colour it is drawn in. See
     /// [`Viewer::mark_open`].
     mark: Option<(Rect, MarkKey, String)>,
+    /// The size this page's texture is drawn at, which is its box except
+    /// under a zoom gesture. See [`Viewer::zoom_held_at`].
+    drawn: (f64, f64),
     /// The colours it offers. See [`Viewer::markup_colors`].
     colours: Vec<String>,
     /// How this page is turned and how much of it is drawn. In the key as
@@ -6939,6 +7067,13 @@ fn Page(
             // load-bearing thing in `layout.rs` and it is invisible from
             // outside without this.
             "data-page": "{index + 1}",
+            // The size the texture under this page is drawn at, which is the
+            // box's own except while a zoom gesture is running — see
+            // [`Viewer::zoom_held_at`]. On the page for the reason
+            // `data-page` is: it is the one thing about a page that nothing
+            // else in the DOM says, and a test that could not read it would
+            // have to photograph the difference between sharp and stretched.
+            "data-drawn": "{drawn.0}x{drawn.1}",
             style: "position: absolute; top: {top}px; left: {left}px; width: {width}px; height: {height}px;",
             // Where a sweep begins, and the whole of what a page hears from
             // the pointer.

@@ -3655,6 +3655,67 @@ the editing keys can be tested at all off a Mac, and it means the tests were
 exercising the half below the fault. Both halves of this bug live between winit
 and the window, which is the one seam the harness is built to do without.
 
+### A pinch blanked the document until the fingers stopped
+
+A trackpad sends a magnification event a frame, and each one changes the size
+every page is laid out at. A page whose size changed is a page whose texture is
+registered afresh — and a texture registered on one frame must not be *drawn*
+until the next, which is the `fresh` dance in `page.rs` and is there to stop
+Vello's `MissingTextureBinding`. So every frame of the gesture registered and
+painted nothing, and pdfium was asked for a page sixty times a second to
+produce it. The document went blank for the length of the pinch and came back
+when the fingers stopped, which is exactly what was reported.
+
+**What holds it together is that a pinch is one gesture rather than a hundred
+zoom steps.** `Chosen::holding` — the shared cell that already carries the
+theme to every mounted page — now also carries whether a zoom gesture is
+running. While it is, a page keeps the texture it has and is stretched to
+whatever box the layout is asking for this frame, which is what a browser does
+under a pinch: the words grow under the reader's fingers, a little soft, and
+come back sharp when it settles. The frozen size is in the component key too
+(`Viewer::zoom_held_at`, which is the scale the gesture began at divided by the
+scale it is at now), so nothing is re-keyed on the way either — and the key is
+computed from the *baseline* rather than accumulated from the live size, so it
+does not drift a pixel per frame and re-key by rounding.
+
+The gesture has no end in it — macOS sends magnification and says nothing about
+the last one — so what ends it is the gap after it: `ZOOM_SETTLES`, 180ms,
+through the same `emit::after` door the notice line and the page pill use, with
+the same token guard so a gesture that ran on past one timer is not ended by
+it. `set_zoom` and `set_fit` end it outright, because a zoom asked for by name
+is not a gesture. It covers ⌃-wheel as well as the trackpad, because both
+arrive at `zoom_by` and neither is a step on the ladder.
+
+`.page` carries `data-drawn` now for the same reason it carries `data-page`:
+the difference between a page drawn and a page stretched is the one thing on
+screen that nothing in the DOM says, and a test that could not read it would
+have to photograph it.
+
+**And that was half of it, again.** With the texture held, the reported blank
+became something stranger: the page's *border* grew under the fingers and the
+print inside it stayed exactly where it was, arriving at the right size only
+once the gesture settled. The stretch was being asked for and was not
+happening, and the reason is one arm of somebody else's `match`:
+
+> **`anyrender_vello_hybrid`'s `fill` ignores `brush_transform` for a
+> `PaintRef::Resource`.** It takes the shape's *origin*, draws the texture
+> there at its own size, and stops. Only the other arm — an image the renderer
+> owns rather than a registered texture — reads the brush transform at all.
+
+So the scale goes in the *scene* transform instead, and the destination
+rectangle is the texture's rather than the box's:
+`draw_texture_rects` composes it, `effective_path_transform() * rect.transform`,
+and that is the one hook there is. This was a latent fault in its own right —
+any page held under `MAX_PIXELS` was already being drawn small in the corner of
+its box — and it had gone unseen because before the zoom hold a texture was
+always exactly the size of its box.
+
+**The harness could not see this one either**, and for a reason worth writing
+down beside the IME fault: the harness renders through `vello_cpu`, which is
+the software path in `page.rs`, which builds an `ImageBrush` and takes the
+*other* arm — the one that honours the brush transform. The test added for the
+hold passes on both. What the harness exercises is the arm the bug is not in.
+
 ### Markup could be removed, and there was nowhere to do it
 
 This one was not a bug in the feature. `markup::remove` is `FPDFPage_RemoveAnnot`

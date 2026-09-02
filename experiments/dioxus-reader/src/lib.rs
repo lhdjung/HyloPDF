@@ -137,6 +137,7 @@ pub mod shell;
 pub mod sidebar;
 pub mod single;
 pub mod stats;
+pub mod steady;
 pub mod store;
 pub mod styles;
 pub mod windows;

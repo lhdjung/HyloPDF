@@ -41,7 +41,9 @@ use std::sync::mpsc::Receiver;
 
 use blitz_shell::{BlitzApplication, BlitzShellEvent, BlitzShellProxy, View, WindowConfig};
 use dioxus_core::{provide_context, ScopeId, VirtualDom};
-use dioxus_native::{DioxusDocument, DioxusNativeWindowRenderer, DocumentConfig};
+use dioxus_native::{DioxusDocument, DocumentConfig};
+
+use crate::steady::Steady;
 use winit::application::ApplicationHandler;
 use winit::dpi::Position;
 use winit::event::{ElementState, StartCause, WindowEvent};
@@ -255,7 +257,7 @@ fn is_document(path: &std::path::Path) -> bool {
 }
 
 pub struct Shell {
-    inner: BlitzApplication<DioxusNativeWindowRenderer>,
+    inner: BlitzApplication<Steady>,
     proxy: BlitzShellProxy,
     windows: Windows,
     /// Where a window comes from when nobody handed one over: one place that
@@ -510,7 +512,7 @@ impl Shell {
     /// the spot is taken. `None` when there is no window to step off, which is
     /// the first one.
     fn next_spot(&self) -> Option<Position> {
-        let corner = |view: &View<DioxusNativeWindowRenderer>| {
+        let corner = |view: &View<Steady>| {
             let scale = view.window.scale_factor();
             let at = view.window.outer_position().ok()?.to_logical::<f64>(scale);
             Some((at.x, at.y))
@@ -536,8 +538,10 @@ impl Shell {
     fn open(&mut self, event_loop: &dyn ActiveEventLoop, spec: WindowSpec) {
         // One renderer per window: `DioxusNativeWindowRenderer` is an
         // `Rc<RefCell<VelloWindowRenderer>>` over one surface, and a surface
-        // belongs to one window.
-        let renderer = DioxusNativeWindowRenderer::new();
+        // belongs to one window. [`Steady`] is that renderer with the scene
+        // reset at the top of every frame — see `steady.rs`, which is the
+        // whole account of why.
+        let renderer = Steady::new();
 
         let doc = DioxusDocument::new(
             spec.vdom,

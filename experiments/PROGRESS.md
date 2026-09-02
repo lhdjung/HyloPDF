@@ -3740,6 +3740,44 @@ has found it: *a feature that is built, correct and tested can still be a
 feature the reader does not have.* The item list said markup was done, the test
 said removal worked, and both were true.
 
+### `alpha_idx too large`, which was a frame that never reached the screen
+
+While the fixes above were being checked in the real app the machine's display
+went to sleep and locked, and the reader died on the way with
+`vello_common/src/strip.rs:205: alpha_idx too large` — inside vello's own strip
+generation, from a stack with nothing of this crate in it. It was written down
+as a one-off. It is not one:
+
+> **A frame that fails to reach the screen is not thrown away, and the next one
+> is drawn on top of it.** `render` in `anyrender_vello_hybrid` builds the
+> scene, asks the surface for a texture to draw into, and resets the scene at
+> the very end — *after* the present has succeeded. Two early returns stand
+> before that point, one for a surface texture that cannot be had and one for a
+> present that fails, and neither resets.
+
+So a window whose surface has gone away accumulates: every redraw appends
+another whole frame to the same scene, the alpha buffer behind it grows without
+bound, and at about two billion the index runs into the bit `Strip` packs its
+fill flag into. The assert is the symptom; the cause is a hundred thousand
+frames stacked in one scene. It takes a while to get there, which is why the
+way to see it is to leave the reader open and let the display sleep — the app
+dies while nobody is looking at it, and the reader's next sight of it is that
+it is gone.
+
+Blitz already declines to paint an *occluded* window, which is the case macOS
+reports. This is the case it does not, and it is not specific to sleep: a
+`Timeout` from `get_current_texture` during any surface hiccup poisons the
+scene the same way and never recovers on its own.
+
+The fix upstream is two lines on those two paths. From outside the crate there
+is still a hook, because the draw closure is handed the scene and `PaintScene`
+has `reset` on it — so `steady.rs` wraps `DioxusNativeWindowRenderer` and
+resets at the *start* of every frame, discarding whatever a failed frame left
+behind and costing nothing when there was none. The base colour is filled back
+in, because the reset takes the inner renderer's own fill with it. The rest of
+that file is eight methods of delegation and exists only because
+`WindowRenderer` is a trait rather than something with a blanket impl.
+
 ### The reload notice, taken out
 
 "Reloaded — the document changed on disk" is what this reader used to say when
@@ -3772,7 +3810,7 @@ comment said so.
    what was on this list *can* be, once the rules are separated from the
    windows they are about.
 
-## Fifteen things worth raising upstream, and none of them is blocking
+## Seventeen things worth raising upstream, and none of them is blocking
 
 - `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
   comment in the source already says it should be. A tenth of every one of
@@ -3900,6 +3938,27 @@ comment said so.
   it means "enable when a field has the focus" is the only rule any Blitz
   application can actually implement, whatever it writes for the other half.
   winit-appkit 0.31.0-beta.2, `src/view.rs`.
+- **`anyrender_vello_hybrid` ignores `brush_transform` for a texture.** `fill`
+  has an arm for `PaintRef::Resource` that reads the shape's *origin*, draws
+  the registered texture there at its own size through `draw_texture_rects`,
+  and never looks at the brush transform it was handed. Every other paint —
+  solid, gradient, an image the renderer owns — goes down the other arm and
+  honours it. So a texture cannot be scaled by the documented means, silently:
+  the call is accepted and the picture comes out the wrong size in the corner
+  of its box. The way round is to put the scale in the scene transform and make
+  the shape the texture's own rectangle, which `draw_texture_rects` composes.
+  `anyrender_vello_hybrid 0.10.0`, `src/scene.rs`.
+- **A frame that fails to present is never discarded.** `render` in the same
+  crate resets the scene only after a successful present, and returns early
+  without resetting both when the surface texture cannot be had and when the
+  blit-and-present fails. A window whose surface has gone away — a display
+  going to sleep, a `Timeout` during any hiccup — therefore accumulates one
+  whole frame per redraw in a single scene until `vello_common` panics with
+  ``alpha_idx` too large`, which is a `u32` running into `Strip`'s packed fill
+  flag at about two billion. The assert names strip generation and the cause is
+  a hundred thousand stacked frames. Two lines on the two early returns. See
+  ``alpha_idx too large`, which was a frame that never reached the screen`
+  above, and `steady.rs`.
 - **`font-variation-settings` is parsed and dropped.** `stylo_to_parley.rs`
   converts it and hands it on, and `'wght' 100` and `'wght' 900` lay out
   identically — so a variable font's axes cannot be reached from CSS at all,

@@ -3790,6 +3790,48 @@ calling it is what renames the document; what is no longer done is announce it.
 `reopen` had already reached this conclusion for its other caller, and its
 comment said so.
 
+### And the question: can this sign a document?
+
+Two different things travel under that name, and the answer is different for
+each.
+
+**A visible signature — what Preview calls Sign — is a day or two, and this
+reader has already built most of it.** A drawn or imported signature is an
+image in a stamp annotation, positioned by dragging on the page:
+`create_stamp_annotation` and `PdfPageImageObject::new` are both in
+`pdfium-render` today, and everything around the write already exists for
+markup — the release-write-reopen through `PageSource::release`, the atomic
+write, the `.hylopdf-original` kept beside the document the first time this
+reader ever appends to it, and the reload that rebuilds every cache. It would
+be a new gesture and a new annotation kind, and nothing structural.
+
+**A cryptographic signature is a project of its own, and pdfium cannot be part
+of it.** pdfium's whole signature surface is eight `FPDF_GetSignature*`
+entry points and every one of them reads: there is no call that writes a
+`/Sig`. Worse, `save_to_bytes` is `FPDF_SaveAsCopy` with flags hard-coded to 0,
+which is a **full rewrite** — the one thing a signed document cannot survive,
+since a signature covers a byte range of the file it was made over. So signing
+could not go through this reader's write path at all; it would need a PDF
+writer of its own that appends an incremental update: a `/Sig` dictionary, a
+`/ByteRange` covering the whole file bar a `/Contents` placeholder, a detached
+CMS blob computed over that range and written back into the hole, and a
+`/AcroForm` signature field to hang it on. Then the part that is not PDF at
+all: reaching a key the reader actually has, which is the Keychain on macOS
+(`SecIdentityCopyPreferred` through Security.framework), CryptoAPI on Windows
+and a PKCS#12 file on Linux — and, for a signature anything else will call
+valid, an RFC 3161 timestamp and a chain that resolves.
+
+Call it two to four weeks with the trust story, and note that the trust story
+is the hard half: a signature that no other reader accepts is worse than none,
+and this is the one feature in the whole application where being *nearly* right
+is indistinguishable from being wrong. The recommendation is the visible
+signature, said plainly as what it is — a mark on the page, not a claim about
+who made it — and cryptographic signing left as a decision to take on its own
+merits rather than as an increment on markup.
+
+The long form is `signing-assessment.md` at the root of the repository, beside
+`markup-assessment.md`: the two things the word covers, what each needs, why
+neither renderer can write a `/Sig` today, and the three ways round it.
 
 ---
 

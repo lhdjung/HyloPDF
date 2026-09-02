@@ -3019,6 +3019,510 @@ that a webview does not pay twice. The levers, if it has to come down, are the
 12MP page ceiling and the two-textures-per-page upload; `device.poll` was
 measured and ruled out.
 
+## Five more from the bar, and the one underneath them
+
+A second reading session against the app, and five more differences. Four are
+the sort this file has collected all along — a label, an order, a message. The
+fifth was underneath the other four and is the largest single fault found in
+this experiment: **no ⌘ chord had ever worked in the real app.**
+
+### Every ⌘ chord was dead, and the harness said they all worked
+
+⌘T cycled the theme. ⌘F opened nothing. Neither is a mistake anybody made in
+the keymap: `mod+t` is Toolbar and `mod+f` is Find in `keymap.rs`, and
+`tests/keys.rs` presses both and passes.
+
+`keyboard_types::Modifiers` carries **both `META` and `SUPER`**. Its own
+`meta()` asks for `META`. `winit_modifiers_to_kbt_modifiers` in `blitz-shell`
+answers winit's `meta_key()` — Command, on macOS — with **`SUPER`**. So
+`event.modifiers().meta()` is false with ⌘ held, `chords_of` spelled the
+keystroke without a modifier at all, and ⌘T arrived as a bare `t`, which is
+`next-theme`. Every ⌘ chord either did nothing or did whatever its plain letter
+does.
+
+**And the harness was writing `META` by hand.** `spell_out` turns a chord back
+into a keystroke, and it had been spelling `mod` the way the type reads rather
+than the way the shell sends — so 350-odd tests exercised a keyboard no machine
+has. That is the whole lesson: a harness that constructs its own events is a
+second implementation of the platform, and it has to be checked against the
+first one. `spell_out` sends `SUPER` now, `keymap::command` reads either bit,
+and `command_is_read_whichever_bit_it_arrives_in` says so out loud.
+
+It also explains a note left two rounds ago — "driving the real app failed
+because plain keys sent by System Events reach this app and modified chords
+(⌘O, ⌘B) do not". System Events was delivering them perfectly.
+
+`keymap::plain` came out of the same fix: three fields ask "is this typing or a
+chord" before letting a key through to the root, and all three were asking
+`meta()`.
+
+### The other four
+
+**The theme chip said the name of the theme; the app's says "Theme".** A button
+says what pressing it does, and which of the fourteen is on is the tick in the
+menu. The settings chip was the one button in the bar wearing a drawing and no
+word, and a cog is exactly the icon somebody has to have learned. Both are
+`index.html` now, `#theme` and `#settings`. The harness reads the theme off
+`data-theme` — the reader's own account of what it is wearing, and not a label
+anybody has to look at.
+
+**A page number past the end is the last page, not a complaint.** ⌘9 in a
+browser with four tabs open goes to the fourth. The field is gone by the time
+the notice arrives, so the sentence was all the reader got for it. The notice
+is kept for what cannot be clamped: text that is neither a label this document
+uses nor a number at all.
+
+**A search shows its matches.** The count in the bar is still the door back to
+the list, but the list no longer waits behind it: the panel opens with the
+first hit, on the Results tab, with each match cited by the page's *label* —
+`this.viewer.label(result.page)` in `sidebar.ts`, which is what a book that
+numbers its front matter i, ii, iii needs. The panel is borrowed, as it already
+was, so closing the bar takes it back down; it is offered once per search, or a
+scan of a long book would reopen it on every slice. A search that finds nothing
+opens nothing. And the bar's last button is a × rather than the word "Done" —
+closing the find bar finishes nothing, it puts a thing away — with the three
+switches in the app's order, "Highlight all" first, because it is the one that
+changes only how much is painted.
+
+### And the hit test, a fourth time
+
+**Clicking Contents while the Pages tab was scrolled did nothing.** Blitz
+hit-tests without clipping on `overflow: hidden` — this file has the entry
+already — and a thumbnail is placed at `top - thumb_scroll`, so a scrolled
+column puts rows at negative offsets, painted clipped and hit-tested over the
+tab strip. `.tabs` carries `position: relative; z-index: 1` now, and
+`.sidebar-resize` beside it goes to 2 so the drag edge keeps the top 35px it
+overlaps. It worked perfectly at the top of the column, which is where anybody
+checking it would look, and that is the fourth time this trap has cost an hour
+in this experiment.
+
+## Reading the app's own source instead of waiting to be told
+
+The round above was five differences, found by using the two apps side by
+side. The reader's answer to it was the right one: **why is the interface
+being reinvented, when it is all in `index.html`, `styles.css` and
+`main.ts`?**
+
+It was, and the reason is the one this file has recorded twice already: the
+eleven items were the order the app was *built* in — layout, rendering,
+search, links, library, windows, selection — so the interface was never an
+item, and the toolbar and the find bar were built from what the app was
+remembered to do rather than from what it does. **The way to find the rest is
+not to read with it. It is to diff it**: every class in `styles.css` against
+every class in `styles.rs`, and every `show*Menu` in `main.ts` against the
+menu beside it. That takes a minute and it names everything at once.
+
+What the diff found, and what this round did about it:
+
+**The find bar is a card, not a row.** `styles.css` hangs it under the
+toolbar at the right, over the document, in two rows — the query with its four
+buttons, and the three switches indented under the field so they read as
+belonging to the query. Here it was a row of the flex column, which is simpler
+and is not what a find bar is: it took forty pixels off the viewport for as
+long as it was up, so opening the search moved the page being read. Two rows
+now, `.find-icon` at the head of it, up and down for the matches, a × to
+close, and "Highlight all" first of the three because it is the one that
+changes only how much is painted.
+
+**Rotate left and right are buttons in the bar.** `#rotate-left` and
+`#rotate-right`, beside Search — they were items in the View menu here, which
+is a place to go looking for something you press twice in a row while reading
+a scan that came in sideways.
+
+**The zoom menu is `showZoomMenu`, item for item**: the three fits, a number
+to type, and 50 to 300% under it. It had grown spread and rotation instead,
+and was missing the half that makes it a zoom menu at all. And `ZOOMS` is
+`ZOOM_LADDER` again — 175%, 250% and 600% had been dropped on the way across,
+so ⌘+ walked a shorter ladder and stopped at 400%.
+
+**The cog opens a menu, not the window.** `showSettingsMenu`: the toolbar and
+full screen, continuous or paged, the three spreads, whether a picture takes
+the theme, whether the pill appears — and "All settings…" at the foot of it.
+Going straight to the window put a window over the document for a switch that
+is one press.
+
+**The theme menu has two switches and a swatch a row.** Dark mode and "Light
+or dark follow system" were on the Appearance page alone, which is a window
+away from the list they are about. And neither that menu nor the zoom menu
+closes on a choice any more: a theme is something you try on, so the tick
+moves and the list stays — the app's own rule, in the same two places.
+
+**The page pill and the peek handle, both missing entirely.** With the toolbar
+away this reader had no way back but the key the notice names, and no way to
+tell which page it was on. `#toolbar-peek` drops in when the pointer reaches
+the top edge — 8px, or 46 in full screen, where the system's own bars land on
+that band — and `#page-pill` says where you are for a second after a scroll.
+Both are timers-as-threads, the shape the notice line already had.
+
+**Notes: the annotations a document already carries, made readable.** pdfium
+paints an annotation's own appearance into the page, so a sticky note arrives
+as the little icon it was drawn as and a comment arrives highlighted — and the
+words behind either of them live in the annotation, which nothing here was
+reading. So the icon sat there looking like a button and was not one, which is
+`renderNotes`'s own sentence about the same fault on the other side.
+`PageSource::notes_of` is the seam's eighth question; a marker is pressable
+all over and a comment over a passage answers on a strip at its right edge, so
+that the words underneath stay in reach of a pointer that wants to select
+them.
+
+**The theme button says "Theme" and the cog says "Settings"**, and a page
+number past the end goes to the last page rather than raising a notice — the
+two from the round above that belong to this list rather than that one.
+
+### One Blitz finding, and it is a layout one
+
+**A flex item whose basis is its content does not shrink.** `.chip.title` is
+`flex: 0 1 auto; min-width: 0; overflow: hidden` — the app's `.doc-title` with
+its ellipsis — and when the bar grew two rotate buttons the group gave way and
+the button inside it kept its full width, so a long file name was drawn
+straight across the page controls in the middle of the bar. `flex: 1 1 0` is
+what shrinks, which is the shape `.tab` in the sidebar already uses for the
+same reason one panel over. Worth knowing before the next thing that has to
+give way.
+
+### What is left, and it is now a list rather than a search
+
+- **The theme editor**, which is the whole of Appearance's second half and the
+  three items the theme menu is still missing: New theme…, Edit this
+  theme… / Make a copy…, Delete this theme. The largest thing outstanding, and
+  the oldest.
+- **A password prompt.** `ui.askForPassword` has no counterpart here; an
+  encrypted document opens as an error.
+- **`.loading` and `.page-placeholder`**, which is what the app shows where a
+  page has not been drawn yet.
+- **`.title-drag`**, which is macOS window dragging with the toolbar hidden.
+  It may not apply — this window keeps its own title bar — and that is a
+  question to answer rather than a thing to build.
+- **`popover-*` against `menu-*`.** The two files name the same components
+  differently. Deliberate, and worth writing down: what a port owes the app is
+  the same elements, labels, order, behaviour and look, not the same class
+  names, and renaming them costs a test suite and buys a reader nothing.
+
+---
+
+## Six more, and the window was the size of most of them
+
+Six things a reader listed after using it. Two were bugs with one cause each;
+three were one cause between them; and the sixth turned out to be the window
+rather than the interface in it.
+
+### The picker crashed the app, and it was right to
+
+⌘O and Open ▸ Open document… killed the process:
+
+```
+thread 'main' panicked at winit-common-0.31.0-beta.2/src/event_handler.rs:134:
+tried to handle event while another event is currently being handled
+```
+
+`rfd` shows an `NSOpenPanel` and runs it **modally**, which spins a nested run
+loop; a nested run loop delivers events to winit; and winit is already inside
+`EventHandler::handle`, because a click on a menu item is what got us there.
+That handler holds a `RefMut` on itself for exactly this reason. The panic is
+the guard doing its job.
+
+So the picker cannot answer where it was asked. `Pick` is an *ask* now:
+`pick.ask(Opening::Here)` opens the panel on a thread of its own, where `rfd`
+dispatches it back onto the main queue — which the main thread reaches after
+the click has been handled and the handler is free — and the answer comes back
+as news in the mailbox, beside the document dropped on the window and the
+document handed over by a second launch, both of which were already that shape.
+`Opening::Beside` is the other door, "Open document in new window…", carried in
+the event's name because by the time the answer arrives the menu it was chosen
+from is long shut. The harness's `Pick` posts the same news from its queue of
+paths, so a test still hands over a path and reads the outcome; nothing in
+`tests/menus.rs` changed.
+
+### Everything was too small, and none of it was the font
+
+Three of the six were about size, and the first thing to do was measure rather
+than adjust. The app was opened in Playwright's WebKit at 1100×900 and asked
+for the computed font and the box of every control in its toolbar; the port was
+opened in the harness at the same size and asked for the same boxes. The
+answers: the same family (`ui-sans-serif` falls through to `-apple-system`,
+which Blitz maps to `SystemUi`, which is what a WKWebView resolves it to as
+well), the same 13.5px, the same 16px icons, the same 30px chips, and widths
+within four per cent — parley does not apply the optical tracking WebKit gives
+SF at small sizes, and that is the whole of the difference.
+
+**What was actually small was the window.** `settings.rs` — the app's own file,
+mounted here — says `window_width = 1280`, `window_height = 860` and
+`window_maximized = true`, and this reader had `--width 1100` hard-coded in
+`main.rs` and never wrote the geometry back. So the app opens filling the
+screen and the port opened in a small window, and every comparison a reader made
+was between a bar with room in it and the same bar squeezed. The flags still
+win, because they are what a measuring run asks with; otherwise the setting
+decides, and the launch window's size is written back on the way out. Geometry
+belongs to the launch window, which is the app's own rule and the app's own
+reason.
+
+### And the name of the document was twenty pixels wide
+
+`.chip.title` had `flex: 1 1 0` — a basis of nothing, asking for whatever the
+bar has left over, which in a bar carrying fourteen controls is nothing at all.
+The name came out as three letters at every window size. The app's `.doc-title`
+is `flex: 0 1 auto`: it asks for the name and gives way under pressure, which is
+what `min-width: 0` and the fade are for. The icon in front of it went too — the
+app has none there, this is the one thing in the bar that is not a verb, and it
+was costing the name twenty-three pixels in a bar with none to spare. And
+`of 400`, not `/ 400`, which is `#page-count` in `index.html` said exactly.
+
+### Three labels kept the last theme's colour
+
+The zoom readout stayed the colour of the theme before last and caught up at the
+next zoom step. So did the document's name. So did the page number, which on a
+dark theme after a light one was black on black and simply not there.
+
+Blitz settles the colour of a run of text when it *builds* the run, and a change
+to a custom property several levels above does not put that layout among the
+damage. Which elements are hit is the surprising half: a `<p>` in the same place
+comes out right and a `<button>` does not, because a button builds an inline
+layout of its own rather than joining its parent's. So a label sitting inline
+beside something that did change is rebuilt along with it — which is why
+"of 400" was always right, being a span in the same box as the number — and a
+label alone inside its own box is not. Every other chip in the bar carries an
+icon whose `stroke` is written out as the theme's colour, so every other chip is
+mutated on a theme change and comes out right. The three with no icon now name
+their colour the same way. `tests/upstream.rs` carries the smallest thing that
+shows it, and passes while the bug is there.
+
+### The one that did not reproduce
+
+"The Close button triggers the document button beside it" could not be
+reproduced: clicked by coordinate at 1100, 1280, 1512 and 1728 wide, with the
+pointer moved onto it first, and with the document menu already open, the Close
+chip closes the document every time. What was certainly wrong beside it is the
+title chip above, which was twenty pixels of button with its text overflowing —
+and hit-testing in Blitz does not clip. It is worth pressing again now that the
+name has a box of its own.
+
+---
+
+## Seven more, and two of them were one fault
+
+### A press that slides is not a press
+
+Blitz turns a two-pixel movement with the button down into a text selection and
+then declines to dispatch the click, so a press made with a mouse rather than a
+trackpad answered perhaps one time in three and highlighted the button's label
+instead. Every browser's user-agent stylesheet says `user-select: none` for a
+button; `blitz-dom/assets/default.css` does not. `blitz-button-select.md` and
+`blitz-button-select.patch` are the report and the fix, beside the QRnew note
+they are modelled on.
+
+Two things came out of chasing it. `user-select` **does not reach an element
+from an ancestor** — Blitz reads it off the node the press landed on and its
+parent, so saying it once on the root is not enough; `styles.rs` says it on
+`.root *`. And the shared test harness sends its moves with **no buttons held**,
+which is exactly the field Blitz reads, so a press-and-drag could not be
+expressed with it at all: `Reader::press_and_drag` builds the events itself.
+
+### The document's name was standing on the two buttons to its left
+
+`.chip.title` had `flex: 1 1 0`, so the chip was twenty pixels wide and its
+label was laid out from a negative offset — which is why it read "ool" rather
+than "book.pdf". The text node's box therefore covered Close and Open, and the
+anchor around it is positioned, so it was hit-tested ahead of them: hovering
+Open highlighted the name, and pressing Close opened the name's menu. One
+cause, three complaints, and `flex: 0 1 auto` — the app's own value — is all
+of it.
+
+### Colours: no, they were not the same
+
+Every derived shade was a near-miss of `applyTheme`'s: a surface 6% towards the
+ink where the app pulls it 55% towards white, a ground 13% towards the ink
+where the app takes it 7% towards black, an accent tint mixed from the paper
+rather than from the surface. Near-misses are the worst kind, because the two
+apps then look almost the same and nobody can say what is different. `Palette`
+is now `applyTheme` arithmetic for arithmetic, including the four `--bar-*`
+shades the toolbar needs because it stands on the paper rather than on the
+surface, and `--positive`, `--negative` and the two contrast inks.
+
+### Zoom by trackpad did not exist
+
+macOS reports a pinch as `WindowEvent::PinchGesture`, not as a modified wheel,
+so a reader listening only for ⌃-wheel hears nothing at all. Both are answered
+now — the gesture through `Shell::on_pinch` and the mailbox, ⌃/⌘-wheel in the
+viewer's own handler — and both go through `Viewer::zoom_by`, which is a
+*proportion* rather than a step on the ladder: a trackpad sends a stream of
+small events and a mouse sends one large one, and stepping on each took 125% to
+400% in one gesture. The setting is written through a new `Store::set_soon`,
+which hands the value to the library's scribe and lets it coalesce — a pinch
+produces one of these a frame.
+
+### A thread per timer, which a session ran out of
+
+```
+failed to spawn thread: Os { code: 35, kind: WouldBlock }
+```
+
+The page pill is armed by every change in the scroll offset, and arming it was
+`thread::spawn` followed by `sleep`. A minute of reading is a few thousand
+threads that exist only to sleep, and macOS stops giving them out. `emit::after`
+is one thread, a heap of deadlines and a condvar, for the whole process.
+
+### And the picker crashed the app
+
+`rfd` runs `NSOpenPanel` modally, which spins a nested run loop, which delivers
+events to winit while winit is still inside `EventHandler::handle`. That
+handler panics on re-entry, correctly. `Pick` is an *ask* now: the panel opens
+on a thread of its own, where `rfd` dispatches it back onto the main queue —
+which the main thread reaches once the click has been handled — and the answer
+comes back as news in the mailbox, beside the document dropped on the window.
+
+### Menu items have their icons
+
+`menuItem` in `ui.ts` puts one between the tick and the label, and eleven of
+this reader's items were missing theirs. `print`, `copy` and `edit` came across
+from `icons.ts` with them.
+
+---
+
+## Parity, measured rather than asserted
+
+Everything above was found by using the two readers side by side, one fault at
+a time. This is the other way round: **`tests/parity/app-inventory.json` is
+taken from the running Tauri app** — in WebKit, through
+`scripts/ui-harness.mjs` — and `tests/parity.rs` asks the port the same
+questions. What it records is what each toolbar group holds, what each of the
+five menus lists in what order and where the rules fall, the Settings window's
+pages with their fields, headings and buttons, the sidebar's tabs, the find
+bar's switches, and what all twenty-two of `applyTheme`'s custom properties
+resolve to.
+
+Six tests, and the first run of them found eight divergences that nobody had
+reported:
+
+- The **document menu** was missing "Show in Finder" and "Information", had an
+  item the app does not have, and put its rules in two other places.
+- The **theme menu** stopped at the fourteenth theme: no New theme…, no Make a
+  copy…, no All appearance settings…
+- **There was no theme editor at all** — the oldest outstanding item, and the
+  three menu entries above are its front door. It is `themeEditor` field for
+  field: the same seven colours in the same order with the same sentences
+  under them, the draft worn while it is being written, and Cancel, Save and
+  Delete at the foot. The one difference is the platform's: the app puts an
+  `<input type="color">` beside each hex field and Blitz has no colour input,
+  so what is here is a swatch and the hex.
+- The Settings window's **Reading** page carried "Recolour pictures too",
+  which belongs on Appearance; **Window** had Full screen and Presenting as a
+  *sentence* rather than two switches (the component had no `Frame` to throw
+  them with, and now takes one); **Keyboard** was missing "Open keys file" and
+  **About** both of its buttons.
+- **Appearance** had two of the app's three switches, in the other order.
+- And `--accent-soft` was one level out, because `mix` here rounded at every
+  step where the app rounds once at the end.
+
+Two things the inventory cannot cover, and both are named where they occur:
+anything about the *window* — dragging it, full screen, the traffic lights —
+and anything drawn with a browser widget the renderer has no counterpart for.
+
+---
+
+## Four from the bar, and the first one was the type
+
+A second reading of the two side by side, and the first of the four is behind
+most of the other three.
+
+### The font was the same file and not the same type
+
+`ui-sans-serif, -apple-system, …` resolves on both sides to
+`/System/Library/Fonts/SFNS.ttf` — fontique reaches it through
+`GenericFamily::SystemUi`, WebKit through `system-ui`, and at 27px and above
+the two lay out the same string to within a third of a pixel. Below that they
+diverge by about a tenth, and the reason is SF's `trak` table: **the system
+font carries tracking that grows as the size falls, WebKit applies it, and
+parley does not read the table at all.**
+
+So the chrome came out tighter and darker than the app's, which is what a UI
+face looks like with its small-size tracking taken away and is exactly what
+was reported — "less spacious, more machine-like, a tiny bit too strong".
+Measured against WebKit over the same string at every size the sheet uses, the
+missing advance is 0.61px a character at 11px, 0.59px at 13.5px and 0.55px at
+16px. Flat enough across that band for one number to say it, so `body` says
+`letter-spacing: 0.6px`. Above about 17px SF's tracking falls away towards
+nothing and the flat number is too much; the two headings up there carry the
+app's own `-0.01em` and cancel it.
+
+Three things were ruled out on the way, and each is worth knowing:
+`font-variation-settings` **does nothing in Blitz** — `'wght' 100` and
+`'wght' 900` lay out identically, so the `opsz` axis on the variable system
+font cannot be reached from CSS; parley's advances are exactly linear in the
+font size, so there is no optical sizing anywhere in the pipeline; and the
+face itself was never in doubt, because `fontique` names the file.
+
+### Which is why every chip in the bar was five per cent narrow
+
+`Contents` 96 against the app's 101.3, `of 400` 38 against 41.5, the name of
+the document 64 against 70.3 — the whole bar, uniformly, and no test could see
+it because every test compares *labels*. `tests/parity/app-inventory.json` now
+carries `getBoundingClientRect().width` for each control and the width of each
+group, and `tests/parity.rs` asserts them to within two pixels — which is as
+tight as it can be, because the app's numbers are fractional and Blitz rounds
+a box to whole pixels. That one assertion covers the font, the padding and the
+box model at once, and it is the test that would have caught this on the day
+it was written.
+
+It found a second thing immediately. **`* { box-sizing: border-box }` — the
+first line of `styles.css` — was missing here**, so every `width`, `min-width`
+and `height` in the sheet meant the padding on top rather than inside. Five
+rules had been patched to say it for themselves as each near-miss was noticed;
+the one that had not was `.zoom-level`'s `min-width`, which came out as 82
+rather than 62 in the group that was already the widest thing in the bar.
+
+### The page count was cramped because it had a floor under it
+
+`.page-jump` in the app is a transparent box with `padding: 0 4px` holding one
+bordered field and one plain count. This had no padding and a `--bar-sunk`
+fill under the pair, so "of 400" was written on a grey panel that ended
+exactly where the last zero did. That is the whole of "almost cut off on the
+right": a word with a background behind it and no room between the two. The
+field keeps its own sunk ground, because in the app the field is the only part
+of this that is a control — and its floor is the app's 44px now rather than
+28, so page 1 of anything is not a slot half the width of the count beside it.
+
+**And the middle group is now in the middle.** The app's two side groups have
+a basis of `auto`, so each starts from what it holds and the slack is split
+evenly on top — which puts the middle off centre by exactly half the
+difference between the two sides, a hundred and eleven pixels here, at every
+width, for ever. The app can afford that because seventy-eight pixels of its
+bar are given to the traffic lights and the offset lands about where the eye
+expects the middle to be. This window keeps its own title bar and has none, so
+the same rule reads as a page counter that has slid left. A basis of nought
+asks for nothing and both sides are given an equal share of the whole bar;
+`min-width: auto` on `.bar-right` is its content, so it can grow past its
+share and never below it, and `.bar-left` says `0` and is the side that gives
+way — which is the app's rule and the app's reason, kept exactly. Above about
+1500px the middle is centred; below it the right takes what it needs.
+
+### The find bar had one way out, and the app has six
+
+Only the × closed it. `onFindOutside` in `main.ts` is the rule — "reaching
+past the bar puts it away, the way the Theme and Settings menus do" — together
+with `wire()`'s `opens(…)`, which every control in the bar that opens
+something of its own is wrapped in. The app spells its exceptions as a
+selector, `FIND_KEEPS_OPEN`, and a handler in this reader has no `closest` to
+ask with: so the top strip is asked for by *height*, which is the whole of
+what that half of the selector means, and the other four stop the press
+themselves the way the menus already do. `show_menu` closes the search for all
+five menus at once, Contents closes it from its button and not from its
+shortcut — which is the split the app has — and the results panel and its tab
+stop the press, because that list is this search seen larger and picking a
+line out of it must not close the thing that found it.
+
+### And the document's name was faded whether or not it had run out of room
+
+Blitz has no `text-overflow: ellipsis`, so a gradient mask over the last
+twenty-four pixels stands in for one — and it was on the button
+unconditionally. On `book.pdf`, a button sixty-four pixels wide, that is more
+than a third of it going pale, and it reads as precisely what was reported: a
+button too small for its name. `app.rs` puts the class on only when the name
+is longer than the box can hold, counted rather than measured against the same
+`34ch` the app caps at. Erring long is the safe direction — a name a character
+or two past the cap is cut without a fade, which is what a narrow column has
+always looked like; a name inside the cap is never faded, which was the
+complaint.
+
 ---
 
 ## Three things to carry forward
@@ -3038,7 +3542,7 @@ measured and ruled out.
    what was on this list *can* be, once the rules are separated from the
    windows they are about.
 
-## Eight things worth raising upstream, and none of them is blocking
+## Thirteen things worth raising upstream, and none of them is blocking
 
 - `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
   comment in the source already says it should be. A tenth of every one of
@@ -3105,12 +3609,53 @@ measured and ruled out.
   macOS, with nothing at either end saying so. `blitz-shell` cannot fix this
   from where it stands, but a line in its docs beside `BlitzApplication` would
   have saved the afternoon it cost here.
+- **`blitz-shell` reporting Command as `Modifiers::SUPER` while
+  `keyboard_types`' own `meta()` reads `Modifiers::META`.**
+  `winit_modifiers_to_kbt_modifiers` in `packages/blitz-shell/src/convert_events.rs`
+  answers winit's `meta_key()` with `SUPER`; every application asking
+  `event.modifiers().meta()` — which is what the DOM calls that key, and what
+  the type's own accessor is named for — gets `false` with ⌘ held. So on macOS
+  no ⌘ shortcut in any Blitz application works, silently, and the keystroke
+  arrives as its bare letter. One line, and either bit would do as long as the
+  accessor and the sender agree. See "Every ⌘ chord was dead" above.
+- **Text that keeps the colour it was built with when a custom property changes
+  above it.** Blitz puts the brush into the parley layout when it builds a run
+  and a change to a custom property several levels up is not among the damage,
+  so a label alone in its own box — a `<button>`, which builds an inline layout
+  of its own — stays in the old colour until something else touches it. A `<p>`
+  in the same place is fine, which is what makes it so easy to miss. In a themed
+  application it means a bar that changes colour except for the two or three
+  labels that have nothing else in them. See "Three labels kept the last theme's
+  colour" above.
+- **No `user-select: none` for a button in the user-agent stylesheet**, so a
+  press that slides two pixels becomes a text selection and the click is never
+  dispatched. Every browser's UA sheet has this rule. Patch prepared:
+  `experiments/dioxus-reader/blitz-button-select.patch`. The same investigation
+  found that `user-select` does not reach an element from an ancestor — the
+  check in `handle_pointermove` reads the pressed node and its parent and stops
+  — and that `Harness::move_mouse_to` sends no buttons, so a drag is not
+  expressible in the shared test harness.
 - A custom widget swallowing every default action, so `click` and `dblclick`
   never happen over one — `handle_dom_event` forwards the event to the widget
   and returns before the match that generates them. The two it takes away are
   exactly the two a widget cannot generate for itself, because a click is a
   press and a release on the same node rather than a pointerup. See Phase 3
   item 10.
+
+- **The system font's `trak` table is not read**, so every UI face that has one
+  lays out too tight below about 17px — on macOS that is SF, which is to say
+  every application that says `system-ui` and does not set its own tracking.
+  A browser applies it; parley does not, and the difference is a tenth of the
+  width of a word at the sizes an interface is actually written at. There is
+  nothing wrong with the face, the file or the shaping: the advances are
+  simply the untracked ones. See "The font was the same file and not the same
+  type" above, which carries the measurements at every size from 11 to 30.
+- **`font-variation-settings` is parsed and dropped.** `stylo_to_parley.rs`
+  converts it and hands it on, and `'wght' 100` and `'wght' 900` lay out
+  identically — so a variable font's axes cannot be reached from CSS at all,
+  including the `opsz` axis that would otherwise have been the answer to the
+  entry above. The failure is silent, which is what makes it expensive: the
+  declaration is accepted and nothing happens.
 
 **IME used to be an entry of its own and the only blocking one**, on the strength
 of there being no composition events at all: a reader writing CJK could not

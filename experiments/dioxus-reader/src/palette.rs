@@ -54,47 +54,218 @@ pub const FALLBACK: Palette = Palette {
     keep_colour: true,
 };
 
+/// **Every shade in the block below is `applyTheme`'s, arithmetic for
+/// arithmetic.** They were near-misses of it — a surface 6% towards the ink
+/// where the app pulls it 55% towards white, a ground 13% towards the ink
+/// where the app takes it 7% towards black — and near-misses are the worst
+/// kind, because the two apps then look *almost* the same and nobody can say
+/// what is different. See `themes.ts`.
 impl Palette {
-    /// The shades the chrome is built out of, derived rather than named.
+    /// Whether this theme reads as a dark one, which several of the shades
+    /// below branch on. `luminance` is the WCAG relative luminance, not the
+    /// ramp's luma: the same function `isDarkTheme` uses.
+    pub fn dark(&self) -> bool {
+        luminance(self.background) < 0.35
+    }
+
+    /// The ground the pages stand on. `--bg` in the app, and it is the one
+    /// that shows most: it is the whole window either side of the paper.
+    pub fn ground(&self) -> Rgb {
+        mix(self.background, BLACK, if self.dark() { 0.34 } else { 0.07 })
+    }
+
+    /// What floats: a menu, the sidebar, the settings window. `--surface`.
+    ///
+    /// **Unrounded**, because three of the shades below are mixed *from* it
+    /// and the app rounds once, at the end. `mix` in `themes.ts` returns
+    /// floats and only `toHex` rounds; rounding at every step put
+    /// `--accent-soft` one level out, which is invisible on screen and is
+    /// exactly the kind of difference that makes a comparison useless.
+    fn surface_raw(&self) -> Shade {
+        blend(
+            shade(self.background),
+            shade(WHITE),
+            if self.dark() { 0.06 } else { 0.55 },
+        )
+    }
+
     pub fn surface(&self) -> Rgb {
-        mix(self.background, self.text, 0.06)
+        solid(self.surface_raw())
+    }
+
+    /// A row of one of those under the pointer, and one being pressed.
+    pub fn surface_hover(&self) -> Rgb {
+        solid(blend(self.surface_raw(), shade(self.text), 0.09))
+    }
+
+    pub fn surface_sunk(&self) -> Rgb {
+        solid(blend(self.surface_raw(), shade(self.text), 0.055))
     }
 
     pub fn line(&self) -> Rgb {
-        mix(self.background, self.text, 0.16)
+        mix(self.background, self.text, if self.dark() { 0.14 } else { 0.17 })
     }
 
-    /// The colour the toolbar's own labels are written in.
-    ///
-    /// **0.74 of the way to the ink, not 0.55, and the difference is the
-    /// whole of what a theme is for.** A shade halfway between paper and ink
-    /// is a mid-grey whatever the two ends are, so Mark, Trim, the zoom and
-    /// the two steppers came out very nearly the same colour under all
-    /// fourteen themes — the chrome reading as though the theme had not
-    /// loaded. `--text-soft` in `themes.ts` is `mix(text, bg, 0.26)`, which
-    /// is this number said from the other end, and it keeps enough of the
-    /// ink for the theme to be legible in the bar.
+    /// The colour the toolbar's own labels are written in — `--text-soft`.
     pub fn muted(&self) -> Rgb {
-        mix(self.background, self.text, 0.74)
+        mix(self.text, self.background, 0.26)
     }
 
-    /// The quieter one still: the document's name, the "/ 400" beside the
-    /// page number, a chord in a menu. `--text-faint` in `themes.ts`, which
-    /// is `mix(text, bg, 0.52)` and the same number from the other end.
+    /// The quieter one still: the document's name, "of 400", a chord in a
+    /// menu. `--text-faint`.
     pub fn faint(&self) -> Rgb {
-        mix(self.background, self.text, 0.48)
+        mix(self.text, self.background, 0.52)
     }
 
-    /// What an undrawn page is. See `--page` in `styles.rs`: a page that a
-    /// recolouring theme has not reached yet is the theme's paper, and a page
-    /// nothing is recolouring is the paper the printer used.
+    /// The small print beside a setting — quieter than the label and still
+    /// meant to be read, which is why it is only a little quieter.
+    pub fn note(&self) -> Rgb {
+        mix(self.text, self.background, 0.28)
+    }
+
+    /// The ground a floating control stands on while what it names is in
+    /// force. The accent at a sixth of its strength over the surface, which
+    /// is what keeps the accent on top of it legible.
+    pub fn accent_soft(&self) -> Rgb {
+        solid(blend(
+            shade(self.accent),
+            self.surface_raw(),
+            if self.dark() { 0.8 } else { 0.86 },
+        ))
+    }
+
+    /// The ink on a filled accent button.
+    pub fn accent_contrast(&self) -> Rgb {
+        if contrast_ratio(self.accent, WHITE) >= 3.0 {
+            WHITE
+        } else {
+            mix(self.accent, BLACK, 0.82)
+        }
+    }
+
+    /// "That worked": a green that reads on this theme's surface, pulled a
+    /// little towards the theme's own ink so it belongs to the palette.
+    pub fn positive(&self) -> Rgb {
+        let green = if self.dark() {
+            [0x6a, 0xd3, 0x8c]
+        } else {
+            [0x3d, 0x8f, 0x5b]
+        };
+        mix(green, self.text, 0.14)
+    }
+
+    pub fn negative(&self) -> Rgb {
+        if self.dark() {
+            [0xf1, 0x7a, 0x84]
+        } else {
+            [0xb0, 0x2a, 0x37]
+        }
+    }
+
+    pub fn negative_contrast(&self) -> Rgb {
+        if contrast_ratio(self.negative(), WHITE) >= 3.0 {
+            WHITE
+        } else {
+            mix(self.negative(), BLACK, 0.82)
+        }
+    }
+
+    /// What an undrawn page is, and what the toolbar stands on: the paper,
+    /// which is the theme's background where it recolours and the printer's
+    /// white where it does not.
     pub fn page(&self) -> Rgb {
         if self.recolor {
             self.background
         } else {
-            [0xff, 0xff, 0xff]
+            WHITE
         }
     }
+
+    /// **The bar has a family of its own, mixed from the paper it sits on.**
+    /// The toolbar takes the paper's colour rather than the surface's because
+    /// it belongs to the document instead of floating over it — so a hover, a
+    /// held-down button and the zoom group have to come off the paper too, or
+    /// a warm theme gets a cold chip on warm paper. `--bar-*` in `themes.ts`.
+    fn chip_ink(&self) -> Rgb {
+        // A theme may name a text colour its paper cannot support — a dark
+        // theme that leaves the document alone shows its chrome on white —
+        // and a chip nobody can see is worse than one that is merely grey.
+        if contrast_ratio(self.text, self.page()) >= 3.0 {
+            self.text
+        } else if luminance(self.page()) < 0.35 {
+            WHITE
+        } else {
+            BLACK
+        }
+    }
+
+    fn paper_dark(&self) -> bool {
+        luminance(self.page()) < 0.35
+    }
+
+    pub fn bar_hover(&self) -> Rgb {
+        let amount = if self.paper_dark() { 0.13 } else { 0.09 };
+        mix(self.page(), self.chip_ink(), amount)
+    }
+
+    pub fn bar_sunk(&self) -> Rgb {
+        let amount = if self.paper_dark() { 0.075 } else { 0.055 };
+        mix(self.page(), self.chip_ink(), amount)
+    }
+
+    pub fn bar_line(&self) -> Rgb {
+        let amount = if self.paper_dark() { 0.2 } else { 0.17 };
+        mix(self.page(), self.chip_ink(), amount)
+    }
+
+    pub fn bar_accent(&self) -> Rgb {
+        let amount = if self.paper_dark() { 0.8 } else { 0.86 };
+        mix(self.accent, self.page(), amount)
+    }
+}
+
+/// A colour part-way between two others, before anybody has decided what byte
+/// it is. See [`Palette::surface_raw`].
+type Shade = [f64; 3];
+
+fn shade(colour: Rgb) -> Shade {
+    [colour[0] as f64, colour[1] as f64, colour[2] as f64]
+}
+
+fn solid(shade: Shade) -> Rgb {
+    let byte = |value: f64| value.clamp(0.0, 255.0).round() as u8;
+    [byte(shade[0]), byte(shade[1]), byte(shade[2])]
+}
+
+fn blend(a: Shade, b: Shade, amount: f64) -> Shade {
+    [
+        a[0] + (b[0] - a[0]) * amount,
+        a[1] + (b[1] - a[1]) * amount,
+        a[2] + (b[2] - a[2]) * amount,
+    ]
+}
+
+const WHITE: Rgb = [0xff, 0xff, 0xff];
+const BLACK: Rgb = [0x00, 0x00, 0x00];
+
+/// WCAG relative luminance — the same function `isDarkTheme` and
+/// `contrastRatio` use in the app, and not the ramp's `luma`.
+pub fn luminance(colour: Rgb) -> f64 {
+    let channel = |value: u8| {
+        let c = value as f64 / 255.0;
+        if c <= 0.03928 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(colour[0]) + 0.7152 * channel(colour[1]) + 0.0722 * channel(colour[2])
+}
+
+pub fn contrast_ratio(a: Rgb, b: Rgb) -> f64 {
+    let (one, two) = (luminance(a), luminance(b));
+    let (high, low) = if one >= two { (one, two) } else { (two, one) };
+    (high + 0.05) / (low + 0.05)
 }
 
 /// A colour as CSS writes it, which is how it reaches both the stylesheet and

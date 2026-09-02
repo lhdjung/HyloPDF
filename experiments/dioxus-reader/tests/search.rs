@@ -105,10 +105,10 @@ fn matches_are_painted_on_the_page_and_the_switch_says_how_many() {
     reader.press_chord("mod+g");
     let all = reader.state().hits;
     assert!(all >= 2, "two matches on the page, {all} painted");
-    reader.click(".chip.find-all");
+    reader.click(".find-all");
     let one = reader.state().hits;
     assert_eq!(one, 1, "only the match the reader is on");
-    reader.click(".chip.find-all");
+    reader.click(".find-all");
     assert_eq!(reader.state().hits, all, "and back");
 }
 
@@ -139,7 +139,10 @@ fn an_accent_a_ligature_and_a_soft_hyphen_are_all_findable_by_typing_the_word() 
         look_for(&mut reader, query);
         let state = reader.state();
         assert!(
-            state.find.as_deref().is_some_and(|said| said.starts_with("1 of ")),
+            state
+                .find
+                .as_deref()
+                .is_some_and(|said| said.starts_with("1 of ")),
             "{query}: {:?}",
             state.find,
         );
@@ -164,7 +167,7 @@ fn the_two_switches_change_what_is_found_and_are_remembered() {
     // and "line" — so the whole-words switch has something to take away.
     look_for(&mut reader, "in");
     let loose = reader.state().find.expect("a count");
-    reader.click(".chip.find-words");
+    reader.click(".find-words");
     reader.scan_out();
     let whole = reader.state().find.expect("a count");
     assert_ne!(loose, whole, "whole words changed nothing: {loose}");
@@ -176,10 +179,13 @@ fn the_two_switches_change_what_is_found_and_are_remembered() {
     reader.press_chord("mod+f");
     look_for(&mut reader, "The");
     let insensitive = reader.state().find.expect("a count");
-    reader.click(".chip.find-case");
+    reader.click(".find-case");
     reader.scan_out();
     let cased = reader.state().find.expect("a count");
-    assert_ne!(insensitive, cased, "match case changed nothing: {insensitive}");
+    assert_ne!(
+        insensitive, cased,
+        "match case changed nothing: {insensitive}"
+    );
 
     // Both survive the reader being closed and opened again, which is what
     // makes them settings rather than a state of the bar.
@@ -232,7 +238,7 @@ fn the_results_tab_lists_the_matches_and_a_row_goes_to_one() {
     assert_eq!(reader.state().page, 3);
 
     // And it goes when the bar does, rather than sitting there empty.
-    reader.click(".chip.find-close");
+    reader.click(".find-close");
     assert_eq!(reader.state().find, None);
     assert_eq!(reader.state().sidebar.as_deref(), Some("pages"));
     assert!(reader.state().results.is_empty());
@@ -262,7 +268,7 @@ fn typing_into_the_field_does_not_drive_the_document() {
 fn a_click_in_the_find_bar_leaves_the_keyboard_in_the_field() {
     let mut reader = searching();
     look_for(&mut reader, "need");
-    reader.click(".chip.find-all");
+    reader.click(".find-all");
     reader.type_text("le");
     reader.scan_out();
     assert_eq!(reader.state().query, "needle");
@@ -343,7 +349,11 @@ fn one_slice_of_the_scan_does_not_read_the_whole_book() {
 #[test]
 fn the_count_opens_the_results_and_escape_puts_them_away() {
     let mut reader = searching();
-    assert_eq!(reader.state().sidebar, None, "the panel is shut to start with");
+    assert_eq!(
+        reader.state().sidebar,
+        None,
+        "the panel is shut to start with"
+    );
     look_for(&mut reader, "needle");
 
     reader.click(".find-count");
@@ -383,7 +393,11 @@ fn a_panel_the_reader_opened_is_not_taken_away() {
 fn an_empty_count_opens_nothing() {
     let mut reader = searching();
     reader.click(".find-count");
-    assert_eq!(reader.state().sidebar, None, "nothing has been searched for");
+    assert_eq!(
+        reader.state().sidebar,
+        None,
+        "nothing has been searched for"
+    );
     look_for(&mut reader, "zzzzz");
     reader.click(".find-count");
     assert_eq!(reader.state().sidebar, None, "and nothing was found");
@@ -409,4 +423,179 @@ fn a_query_can_be_corrected_as_well_as_typed() {
     reader.scan_out();
     assert_eq!(reader.state().query, "needle", "the letter came back off");
     assert_eq!(reader.state().find.as_deref(), Some("1 of 3"));
+}
+
+/* ------------------------------------------- the results, without asking */
+
+/// **A search shows its matches**, rather than keeping them behind the count.
+/// The panel comes up with the first hit, on the Results tab, and it is
+/// borrowed: closing the bar takes it back down, so one Escape undoes the
+/// whole of what one search did.
+#[test]
+fn searching_opens_the_panel_on_the_results_and_closing_it_puts_the_panel_away() {
+    let mut reader = searching();
+    assert_eq!(
+        reader.state().sidebar,
+        None,
+        "shut before anything is typed"
+    );
+    look_for(&mut reader, "needle");
+    assert_eq!(
+        reader.state().sidebar.as_deref(),
+        Some("results"),
+        "the matches are on screen without being asked for",
+    );
+    assert_eq!(reader.state().results, vec![0, 1, 2]);
+
+    reader.click(".find-close");
+    assert_eq!(reader.state().find, None);
+    assert_eq!(reader.state().sidebar, None, "and the panel it borrowed");
+}
+
+/// A search that finds nothing opens nothing: a panel that comes up to say
+/// "No matches." is a panel saying what the bar has already said.
+#[test]
+fn a_search_that_finds_nothing_opens_no_panel() {
+    let mut reader = searching();
+    look_for(&mut reader, "zzzzz");
+    assert_eq!(reader.state().sidebar, None);
+}
+
+/// And a panel the reader shuts stays shut, for as long as that search does.
+/// The panel is opened once per search and not on every slice of the scan —
+/// see `Viewer::show_the_matches`.
+#[test]
+fn a_panel_shut_during_a_search_stays_shut() {
+    let mut reader = searching();
+    look_for(&mut reader, "needle");
+    reader.press_chord("mod+b");
+    assert_eq!(reader.state().sidebar, None, "the reader shut it");
+    reader.scan_out();
+    assert_eq!(reader.state().sidebar, None, "and it stayed shut");
+}
+
+/* --------------------------------------------- the bar is a card, not a row */
+
+/// **The bar hangs over the document rather than taking a row from it.**
+/// `styles.css` puts it under the toolbar at the right; here it had been a
+/// row of the flex column, which took forty pixels off the viewport for as
+/// long as it was up — so opening the search moved the page being read.
+#[test]
+fn the_bar_hangs_over_the_document_and_does_not_shorten_it() {
+    let mut reader = Reader::open_with(&fixture::prose_pdf(), Options::default());
+    let before = reader.harness.layout_rect(".viewer");
+    reader.press_chord("mod+f");
+    let after = reader.harness.layout_rect(".viewer");
+    assert_eq!(
+        (after.width, after.height),
+        (before.width, before.height),
+        "the document is the size it was",
+    );
+    let bar = reader.harness.layout_rect(".find-bar");
+    assert!(bar.y > 0.0 && bar.y < 100.0, "under the toolbar: {bar:?}");
+    assert!(
+        bar.x + bar.width > after.width - 40.0,
+        "and over at the right: {bar:?} against a window {} wide",
+        after.width,
+    );
+}
+
+/// And it can be pressed with the document scrolled under it, which is the
+/// trap in `tests/upstream.rs`: a page is placed at `top - scroll`, so a
+/// scrolled document is hit-tested over the whole window whatever is drawn
+/// on top. The bar's `z-index` is what settles it.
+#[test]
+fn the_bar_can_be_pressed_over_a_scrolled_document() {
+    let mut reader = searching();
+    look_for(&mut reader, "needle");
+    // By the wheel rather than by a key: the field owns the keyboard while
+    // the bar is up, which is the whole of why `j` does not scroll here.
+    reader.wheel_over(".viewer", 2_000.0);
+    assert!(
+        reader.state().scroll > 0.0,
+        "the document has been scrolled"
+    );
+    reader.click(".find-close");
+    assert_eq!(reader.state().find, None, "the bar closed");
+}
+
+/* ------------------------------- and the four ways it goes away by itself */
+
+/// **Reaching past the bar puts it away**, which is `onFindOutside` in
+/// `main.ts` and was missing here entirely: the × was the only way out, so a
+/// reader who had found what they came for and gone back to reading had a
+/// card sitting over the top-right corner of the page for the rest of the
+/// session.
+///
+/// The app spells the exceptions as a selector and this reader has no
+/// `closest` to ask with, so the top strip is asked for by height and the
+/// other four stop the press themselves — see the root's `onmousedown` in
+/// `app.rs`.
+#[test]
+fn a_press_in_the_document_puts_the_find_bar_away() {
+    let mut reader = searching();
+    look_for(&mut reader, "needle");
+    assert!(reader.state().find.is_some(), "the bar is up");
+    reader.click(".viewer");
+    assert_eq!(reader.state().find, None, "and reading closed it");
+}
+
+/// And opening any of the five menus does too, which is `opens(…)` in
+/// `wire()`: two panels claiming the same corner of the screen, one of them
+/// still holding the keyboard, is not a place anybody meant to be.
+#[test]
+fn opening_a_menu_puts_the_find_bar_away() {
+    for chip in [".chip.theme", ".chip.settings", ".chip.open", ".chip.fit"] {
+        let mut reader = searching();
+        look_for(&mut reader, "needle");
+        reader.click(chip);
+        assert_eq!(reader.state().find, None, "{chip} left the bar up");
+    }
+}
+
+/// Contents is one of them, and it is the one that is not a menu: it opens a
+/// panel rather than a popover, and the app wraps it in the same `opens(…)`
+/// for the same reason.
+#[test]
+fn the_contents_button_puts_the_find_bar_away() {
+    let mut reader = searching();
+    look_for(&mut reader, "needle");
+    reader.click(".chip.contents");
+    assert_eq!(reader.state().find, None);
+}
+
+/// **But the bar's own switches, the toolbar, and the list of results do
+/// not.** The three that would each have been a bug of their own: a switch
+/// that closes the thing it is about, a rotation that ends a search, and a
+/// result that closes the list it was picked from.
+#[test]
+fn the_bar_its_own_toolbar_and_its_results_all_keep_it_open() {
+    let mut reader = searching();
+    look_for(&mut reader, "needle");
+
+    reader.click(".find-option");
+    assert!(
+        reader.state().find.is_some(),
+        "a switch on the bar closed the bar",
+    );
+
+    reader.click(".chip.rotate-left");
+    assert!(
+        reader.state().find.is_some(),
+        "turning the page is reading, not leaving",
+    );
+
+    // The list is this search seen larger — `#results-panel` and
+    // `#tab-results` in `FIND_KEEPS_OPEN`.
+    reader.click(".find-count");
+    assert_eq!(
+        reader.state().sidebar.as_deref(),
+        Some("results"),
+        "the count opens the list behind it",
+    );
+    reader.click_nth(".result", 0);
+    assert!(
+        reader.state().find.is_some(),
+        "picking a result closed the search that found it",
+    );
 }

@@ -267,6 +267,16 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
     } else {
         Vec::new()
     };
+    // **What a page is called, not where it is in the file**, which is what
+    // `this.viewer.label(result.page)` reads in `sidebar.ts` and is the whole
+    // point of a document that numbers its own front matter: a match on the
+    // third page of a book that calls it iii is cited as iii. Taken here
+    // rather than in the row, because the rows are built after the reader is
+    // let go of.
+    let result_labels: Vec<String> = results
+        .iter()
+        .map(|result| held.label(result.page))
+        .collect();
     let result_at = held.search.state().at;
     let result_total = held.search.state().total;
     let scanning = held.search.state().scanning;
@@ -317,6 +327,11 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                     button {
                         class: if tab == Tab::Results { "tab on" } else { "tab" },
                         "data-tab": "results",
+                        // `#tab-results` in `FIND_KEEPS_OPEN` — see the root's
+                        // `onmousedown` in `app.rs`. This tab and the panel
+                        // under it are the search seen larger, so reaching
+                        // into either is not reaching past the bar.
+                        onmousedown: move |event| event.stop_propagation(),
                         onclick: move |_| viewer.write().show_tab(Tab::Results),
                         Icon { name: "search", stroke: if tab == Tab::Results { ink_on.clone() } else { ink.clone() } }
                         if labelled { span { class: "tab-label", "Results" } }
@@ -325,6 +340,11 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
             }
             if tab == Tab::Results {
                 div { class: "panel results",
+                    // `#results-panel` in `FIND_KEEPS_OPEN` — see the Results
+                    // tab above, and the root's `onmousedown` in `app.rs`.
+                    // Picking a result would otherwise close the search that
+                    // found it, and the list with it.
+                    onmousedown: move |event| event.stop_propagation(),
                     if results.is_empty() {
                         p { class: "sidebar-empty",
                             if scanning { "Searching…" } else { "No matches." }
@@ -342,7 +362,7 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                                 "{result_total} matches"
                             }
                         }
-                        for result in results.iter() {
+                        for (row, result) in results.iter().enumerate() {
                             {
                                 let at = result.at;
                                 let current = result_at == Some(at);
@@ -352,6 +372,7 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                                     result.hit.clone(),
                                     result.after.clone(),
                                 );
+                                let named = result_labels[row].clone();
                                 rsx! {
                                     button {
                                         key: "{at}",
@@ -359,7 +380,7 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                                         "data-result": "{at}",
                                         "data-page": "{page}",
                                         onclick: move |_| viewer.write().go_to_result(at),
-                                        span { class: "result-page", "{page}" }
+                                        span { class: "result-page", "{named}" }
                                         span { class: "result-line",
                                             span { class: "result-before", "{before}" }
                                             span { class: "result-hit", "{hit}" }

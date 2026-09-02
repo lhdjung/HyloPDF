@@ -50,8 +50,41 @@ fn main() {
     // experiment is judged against, and a GPU renderer's buffers scale with
     // the surface: "how much of the floor is the window" is answerable only by
     // asking for two of them.
-    let window_width = flag("--width", 1100) as f64;
-    let window_height = flag("--height", 900) as f64;
+    // **The window's size is the app's setting, not a number in this file.**
+    // It was 1100×900 and never remembered, and that is most of what a reader
+    // comparing the two sees as "everything is too small": the app opens at
+    // 1280×860 *maximized* (`settings.rs`), so its toolbar has room for the
+    // document's name and this one squeezed the name to three letters. The
+    // flags still win, because they are what a measuring run asks with — the
+    // floor is measured at two sizes on purpose — and a run that quietly
+    // adopted whatever size somebody had left the window at would not be
+    // comparable with the table in `PROGRESS.md`.
+    let remembered = dioxus_reader::settings::load(&dioxus_reader::config::config_dir());
+    let setting = |key: &str, fallback: f64| -> f64 {
+        remembered
+            .get(key)
+            .and_then(|value| value.as_f64())
+            .unwrap_or(fallback)
+    };
+    let given = |name: &str| args.iter().any(|arg| arg == name);
+    let window_width = if given("--width") {
+        flag("--width", 1100) as f64
+    } else {
+        setting("window_width", 1280.0)
+    };
+    let window_height = if given("--height") {
+        flag("--height", 900) as f64
+    } else {
+        setting("window_height", 860.0)
+    };
+    // A measuring run is never maximized: the whole point of `--width` is to
+    // ask what the floor costs at a named size.
+    let window_maximized = !given("--width")
+        && !given("--height")
+        && remembered
+            .get("window_maximized")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true);
     // `--theme N` is a place in the theme list, and the list is fourteen long
     // rather than two now: it is read out of the app's own `themes/` files,
     // through the app's own loader. Absent means whatever the last run wore.
@@ -161,6 +194,11 @@ fn main() {
         }
     }
 
+    // Where the launch window's size waits until the app goes. See the
+    // `on_resized` hook below for why it is held rather than written.
+    let geometry: Arc<std::sync::Mutex<Option<(f64, f64, bool)>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
     let event_loop = blitz_shell::create_default_event_loop();
     let (proxy, queue) = blitz_shell::BlitzShellProxy::new(event_loop.create_proxy());
     let mut shell = Shell::new(proxy, queue);
@@ -188,6 +226,7 @@ fn main() {
         dir: config.dir.clone(),
         theme: config.theme,
         size: (window_width, window_height),
+        maximized: window_maximized,
         remote: windows.remote(),
     });
 
@@ -241,8 +280,29 @@ fn main() {
         // window because a component is the only thing that can read the
         // signal, and news is how a component is reached.
         let handle = AppHandle::new(exchange.clone());
-        shell.on_resized(move |label| {
+        let geometry = geometry.clone();
+        shell.on_resized(move |label, width, height, maximized| {
             let _ = handle.emit_to(label, "window-resized", ());
+            // **Geometry belongs to the launch window**, which is the app's
+            // own rule and the app's own reason: there is one remembered size
+            // and there are several windows, and letting whichever moved last
+            // own it makes the number creep, because what it reads back are
+            // windows that were themselves cascaded off it. Held rather than
+            // written — a drag is a hundred of these, and each write is a
+            // whole file — and put down once, on the way out.
+            if label == "main" {
+                *geometry.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some((width, height, maximized));
+            }
+        });
+    }
+    {
+        // Two fingers on the trackpad, which macOS reports as a gesture rather
+        // than as a modified wheel — so an application that listens only for
+        // ⌃-wheel does not zoom at all. See `Shell::on_pinch`.
+        let handle = AppHandle::new(exchange.clone());
+        shell.on_pinch(move |label, delta| {
+            let _ = handle.emit_to(label, "pinched", delta);
         });
     }
     {
@@ -309,6 +369,23 @@ fn main() {
     }
 
     event_loop.run_app(shell).unwrap();
+    // How big the window was when the reader put it down, which is how big it
+    // comes back. Written here rather than as it changes for the reason above,
+    // and not at all for a measuring run, whose size came from a flag.
+    if !measuring {
+        if let Some((width, height, maximized)) =
+            *geometry.lock().unwrap_or_else(|e| e.into_inner())
+        {
+            let _ = dioxus_reader::settings::set_many(
+                &config.dir,
+                vec![
+                    ("window_width".into(), serde_json::json!(width)),
+                    ("window_height".into(), serde_json::json!(height)),
+                    ("window_maximized".into(), serde_json::json!(maximized)),
+                ],
+            );
+        }
+    }
     // The socket goes with the process it stood for.
     if !measuring {
         dioxus_reader::single::release(&config.dir);

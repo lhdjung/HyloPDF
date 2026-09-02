@@ -45,14 +45,22 @@ fn the_settings_window_opens_on_its_key_and_leaves_on_escape() {
 }
 
 #[test]
-fn the_cog_opens_it_too() {
+fn the_cog_opens_a_menu_and_the_menu_opens_the_window() {
     // ⌘, is not discoverable, and the app has a Settings button at the end of
-    // its bar. This used to be the last item of the document's own menu, for
-    // want of room; the bar has room now that it is three groups, and the
-    // button is where the app puts it.
+    // its bar. **What the button opens is a menu**, not the window —
+    // `showSettingsMenu` in `main.ts`: the switches somebody reaches for while
+    // reading are one press, and "All settings…" at the foot of it is the way
+    // to the rest. Going straight to the window put a window over the document
+    // for a switch.
     let mut reader = book();
     reader.click(".chip.settings");
-    assert!(open(&reader));
+    assert!(!open(&reader), "the window is not up");
+    assert_eq!(reader.state().menu.as_deref(), Some("settings"));
+
+    // The last item of that menu, which is the door to the window.
+    let items = reader.harness.query_all(".menu.settings .menu-item").len();
+    reader.click_nth(".menu.settings .menu-item", items - 1);
+    assert!(open(&reader), "and now it is");
 }
 
 #[test]
@@ -243,7 +251,8 @@ fn dark_mode_is_a_key_and_a_switch_and_they_are_the_same_thing() {
     // And the switch on the Appearance page, which is the same call.
     appearance(&mut reader);
     assert!(!switched(&reader, "Dark mode"));
-    reader.click_nth("[role='switch']", 0);
+    // Second on the page: the app puts "Follow the system" above it.
+    reader.click_nth("[role='switch']", 1);
     assert!(switched(&reader, "Dark mode"));
     reader.press("Escape");
     assert_eq!(reader.state().theme, "Hylo Dark");
@@ -308,7 +317,7 @@ fn the_machine_changing_its_mind_is_followed_and_then_is_not() {
         reader.state().notice
     );
     appearance(&mut reader);
-    assert!(!switched(&reader, "Light or dark follow system"));
+    assert!(!switched(&reader, "Follow the system"));
     reader.press("Escape");
 
     // …and the machine going light again leaves them where they are.
@@ -331,9 +340,9 @@ fn following_can_be_switched_back_on_and_takes_effect_at_once() {
     assert_eq!(reader.state().theme, "Hylo Light", "not following, so not moved");
 
     appearance(&mut reader);
-    assert!(!switched(&reader, "Light or dark follow system"));
-    reader.click_nth("[role='switch']", 1);
-    assert!(switched(&reader, "Light or dark follow system"));
+    assert!(!switched(&reader, "Follow the system"));
+    reader.click_nth("[role='switch']", 0);
+    assert!(switched(&reader, "Follow the system"));
     reader.press("Escape");
     assert_eq!(reader.state().theme, "Hylo Dark");
 }
@@ -363,7 +372,7 @@ fn a_machine_that_will_not_say_leaves_the_reader_alone() {
     // today — a control that reads back other than what is in the file is the
     // picker lying about the page. The sentence under it is where the
     // machine's silence is said.
-    assert!(switched(&reader, "Light or dark follow system"));
+    assert!(switched(&reader, "Follow the system"));
     let notes = reader.text_all(".field-note");
     assert!(
         notes.iter().any(|note| note.contains("does not report an appearance")),

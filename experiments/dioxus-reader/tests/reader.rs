@@ -153,7 +153,11 @@ fn the_toolbar_is_clickable() {
     assert_eq!(reader.state().menu.as_deref(), Some("view"));
     reader.click_nth(".menu.view .menu-item", 0);
     assert_eq!(reader.state().zoom, "Fit width");
-    assert_eq!(reader.state().menu, None, "choosing closes the menu");
+    // Neither menu closes on a choice: a zoom and a theme are both things you
+    // try on, which is the app's own rule for these two — see `showZoomMenu`
+    // and `showThemeMenu`. Escape is the way out of either.
+    assert_eq!(reader.state().menu.as_deref(), Some("view"));
+    reader.press("Escape");
     reader.click(".chip.theme");
     reader.click_nth(".menu.theme .menu-item", 1);
     assert_eq!(reader.state().theme, "Hylo Dark");

@@ -580,6 +580,77 @@ fn build_links() -> Vec<u8> {
     pdf.bytes()
 }
 
+/// A document with the notes somebody else left in it: a sticky note, a
+/// comment over a passage, an annotation with nothing to read, and a link —
+/// the last two being the cases that must *not* show up as notes.
+pub fn notes_pdf() -> String {
+    written("hylopdf-fixture-notes.pdf", build_notes)
+}
+
+fn build_notes() -> Vec<u8> {
+    const PAGES: usize = 3;
+    let mut pdf = Pdf::new();
+    let catalog = pdf.reserve();
+    let tree = pdf.reserve();
+    let font = pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let page_ids: Vec<usize> = (0..PAGES).map(|_| pdf.reserve()).collect();
+
+    // A sticky note: small in both directions, so it is a marker and is
+    // pressable all over. `/T` is who left it and `/Contents` is what it says.
+    let sticky = pdf.add(
+        "<< /Type /Annot /Subtype /Text /Rect [500 700 520 720] /T (A Reader) \
+         /Contents (Check this against the second edition.) >>",
+    );
+    // A comment over a highlighted sentence: a passage rather than a marker,
+    // so only the strip at its right edge answers a press.
+    let comment = pdf.add(
+        "<< /Type /Annot /Subtype /Highlight /Rect [72 690 400 715] \
+         /QuadPoints [72 715 400 715 72 690 400 690] \
+         /Contents (This is the sentence the whole argument turns on.) >>",
+    );
+    // Nothing to read: an annotation with no `/Contents` is not a note.
+    let silent = pdf.add("<< /Type /Annot /Subtype /Square /Rect [72 600 200 640] >>");
+    // And a link, whose text is where it goes and which is never a note.
+    let link = pdf.add(
+        "<< /Type /Annot /Subtype /Link /Rect [72 500 200 520] /Border [0 0 0] \
+         /Contents (not a note) /A << /S /URI /URI (https://example.com) >> >>",
+    );
+
+    for (index, &id) in page_ids.iter().enumerate() {
+        let text = format!("Page {} of the fixture.", index + 1);
+        let stream = format!("BT /F1 18 Tf 72 700 Td ({text}) Tj ET");
+        let content = pdf.add(format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            stream.len(),
+            stream
+        ));
+        let annots = match index {
+            0 => format!(" /Annots [{sticky} 0 R {comment} 0 R {silent} 0 R {link} 0 R]"),
+            _ => String::new(),
+        };
+        pdf.put(
+            id,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 612 792] \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R{annots} >>"
+            ),
+        );
+    }
+    pdf.put(
+        tree,
+        format!(
+            "<< /Type /Pages /Count {PAGES} /Kids [{}] >>",
+            page_ids
+                .iter()
+                .map(|id| format!("{id} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    );
+    pdf.put(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    pdf.bytes()
+}
+
 fn build(pages: usize) -> Vec<u8> {
     let mut pdf = Pdf::new();
     let catalog = pdf.reserve();

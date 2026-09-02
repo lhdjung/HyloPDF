@@ -83,6 +83,9 @@ pub struct Document {
     /// and the window say, and a name that arrives late is a name that was
     /// wrong. See [`PageSource::title`].
     title: String,
+    /// What the document says about itself, read at open with everything else
+    /// that costs a page load. See [`PageSource::details`].
+    details: Vec<(String, String)>,
     opened_in: f64,
 }
 
@@ -186,12 +189,14 @@ impl Document {
             .get(PdfDocumentMetadataTagType::Title)
             .map(|tag| tag.value().trim().to_string())
             .unwrap_or_default();
+        let details = read_details(&document, sizes.first());
         Ok(Document {
             path: path.to_string(),
             labels: own_numbering(labels),
             sizes,
             outline,
             title,
+            details,
             opened_in: began.elapsed().as_secs_f64() * 1000.0,
             inner: Mutex::new(Open {
                 document: Some(document),
@@ -224,6 +229,10 @@ impl PageSource for Document {
 
     fn title(&self) -> String {
         self.title.clone()
+    }
+
+    fn details(&self) -> Vec<(String, String)> {
+        self.details.clone()
     }
 
     /// The links on one page.
@@ -300,6 +309,56 @@ impl PageSource for Document {
             links.push(Link { rect: area, target });
         }
         links
+    }
+
+    /// The notes on one page: any annotation with words in it.
+    ///
+    /// **By whether there is anything to read rather than by subtype**, which
+    /// is `notesIn` in `viewer.ts` and its reasoning: a sticky note and a
+    /// comment on a highlighted sentence are the same thing to a reader.
+    /// Links are the exception — their text is where they go, and that is
+    /// already on the link — and so is a Popup, which is the box another
+    /// annotation's words are shown *in* rather than an annotation with words
+    /// of its own.
+    fn notes_of(&self, index: usize) -> Vec<crate::render::Note> {
+        let _library = library();
+        let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(document) = held.document.as_ref() else {
+            return Vec::new();
+        };
+        let Ok(page) = document.pages().get(index as i32) else {
+            return Vec::new();
+        };
+        let (width, height) = (page.width().value as f64, page.height().value as f64);
+        let mut notes = Vec::new();
+        for annotation in page.annotations().iter() {
+            if matches!(
+                annotation,
+                PdfPageAnnotation::Link(_) | PdfPageAnnotation::Popup(_)
+            ) {
+                continue;
+            }
+            let text = annotation.contents().unwrap_or_default().trim().to_string();
+            if text.is_empty() {
+                continue;
+            }
+            let Ok(bounds) = annotation.bounds() else {
+                continue;
+            };
+            let rect = crate::markup::down(&bounds, height);
+            if rect.width <= 0.0 || rect.height <= 0.0 {
+                continue;
+            }
+            notes.push(crate::render::Note {
+                // Small in both directions is a marker; anything bigger is a
+                // comment sitting over words somebody may want to select.
+                icon: rect.width < width * 0.06 && rect.height < height * 0.06,
+                rect,
+                by: annotation.creator().unwrap_or_default().trim().to_string(),
+                text,
+            });
+        }
+        notes
     }
 
     /// Every highlight in the document, in reading order.
@@ -624,6 +683,83 @@ fn own_numbering(labels: Vec<String>) -> Vec<String> {
 /// at `LIMIT` entries and `DEPTH` levels: a malformed document can point a
 /// bookmark's child or its next sibling at its own ancestor, and a table of
 /// contents is not the place to find that out by running out of memory.
+/// What the Information window lists, in the app's own order and under the
+/// app's own labels — `showDocumentDetails` in `main.ts`. A field the document
+/// does not name is left out rather than shown empty.
+///
+/// Dates are PDF date strings (`D:20240131120000+01'00'`), which nobody reads
+/// as written; `readableDate` in the app turns them into a date, and so does
+/// this.
+fn read_details(
+    document: &PdfDocument<'_>,
+    first: Option<&Size>,
+) -> Vec<(String, String)> {
+    let metadata = document.metadata();
+    let tag = |which: PdfDocumentMetadataTagType| {
+        metadata
+            .get(which)
+            .map(|tag| tag.value().trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let mut out = Vec::new();
+    let mut put = |label: &str, value: Option<String>| {
+        if let Some(value) = value {
+            out.push((label.to_string(), value));
+        }
+    };
+    put("Author", tag(PdfDocumentMetadataTagType::Author));
+    put("Subject", tag(PdfDocumentMetadataTagType::Subject));
+    put("Keywords", tag(PdfDocumentMetadataTagType::Keywords));
+    put("Pages", Some(document.pages().len().to_string()));
+    put("Page size", first.map(page_size));
+    put("Made with", tag(PdfDocumentMetadataTagType::Creator));
+    put("Written by", tag(PdfDocumentMetadataTagType::Producer));
+    // `Pdf1_7` is the variant's name and not a version anybody writes down.
+    put(
+        "PDF version",
+        format!("{:?}", document.version())
+            .strip_prefix("Pdf")
+            .map(|number| number.replace('_', ".")),
+    );
+    put(
+        "Created",
+        tag(PdfDocumentMetadataTagType::CreationDate).map(|raw| readable_date(&raw)),
+    );
+    put(
+        "Changed",
+        tag(PdfDocumentMetadataTagType::ModificationDate).map(|raw| readable_date(&raw)),
+    );
+    out
+}
+
+/// A page's size in millimetres, which is what the app shows: PDF points are
+/// 1/72 inch, and nobody thinks in points.
+fn page_size(size: &Size) -> String {
+    let mm = |points: f64| points * 25.4 / 72.0;
+    format!("{:.0} × {:.0} mm", mm(size.width), mm(size.height))
+}
+
+/// `D:20240131120000+01'00'` → `31 January 2024`. Anything that is not a PDF
+/// date string is passed through as written, which is what the app does: a
+/// value nobody can parse is still a value somebody put there.
+fn readable_date(raw: &str) -> String {
+    const MONTHS: [&str; 12] = [
+        "January", "February", "March", "April", "May", "June", "July", "August",
+        "September", "October", "November", "December",
+    ];
+    let digits = raw.strip_prefix("D:").unwrap_or(raw);
+    if digits.len() < 8 || !digits[..8].bytes().all(|b| b.is_ascii_digit()) {
+        return raw.to_string();
+    }
+    let year = &digits[0..4];
+    let month: usize = digits[4..6].parse().unwrap_or(0);
+    let day: usize = digits[6..8].parse().unwrap_or(0);
+    match (MONTHS.get(month.wrapping_sub(1)), day) {
+        (Some(name), 1..=31) => format!("{day} {name} {year}"),
+        _ => raw.to_string(),
+    }
+}
+
 fn read_outline(document: &PdfDocument<'static>) -> Vec<Heading> {
     /// As many rows as anybody will ever scroll through, and few enough that
     /// a cycle cannot cost anything.

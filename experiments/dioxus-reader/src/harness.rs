@@ -537,6 +537,7 @@ impl Reader {
         let picks: Rc<RefCell<std::collections::VecDeque<String>>> =
             Rc::new(RefCell::new(options.picks.iter().cloned().collect()));
         let picking = picks.clone();
+        let answering = post.clone();
         vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(posting);
             provide_context(Screen::new(move || asked_size.get()));
@@ -554,8 +555,23 @@ impl Reader {
                 printing.borrow_mut().push(path.to_string());
                 Ok(())
             }));
-            provide_context(crate::app::Pick::new(move || {
-                picking.borrow_mut().pop_front()
+            // The picker answers into the mailbox rather than to its caller,
+            // because in the app it cannot answer at all — see `app::Pick`.
+            // Here that is one line and it keeps the two sides the same
+            // shape: a test still hands over a queue of paths, and the reader
+            // still finds out the way it finds out from a dropped document.
+            provide_context(crate::app::Pick::new(move |opening| {
+                let Some(path) = picking.borrow_mut().pop_front() else {
+                    return;
+                };
+                answering.send(crate::emit::News {
+                    event: match opening {
+                        crate::app::Opening::Here => "open-document".into(),
+                        crate::app::Opening::Beside => "open-document-beside".into(),
+                    },
+                    target: None,
+                    payload: serde_json::Value::String(path),
+                });
             }));
         });
 
@@ -847,6 +863,38 @@ impl Reader {
         self.settle();
     }
 
+    /// Press on something, carry the pointer **with the button held**, and let
+    /// go — which is not what `move_mouse_to` does.
+    ///
+    /// The shared harness sends its moves with no buttons in them, so a drag
+    /// cannot be expressed with it at all, and Blitz decides whether a gesture
+    /// is a text selection by looking at exactly that. So a press that slides
+    /// two pixels — which is most presses made with a mouse — could not be
+    /// tested here, and it is the gesture that stopped every button in the
+    /// toolbar from firing and highlighted its label instead.
+    pub fn press_and_drag(&mut self, selector: &str, by: f32) {
+        use blitz_traits::events::{BlitzPointerId, MouseEventButton, MouseEventButtons, UiEvent};
+        let (x, y) = self.harness.center_of(selector);
+        let held = |x: f32, y: f32| {
+            blitz_test_harness::pointer_event(
+                BlitzPointerId::Mouse,
+                x,
+                y,
+                MouseEventButton::Main,
+                MouseEventButtons::Primary,
+                Default::default(),
+            )
+        };
+        self.harness.mouse_down_at(x, y);
+        for step in 1..=4 {
+            let at = x + by * step as f32 / 4.0;
+            self.harness.dispatch(UiEvent::PointerMove(held(at, y)));
+        }
+        self.harness.mouse_up_at(x + by, y);
+        self.give_keyboard_back();
+        self.settle();
+    }
+
     /// Click a point in the window, which is what a test does when the thing
     /// to be clicked is the seventh row of a list rather than a selector.
     pub fn click_at(&mut self, x: f32, y: f32) {
@@ -864,6 +912,21 @@ impl Reader {
         self.harness.mouse_down_at(x, y);
         self.harness.move_mouse_to(x + by, y);
         self.harness.mouse_up_at(x + by, y);
+        // The edge keeps the focus it was given by being pressed, so every
+        // key after this one would go to a strip six pixels wide instead of
+        // to the reader. The app puts the keyboard back where the pointer
+        // leaves it — see [`crate::app::give_keyboard_back`] — and so does
+        // [`Reader::press_and_drag`]; this had been getting away without it
+        // only because nothing was pressed after a drag.
+        self.give_keyboard_back();
+        self.settle();
+    }
+
+    /// The pointer, moved to a point and left there — which is a gesture in
+    /// its own right where the toolbar is away: reaching for the top edge is
+    /// what brings the peek handle down. See `Viewer::reach_for_toolbar`.
+    pub fn point_to(&mut self, x: f32, y: f32) {
+        self.harness.move_mouse_to(x, y);
         self.settle();
     }
 
@@ -987,7 +1050,9 @@ impl Reader {
         let page = label.trim().parse().unwrap_or(0);
         let pages = self
             .text(".of")
-            .trim_start_matches('/')
+            // "of 400", the app's own wording — see `#page-count` in
+            // `index.html`. It was "/ 400" here.
+            .trim_start_matches("of")
             .trim()
             .parse()
             .unwrap_or(0);
@@ -1018,7 +1083,14 @@ impl Reader {
             // and wrong the moment the sidebar added two more — and wrong
             // silently, because a chip is a chip.
             zoom: self.text(".chip.fit"),
-            theme: self.text(".chip.theme"),
+            // Off the attribute rather than the label, because the label
+            // is "Theme" now — see the chip in `app.rs`. What the reader is
+            // wearing is still on the button; it is just not written on it.
+            theme: self
+                .harness
+                .query(".chip.theme")
+                .and_then(|_| self.harness.attr(".chip.theme", "data-theme"))
+                .unwrap_or_default(),
             notice: self.text(".notice"),
             // Guarded, because `attr` panics on a selector that matches
             // nothing and a window showing the start screen has no `.pages`
@@ -1037,13 +1109,13 @@ impl Reader {
             thumbs,
             find: self
                 .harness
-                .query(".findbar")
+                .query(".find-bar")
                 .map(|_| self.harness.text_content(".find-count")),
             query: self.field(".find-field"),
             hits: self.harness.query_all(".hit").len(),
             results: self.numbered(".result", "data-result"),
             title: self.text(".title"),
-            menu: ["document", "open", "theme", "view"]
+            menu: ["document", "open", "theme", "view", "settings"]
                 .into_iter()
                 .find(|which| self.harness.query(&format!(".menu.{which}")).is_some())
                 .map(str::to_string),
@@ -1125,6 +1197,22 @@ impl Reader {
                     .unwrap_or_default()
             })
             .collect()
+    }
+
+    /// How wide the first node matching `selector` is laid out, in CSS
+    /// pixels, or `None` if there is no such node.
+    ///
+    /// Public for the reason [`Reader::text_all`] is: a test outside this
+    /// crate cannot walk the DOM, and `tests/parity.rs` needs this one to ask
+    /// the question that sees the *type*. A chip's width is its padding plus
+    /// its icon plus its word, and the first two are numbers the app and this
+    /// reader already agree on — so the width is the only thing in the
+    /// interface that says whether the font is the same font, laid out the
+    /// same way.
+    pub fn width_of(&self, selector: &str) -> Option<f64> {
+        self.harness
+            .query(selector)
+            .map(|node| self.harness.layout_rect_of(node).width as f64)
     }
 
     /// Every node matching `selector`, as the number its `attribute` carries,
@@ -1301,9 +1389,16 @@ fn spell_out(chord: &str) -> (Key, Code, Modifiers) {
         // as a modifier.
         let (name, after) = rest.split_at(at);
         let flag = match name {
+            // **`SUPER`, not `META`, and that is not a detail.**
+            // `blitz-shell` answers winit's `meta_key()` with
+            // `Modifiers::SUPER`; this said `META`, which is the bit
+            // `keyboard_types`' own `meta()` asks for — so every ⌘ chord
+            // passed here and none of them worked in the real app. The
+            // harness spells a keystroke the way the shell does, or it is
+            // not testing the keyboard the reader has.
             "mod" => {
                 if crate::keymap::this_machine() {
-                    Modifiers::META
+                    Modifiers::SUPER
                 } else {
                     Modifiers::CONTROL
                 }

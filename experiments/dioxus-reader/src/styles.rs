@@ -26,7 +26,7 @@
 //! with `scrollbar-width: thin`), and `text-overflow: ellipsis` (a `mask-image`
 //! fade, which is arguably better and was checked in Phase 0).
 
-use crate::palette::{mix, Palette};
+use crate::palette::Palette;
 
 /// The theme, as the declarations that go in the root's `style` attribute.
 ///
@@ -36,9 +36,16 @@ use crate::palette::{mix, Palette};
 pub fn variables(theme: &Palette) -> String {
     let hex = crate::palette::hex;
     format!(
+        // **Every one of these is `applyTheme`'s own arithmetic** — see
+        // `Palette`, where each is named after the variable it stands for in
+        // `styles.css`. The bar's four are a family of their own because the
+        // toolbar sits on the *paper* and everything else floats on the
+        // surface.
         "--text: {}; --paper: {}; --accent: {}; --surface: {}; --line: {}; \
-         --muted: {}; --faint: {}; --hover: {}; --sunk: {}; --ground: {}; \
-         --accent-soft: {};",
+         --muted: {}; --faint: {}; --note: {}; --hover: {}; --sunk: {}; \
+         --ground: {}; --accent-soft: {}; --accent-contrast: {}; \
+         --positive: {}; --negative: {}; --negative-contrast: {}; \
+         --bar-hover: {}; --bar-sunk: {}; --bar-line: {}; --bar-accent: {};",
         hex(theme.text),
         hex(theme.background),
         hex(theme.accent),
@@ -46,18 +53,19 @@ pub fn variables(theme: &Palette) -> String {
         hex(theme.line()),
         hex(theme.muted()),
         hex(theme.faint()),
-        hex(mix(theme.background, theme.text, 0.10)),
-        hex(mix(theme.background, theme.text, 0.05)),
-        // The ground the pages stand on, a shade away from the chrome so that
-        // the paper has an edge without needing a border.
-        hex(mix(theme.background, theme.text, 0.13)),
-        // The ground a chip stands on while what it names is in force, and
-        // the answer to a toolbar in which the only colour anywhere is a word
-        // that has gone bright accent with nothing under it. `--accent-soft`
-        // in `styles.css`, where every `on` state is this pair: the tint
-        // says *this one*, and the accent on top of it is legible because the
-        // tint is only a fifth of the way there.
-        hex(mix(theme.background, theme.accent, 0.20)),
+        hex(theme.note()),
+        hex(theme.surface_hover()),
+        hex(theme.surface_sunk()),
+        hex(theme.ground()),
+        hex(theme.accent_soft()),
+        hex(theme.accent_contrast()),
+        hex(theme.positive()),
+        hex(theme.negative()),
+        hex(theme.negative_contrast()),
+        hex(theme.bar_hover()),
+        hex(theme.bar_sunk()),
+        hex(theme.bar_line()),
+        hex(theme.bar_accent()),
     ) + &format!(
         // What a page is before the renderer has reached it, which under a
         // recolouring theme is the theme's paper and otherwise is white.
@@ -98,16 +106,68 @@ pub fn variables(theme: &Palette) -> String {
 
 /// The sheet itself, which never changes and is therefore parsed once.
 pub const SHEET: &str = r#"
+/* `* { box-sizing: border-box }` is the first line of `styles.css` and it was
+   missing here, which made every `width`, `min-width` and `height` in this
+   sheet mean something slightly different from the same number over there —
+   the padding on top rather than inside. It shows up as near-misses, which
+   are the worst kind: `.zoom-level`'s `min-width: 62px` came out as 82 in a
+   group that was already the widest thing in the bar. Five rules below had
+   been patched to say it for themselves, one at a time, as each near-miss was
+   noticed; they are left saying it, because each one is load-bearing where it
+   stands and now agrees with the rule above it. */
+* { box-sizing: border-box; }
+
 body { margin: 0;
   font-family: ui-sans-serif, -apple-system, "Helvetica Neue", Arial, sans-serif;
-  font-size: 13.5px; line-height: 1.45; }
+  font-size: 13.5px; line-height: 1.45;
+  /* **The same font as the app's, and this line is what makes it the same
+     type.** Both sides resolve `-apple-system` to the identical file —
+     `/System/Library/Fonts/SFNS.ttf`, which fontique reaches through
+     `GenericFamily::SystemUi` and WebKit through `system-ui` — and at 27px
+     and above the two lay out the same string to within a third of a pixel.
+     Below that they diverge by about a tenth, and the reason is SF's `trak`
+     table: the system font carries tracking that grows as the size falls,
+     WebKit applies it, and parley does not read the table at all.
+
+     So the chrome came out tighter and darker than the app's — the "more
+     machine-like, a tiny bit too strong" of the complaint, which is what a
+     UI face looks like with its small-size tracking taken away. Measured
+     against WebKit over the same string at every size this sheet uses, the
+     missing advance is 0.61px a character at 11px, 0.59px at 13.5px and
+     0.55px at 16px — flat enough across the band that one number says it,
+     and 0.6px is that number. It is wrong above about 17px, where SF's
+     tracking falls away towards nothing; the two headings that live up
+     there say so themselves. */
+  letter-spacing: 0.6px; }
 
  /* `position: relative` so that the Settings scrim, which is absolute, is
    measured against the window rather than against whatever Blitz would
    otherwise pick — without it the scrim started below the toolbar and the bar
    stayed bright behind a window that claims to be modal. */
 .root { position: relative; display: flex; flex-direction: column; height: 100vh;
-  background: var(--paper); color: var(--text); }
+  /* `body { background: var(--bg) }` in the app: the ground, not the paper. */
+  background: var(--ground); color: var(--text);
+  /* **The chrome is not text to be selected, and until this line every button
+     in it could be highlighted instead of pressed.** Blitz decides a gesture
+     is a selection as soon as the pointer moves two pixels with the button
+     down — which is most presses made with a mouse — and from then on the
+     press is a drag and the click never happens. A browser does not have this
+     problem because its user-agent stylesheet says `user-select: none` for a
+     button; Blitz's does not, so the rule is said here for the whole window.
+     `#toolbar` and `#sidebar` carry it in the app for the same reason, one
+     level down. See `blitz-button-select.md`. */
+  user-select: none; }
+
+/* …and on everything in it, because it does not inherit: Blitz reads the
+   property off the node the press landed on, and a button under a root that
+   says `none` still answers `auto`. */
+.root * { user-select: none; }
+
+/* …and the two places where selecting *is* the point: a field being typed in,
+   and the text of somebody's note. The document itself is not among them —
+   its selection is drawn by `select.rs` from pdfium's own character boxes and
+   never went through the DOM. */
+.root input, .root textarea, .root .note-text { user-select: text; }
 
 /* Every row of the window that is not the document carries `z-index`, and it
    is not decoration. Blitz paints by the rules — `.viewer` has
@@ -118,13 +178,21 @@ body { margin: 0;
    document scrolled at all, landed on the page behind it and did nothing.
    `position: relative` and a `z-index` put these back in front, which is the
    same trap and the same fix as `.sidebar-resize` below, one level out. */
-.toolbar, .findbar { position: relative; z-index: 2; }
+.toolbar { position: relative; z-index: 2; }
 .sidebar { position: relative; z-index: 1; }
 
 .toolbar {
-  display: flex; align-items: center; gap: 8px;
-  height: 46px; flex: 0 0 auto; padding: 0 12px;
-  background: var(--paper); border-bottom: 1px solid var(--line);
+  /* Twelve between the three groups and six inside each of them, which is
+     `#toolbar { gap: 12px }` over `.bar-group { gap: 6px }` in the app: the
+     seam between two groups reads as a seam only if it is wider than the one
+     between two chips. This said six in both places, so the bar was one
+     undifferentiated row of fourteen controls. */
+  display: flex; align-items: center; gap: 12px;
+  height: 46px; flex: 0 0 auto; padding: 0 10px;
+  /* The paper, not the backdrop: the bar runs along the top of the document
+     and belongs to it — `#toolbar { background: var(--page-paper) }` in the
+     app, with a line off the same family. */
+  background: var(--page); border-bottom: 1px solid var(--bar-line);
 }
 /* **Three groups, and the middle one is why there are three.** The bar was
    one flat row with a `.spacer` in it, so the page readout sat wherever the
@@ -133,20 +201,48 @@ body { margin: 0;
    they hold and share the slack, which keeps the page controls near the
    middle without promising they are in it. When there is not enough room for
    everything the left gives way, because it is the side with a title in it
-   and a title has an ellipsis to shrink into. */
-.bar-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.bar-left { flex: 1 1 auto; }
+   and a title has an ellipsis to shrink into.
+
+   **The bases are nought, where the app's are `auto`, and that one difference
+   is what puts the page controls in the middle.** With a basis of `auto` each
+   side starts from what it holds and the slack is split evenly on top, so the
+   middle sits off centre by exactly half the difference between the two
+   sides — which here is a hundred and eleven pixels, at every window width,
+   for ever. The app can afford that because seventy-eight pixels of its bar
+   are given over to the traffic lights and the offset lands roughly where the
+   eye expects the middle to be anyway; this window keeps its own title bar,
+   has no traffic lights to make room for, and so the same rule reads as a
+   page counter that has slid to the left.
+
+   A basis of nought asks for nothing, so both sides are given an equal share
+   of the whole bar and the middle is genuinely in the middle. What stops the
+   right side from being squeezed off the edge is `min-width`: `auto` on a
+   flex item is its content, so `.bar-right` can grow past its share and never
+   below it, and `.bar-left` says `0` and is therefore the side that gives way
+   — which is the app's rule, and its reason, kept exactly. Below about
+   1500px there is not enough bar for an even split and the right takes what
+   it needs; above it the middle is centred. */
+.bar-group { display: flex; align-items: center; gap: 6px; }
+.bar-left { flex: 1 1 0; min-width: 0; }
 .bar-center { flex: 0 0 auto; }
-.bar-right { flex: 1 0 auto; justify-content: flex-end; }
+.bar-right { flex: 1 0 0; justify-content: flex-end; }
 
 .chip {
   display: flex; align-items: center; gap: 7px;
-  height: 30px; padding: 0 11px; border-radius: 9px; border: 0;
+  height: 30px; padding: 0 10px; border-radius: 9px; border: 0;
   background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 500;
   white-space: nowrap;
 }
 .icon { flex: 0 0 auto; }
 .chip:hover { background: var(--hover); color: var(--text); }
+/* On the bar, a hover and a held-down state come from the paper the bar sits
+   on rather than from the surface — `#toolbar .btn:hover` in the app, and its
+   reason: the bar belongs to the document, so a chip mixed from the backdrop
+   is a chip from another theme. Everything else wearing `.chip` floats on
+   `--surface` and keeps the surface's. */
+.toolbar .chip:hover { background: var(--bar-hover); }
+.toolbar .chip.on, .toolbar .chip.on:hover { background: var(--bar-accent); }
+.toolbar .zoom-group { background: var(--bar-sunk); }
 /* A chip whose thing is in force. **The colour alone was not enough and was
    the wrong half.** Every theme in this app names a near-monochrome text
    colour — #2f3237, #e9eaee, #f8f8f2 — so a bar written in a shade of it is a
@@ -158,16 +254,25 @@ body { margin: 0;
 .chip.on:hover { background: var(--accent-soft); color: var(--accent); }
 
 /* Minus, the readout, plus — one control rather than three labels, which is
-   `.zoom-group` in the app. */
+   `.zoom-group` in the app.
+
+   **Every number here is now the app's**, and between them they were eleven
+   pixels of extra width in the one group that had none to spare: this was the
+   widest thing in the bar and the reason the page controls sat a hundred and
+   twenty pixels left of the middle. `.zoom-group` is `padding: 2px` and
+   `var(--radius)`, the three buttons are a chip's own 30px tall with the two
+   ends 30px square, and `.zoom-level` asks for 62. The readout is wider than
+   that in practice — "Fit width" is about 75 — so the minimum only decides
+   what "100%" gets, which is the point of having one. */
 .zoom-group {
   display: flex; align-items: center; gap: 2px;
-  padding: 2px; border-radius: 11px; background: var(--sunk);
+  padding: 2px; border-radius: 9px; background: var(--sunk);
 }
-.zoom-group .chip { height: 26px; border-radius: 8px; }
+.zoom-group .chip { height: 30px; border-radius: 9px; }
 .zoom-group .chip.zoom-out, .zoom-group .chip.zoom-in {
-  width: 26px; padding: 0; text-align: center;
+  width: 30px; padding: 0; text-align: center;
 }
-.zoom-group .chip.fit { min-width: 74px; text-align: center; }
+.zoom-group .chip.fit { min-width: 62px; text-align: center; }
 
 /* What a menu hangs off. The button is in the flow and the menu is not, so
    the row is the height of the button and the panel is under whichever
@@ -175,6 +280,7 @@ body { margin: 0;
    to the ends of the bar. `calc(100% + 8px)` is the toolbar's own lower edge
    read off the button rather than written down: the chip is 30px in a 46px
    row, and 8px is the space under it. */
+.anchor.titled { margin-left: 6px; min-width: 0; }
 .anchor { position: relative; display: flex; align-items: center; }
 
 /* The menu itself, out of the flow inside its `.anchor`, so a panel taller
@@ -192,10 +298,13 @@ body { margin: 0;
 /* Under the left edge of the button, except the two near the right end of the
    bar, which would otherwise run off it. */
 .menu.document, .menu.open, .menu.view { left: 0; }
-.menu.theme { right: 0; }
+.menu.theme, .menu.settings { right: 0; }
 /* Fourteen themes is taller than a short window, and this is the one list in
    the app that is a list rather than a handful. */
 .menu.theme { max-height: 60vh; overflow: scroll; scrollbar-width: thin; }
+/* Wide enough for "Show page count while scrolling" and its note beside a
+   switch, which is the widest row any menu here has. */
+.menu.settings { min-width: 330px; }
 /* No `width: 100%`. A menu is absolutely positioned and therefore shrinks to
    fit, and a percentage width inside a shrink-to-fit box is resolved against
    a width computed as though the percentage were not there — so the widest
@@ -220,6 +329,18 @@ body { margin: 0;
    `Viewer::chord_for`. Quiet, because it is an aside and not the item. */
 .menu-key { flex: 0 0 auto; color: var(--faint); font-size: 12.5px; }
 .menu-rule { height: 1px; margin: 5px 8px; background: var(--line); }
+/* A row of a menu that holds a control rather than a choice — `.popover-row`
+   in the app, where the label carries the weight and the control sits at the
+   end of it. */
+.menu-row { display: flex; align-items: center; gap: 10px; padding: 4px 10px; }
+.menu-row-label { flex: 1 1 auto; color: var(--text); font-size: 13.5px; }
+.menu-row-note { color: var(--faint); font-size: 12px; }
+/* A theme, two letters wide, in its own colours — `ui.swatch` in the app. */
+.swatch {
+  display: flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 6px;
+  border: 1px solid var(--line); font-size: 11.5px; font-weight: 600;
+}
 /* A heading over a run of items — the app's `ui.section`, and the Document
    menu's shelf is the one place that has one. Quieter and a size smaller than
    an item, and it is not a row you can point at. */
@@ -233,9 +354,46 @@ body { margin: 0;
    word-shaped one. */
 .chip.page-previous, .chip.page-next { width: 30px; padding: 0; justify-content: center; }
 
+/* **`flex: 1 1 0`, not `0 1 auto`.** The app's `.doc-title` is
+   `min-width: 0` with an ellipsis and shrinks from its content; here a flex
+   item whose basis is its content does not shrink at all — the group gave way
+   and the button inside it kept its full width, so a long file name was drawn
+   straight across the page controls in the middle of the bar. A basis of zero
+   is the shape `.tab` already uses for the same reason one panel over. The
+   `max-width` is the app's own 34ch, so that a short name does not leave a
+   button half the bar wide. */
+/* `.doc-title` in the app, and the numbers are its numbers: no icon, 13px,
+   the faint ink, 8px of padding and 6px of air in front of it.
+
+   **`flex: 0 1 auto`, not `1 1 0`**, and the difference is the whole of what
+   a reader sees. A basis of zero asks for nothing and is given whatever the
+   bar has left over, which in a bar holding fourteen controls is nothing at
+   all: the name came out twenty pixels wide, three letters of it visible, at
+   every window size. `auto` asks for the name and gives way under pressure,
+   which is what the app does and what an ellipsis is for. `min-width: 0` is
+   what lets it give way at all — without it the automatic minimum size of a
+   `nowrap` run is the whole run, and the bar overflows instead. */
 .chip.title {
-  flex: 0 1 auto; min-width: 0; color: var(--faint);
+  /* The air in front of the name is on `.anchor.titled`, not here, so that
+     the menu still comes down flush with the button it belongs to. */
+  flex: 0 1 auto; min-width: 0; max-width: 276px;
+  padding: 0 8px; font-size: 13px; font-weight: 400; color: var(--faint);
   white-space: nowrap; overflow: hidden;
+}
+/* **The fade is what an ellipsis would be, and it belongs only to a name that
+   has actually run out of box.** It was on `.chip.title` itself, so every
+   document was faded over its last twenty-four pixels — which on `book.pdf`,
+   a button sixty-four pixels wide, is more than a third of it, and reads
+   exactly as the reader described it: a button too small for its name, going
+   pale at the edge. The app has no such thing on a name that fits;
+   `text-overflow: ellipsis` shows nothing until there is something to cut.
+
+   Blitz has no `text-overflow`, so the fade stands in for it, and *when* to
+   draw it has to be decided outside the sheet: `app.rs` puts this class on
+   only when the name is longer than the box can hold. `max-width` is the
+   app's `34ch` in pixels, which is what 34ch resolves to at 13px in the
+   engine the app runs in — `ch` is a unit this renderer need not have. */
+.chip.title.clipped {
   mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
 }
 .chip.title:hover { color: var(--text); }
@@ -244,8 +402,16 @@ body { margin: 0;
    type in, and the total beside it rather than inside it. The pair used to be
    one sunk pill with the number pushed against its left wall and the count
    after it, and there was no way to tell the two apart. */
+/* **Four pixels either side, and no ground of its own.** `.page-jump` in the
+   app is a transparent box with `padding: 0 4px` holding one bordered field
+   and one plain count; this had no padding and a `--bar-sunk` fill under the
+   pair (see `.toolbar .pill`, now gone), so "of 400" was written on a grey
+   panel that ended exactly where the last zero did. That is the whole of
+   "cramped, almost cut off on the right": a word with a background behind it
+   and no room between the two. The field keeps its own sunk ground, because
+   in the app the field is the only part of this that is a control. */
 .pill {
-  height: 30px; padding: 0;
+  height: 30px; padding: 0 4px;
   display: flex; align-items: center; gap: 6px;
 }
 /* The number, typed. The unit is deliberately *not* in the field — the app
@@ -261,8 +427,11 @@ body { margin: 0;
 .page-field, .page-now {
   box-sizing: border-box;
   height: 28px; padding: 0 6px;
-  border: 1px solid var(--line); border-radius: 7px;
-  background: var(--sunk); color: var(--text); font-size: 13.5px;
+  /* The bar's own family rather than the surface's, which is what
+     `.page-jump input` names in the app: this control stands on the paper the
+     document is on, not on a floating surface. */
+  border: 1px solid var(--bar-line); border-radius: 7px;
+  background: var(--bar-sunk); color: var(--text); font-size: 13.5px;
   text-align: center;
 }
 .page-now:hover { border-color: var(--muted); }
@@ -283,31 +452,68 @@ body { margin: 0;
 }
 .of { color: var(--faint); font-size: 13.5px; }
 
-/* The find bar: a row of the column, so the document is what gets shorter.
-   Nothing here is over anything, which is the one place Blitz's missing
-   `position: fixed` made the layout simpler rather than harder. */
-.findbar {
-  display: flex; align-items: center; gap: 6px;
-  height: 40px; flex: 0 0 auto; padding: 0 12px;
-  background: var(--surface); border-bottom: 1px solid var(--line);
+/* **The find bar is the app's own card, and it was a row of the column
+   here.** A row is simpler — nothing is over anything, and Blitz has no
+   `position: fixed` — and it is not what the app does or what a find bar is:
+   it took forty pixels off the document for as long as it was up, so opening
+   it moved the page the reader was looking at. `styles.css` puts it under the
+   toolbar at the right, over the document, in two rows: the query and its
+   four buttons, and the three switches indented under the field so they read
+   as belonging to the query rather than as three more buttons.
+
+   `top` is set in `app.rs` rather than in a `calc`, because the toolbar can
+   be put away and the bar has to come up to meet the window's edge —
+   `#shell[data-toolbar="hidden"] .find-bar` in the app, which is a selector
+   this port has no shell attribute for. */
+.find-bar {
+  position: absolute; right: 18px; z-index: 30;
+  display: flex; flex-direction: column;
+  padding: 6px 8px 8px 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 8px 26px rgba(0,0,0,0.14);
 }
+.find-row { display: flex; align-items: center; gap: 8px; }
+/* Indented to the field above them rather than to the bar, so the three read
+   as belonging to the query and not as three more buttons. */
+.find-options { display: flex; align-items: center; gap: 2px; margin-left: 20px; padding-top: 4px; }
+/* On, and saying so as loudly as the buttons up in the bar do. These three
+   are settings that outlive the bar and the session, so "Highlight all" being
+   on is a thing to see at a glance rather than a tick to go looking for. The
+   drawing is there whether it is ticked or not, so turning one on does not
+   shuffle the other two sideways under the pointer — which is why the tick is
+   faint rather than absent. */
+.find-option {
+  display: flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 7px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--faint); font-size: 12.5px;
+}
+.find-option:hover { background: var(--hover); color: var(--muted); }
+.find-option.on { background: var(--accent-soft); color: var(--accent); }
+.find-icon { display: flex; align-items: center; color: var(--faint); }
 .find-field {
-  flex: 0 1 320px; height: 28px; padding: 0 10px;
-  border: 1px solid var(--line); border-radius: 8px;
-  background: var(--paper); color: var(--text); font-size: 13.5px;
+  width: 230px; height: 28px; padding: 0;
+  border: 0; background: transparent; color: var(--text); font-size: 13.5px;
 }
+/* `.find-bar input:focus { outline: none }` in the app, and the same reason
+   the page field carries it: the ring Blitz draws round a focused input is a
+   blue box the length of the field, which over a card that is already the
+   thing being looked at reads as an error state. */
+.find-field:focus { outline: none; }
 /* The count, and the way to the list behind it — `Viewer::show_results`. It
    is a button, so it wears a button's clothes: transparent until there is
    something to show, and then a hover, which is `.find-status:not(:empty)` in
    the app. `.ready` rather than `:empty`, which Blitz does not implement. */
 .find-count {
-  flex: 0 0 auto; min-width: 96px; height: 26px; padding: 0 8px;
-  border: 0; border-radius: 7px;
-  background: transparent; color: var(--faint); font-size: 13.5px;
-  justify-content: flex-start;
+  flex: 0 0 auto; min-width: 60px; height: 24px; padding: 0 6px;
+  border: 0; border-radius: 6px;
+  background: transparent; color: var(--faint); font-size: 12.5px;
+  justify-content: flex-end;
 }
 .find-count.ready:hover { background: var(--hover); color: var(--text); }
-.chip.find-previous, .chip.find-next { min-width: 30px; padding: 0 8px; }
+/* A chip wearing a drawing and no word: square, with the drawing centred in
+   it. `.btn.icon-only` in the app, where the find bar's close button is one
+   too. */
+.chip.icon-only { width: 30px; padding: 0; justify-content: center; }
 
 /* A match, as a rectangle over the page. Behind the ink rather than over it:
    `mix-blend-mode` is out (see `AGENTS.md`, and Blitz has none), and an
@@ -338,6 +544,17 @@ body { margin: 0;
    same reason it is above the widget: where a match falls on a
    cross-reference, following the link is the gesture that meant something. */
 .link { z-index: 2; cursor: pointer; }
+
+/* **A note somebody left in the document.** pdfium paints the annotation's
+   own appearance into the page — a sticky note arrives as the little icon it
+   was drawn as — so nothing is painted here: this is the hit area over it,
+   and it shows itself on hover. Above `.link` for the same reason `.link` is
+   above the page: a note over a cross-reference is the more specific thing.
+   `.note-edge` is the strip at the right of a comment that covers a passage;
+   see [`crate::render::Note`]. */
+.note-spot, .note-edge { z-index: 3; cursor: pointer; border-radius: 3px; }
+.note-spot:hover, .note-edge:hover { background: var(--accent-soft); }
+.note-edge { margin-left: 2px; }
 
 /* Words can be swept, so the pointer says so over a page — and says the other
    thing over a link, which is the rule above winning by coming after it. */
@@ -391,10 +608,21 @@ body { margin: 0;
      `blitz-dom/src/node/node.rs`) — without it this loses every hit test to
      `.panel`, which is later in the DOM and just as wide. */
   position: absolute; top: 0; right: -3px; width: 6px; height: 100%;
-  z-index: 1; cursor: col-resize;
+  /* Two, not one, since `.tabs` below took one: they are siblings in the
+     same stacking context and they overlap for the height of the tab strip,
+     so equal numbers would hand the top 35px of the drag edge to the tabs. */
+  z-index: 2; cursor: col-resize;
 }
 .sidebar-resize:hover { background: var(--accent); opacity: 0.35; }
-.tabs { display: flex; flex: 0 0 auto; gap: 4px; padding: 8px 8px 6px 8px; min-width: 0; }
+/* **And the tabs are the same trap again, one level in.** A thumbnail is
+   absolutely positioned at `top - thumb_scroll`, so the column scrolled down
+   at all puts rows at negative offsets — clipped by `.panel`'s
+   `overflow: hidden` when it paints, and hit-tested where their boxes say
+   they are, which is over this strip. Clicking Contents from a scrolled Pages
+   tab therefore landed on a thumbnail nobody could see and did nothing at
+   all, and it worked perfectly at the top of the column, which is where
+   anybody checking it would look. */
+.tabs { position: relative; z-index: 1; display: flex; flex: 0 0 auto; gap: 4px; padding: 8px 8px 6px 8px; min-width: 0; }
 /* **Three of these have to fit across a panel the reader can drag to any
    width, and a flex item does not shrink below its content unless it is told
    it may.** `flex: 1 1 auto` with no `min-width` is that rule not being told:
@@ -679,6 +907,48 @@ body { margin: 0;
   color: var(--text);
 }
 
+/* The handle that gives the toolbar back, centred along the top edge by a row
+   rather than by `left: 50%` and a transform — `.notice-line`'s reason again.
+   It is in the DOM only while it is being reached for (see
+   `Viewer::reach_for_toolbar`), which is what the app's `.visible` class does
+   with a transform it can animate and this cannot.
+
+   In full screen it sits clear of the system's own bars, which slide down
+   over exactly this band when the pointer reaches for it. */
+.peek-line {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 30;
+  display: flex; align-items: flex-start; justify-content: center;
+}
+.toolbar-peek {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 13px 7px; border: 1px solid var(--line); border-top: 0;
+  border-radius: 0 0 11px 11px;
+  background: var(--surface); box-shadow: 0 6px 18px rgba(0,0,0,0.16);
+  color: var(--muted); font-size: 13.5px;
+}
+.toolbar-peek.clear {
+  margin-top: 38px; border-top: 1px solid var(--line); border-radius: 11px;
+}
+
+/* **The page pill**: where the reader is, said in the middle of the lower
+   edge while they scroll with the toolbar away — `#page-pill` in the app,
+   which is the one thing that answers "which page is this" when the bar that
+   usually answers it has been put down. Centred by a row rather than by
+   `left: 50%` and a transform, for the reason `.notice-line` above is.
+   `box-shadow` and no animation: the app fades it in over 160ms, and this
+   file's rule is that nothing moves unless the reader moved it. */
+.pill-line {
+  position: absolute; left: 0; right: 0; bottom: 20px; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.page-pill {
+  padding: 6px 14px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.14);
+  color: var(--muted); font-size: 13.5px;
+}
+
 /* Presenting: full screen with nothing else on it. The chrome is gone from
    the DOM rather than hidden here — see `Viewer::chrome`, which is what gives
    the document the room the toolbar was using — so all that is left for CSS
@@ -714,6 +984,20 @@ body { margin: 0;
 .window-title { flex: 1 1 auto; font-size: 14px; font-weight: 600; }
 .chip.window-close { width: 30px; padding: 0; justify-content: center; }
 .window-body { flex: 1 1 auto; display: flex; flex-direction: row; min-height: 0; }
+/* A note is a paragraph, not a settings window: it fits what is in it. */
+.note-window { width: 440px; height: auto; max-height: 70%; }
+.note-body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
+.note-where { margin: 0; color: var(--faint); font-size: 12.5px; }
+.note-text { margin: 0; color: var(--text); }
+.note-said { margin: 0; color: var(--faint); font-size: 12.5px; }
+
+/* The Information window: what the document says about itself, a row a fact.
+   `showDocumentDetails` in `main.ts` and `ui.field` under it. */
+.details-window { min-width: 420px; max-width: 560px; }
+.details-name { margin: 0 0 10px 0; font-size: 15px; font-weight: 600; }
+.details-row { display: flex; gap: 12px; padding: 4px 0; }
+.details-label { flex: 0 0 34%; color: var(--faint); font-size: 13px; }
+.details-value { flex: 1 1 0; min-width: 0; color: var(--text); font-size: 13px; }
 .window-nav {
   flex: 0 0 188px; display: flex; flex-direction: column; gap: 2px;
   padding: 12px 10px; border-right: 1px solid var(--line); background: var(--surface);
@@ -734,7 +1018,10 @@ body { margin: 0;
   flex: 1 1 auto; min-width: 0; padding: 18px 22px 24px 22px;
   overflow: scroll; scrollbar-width: thin;
 }
-.pane-title { margin: 0 0 4px 0; font-size: 19px; font-weight: 600; }
+/* `letter-spacing` is the app's own `-0.01em`, and it does a second job here:
+   the 0.6px of tracking `body` stands in with is right for the 11-16px band
+   the rest of this sheet lives in and too much at nineteen. See `body`. */
+.pane-title { margin: 0 0 4px 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
 .pane-lede { margin: 0 0 12px 0; color: var(--faint); font-size: 14px; }
 .pane-group {
   margin: 22px 0 8px 0; font-size: 12.5px; font-weight: 600;
@@ -742,6 +1029,26 @@ body { margin: 0;
 }
 .pane-note { margin: 0 0 12px 0; color: var(--faint); font-size: 13px; line-height: 1.5; }
 .pane-actions { display: flex; gap: 8px; margin-top: 16px; }
+/* The three shapes an action button takes, which is `ui.button`'s `kind`. */
+.chip.action { border: 1px solid var(--line); }
+.chip.action.primary { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+.chip.action.primary:hover { background: var(--accent); color: var(--accent-contrast); }
+.chip.action.danger { background: var(--negative); color: var(--negative-contrast); border-color: var(--negative); }
+.chip.action.danger:hover { background: var(--negative); color: var(--negative-contrast); }
+
+/* A field somebody types into, and a colour: the swatch shows what the page
+   will use, the six digits say it. */
+.text-field {
+  height: 28px; min-width: 0; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--paper); color: var(--text); font-size: 13.5px;
+}
+.text-field:focus { outline: none; border-color: var(--accent); }
+.color-field { display: flex; align-items: center; gap: 6px; }
+.color-swatch {
+  width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--line);
+}
+.color-hex { width: 96px; }
 .chip.action {
   border: 1px solid var(--line); background: var(--surface); color: var(--text);
 }

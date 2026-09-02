@@ -268,6 +268,92 @@ impl AppHandle {
     }
 }
 
+/* ----------------------------------------------------------------- later */
+
+/// News, sent after a delay, on **one** thread for the whole process.
+///
+/// **This was a thread apiece and that is what a reader's session ran out
+/// of.** Two things in this reader say "and put it away again in a moment" —
+/// the notice line, and the page pill while somebody is scrolling — and both
+/// were `thread::spawn` followed by `sleep`. The pill's is armed by every
+/// change in the scroll offset, which is one per frame of a gesture, so a
+/// minute of reading is a few thousand threads that exist only to sleep. On
+/// macOS the process runs out and `spawn` returns `EAGAIN`, which `std` reports
+/// by panicking: `failed to spawn thread: Resource temporarily unavailable`,
+/// from a stack with nothing of this app in it.
+///
+/// One thread, a heap of deadlines and a condvar. It is started on first use
+/// and never stopped, like the library's scribe: asleep except when something
+/// is due. Arming the same thing again is cheap, which is what lets the pill
+/// keep its "restarted by every scroll" shape — the stale ones still fire, and
+/// both `unflash_pill` and the notice already ignore an answer that is no
+/// longer about anything.
+pub fn after(delay: std::time::Duration, post: Post, news: News) {
+    use std::sync::Condvar;
+    use std::time::Instant;
+
+    struct Clock {
+        due: Mutex<Vec<(Instant, Post, News)>>,
+        ring: Condvar,
+    }
+
+    static CLOCK: std::sync::OnceLock<Arc<Clock>> = std::sync::OnceLock::new();
+    let clock = CLOCK.get_or_init(|| {
+        let clock = Arc::new(Clock {
+            due: Mutex::new(Vec::new()),
+            ring: Condvar::new(),
+        });
+        let ticking = clock.clone();
+        let started = std::thread::Builder::new()
+            .name("hylopdf-clock".into())
+            .spawn(move || loop {
+                let mut due = ticking.due.lock().unwrap_or_else(|e| e.into_inner());
+                // Nothing waiting: sleep until something is left here.
+                while due.is_empty() {
+                    due = ticking.ring.wait(due).unwrap_or_else(|e| e.into_inner());
+                }
+                let soonest = due.iter().map(|(at, _, _)| *at).min().unwrap_or_else(Instant::now);
+                let now = Instant::now();
+                if soonest > now {
+                    let (waited, _) = ticking
+                        .ring
+                        .wait_timeout(due, soonest - now)
+                        .unwrap_or_else(|e| e.into_inner());
+                    due = waited;
+                }
+                let now = Instant::now();
+                let mut ready = Vec::new();
+                due.retain(|(at, post, news)| {
+                    if *at <= now {
+                        ready.push((post.clone(), news.clone()));
+                        false
+                    } else {
+                        true
+                    }
+                });
+                // Outside the lock: sending wakes a task, and a task that
+                // arms another timer would deadlock against it.
+                drop(due);
+                for (post, news) in ready {
+                    post.send(news);
+                }
+            });
+        // A machine that will not give this app one thread is a machine it
+        // cannot run on, and there is nothing useful to do about it here —
+        // but it is still not worth dying for, so the timer simply never
+        // fires and the notice stays up.
+        if started.is_err() {
+            eprintln!("no thread to keep time on; notices will not clear themselves");
+        }
+        clock
+    });
+
+    let mut due = clock.due.lock().unwrap_or_else(|e| e.into_inner());
+    due.push((std::time::Instant::now() + delay, post, news));
+    drop(due);
+    clock.ring.notify_one();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

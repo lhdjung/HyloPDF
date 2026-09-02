@@ -514,3 +514,27 @@ fn every_action_in_the_table_answers() {
     assert_eq!(reader.state().theme, "Hylo Dark");
 
 }
+
+/// **Command arrives in either bit, and reading only one of them was the
+/// whole of why no ⌘ chord worked in the real app.**
+///
+/// `keyboard_types::Modifiers` carries both `META` and `SUPER`; its own
+/// `meta()` asks for `META`, and `winit_modifiers_to_kbt_modifiers` in
+/// `blitz-shell` answers winit's `meta_key()` — Command, on a Mac — with
+/// `SUPER`. So ⌘T arrived as a bare `t` and cycled the theme, ⌘F never opened
+/// the find bar, and every test passed, because the harness was spelling the
+/// chord `META` by hand. Which bit a keystroke carries is the window system's
+/// business; both are Command here.
+#[test]
+fn command_is_read_whichever_bit_it_arrives_in() {
+    for held in [Modifiers::META, Modifiers::SUPER] {
+        assert_eq!(press("t", "KeyT", held), vec!["mod+t"], "{held:?}");
+        assert_eq!(press("f", "KeyF", held), vec!["mod+f"], "{held:?}");
+        let keymap = Keymap::shipped(MAC);
+        assert_eq!(keymap.action_for("mod+t"), Some(Action::Toolbar));
+    }
+    // And on a PC neither of them is `mod`: that is the Windows key, which is
+    // bound to nothing at all.
+    assert!(press_on(PC, "j", "KeyJ", Modifiers::SUPER).is_empty());
+    assert!(press_on(PC, "j", "KeyJ", Modifiers::META).is_empty());
+}

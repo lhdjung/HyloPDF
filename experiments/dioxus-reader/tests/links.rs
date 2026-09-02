@@ -274,14 +274,36 @@ fn the_field_takes_a_label_first_and_a_position_second() {
     assert!(reader.state().mounted.contains(&3));
 }
 
+/// **A number past the end goes to the end, and says nothing about it.**
+/// This is ⌘9 in a browser with four tabs open: it goes to the fourth. The
+/// notice is kept for what cannot be clamped — text that is neither a label
+/// this document uses nor a number at all.
 #[test]
-fn a_page_the_document_does_not_have_is_said_rather_than_swallowed() {
+fn a_number_past_the_end_goes_to_the_end_and_a_word_is_said() {
     let mut reader = linked();
     reader.press("p");
     reader.type_text("99");
     reader.press("Enter");
+    assert_eq!(
+        reader.state().label,
+        "3",
+        "the sixth page of six, which this document calls 3",
+    );
+    assert!(reader.state().mounted.contains(&6));
+    assert_eq!(reader.state().notice, "", "and nothing was said about it");
+
+    // The other end, for the same reason: 0 is the first page.
+    reader.press("p");
+    reader.type_text("0");
+    reader.press("Enter");
+    assert_eq!(reader.state().label, "i");
+
+    // And what cannot be clamped is still said out loud.
+    reader.press("p");
+    reader.type_text("xii");
+    reader.press("Enter");
     assert!(
-        reader.state().notice.contains("no page 99"),
+        reader.state().notice.contains("no page xii"),
         "{:?}",
         reader.state().notice
     );

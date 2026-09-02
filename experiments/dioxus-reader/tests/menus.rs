@@ -53,21 +53,33 @@ fn a_menu_opens_and_closes() {
     assert_eq!(reader.state().menu, None, "a press elsewhere closes it");
 }
 
-/// Escape closes the menu *first*, ahead of everything else it is the way out
-/// of. A reader with the find bar open and a menu down means the menu.
+/// **A menu and the find bar are never both up**, so Escape has one thing to
+/// close and closes it.
+///
+/// This used to assert the other thing — that Escape takes the menu first and
+/// leaves the bar — and it was testing a state the app cannot reach. `wire()`
+/// in `main.ts` wraps every control in the bar that opens something of its own
+/// in `opens(…)`, which closes the search on the way, and its reason is worth
+/// keeping: two panels claiming the same corner of the screen, one of them
+/// still holding the keyboard, is not a place anybody meant to be. `show_menu`
+/// does the same for all five menus at once. The ordering in `dismiss` is
+/// still menu-before-bar and still right; there is simply nothing left that
+/// can put a reader in front of both.
 #[test]
-fn escape_takes_the_menu_before_the_find_bar() {
+fn opening_a_menu_puts_the_find_bar_away_and_escape_closes_the_menu() {
     let mut reader = reader();
     reader.press_chord("mod+f");
     assert!(reader.state().find.is_some());
+
     reader.click(".chip.theme");
+    assert_eq!(reader.state().menu.as_deref(), Some("theme"));
+    assert!(
+        reader.state().find.is_none(),
+        "the search stayed up behind the menu",
+    );
 
     reader.press("Escape");
     assert_eq!(reader.state().menu, None);
-    assert!(reader.state().find.is_some(), "the bar is still up");
-
-    reader.press("Escape");
-    assert!(reader.state().find.is_none(), "and now it is not");
 }
 
 /// Fourteen themes reached by pressing `t` fourteen times is what a menu is
@@ -77,7 +89,13 @@ fn escape_takes_the_menu_before_the_find_bar() {
 fn the_theme_menu_is_the_whole_list() {
     let mut reader = reader();
     reader.click(".chip.theme");
-    let names = reader.harness.query_all(".menu.theme .menu-item").len();
+    // The themes themselves carry a swatch; the three items under them —
+    // New theme…, Make a copy…, All appearance settings… — do not, which is
+    // what tells the two apart without counting from the end.
+    let names = reader
+        .harness
+        .query_all(".menu.theme .menu-item .swatch")
+        .len();
     assert_eq!(names, 14, "every shipped theme is in the menu");
     assert_eq!(
         reader.harness.query_all(".menu.theme .menu-item.on").len(),
@@ -87,22 +105,48 @@ fn the_theme_menu_is_the_whole_list() {
 
     reader.click_nth(".menu.theme .menu-item", 2);
     assert_eq!(reader.state().theme, "Hylo Ember");
+    // **And the menu stays.** A theme is something you try on, so the tick
+    // moves and the list is still there — `showThemeMenu` in `main.ts` puts
+    // the menu away only for the items that take you somewhere else.
+    assert_eq!(reader.state().menu.as_deref(), Some("theme"));
+    reader.press("Escape");
     assert_eq!(reader.state().menu, None);
 }
 
-/// The View menu holds what the fit chip could not say and the `s` key was
-/// standing in for: three fits, three spreads, and the two rotations.
+/// **The spreads are under the cog, which is where the app keeps them.**
+/// `showSettingsMenu` in `main.ts` has them under "Pages side by side"; they
+/// were in the zoom menu here, which is a menu about how big a page is.
 #[test]
-fn the_view_menu_chooses_a_spread() {
+fn the_settings_menu_chooses_a_spread() {
     let mut reader = reader();
     let one = reader.state().mounted.len();
-    reader.click(".chip.fit");
-    // Fit width, fit page, actual size, then the three spreads.
-    reader.click_nth(".menu.view .menu-item", 4);
+    reader.click(".chip.settings");
+    // Continuous, one page at a time, then the three spreads.
+    reader.click_nth(".menu.settings .menu-item", 3);
     assert_eq!(reader.state().menu, None);
     assert!(
         reader.state().mounted.len() > one,
         "two pages side by side mount more than one did",
+    );
+}
+
+/// And the zoom menu is the app's: the three fits, a number to type, and the
+/// presets under it. It puts nothing away — a zoom is something you try on.
+#[test]
+fn the_zoom_menu_offers_a_number_and_the_presets() {
+    let mut reader = reader();
+    reader.click(".chip.fit");
+    assert!(
+        reader.harness.query(".menu.view .stepper").is_some(),
+        "a number to type",
+    );
+    // Fit width, fit page, actual size, then 50%.
+    reader.click_nth(".menu.view .menu-item", 3);
+    assert_eq!(reader.state().zoom, "50%");
+    assert_eq!(
+        reader.state().menu.as_deref(),
+        Some("view"),
+        "and the menu is still up",
     );
 }
 
@@ -199,7 +243,11 @@ fn open_in_a_new_window_leaves_this_one_alone() {
     reader.click(".chip.open");
     reader.click_nth(".menu.open .menu-item", 1);
 
-    assert_eq!(reader.state().pages, before.pages, "this window is untouched");
+    assert_eq!(
+        reader.state().pages,
+        before.pages,
+        "this window is untouched"
+    );
     assert_eq!(reader.state().title, before.title);
     assert_eq!(
         reader.asks().last(),

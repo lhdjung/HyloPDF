@@ -128,6 +128,31 @@ pub struct Link {
     pub target: Target,
 }
 
+/// A note somebody left in the document: an area on the page, and what it
+/// says.
+///
+/// **The notes a document already carries, made readable** — `notesIn` in
+/// `viewer.ts`, and the same rule for what counts: any annotation with words
+/// in it, whatever its subtype, because a comment on a highlight and a sticky
+/// note are the same thing to a reader. Links are the exception, their text
+/// being where they go, and a Popup is the box another annotation's words are
+/// shown in rather than an annotation with words of its own.
+///
+/// The area is in the page's own points, like a [`Link`]'s and for its
+/// reason. `icon` is the app's own judgement: a note that is small in both
+/// directions is a marker and can be pressed anywhere on it, and one that is
+/// a passage of text is a comment on a highlighted sentence — pressing that
+/// would put the sentence underneath out of reach of a pointer that wants to
+/// select it, so only a strip at its right edge answers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Note {
+    pub rect: Rect,
+    pub icon: bool,
+    /// Who left it, or empty where the document does not say.
+    pub by: String,
+    pub text: String,
+}
+
 /// A page's text, and where every character of it is.
 ///
 /// `chars` and `boxes` are the same length and are indexed together — which is
@@ -269,6 +294,15 @@ pub trait PageSource: Send + Sync {
         Vec::new()
     }
 
+    /// The notes on one page, in the order the document lists them.
+    ///
+    /// Asked per page and asked late, exactly as the links are — and empty
+    /// for a renderer that cannot answer, for the reason [`Self::text_of`]
+    /// has a default.
+    fn notes_of(&self, _index: usize) -> Vec<Note> {
+        Vec::new()
+    }
+
     /// What the document calls its own pages, one per page, or empty.
     ///
     /// A book's front matter is numbered i, ii, iii and its body starts again
@@ -299,6 +333,17 @@ pub trait PageSource: Send + Sync {
     /// falls back to and is what it held before this question existed.
     fn title(&self) -> String {
         String::new()
+    }
+
+    /// What the document says about itself: the fields its metadata carries,
+    /// in the order the app's Information window lists them, and the size of
+    /// its first page. Anything the document does not name is left out rather
+    /// than shown empty, which is what `showDocumentDetails` does.
+    ///
+    /// Empty for a renderer that cannot answer — the window then has only the
+    /// name, the page count and the path, which are the reader's own.
+    fn details(&self) -> Vec<(String, String)> {
+        Vec::new()
     }
 
     /// Every highlight in the document, in reading order.

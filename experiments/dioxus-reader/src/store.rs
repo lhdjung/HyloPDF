@@ -87,6 +87,15 @@ enum Job {
         page: u32,
         offset: f64,
     },
+    /// A setting that moves continuously — the zoom during a pinch — held
+    /// until it stops moving. `App.setSoon` in `main.ts`, and the same
+    /// reason: one write per frame of a gesture is one whole-file rewrite per
+    /// frame, and only the value the gesture ends on matters.
+    Setting {
+        dir: PathBuf,
+        key: String,
+        value: Value,
+    },
     /// Write everything pending now and say when it is done. What quitting
     /// asks for, and what a test asks for instead of sleeping.
     Flush(Sender<()>),
@@ -120,8 +129,9 @@ impl Scribe {
 /// flush.
 fn run(inbox: Receiver<Job>) {
     let mut pending: BTreeMap<(PathBuf, String), (u32, f64)> = BTreeMap::new();
+    let mut settings_pending: BTreeMap<(PathBuf, String), Value> = BTreeMap::new();
     loop {
-        let job = if pending.is_empty() {
+        let job = if pending.is_empty() && settings_pending.is_empty() {
             inbox.recv().map_err(|_| RecvTimeoutError::Disconnected)
         } else {
             inbox.recv_timeout(SETTLE)
@@ -135,15 +145,23 @@ fn run(inbox: Receiver<Job>) {
             }) => {
                 pending.insert((dir, file), (page, offset));
             }
+            Ok(Job::Setting { dir, key, value }) => {
+                settings_pending.insert((dir, key), value);
+            }
             Ok(Job::Flush(done)) => {
                 write_out(&mut pending);
+                write_settings(&mut settings_pending);
                 // The sender may be gone — a test that stopped waiting — and
                 // that is not this thread's problem.
                 let _ = done.send(());
             }
-            Err(RecvTimeoutError::Timeout) => write_out(&mut pending),
+            Err(RecvTimeoutError::Timeout) => {
+                write_out(&mut pending);
+                write_settings(&mut settings_pending);
+            }
             Err(RecvTimeoutError::Disconnected) => {
                 write_out(&mut pending);
+                write_settings(&mut settings_pending);
                 return;
             }
         }
@@ -157,6 +175,19 @@ fn write_out(pending: &mut BTreeMap<(PathBuf, String), (u32, f64)>) {
         // The notice for that case is raised at open, where the same file is
         // written by `touch` and somebody is looking at the screen.
         let _ = library::remember(&dir, &file, page, offset);
+    }
+}
+
+/// The settings the scribe is holding, written a directory at a time so that
+/// a pinch and a theme chosen in the same second are one rewrite rather than
+/// two.
+fn write_settings(pending: &mut BTreeMap<(PathBuf, String), Value>) {
+    let mut by_dir: BTreeMap<PathBuf, Vec<(String, Value)>> = BTreeMap::new();
+    for ((dir, key), value) in std::mem::take(pending) {
+        by_dir.entry(dir).or_default().push((key, value));
+    }
+    for (dir, entries) in by_dir {
+        let _ = settings::set_many(&dir, entries);
     }
 }
 
@@ -963,6 +994,19 @@ impl Store {
             // And take the refused ones back out of memory, so that what is
             // held and what is on disk agree.
             self.settings = settings::load(&self.dir);
+        }
+    }
+
+    /// The same, for a value that is still moving: held in memory now and
+    /// written when it stops. See [`Job::Setting`].
+    pub fn set_soon(&mut self, entries: Vec<(String, Value)>) {
+        for (key, value) in entries {
+            self.settings.insert(key.clone(), value.clone());
+            let _ = Scribe::get().jobs.send(Job::Setting {
+                dir: self.dir.clone(),
+                key,
+                value,
+            });
         }
     }
 

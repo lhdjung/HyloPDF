@@ -53,6 +53,14 @@ pub struct Session {
     /// `--theme N`, which every window this run makes wears.
     pub theme: Option<usize>,
     pub size: (f64, f64),
+    /// Whether a window comes up filling the screen, which is the app's own
+    /// default (`window_maximized`, true in `settings.rs`). It matters more
+    /// than it sounds: the toolbar holds fourteen controls and a document
+    /// title, and in a 1100-pixel window the title is squeezed to nothing
+    /// while every group crowds its neighbour. The app opens at 1280×860
+    /// *maximized*; a reader who has only seen this one in a small window has
+    /// been reading a cramped copy of the same bar.
+    pub maximized: bool,
     /// How a window in front is brought forward, which is the shell's to do
     /// and is asked for from here.
     pub remote: Remote,
@@ -121,7 +129,8 @@ impl Session {
         };
         let attributes = WindowAttributes::default()
             .with_title(called)
-            .with_surface_size(LogicalSize::new(self.size.0, self.size.1));
+            .with_surface_size(LogicalSize::new(self.size.0, self.size.1))
+            .with_maximized(self.maximized);
 
         let config = Config {
             dir: self.dir.clone(),

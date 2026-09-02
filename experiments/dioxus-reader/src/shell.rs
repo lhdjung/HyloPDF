@@ -208,7 +208,9 @@ type Swap = Box<dyn FnMut(&str, &str)>;
 
 /// A window's name, said again every time the window changes size. See
 /// [`Shell::on_resized`].
-type Resized = Box<dyn FnMut(&str)>;
+type Resized = Box<dyn FnMut(&str, f64, f64, bool)>;
+/// That two fingers moved apart or together on a window. See [`Shell::on_pinch`].
+type Pinched = Box<dyn FnMut(&str, f64)>;
 
 /// A window's name, said again every time the machine goes light or dark. See
 /// [`Shell::on_theme`].
@@ -275,6 +277,8 @@ pub struct Shell {
     focus: Option<Box<dyn FnMut(Option<String>)>>,
     /// That a window changed size. See [`Shell::on_resized`].
     resized: Option<Resized>,
+    /// That two fingers moved apart or together on it.
+    pinched: Option<Pinched>,
     /// That the machine went light or dark. See [`Shell::on_theme`].
     themed: Option<Themed>,
     /// That a document is being dragged over a window, or has been let go
@@ -316,6 +320,7 @@ impl Shell {
             swap: None,
             focus: None,
             resized: None,
+            pinched: None,
             themed: None,
             dropped: None,
             leaving: None,
@@ -367,8 +372,13 @@ impl Shell {
     /// news comes the way every other piece of news does, through the window's
     /// mailbox. This is only the half winit can see; `main.rs` is where it is
     /// turned into an emit.
-    pub fn on_resized(&mut self, resized: impl FnMut(&str) + 'static) {
+    pub fn on_resized(&mut self, resized: impl FnMut(&str, f64, f64, bool) + 'static) {
         self.resized = Some(Box::new(resized));
+    }
+
+    /// Say what happens when two fingers pinch on a window.
+    pub fn on_pinch(&mut self, pinched: impl FnMut(&str, f64) + 'static) {
+        self.pinched = Some(Box::new(pinched));
     }
 
     /// Say what happens when the machine goes light or dark.
@@ -750,6 +760,17 @@ impl ApplicationHandler for Shell {
             event,
             WindowEvent::SurfaceResized(_) | WindowEvent::ScaleFactorChanged { .. }
         );
+        // …and a two-finger pinch, which is how a trackpad asks to zoom and is
+        // not a wheel: macOS reports it as a gesture of its own, so an
+        // application listening only for ⌃-wheel hears the opening of the
+        // gesture at best and usually nothing at all. Blitz has no DOM event
+        // for it, so it goes down the mailbox like the resize.
+        let pinched = match event {
+            WindowEvent::PinchGesture { delta, .. } if delta.is_finite() && delta != 0.0 => {
+                Some(delta)
+            }
+            _ => None,
+        };
         // …and the machine going light or dark, which nothing else in this
         // process hears. See [`Shell::on_theme`].
         let themed = matches!(event, WindowEvent::ThemeChanged(_));
@@ -773,10 +794,33 @@ impl ApplicationHandler for Shell {
         };
         self.inner.window_event(event_loop, window_id, event);
         if resized {
+            // The size goes with the news, because the one thing that wants
+            // it outside this file is the setting that remembers it — and
+            // `main.rs`, which is where that is written, has no window to
+            // ask. Logical, not physical: a setting written in device pixels
+            // comes back at half the size on the next screen.
+            let geometry = self.inner.windows.get(&window_id).map(|view| {
+                let scale = view.window.scale_factor();
+                let size = view.window.surface_size();
+                (
+                    size.width as f64 / scale,
+                    size.height as f64 / scale,
+                    view.window.is_maximized(),
+                )
+            });
+            if let (Some(label), Some((width, height, maximized)), Some(tell)) = (
+                self.labels.get(&window_id).cloned(),
+                geometry,
+                self.resized.as_mut(),
+            ) {
+                tell(&label, width, height, maximized);
+            }
+        }
+        if let Some(delta) = pinched {
             if let (Some(label), Some(tell)) =
-                (self.labels.get(&window_id).cloned(), self.resized.as_mut())
+                (self.labels.get(&window_id).cloned(), self.pinched.as_mut())
             {
-                tell(&label);
+                tell(&label, delta);
             }
         }
         if themed {

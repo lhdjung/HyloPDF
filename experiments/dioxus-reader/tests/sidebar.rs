@@ -91,7 +91,9 @@ fn a_document_that_carries_its_contents_lists_them() {
         })
         .collect();
     let shot = reader.screenshot();
-    let parent = shot.leftmost_ink(bands[0]).expect("\"Front matter\" is drawn");
+    let parent = shot
+        .leftmost_ink(bands[0])
+        .expect("\"Front matter\" is drawn");
     let child = shot.leftmost_ink(bands[1]).expect("\"Preface\" is drawn");
     assert!(
         child > parent,
@@ -442,10 +444,15 @@ fn a_mark_can_be_taken_off_from_the_panel() {
 fn nothing_in_the_panel_hangs_over_the_document() {
     let mut reader = Reader::open_with(&fixture::prose_pdf(), Options::default());
     reader.press_chord("mod+b");
+    // **The narrowing comes first, and it has to.** The panel's edge is below
+    // the toolbar, so picking it up is reaching past the find bar and puts the
+    // search away — in this reader and, measured, in the app, where the grip
+    // is not in `FIND_KEEPS_OPEN` either. Search after dragging and there is
+    // still a list to look at.
+    reader.drag_sidebar_edge(-100.0);
     reader.press_chord("mod+f");
     reader.type_text("the");
     reader.scan_out();
-    reader.drag_sidebar_edge(-100.0);
 
     let panel = reader.harness.layout_rect(".sidebar");
     let edge = panel.x + panel.width;
@@ -508,4 +515,26 @@ fn a_narrow_panel_keeps_the_drawings_and_drops_the_words() {
         reader.harness.query(".tab .icon").is_some(),
         "the drawings stay at every width",
     );
+}
+
+/// **The tab strip has to win the hit test against a scrolled column.**
+/// A thumbnail is placed at `top - thumb_scroll`, so a column scrolled at all
+/// puts rows at negative offsets — painted clipped by `.panel`'s
+/// `overflow: hidden`, and hit-tested where their boxes say they are, which
+/// is over the tabs. Without a `z-index` on `.tabs`, clicking Contents from a
+/// scrolled Pages tab landed on a thumbnail nobody could see; at the top of
+/// the column, which is where anyone would check it, it worked.
+#[test]
+fn the_tabs_can_be_clicked_over_a_scrolled_column() {
+    let mut reader = with_contents();
+    reader.press_chord("mod+b");
+    reader.click(".tab[data-tab='pages']");
+    reader.wheel_over(".panel.thumb-column", 3_000.0);
+    assert!(
+        reader.state().thumbs[0] > 1,
+        "the column has been scrolled: {:?}",
+        reader.state().thumbs
+    );
+    reader.click(".tab[data-tab='contents']");
+    assert_eq!(reader.state().sidebar.as_deref(), Some("contents"));
 }

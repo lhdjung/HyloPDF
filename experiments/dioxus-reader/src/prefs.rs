@@ -22,7 +22,7 @@ use crate::layout::{Fit, Mode, Spread};
 
 /// The whole window, or nothing at all.
 #[component]
-pub fn Settings(viewer: Signal<Viewer>) -> Element {
+pub fn Settings(viewer: Signal<Viewer>, frame: crate::app::Frame) -> Element {
     let held = viewer.read();
     let Some(pane) = held.pane else {
         return rsx! {};
@@ -79,7 +79,7 @@ pub fn Settings(viewer: Signal<Viewer>) -> Element {
                         match pane {
                             Pane::Reading => rsx! { Reading { viewer } },
                             Pane::Appearance => rsx! { Appearance { viewer } },
-                            Pane::Window => rsx! { WindowPage { viewer } },
+                            Pane::Window => rsx! { WindowPage { viewer, frame: frame.clone() } },
                             Pane::Keyboard => rsx! { Keyboard { viewer } },
                             Pane::About => rsx! { About { viewer } },
                         }
@@ -115,7 +115,7 @@ fn Field(label: String, #[props(default)] note: Option<String>, children: Elemen
 /// A switch. `role="switch"` and `aria-checked`, because it is a button that
 /// answers a yes-or-no question and the shape of it says nothing.
 #[component]
-fn Toggle(on: bool, onchange: EventHandler<bool>) -> Element {
+pub(crate) fn Toggle(on: bool, onchange: EventHandler<bool>) -> Element {
     rsx! {
         button {
             class: if on { "switch on" } else { "switch" },
@@ -157,7 +157,7 @@ fn Segmented(options: Vec<(String, String)>, chosen: String, onchange: EventHand
 /// text — see the comment on `.pill` in `app.rs`, which is the same finding
 /// one window along.
 #[component]
-fn Stepper(
+pub(crate) fn Stepper(
     viewer: Signal<Viewer>,
     value: f64,
     min: f64,
@@ -248,7 +248,7 @@ fn Stepper(
                 // looking at.
                 onkeydown: move |event| {
                     let modifiers = event.modifiers();
-                    if modifiers.meta() || modifiers.ctrl() || modifiers.alt() {
+                    if !crate::keymap::plain(modifiers) {
                         return;
                     }
                     let key = event.key();
@@ -307,11 +307,10 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
     let fit = held.layout.fit;
     let zoom = held.layout.zoom;
     let trimming = held.trims_margins();
-    let (remember, reopen, pill, pictures) = (
+    let (remember, reopen, pill) = (
         held.store.flag("remember_position"),
         held.store.flag("reopen_last_document"),
         held.store.flag("show_page_pill"),
-        held.store.flag("recolor_images"),
     );
     drop(held);
 
@@ -406,11 +405,6 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
             }
         }
         Field {
-            label: "Recolour pictures too",
-            note: "A theme that recolours the page recolours what is drawn on it. Off keeps a photograph exactly as it was printed — and costs a figure drawn half in lines and half in pictures the agreement between its halves.",
-            Toggle { on: pictures, onchange: move |on| viewer.write().set_recolor_images(on) }
-        }
-        Field {
             label: "Come back to where I stopped",
             note: "Each document reopens on the page you left it on.",
             Toggle { on: remember, onchange: move |on| viewer.write().set_flag("remember_position", on) }
@@ -431,7 +425,9 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
 #[component]
 fn Appearance(viewer: Signal<Viewer>) -> Element {
     let held = viewer.read();
+    let editing = held.editing.clone();
     let chosen = held.store.theme_index();
+    let worn = held.store.theme().clone();
     let themes: Vec<(usize, String, [String; 3])> = held
         .store
         .themes()
@@ -456,56 +452,246 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
         .collect();
     let dark = held.store.dark_now();
     let following = held.store.flag("follow_system_theme");
+    let recolor_images = held.store.flag("recolor_images");
     // What the machine says, which is the difference between a switch that
     // does something and a switch that cannot: a platform reporting nothing
     // has no light and dark to follow, and saying so is better than leaving
     // an inert switch on the page.
     let machine = held.store.outside();
+    let folder = held.store.themes_dir().display().to_string();
     drop(held);
     let mac = keymap::this_machine();
 
     rsx! {
         h2 { class: "pane-title", "Appearance" }
+        // The three switches, in `appearancePage`'s own order.
+        Field {
+            label: "Follow the system",
+            note: match machine {
+                Some(_) => "Take the light theme when the machine is light and the dark one when it is dark. Choosing a theme that disagrees turns this off.".to_string(),
+                None => "This machine does not report an appearance, so there is nothing to follow.".to_string(),
+            },
+            Toggle { on: following, onchange: move |on| viewer.write().set_follow_system(on) }
+        }
         Field {
             label: "Dark mode",
-            note: format!("Swaps between the light theme and the dark theme you last chose, so this comes back to your pair rather than to a default. {}", if mac { "⌘D" } else { "Ctrl+D" }),
+            note: format!("Switches between the light theme and the dark theme you last chose. {}", if mac { "⌘D" } else { "Ctrl+D" }),
             Toggle { on: dark, onchange: move |on| viewer.write().set_dark(on) }
         }
         Field {
-            label: "Light or dark follow system",
-            note: match machine {
-                Some(_) => "Follows the machine's own appearance. Choosing a theme that disagrees with it turns this off.".to_string(),
-                None => "This machine does not report an appearance, so there is nothing to follow.".to_string(),
-            },
-            // The setting, not the setting narrowed by whether it can do
-            // anything today: a switch that reads back other than what is in
-            // the file is the picker lying about the page, and the note above
-            // is where "there is nothing to follow" belongs.
-            Toggle { on: following, onchange: move |on| viewer.write().set_follow_system(on) }
+            label: "Recolour pictures too",
+            note: "On, pictures take the theme along with the rest of the page. Off, they stay exactly as printed.".to_string(),
+            Toggle { on: recolor_images, onchange: move |on| viewer.write().set_recolor_images(on) }
         }
-        Note { text: "A theme is a file. These are the ones in your themes folder, and the ones that ship are written there on every run so they can be read and copied." }
-        div { class: "theme-grid",
-            for (index, name, colours) in themes {
-                button {
-                    key: "{index}",
-                    class: if index == chosen { "theme-card on" } else { "theme-card" },
-                    "aria-pressed": if index == chosen { "true" } else { "false" },
-                    onclick: move |_| viewer.write().set_theme(index),
-                    div {
-                        class: "theme-swatch",
-                        style: "background: {colours[0]};",
-                        span { class: "swatch-ink", style: "background: {colours[1]};" }
-                        span { class: "swatch-accent", style: "background: {colours[2]};" }
+        if let Some(draft) = editing {
+            ThemeEditor { viewer, draft }
+        } else {
+            h3 { class: "pane-group", "Themes" }
+            div { class: "theme-grid",
+                for (index, name, colours) in themes {
+                    button {
+                        key: "{index}",
+                        class: if index == chosen { "theme-card on" } else { "theme-card" },
+                        "aria-pressed": if index == chosen { "true" } else { "false" },
+                        onclick: move |_| viewer.write().set_theme(index),
+                        div {
+                            class: "theme-swatch",
+                            style: "background: {colours[0]};",
+                            span { class: "swatch-ink", style: "background: {colours[1]};" }
+                            span { class: "swatch-accent", style: "background: {colours[2]};" }
+                        }
+                        span { class: "theme-name", "{name}" }
                     }
-                    span { class: "theme-name", "{name}" }
+                }
+            }
+            div { class: "pane-actions",
+                button {
+                    class: "chip action",
+                    onclick: move |_| viewer.write().begin_theme(None),
+                    "New theme…"
+                }
+                button {
+                    class: "chip action",
+                    onclick: {
+                        let worn = worn.clone();
+                        move |_| viewer.write().begin_theme(Some(worn.clone()))
+                    },
+                    // A built-in is copied rather than edited, which is the
+                    // app's own rule and its own wording: a shipped theme is
+                    // written back on every run, so an edit in place would be
+                    // silently reverted.
+                    {if worn.built_in {
+                        format!("Make a copy of {}…", worn.name)
+                    } else {
+                        format!("Edit {}…", worn.name)
+                    }}
+                }
+                if !worn.built_in {
+                    button {
+                        class: "chip action danger",
+                        onclick: {
+                            let worn = worn.clone();
+                            move |_| {
+                                viewer.write().begin_theme(Some(worn.clone()));
+                                viewer.write().delete_theme();
+                            }
+                        },
+                        "Delete {worn.name}"
+                    }
+                }
+            }
+            Note { text: format!("Theme files live in {folder}. They are plain text — a theme can be written by hand, or copied to another computer.") }
+        }
+    }
+}
+
+/// A theme being written, field by field. `themeEditor` in `settings.ts`.
+///
+/// **One difference from the app, and it is the platform's.** There, each
+/// colour is an `<input type="color">` beside a hex field — the operating
+/// system's own picker. Blitz has no colour input, so what is here is the
+/// swatch and the hex field, and the swatch is a preview rather than a way in.
+/// Everything else is the app's: the same seven fields in the same order with
+/// the same sentences under them, the draft worn while it is being written,
+/// and Cancel, Save and Delete at the foot.
+#[component]
+fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
+    // What the page will actually use, which is what the fields have to show:
+    // four of the seven are derived when the file does not name them, and a
+    // field standing in with something else is the picker lying again.
+    let shown = crate::palette::resolve(&draft, true);
+    let hex = crate::palette::hex;
+    let fresh = draft.id.trim().is_empty();
+
+    rsx! {
+        h3 { class: "pane-group", {if fresh { "New theme" } else { "Edit theme" }} }
+        Field { label: "Name",
+            TextField {
+                value: draft.name.clone(),
+                onchange: move |value| viewer.write().draft_set("name", value),
+            }
+        }
+        Field {
+            label: "Text",
+            note: "The colour the words are printed in.".to_string(),
+            ColorField {
+                value: hex(shown.text),
+                onchange: move |value| viewer.write().draft_set("text", value),
+            }
+        }
+        Field {
+            label: "Background",
+            note: "The colour of the paper behind them.".to_string(),
+            ColorField {
+                value: hex(shown.background),
+                onchange: move |value| viewer.write().draft_set("background", value),
+            }
+        }
+        Field {
+            label: "Accent",
+            note: "The current page, the ring around whatever has the keyboard, and anything else that needs to stand out.".to_string(),
+            ColorField {
+                value: hex(shown.accent),
+                onchange: move |value| viewer.write().draft_set("accent", value),
+            }
+        }
+        Field {
+            label: "Links",
+            note: "Links in the document take this colour, wherever the page is recoloured.".to_string(),
+            ColorField {
+                value: hex(shown.link),
+                onchange: move |value| viewer.write().draft_set("link", value),
+            }
+        }
+        Field {
+            label: "Selection area",
+            note: "The colour behind text you have selected. Left alone it follows the accent.".to_string(),
+            ColorField {
+                value: hex(shown.selection_area),
+                onchange: move |value| viewer.write().draft_set("selection_area", value),
+            }
+        }
+        Field {
+            label: "Selected text",
+            note: "The words inside that area. Left alone they take the opposite of it.".to_string(),
+            ColorField {
+                value: hex(shown.selection_text),
+                onchange: move |value| viewer.write().draft_set("selection_text", value),
+            }
+        }
+        Field {
+            label: "Recolour the document",
+            note: "Off leaves every page exactly as it was printed.".to_string(),
+            Toggle {
+                on: draft.recolor,
+                onchange: move |on| viewer.write().draft_recolor(on),
+            }
+        }
+        div { class: "pane-actions",
+            button {
+                class: "chip action",
+                onclick: move |_| viewer.write().cancel_theme(),
+                "Cancel"
+            }
+            button {
+                class: "chip action primary",
+                onclick: move |_| viewer.write().save_theme(),
+                "Save theme"
+            }
+            // Only a theme already on disk can be deleted: "New theme…" and a
+            // copy of a built-in have not been saved yet.
+            if !fresh {
+                button {
+                    class: "chip action danger",
+                    onclick: move |_| viewer.write().delete_theme(),
+                    "Delete this theme"
                 }
             }
         }
     }
 }
 
+/// A line of text somebody types. The app's `ui.textField`.
 #[component]
-fn WindowPage(viewer: Signal<Viewer>) -> Element {
+fn TextField(value: String, onchange: EventHandler<String>) -> Element {
+    rsx! {
+        input {
+            class: "text-field",
+            r#type: "text",
+            value: "{value}",
+            oninput: move |event| onchange.call(event.value()),
+        }
+    }
+}
+
+/// A colour: what it looks like, and the six digits that say so.
+///
+/// The hex field takes every notation the renderer reads rather than only the
+/// long one — a theme file may perfectly well say `#fff` — and what leaves
+/// here is always the six-digit form, because that is what is written back to
+/// the file. A value the renderer cannot read is simply not passed on, which
+/// is `readColor` returning null in the app.
+#[component]
+fn ColorField(value: String, onchange: EventHandler<String>) -> Element {
+    rsx! {
+        span { class: "color-field",
+            span { class: "color-swatch", style: "background: {value};" }
+            input {
+                class: "text-field color-hex",
+                r#type: "text",
+                value: "{value}",
+                oninput: move |event| {
+                    if let Some(read) = crate::palette::read_colour(&event.value()) {
+                        onchange.call(crate::palette::hex(read));
+                    }
+                },
+            }
+        }
+    }
+}
+
+#[component]
+fn WindowPage(viewer: Signal<Viewer>, frame: crate::app::Frame) -> Element {
     let held = viewer.read();
     let toolbar = held.toolbar;
     let sidebar = held.sidebar_open;
@@ -536,18 +722,42 @@ fn WindowPage(viewer: Signal<Viewer>) -> Element {
                 onchange: move |value| viewer.write().set_sidebar_width(value),
             }
         }
-        // Full screen and presenting are the window's rather than the page's,
-        // so they are shown and not offered here: throwing the switch needs
-        // the `Frame` the reader holds, and this window is inside the reader
-        // rather than beside it. The keys do it, and so does the View menu.
-        Note {
-            text: format!(
-                "Full screen is {} ({}), and presenting is {} ({}). Both are the window's own, and the keys above throw them.",
-                if full { "on" } else { "off" },
+        // Both of these are the *window's* rather than the page's, so throwing
+        // one is an `Ask` — which is why this component takes the `Frame` the
+        // reader holds. They were a sentence here until it did.
+        Field {
+            label: "Full screen",
+            note: format!(
+                "The window fills the screen. {} — and Escape leaves again.",
                 if mac { "⌘⌃F" } else { "F11" },
-                if presenting { "on" } else { "off" },
+            ),
+            Toggle {
+                on: full,
+                onchange: {
+                    let frame = frame.clone();
+                    move |on| {
+                        viewer.write().set_full_screen(on);
+                        frame.ask(crate::app::Ask::FullScreen(on));
+                    }
+                },
+            }
+        }
+        Field {
+            label: "Presenting",
+            note: format!(
+                "Full screen with nothing else on it: the two switches above, thrown together, and Escape puts both back. {}",
                 if mac { "⌘⇧P" } else { "Ctrl+Shift+P" },
             ),
+            Toggle {
+                on: presenting,
+                onchange: {
+                    let frame = frame.clone();
+                    move |on| {
+                        let full = viewer.write().present(on);
+                        frame.ask(crate::app::Ask::FullScreen(full));
+                    }
+                },
+            }
         }
     }
 }
@@ -561,6 +771,7 @@ fn Keyboard(viewer: Signal<Viewer>) -> Element {
     // it, so the page is a view of what the reader will actually get.
     let held = viewer.read();
     let keymap = held.keymap.clone();
+    let keys_file = held.store.dir().join("keys.toml").display().to_string();
     drop(held);
     let mac = keymap.mac();
 
@@ -617,6 +828,14 @@ fn Keyboard(viewer: Signal<Viewer>) -> Element {
         h3 { class: "pane-group", "Changing keybinds" }
         Note { text: "Every keybind is in keys.toml in your config folder, commented out. Uncomment a line to change its keys, then Reload — the file is deliberately not watched, because the app writes to that folder several times a minute while you are scrolling." }
         div { class: "pane-actions",
+            // The file itself, opened in whatever edits text here. The app's
+            // own first button, and the reason it is beside Reload: the two
+            // are one gesture — change the file, then say so.
+            OpenPath {
+                viewer,
+                label: "Open keys file".to_string(),
+                path: keys_file,
+            }
             button {
                 class: "chip action",
                 onclick: move |_| viewer.write().reload_keys(),
@@ -631,6 +850,7 @@ fn About(viewer: Signal<Viewer>) -> Element {
     let held = viewer.read();
     let config = held.store.dir().display().to_string();
     let themes = held.store.themes_dir().display().to_string();
+    let settings_file = held.store.dir().join("settings.toml").display().to_string();
     drop(held);
 
     rsx! {
@@ -643,6 +863,43 @@ fn About(viewer: Signal<Viewer>) -> Element {
             span { class: "key-chord", "{config}" }
             span { class: "key-what", "Themes" }
             span { class: "key-chord", "{themes}" }
+        }
+        div { class: "pane-actions",
+            OpenPath {
+                viewer,
+                label: "Open settings file".to_string(),
+                path: settings_file,
+            }
+            OpenPath {
+                viewer,
+                label: "Open themes folder".to_string(),
+                path: themes.clone(),
+            }
+        }
+    }
+}
+
+/// A button that hands a path to whatever the platform opens it with.
+///
+/// Three of these, and all three are about the same thing: the files this
+/// reader keeps are plain text, and the point of saying so is that they can be
+/// opened. Through [`crate::app::Reveal`], which is the one door in this crate
+/// that starts another program — so a test writes the path down instead.
+#[component]
+fn OpenPath(viewer: Signal<Viewer>, label: String, path: String) -> Element {
+    let reveal = use_hook(|| {
+        dioxus_core::try_consume_context::<crate::app::Reveal>()
+            .unwrap_or_else(crate::app::Reveal::to_the_system)
+    });
+    rsx! {
+        button {
+            class: "chip action",
+            onclick: move |_| {
+                if let Err(said) = reveal.show(&path) {
+                    viewer.write().notice = said;
+                }
+            },
+            "{label}"
         }
     }
 }

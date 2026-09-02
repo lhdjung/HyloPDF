@@ -360,6 +360,29 @@ const ALIASES: &[(&str, &str)] = &[
     ("grave", "`"),
 ];
 
+/// Whether the modifier this app calls `mod` is down: ⌘ on a Mac.
+///
+/// **`meta()` alone is not the question, and asking it was the whole of why
+/// every ⌘ chord was dead in the real app.** `keyboard_types::Modifiers` has
+/// both `META` and `SUPER`, `meta()` asks for `META`, and
+/// `winit_modifiers_to_kbt_modifiers` in `blitz-shell` answers winit's
+/// `meta_key()` — which is Command on macOS — with `SUPER`. So ⌘T arrived as
+/// a bare `t` and cycled the theme, ⌘F never opened the find bar, and the
+/// harness saw none of it because `spell_out` was writing `META` by hand.
+/// The harness spells it the way the shell does now; both bits are read here,
+/// because which one a keystroke carries is the window system's business and
+/// not this app's.
+pub fn command(modifiers: Modifiers) -> bool {
+    modifiers.meta() || modifiers.contains(Modifiers::SUPER)
+}
+
+/// Nothing held but Shift: a keystroke that is typing rather than a chord.
+/// The three fields that own the keyboard ask this before they let a key
+/// through to the root — see the `onkeydown` handlers in `app.rs`.
+pub fn plain(modifiers: Modifiers) -> bool {
+    !command(modifiers) && !modifiers.ctrl() && !modifiers.alt()
+}
+
 /// `event.code` for the keys whose `event.key` a modifier can take away.
 ///
 /// Option is not a letter on a Mac: ⌥G arrives as ©, and the G is simply not
@@ -541,12 +564,12 @@ pub fn chords_of(key: &Key, code: Code, modifiers: Modifiers, mac: bool) -> Vec<
     }
     // The Windows and Super keys are not bound to anything, and reading one
     // as no modifier at all would turn ⊞J into a scroll.
-    if !mac && modifiers.meta() {
+    if !mac && command(modifiers) {
         return Vec::new();
     }
     let mods = Mods {
         mod_: if mac {
-            modifiers.meta()
+            command(modifiers)
         } else {
             modifiers.ctrl()
         },

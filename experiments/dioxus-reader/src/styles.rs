@@ -1178,6 +1178,16 @@ body { margin: 0;
   min-width: 0; padding: 6px 10px;
 }
 .sign-where { color: var(--faint); font-size: 12.5px; }
+/* A digital signature is the document's rather than the reader's: nothing here
+   can add one and nothing can take one off, so the row carries no controls at
+   all and is drawn as the statement it is. The name is what it is and the
+   detail is whatever the document said, so the second half is the one that
+   gets the room. */
+.sign-seal .sign-placed {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--sunk);
+}
+.sign-seal .sign-name { flex: 0 0 auto; }
+.sign-seal .sign-where { flex: 1 1 auto; min-width: 0; }
 .sign-forget {
   flex: 0 0 auto; width: 30px; height: 30px; padding: 0;
   display: flex; align-items: center; justify-content: center;

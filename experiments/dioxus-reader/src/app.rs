@@ -3096,6 +3096,14 @@ impl Viewer {
         self.document.signatures()
     }
 
+    /// **What the document is already *digitally* signed with**, which is a
+    /// different question from the one above and is answered by reading the
+    /// file rather than the page. See [`crate::sign::Seal`], which is also
+    /// where the four things that can honestly be said about one are.
+    pub fn seals(&self) -> Vec<crate::sign::Seal> {
+        crate::sign::seals(self.document.path())
+    }
+
     /// **Take a signature back out of the document.**
     ///
     /// The assessment that led to this feature named exactly one caveat worth
@@ -5546,6 +5554,9 @@ pub fn Reader(
     } else {
         Vec::new()
     };
+    // What the document already carries in the *other* sense of the word. Read
+    // only while the window is open, because it opens the file to find out.
+    let seals = if signing.is_some() { held.seals() } else { Vec::new() };
     // Whether a signature is looking for somewhere to go, which changes what
     // a click on a page means and what the pointer looks like over one.
     let placing = held.placing.is_some();
@@ -7393,6 +7404,28 @@ pub fn Reader(
                             // have drawn anything.
                             p { class: "pane-lede",
                                 "Ink on the page, the way a pen is. It is written into the document and any reader can see it — and it is not a digital signature: it proves nothing about who signed or whether the file has changed since."
+                            }
+                            // **What the document is already signed with, in
+                            // the other sense of the word**, and it comes
+                            // first because it is the thing the sentence above
+                            // has just said this is not. A reader who came
+                            // here wanting the green tick should meet the
+                            // document's own signatures before they meet the
+                            // pad.
+                            if !seals.is_empty() {
+                                h3 { class: "pane-group", "Digital signatures" }
+                                div { class: "sign-list",
+                                    for (nth, seal) in seals.iter().enumerate() {
+                                        div { key: "{nth}", class: "sign-row sign-seal",
+                                            span { class: "sign-placed",
+                                                span { class: "sign-name",
+                                                    {if seal.filled { "Signed" } else { "Signature field" }}
+                                                }
+                                                span { class: "sign-where", "{seal.says()}" }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             // **What is already on this document**, first,
                             // because a reader who opens this window on a

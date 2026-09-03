@@ -147,6 +147,39 @@ rewrite, so ink into a cryptographically signed document ends the signature it
 carried. The reader is told once, before it happens, in a sentence that names
 the consequence rather than the mechanism.
 
+*And the document's own signatures are read.* The recommendation below asks
+for this beside the writing and it is built: the Sign window lists every
+`/Sig` the document carries, before the pad and under the sentence saying what
+this feature is not.
+
+**One line of the recommendation is wrong, and reading them is what showed
+it.** "pdfium's eight getters are enough to say *this document is signed by X,
+and the bytes still match the range that was signed*" — they are not.
+
+* *There is no name getter.* The signer's name is in the certificate inside the
+  PKCS#7 blob. Reading it means parsing DER and choosing between several common
+  names in a chain, and a guess about who signed a contract is worse than
+  silence.
+* *There is no digest check.* "The bytes still match" is a hash over the byte
+  ranges compared against the message digest in that same blob.
+* *Two of the eight are unreachable anyway.* `pdfium-render 0.9.3` wraps
+  neither `FPDFSignatureObj_GetByteRange` nor `GetSubFilter`, and keeps both
+  `PdfSignature`'s handle and `PdfDocument`'s `pub(crate)` — so there is no
+  door onto them. The byte range is what would have answered "was anything
+  appended after this was signed", which is the one useful thing obtainable
+  with no crypto at all.
+
+What the getters *are* enough for is four certain facts: that something was
+signed, when it says it was, why, and whether it forbids changes. That is what
+is shown.
+
+**And the first of those four was a bug.** `FPDF_GetSignatureCount` counts
+every `/FT /Sig` field in the `/AcroForm` whether or not anybody has signed it
+— a blank one is the line at the foot of a contract, put there by whoever wrote
+the contract. So the warning above fired on documents nobody had signed,
+including this repository's own `tests/fixtures/signed.pdf`, which is a field
+and not a signature. `/Contents` tells them apart.
+
 `experiments/PROGRESS.md` has the long form, including the two faults the
 feature turned up in code that was already there.
 

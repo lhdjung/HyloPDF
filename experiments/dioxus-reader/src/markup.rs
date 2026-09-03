@@ -169,13 +169,25 @@ pub fn with_pdfium<T>(
 }
 
 /// Whether the document carries a signature, which a rewrite will break.
+///
+/// **A signature field is not a signature.** `FPDF_GetSignatureCount` counts
+/// every `/FT /Sig` field in the `/AcroForm`, signed or not, and a great many
+/// documents ship with a blank one: it is the line at the foot of a contract,
+/// put there by whoever wrote the contract, and nobody has signed anything.
+/// Counting those meant warning a reader that ink would break a signature that
+/// did not exist — which is worse than saying nothing, because a warning
+/// nobody can act on is a warning they learn to ignore. `/Contents` is what
+/// tells the two apart, and `bytes()` is that entry.
 fn is_signed(path: &str) -> bool {
     let _library = crate::pdfium::library();
     let Ok(pdfium) = crate::pdfium::pdfium() else {
         return false;
     };
     match pdfium.load_pdf_from_file(path, None) {
-        Ok(document) => !document.signatures().is_empty(),
+        Ok(document) => document
+            .signatures()
+            .iter()
+            .any(|signature| !signature.bytes().is_empty()),
         Err(_) => false,
     }
 }

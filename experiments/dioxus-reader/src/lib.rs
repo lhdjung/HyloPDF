@@ -24,7 +24,10 @@
 //! three keyboard actions this reader has and the app has not. It is also not
 //! a *digital* signature and the window says so in its first sentence; see
 //! `signing-assessment.md` for the two things that word means and why only one
-//! of them is reachable from either renderer.
+//! of them is reachable from either renderer. The other one is *read* here,
+//! though — [`sign::Seal`] is every `/Sig` the document already carries, and
+//! its own comment is where the assessment's "signed by X, intact" is
+//! corrected to the four facts that can honestly be had.
 //!
 //! Every one of the
 //! app's forty-three keyboard actions answers here — the last three to arrive were dark mode,

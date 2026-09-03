@@ -783,6 +783,93 @@ fn first_and_last(ids: &[usize]) -> String {
 /// other string to be wrong.
 pub const LOCKED_PASSWORD: &str = "hylo";
 
+/// Two pages, and a signature field that has actually been signed.
+///
+/// **The app's own `tests/fixtures/signed.pdf` is not this**, and the
+/// difference is the whole reason this exists: that one is a `/FT /Sig`
+/// widget with `/SigFlags 3` and **no `/V`** — a signature *field*, which is a
+/// blank line at the foot of a contract and not a signature. This one has a
+/// `/V` holding a real `/Sig` dictionary, with the four entries pdfium can
+/// read out of one: the reason, the time, the DocMDP level and the PKCS#7
+/// blob itself.
+///
+/// The blob is not a real signature over these bytes and could not be —
+/// nothing in this repository can make one, which is the whole of what
+/// `signing-assessment.md` is about. It is a well-formed DER prologue, which
+/// is enough to be *present*, and being present is the fact this reader
+/// reports.
+pub fn signed_pdf() -> String {
+    written("hylopdf-fixture-signed.pdf", || build_signed(true))
+}
+
+/// The same document with the signature field left blank — the app's fixture,
+/// rebuilt here so that the pair can be compared in one test.
+pub fn unsigned_field_pdf() -> String {
+    written("hylopdf-fixture-blank-field.pdf", || build_signed(false))
+}
+
+fn build_signed(filled: bool) -> Vec<u8> {
+    let mut pdf = Pdf::new();
+    let catalog = pdf.reserve();
+    let tree = pdf.reserve();
+    let font = pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    // The signature itself. `/ByteRange` and `/SubFilter` are written because
+    // a `/Sig` without them is malformed, and not because anything reads them:
+    // pdfium has getters for both and `pdfium-render` exposes neither, and
+    // hides the handle they would be called on. See [`crate::sign::Seal`].
+    let value = if filled {
+        Some(pdf.add(
+            "<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached \
+              /Name (A. Reader) /Reason (I agree to the terms) \
+              /M (D:20240314093000+01'00') \
+              /ByteRange [0 840 1560 620] \
+              /Contents <308006092a864886f70d010702a0803080020101310f300d060960864801650304020105000000> >>",
+        ))
+    } else {
+        None
+    };
+    let signature = match value {
+        Some(id) => format!(" /V {id} 0 R"),
+        None => String::new(),
+    };
+    let field = pdf.add(format!(
+        "<< /Type /Annot /Subtype /Widget /FT /Sig /T (Signature1) /Ff 0 \
+          /Rect [400 60 560 110] /F 4{signature} >>"
+    ));
+    let page_ids: Vec<usize> = (0..2).map(|_| pdf.reserve()).collect();
+    for (index, &id) in page_ids.iter().enumerate() {
+        let stream = format!("BT /F1 12 Tf 54 720 Td (Page {}. Sign here.) Tj ET", index + 1);
+        let content = pdf.add(format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            stream.len(),
+            stream
+        ));
+        let annots = if index == 0 { format!(" /Annots [{field} 0 R]") } else { String::new() };
+        pdf.put(
+            id,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 612 792] \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R{annots} >>"
+            ),
+        );
+    }
+    pdf.put(
+        tree,
+        format!(
+            "<< /Type /Pages /Count 2 /Kids [{}] >>",
+            page_ids.iter().map(|id| format!("{id} 0 R")).collect::<Vec<_>>().join(" "),
+        ),
+    );
+    pdf.put(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R \
+             /AcroForm << /Fields [{field} 0 R] /SigFlags 3 >> >>"
+        ),
+    );
+    pdf.bytes()
+}
+
 /// Three pages behind a password: the PDF standard security handler, revision
 /// 2, RC4 at 40 bits.
 ///

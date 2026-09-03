@@ -4122,6 +4122,54 @@ neither is what makes this useful. Cryptographic signing is where the
 assessment left it: not blocked by anything in this codebase, blocked by the
 fact that a signature nobody's software trusts is not a signature.
 
+## And reading the ones a document already carries
+
+The assessment's recommendation had two halves and only the first was built.
+The second — *"add signature reading alongside it, because the API is free and
+'signed by X, intact' is a real answer to a real question"* — is built now, and
+building it found that the sentence is wrong twice over.
+
+**There is no "signed by X".** pdfium has six `FPDFSignatureObj_Get*` getters
+and not one of them is a name: the signer's name lives in the certificate
+inside the PKCS#7 blob, and reading it means parsing DER and then choosing
+between the several common names a chain carries. A guess about who signed a
+contract is worse than silence. There is no "intact" either — that is a hash
+over the byte ranges compared against the message digest in the same blob.
+
+**And two of the eight are unreachable from here at all.**
+`FPDFSignatureObj_GetByteRange` and `GetSubFilter` are in `pdfium-render`'s
+bindings trait, the wrapper wraps neither, and `PdfSignature::handle` and
+`PdfDocument::handle` are both `pub(crate)` — so there is no door onto them
+short of a fork. The byte range is the loss worth naming: comparing where it
+ends against the length of the file says whether anything was appended after
+the signature was made, which is the one genuinely useful answer obtainable
+with no crypto whatsoever.
+
+What is left is four facts, each certain, and they are what `sign::Seal` holds:
+that something was actually signed, when it says it was, why, and whether it
+forbids changes. The Sign window lists them above the pad, under the sentence
+that says what this feature is not — a reader who came here wanting the green
+tick should meet the document's own signatures before they meet a drawing
+surface.
+
+### A signature field is not a signature
+
+`FPDF_GetSignatureCount` counts every `/FT /Sig` field in the `/AcroForm`,
+signed or not. A blank one is ordinary furniture: it is the line at the foot of
+a contract, put there by whoever wrote the contract, and nobody has signed
+anything. `markup::is_signed` counted those, so **the warning that ink would
+break a digital signature fired on documents that had never been signed** —
+which is worse than saying nothing, because a warning nobody can act on is one
+they learn to ignore.
+
+The app's own `tests/fixtures/signed.pdf` is exactly this shape, which is how
+it was found and why nothing had noticed: the one document in the repository
+that was supposed to be signed is a field with no `/V`, the test asserting the
+warning fired was passing on it, and every reader of every contract with a
+blank signature line was being told the same thing. `/Contents` is what tells
+them apart, and `fixture::signed_pdf` is a document that carries a real `/Sig`
+so that the two cases can be tested against each other.
+
 ---
 
 ## Three things to carry forward

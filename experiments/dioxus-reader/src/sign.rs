@@ -361,6 +361,144 @@ pub struct Standing {
     pub rewrites: bool,
 }
 
+/* ------------------------------------- what the document is already signed with */
+
+/// One cryptographic signature the document already carries, as pdfium reads
+/// it.
+///
+/// **This is the other column of `signing-assessment.md`, read rather than
+/// written.** Nothing in this repository can make one of these; pdfium's whole
+/// signature surface is read-only, and that is a good reason to read them
+/// rather than a reason to say nothing. A reader about to put ink into a
+/// document deserves to know what is already on it and what the ink will cost.
+///
+/// **The assessment said the eight getters are enough to say "signed by X, and
+/// the bytes still match the range that was signed". They are not**, and this
+/// is what they are actually enough for:
+///
+/// * *There is no name getter.* The signer's name lives in the certificate
+///   inside the PKCS#7 blob, and reading it means parsing DER and deciding
+///   which of several common names in a chain is the subject's. A guess there
+///   is worse than silence, so nothing here guesses.
+/// * *There is no digest check.* "The bytes still match" means hashing the
+///   byte ranges and comparing against the message digest in the blob, which
+///   is the same DER parse plus a hash. Not done, and not claimed.
+/// * *Two of the eight getters are unreachable.* `FPDFSignatureObj_GetByteRange`
+///   and `GetSubFilter` exist in the bindings and `pdfium-render 0.9.3` wraps
+///   neither, and it keeps `PdfSignature`'s handle and `PdfDocument`'s handle
+///   both `pub(crate)` — so there is no door onto them from outside the crate.
+///   That is what would have answered "was anything appended after this was
+///   signed", which is the one useful thing obtainable without any crypto at
+///   all.
+///
+/// What is left is four facts, every one of them certain, and the first is the
+/// one worth having.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Seal {
+    /// **Whether anything has actually been signed.** A `/FT /Sig` field with
+    /// no `/V` is a *place* for a signature — the blank line at the foot of a
+    /// contract — and `FPDF_GetSignatureCount` counts it exactly the same as a
+    /// signed one. Telling them apart is `/Contents`, and it is the difference
+    /// between warning a reader that they are about to break a signature and
+    /// warning them about a signature nobody has made.
+    pub filled: bool,
+    /// When it says it was signed: the `/M` entry, in words. Empty when it
+    /// gives none.
+    pub when: String,
+    /// Why, in the signer's own words. Empty when they gave none.
+    pub reason: String,
+    /// The DocMDP level, when it sets one: 1 permits no change at all, 2
+    /// permits filling in forms and signing, 3 permits annotations as well.
+    /// `None` is the ordinary case and means the signature certifies nothing
+    /// beyond itself.
+    pub locks: Option<u8>,
+}
+
+impl Seal {
+    /// The one line the window shows under it. Says only what is known, and
+    /// says plainly when that is nothing.
+    pub fn says(&self) -> String {
+        if !self.filled {
+            return "waiting to be signed".to_string();
+        }
+        let mut said = Vec::new();
+        if !self.when.is_empty() {
+            said.push(format!("signed {}", self.when));
+        }
+        if !self.reason.is_empty() {
+            said.push(self.reason.clone());
+        }
+        match self.locks {
+            // Worth a sentence of its own: a level 1 certification says the
+            // document is not to be changed by anybody, which is a stronger
+            // claim than "somebody signed this" and is the one that makes ink
+            // on top of it an actual disagreement.
+            Some(1) => said.push("permits no changes".to_string()),
+            Some(_) => said.push("certified".to_string()),
+            None => {}
+        }
+        if said.is_empty() {
+            "it says nothing about when or why".to_string()
+        } else {
+            said.join(" · ")
+        }
+    }
+}
+
+/// Every signature the document at `path` carries.
+///
+/// Opened here rather than asked of the open document, the way
+/// [`crate::markup::standing`] already asks the disk: this is read once when a
+/// window is opened and never in a frame, and a document that has been
+/// released for a write has no pages to ask.
+pub fn seals(path: &str) -> Vec<Seal> {
+    let _library = crate::pdfium::library();
+    let Ok(pdfium) = crate::pdfium::pdfium() else {
+        return Vec::new();
+    };
+    let Ok(document) = pdfium.load_pdf_from_file(path, None) else {
+        return Vec::new();
+    };
+    document
+        .signatures()
+        .iter()
+        .map(|signature| Seal {
+            filled: !signature.bytes().is_empty(),
+            when: in_words(&signature.signing_date().unwrap_or_default()),
+            reason: signature.reason().unwrap_or_default(),
+            locks: signature.modification_detection_permission().ok().map(|level| {
+                use pdfium_render::prelude::PdfSignatureModificationDetectionPermission as Mdp;
+                match level {
+                    Mdp::Mdp1 => 1,
+                    Mdp::Mdp2 => 2,
+                    Mdp::Mdp3 => 3,
+                }
+            }),
+        })
+        .collect()
+}
+
+/// A PDF date in words: `D:20240314093000+01'00'` becomes `14 March 2024`.
+///
+/// Anything that is not that shape is handed back **unchanged** rather than
+/// dropped or guessed at. A date is a fact the document is asserting, and the
+/// two wrong answers are showing nothing and showing a date that is not the
+/// one written down; showing the string as written is neither.
+pub fn in_words(raw: &str) -> String {
+    const MONTHS: [&str; 12] = [
+        "January", "February", "March", "April", "May", "June", "July", "August", "September",
+        "October", "November", "December",
+    ];
+    let digits = raw.strip_prefix("D:").unwrap_or(raw);
+    let number = |from: usize, to: usize| digits.get(from..to).and_then(|s| s.parse::<usize>().ok());
+    match (number(0, 4), number(4, 6), number(6, 8)) {
+        (Some(year), Some(month), Some(day)) if (1..=12).contains(&month) && (1..=31).contains(&day) => {
+            format!("{day} {} {year}", MONTHS[month - 1])
+        }
+        _ => raw.to_string(),
+    }
+}
+
 /// Ask the disk and the document, once.
 pub fn standing(path: &str, encrypted: bool) -> Standing {
     let markup = crate::markup::standing(path, encrypted);

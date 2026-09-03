@@ -373,3 +373,188 @@ fn the_find_bar_offers_the_app_s_three_switches() {
     reader.press_chord("mod+f");
     assert_eq!(reader.text_all(".find-option"), want);
 }
+
+/* ---------------------------------------------------------------------------
+ *
+ * The four surfaces the fixture used not to reach.
+ *
+ * Everything above was taken from the toolbar and the windows a reader opens
+ * from it, which is most of the app and is not all of it. What follows is the
+ * screen with no document on it, the window the title menu's last item opens,
+ * the theme editor, and the three things the app says on top of a page. Each
+ * was invisible to this file until the inventory was widened to take it, which
+ * is the argument for widening it: a surface nothing compares is a surface
+ * that drifts.
+ */
+
+/// **The start screen says what the app's says.**
+///
+/// The four lines of it, and what the recents shelf is called. This is the
+/// first thing anybody sees and it had never been compared — the port could
+/// have been calling itself anything.
+#[test]
+fn the_start_screen_reads_like_the_app_s() {
+    let reader = Reader::empty(Options {
+        width: 1280,
+        height: 860,
+        ..Default::default()
+    });
+    let app = app();
+    let start = &app["start"];
+    let want = |key: &str| start[key].as_str().unwrap_or_default().to_string();
+    let one = |selector: &str| reader.text_all(selector).first().cloned().unwrap_or_default();
+
+    assert_eq!(one(".start-name"), want("name"), "the name");
+    assert_eq!(one(".start-sub"), want("sub"), "the line under it");
+    assert_eq!(one(".start-open"), want("open"), "the button");
+    assert_eq!(one(".start-hint"), want("hint"), "the hint at the foot");
+}
+
+/// **The Information window lists what the app's lists, in the app's order.**
+///
+/// The rows a document produces rather than all ten: a paper with no
+/// `/Subject` has no Subject row in either reader, so the fixture's own answer
+/// is the question. What is compared is the labels — the values are the
+/// document's and the two renderers read them out of the same bytes.
+///
+/// `Made with`, `Written by` and the two dates are absent from the book
+/// fixture and so are absent from both sides. That is the fixture's shape and
+/// not a gap; `read_details` in `pdfium.rs` carries all ten.
+#[test]
+fn the_information_window_says_what_the_app_s_says() {
+    let mut reader = reader();
+    let app = app();
+    let document = &app["document"];
+
+    reader.click(".chip.title");
+    // The last item of the menu. The inventory counts the rule between it and
+    // Copy path as a row of its own and `.menu-item` does not, which is the
+    // same difference `every_menu_lists_what_the_app_s_lists` reads around.
+    let last = reader.text_all(".menu.document .menu-item").len() - 1;
+    reader.click_nth(".menu.document .menu-item", last);
+
+    assert_eq!(
+        reader.text_all(".details-window .window-title"),
+        vec![document["title"].as_str().unwrap_or_default().to_string()],
+        "what the window is called",
+    );
+    assert_eq!(
+        reader.text_all(".details-label"),
+        document["fields"]
+            .as_array()
+            .expect("the window's rows")
+            .iter()
+            .map(|row| row.as_str().unwrap_or_default().to_string())
+            .collect::<Vec<_>>(),
+        "the rows",
+    );
+}
+
+/// **The theme editor asks for what the app's asks for, and says the same
+/// things about it.**
+///
+/// Both halves matter and the second is the one a comparison of labels would
+/// miss: a colour called "Accent" with no sentence under it is a field whose
+/// whole meaning the reader has to guess. Eight fields, eight notes — one of
+/// which is empty, because a Name needs none — and the two buttons.
+#[test]
+fn the_theme_editor_asks_the_app_s_questions() {
+    let mut reader = reader();
+    let app = app();
+    let editor = &app["editor"];
+
+    reader.press_chord("mod+,");
+    reader.click_nth(".nav-item", 1);
+    // The buttons are under fourteen theme cards, which is below the foot of
+    // the pane at the size the fixture was taken at — in both readers. A
+    // browser's `.click()` reaches an element wherever it is; a pointer has to
+    // be able to see it, so the pane is scrolled first. Nothing about the port
+    // is being worked around here: this is the gesture a reader makes.
+    reader.wheel_over(".window-pane", 600.0);
+    reader.click(".pane-actions button");
+
+    assert_eq!(
+        reader.text_all(".pane-group").last().cloned(),
+        Some(editor["heading"].as_str().unwrap_or_default().to_string()),
+        "what the editor calls itself",
+    );
+
+    let rows = editor["fields"].as_array().expect("the editor's fields");
+    let labels: Vec<String> = rows
+        .iter()
+        .map(|row| row["label"].as_str().unwrap_or_default().to_string())
+        .collect();
+    let notes: Vec<String> = rows
+        .iter()
+        .map(|row| row["note"].as_str().unwrap_or_default().to_string())
+        .collect();
+
+    // The editor is written into the pane *below* Appearance's own three
+    // switches, in both readers — so what is compared is the tail of the
+    // pane's fields. The three above it are the Appearance page's and are
+    // checked as such by `the_settings_window_has_the_app_s_pages`.
+    let tail = |mut all: Vec<String>, want: usize| -> Vec<String> {
+        assert!(all.len() >= want, "the editor is not open: {all:?}");
+        all.split_off(all.len() - want)
+    };
+    assert_eq!(
+        tail(reader.text_all(".field-label"), labels.len()),
+        labels,
+        "the fields",
+    );
+    // A field with no note draws no note in either reader, so the empty one is
+    // taken out of both lists rather than compared against nothing.
+    let notes: Vec<String> = notes.into_iter().filter(|note| !note.is_empty()).collect();
+    assert_eq!(
+        tail(reader.text_all(".field-note"), notes.len()),
+        notes,
+        "what each field says about itself",
+    );
+    assert_eq!(
+        reader.text_all(".pane-actions button"),
+        editor["actions"]
+            .as_array()
+            .expect("the editor's buttons")
+            .iter()
+            .map(|row| row.as_str().unwrap_or_default().to_string())
+            .collect::<Vec<_>>(),
+        "the buttons under it",
+    );
+}
+
+/// **The three things the app says over a page.**
+///
+/// The way back to a toolbar that has been put away, what a dragged file is
+/// told, and the page number while a scroll is running. None of them is part
+/// of the chrome and all three are words a reader reads — and the first is the
+/// one that matters most, because it names the only way back.
+#[test]
+fn what_the_app_says_over_a_page_is_said_here_too() {
+    let mut reader = reader();
+    let app = app();
+    let overlay = &app["overlay"];
+    let want = |key: &str| overlay[key].as_str().unwrap_or_default().to_string();
+    let one = |reader: &Reader, selector: &str| {
+        reader.text_all(selector).first().cloned().unwrap_or_default()
+    };
+
+    reader.press_chord("mod+t");
+    // The handle is not on screen until somebody reaches for the top edge,
+    // which is the app's own rule and the reason it is a handle rather than a
+    // button that is always there.
+    reader.point_to(640.0, 3.0);
+    reader.settle();
+    assert_eq!(one(&reader, ".toolbar-peek"), want("peek"), "the way back");
+
+    reader.press_chord("mod+t");
+    reader.drag_over(true);
+    assert_eq!(one(&reader, ".drop-hint"), want("drop"), "a dragged file");
+    reader.drag_left();
+
+    // The pill is what a scroll puts up, and it says the same "n of m" the
+    // toolbar does. The app's was taken at the top of the document; this one
+    // is read the same way, before anything has moved it.
+    reader.wheel(-10.0);
+    reader.settle();
+    assert_eq!(one(&reader, ".page-pill"), want("pill"), "the page pill");
+}

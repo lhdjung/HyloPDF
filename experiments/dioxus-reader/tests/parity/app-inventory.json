@@ -568,5 +568,68 @@
         ]
       }
     }
+  },
+  "document": {
+    "title": "Document",
+    "heading": "book.pdf",
+    "fields": [
+      "Pages",
+      "Page size",
+      "PDF version",
+      "File"
+    ]
+  },
+  "editor": {
+    "heading": "New theme",
+    "fields": [
+      {
+        "label": "Name",
+        "note": ""
+      },
+      {
+        "label": "Text",
+        "note": "The colour the words are printed in."
+      },
+      {
+        "label": "Background",
+        "note": "The colour of the paper behind them."
+      },
+      {
+        "label": "Accent",
+        "note": "The current page, the ring around whatever has the keyboard, and anything else that needs to stand out."
+      },
+      {
+        "label": "Links",
+        "note": "Links in the document take this colour, wherever the page is recoloured."
+      },
+      {
+        "label": "Selection area",
+        "note": "The colour behind text you have selected. Left alone it follows the accent."
+      },
+      {
+        "label": "Selected text",
+        "note": "The words inside that area. Left alone they take the opposite of it."
+      },
+      {
+        "label": "Recolour the document",
+        "note": "Off leaves every page exactly as it was printed."
+      }
+    ],
+    "actions": [
+      "Cancel",
+      "Save theme"
+    ]
+  },
+  "overlay": {
+    "peek": "Show toolbar",
+    "drop": "Drop to open",
+    "pill": "1 of 400"
+  },
+  "start": {
+    "name": "HyloPDF",
+    "sub": "A calm place to read.",
+    "open": "Open a document",
+    "hint": "Or drop a PDF anywhere in this window",
+    "recentsTitle": "Recently read"
   }
 }

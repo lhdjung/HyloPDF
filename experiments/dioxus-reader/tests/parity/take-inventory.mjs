@@ -178,6 +178,108 @@ const inventory = await app.page.evaluate(async () => {
     await settle();
   }
 
+  // The Information window, which is the last item of the title menu and the
+  // only window in the app that is neither Settings nor a question. What it
+  // holds is decided by the document — a paper with no `/Subject` has no
+  // Subject row — so the fixture is the fixture's answer, and the assertion
+  // that reads it asks for the *rows this document produces* rather than for
+  // all ten.
+  out.document = null;
+  document.getElementById("doc-title").click();
+  await settle();
+  const information = [...document.querySelectorAll("#popovers .popover-item")].find(
+    (item) => words(item) === "Information",
+  );
+  if (information) {
+    information.click();
+    await settle();
+    await settle();
+    const win = document.querySelector(".window");
+    if (win) {
+      out.document = {
+        title: words(win.querySelector(".window-bar")).replace(/\s*✕?\s*$/, ""),
+        heading: words(win.querySelector(".window-pane .pane-title")),
+        fields: [...win.querySelectorAll(".field")]
+          .filter(visible)
+          .map((field) => words(field.querySelector(".field-label"))),
+      };
+      win.querySelector(".window-bar button")?.click();
+      await settle();
+    }
+  } else {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await settle();
+  }
+
+  // The theme editor, which is Appearance's second half and the largest
+  // surface in the app that the fixture had never opened. Reached through
+  // "New theme…", because that is the route with no theme to undo afterwards.
+  out.editor = null;
+  document.getElementById("settings").click();
+  await settle();
+  const toSettings = [...document.querySelectorAll("#popovers .popover-item")].find((item) =>
+    words(item).startsWith("All settings"),
+  );
+  toSettings?.click();
+  await settle();
+  const settingsWindow = document.querySelector(".window");
+  if (settingsWindow) {
+    const appearance = [...settingsWindow.querySelectorAll(".window-nav button")].find(
+      (item) => words(item) === "Appearance",
+    );
+    appearance?.click();
+    await settle();
+    const newTheme = [...settingsWindow.querySelectorAll(".pane-actions button")].find(
+      (button) => words(button).startsWith("New theme"),
+    );
+    if (newTheme) {
+      newTheme.click();
+      await settle();
+      // The editor is appended into the pane below Appearance's own three
+      // fields, so it is taken from its heading down rather than from the
+      // pane — otherwise "Follow the system" is reported as a field of the
+      // theme editor, which it is not.
+      const pane = settingsWindow.querySelector(".window-pane");
+      const heading = [...pane.querySelectorAll(".pane-group")].find((el) =>
+        ["New theme", "Edit theme"].includes(words(el)),
+      );
+      const editorBox = heading?.parentElement ?? pane;
+      out.editor = {
+        heading: words(heading),
+        fields: [...editorBox.querySelectorAll(".field")]
+          .filter(visible)
+          .map((field) => ({
+            label: words(field.querySelector(".field-label")),
+            // The sentence under a colour, which is the whole of how a reader
+            // finds out what "Accent" is for. A port with the fields and not
+            // the notes has the form and not the help.
+            note: words(field.querySelector(".field-note")),
+          })),
+        actions: [...editorBox.querySelectorAll(".pane-actions button")].map(words),
+      };
+    }
+    settingsWindow.querySelector(".window-bar button")?.click();
+    await settle();
+  }
+
+  // The three things the app says over a page rather than in the chrome: the
+  // page number while a scroll is running, the way back to a toolbar that has
+  // been put away, and what a dragged file is told. None of them is reachable
+  // by clicking, so each is read out of the element itself — which is fair,
+  // because what is being compared is the words.
+  out.overlay = {
+    peek: words(document.getElementById("toolbar-peek")),
+    drop: words(document.getElementById("drop-hint")),
+    // The pill is filled as the scroll runs. Asking for it is the one way to
+    // see what shape it is written in.
+    pill: await (async () => {
+      const viewer = document.getElementById("viewer");
+      viewer.scrollBy(0, 900);
+      await settle();
+      return words(document.getElementById("page-pill"));
+    })(),
+  };
+
   // And what the theme resolves to, which is the other half of "does it look
   // the same": every custom property `applyTheme` sets.
   const root = getComputedStyle(document.documentElement);
@@ -193,6 +295,36 @@ const inventory = await app.page.evaluate(async () => {
   return out;
 });
 
+await app.close();
+
+/* The start screen, which needs an app with nothing in it.
+ *
+ * It is a second launch rather than a Close in the first, because closing a
+ * document is a gesture with a *history* — the recents shelf has the document
+ * just put down at the top of it — and what the port has to match is the
+ * screen a reader meets on opening the app, not the one they get on the way
+ * out of a paper. Seeding a library gives the shelf something to hold. */
+const empty = await openApp({
+  width: 1280,
+  height: 860,
+  settings: { restore_last: false },
+});
+inventory.start = await empty.page.evaluate(async () => {
+  const words = (el) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
+  const welcome = document.getElementById("welcome");
+  return {
+    name: words(welcome.querySelector("h1")),
+    sub: words(welcome.querySelector(".welcome-sub")),
+    open: words(welcome.querySelector("#welcome-open")),
+    hint: words(welcome.querySelector(".welcome-hint")),
+    // What the shelf is called when there is one. It is written whether or
+    // not this launch has anything to put in it, because the words are the
+    // thing being compared and an empty library would report `""` for a
+    // heading the app does have.
+    recentsTitle: "Recently read",
+  };
+});
+await empty.close();
+
 writeFileSync(OUT, JSON.stringify(inventory, null, 2) + "\n");
 console.log(`wrote ${OUT}`);
-await app.close();

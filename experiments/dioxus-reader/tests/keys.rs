@@ -256,8 +256,13 @@ fn what_needs_a_document_open_is_only_what_moves_around_inside_one() {
 /// drawings and `settings.test.mjs` checks the settings table: by reading the
 /// app's file. The two lists are the same actions apart from this reader's
 /// own three, which have no row over there to disagree with.
+///
+/// **Three columns rather than one.** This used to read `needsDocument` and
+/// nothing else, which is the column a reader never sees; the label and the
+/// group are the two they read on every visit to the Keyboard page, and they
+/// had been carried across by hand with nothing comparing them.
 #[test]
-fn every_flag_agrees_with_the_app_s_own_table() {
+fn every_row_agrees_with_the_app_s_own_table() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/keys.ts");
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
@@ -278,15 +283,56 @@ fn every_flag_agrees_with_the_app_s_own_table() {
             .find("id: \"")
             .map(|next| next + 1)
             .unwrap_or(rest.len());
-        let theirs = rest[..end].contains("needsDocument: true");
+        let entry = &rest[..end];
+        let theirs = entry.contains("needsDocument: true");
         assert_eq!(
             needs_document(spec.id),
             theirs,
             "{id} disagrees with the app about needing a document",
         );
+
+        // **And what the row *says*, which is the half a reader reads.**
+        //
+        // The label and the group are what the Keyboard page is built from on
+        // both sides, and a port that answers the right key under the wrong
+        // sentence is a port whose help is wrong. They were carried across by
+        // hand and nothing compared them — the flag above was the only column
+        // this test had ever read, and it is the one column nobody sees.
+        assert_eq!(
+            spec.label,
+            quoted(entry, "label").unwrap_or_else(|| panic!("{id} has no label over there")),
+            "{id}: the words on the Keyboard page",
+        );
+        assert_eq!(
+            spec.group.as_str(),
+            quoted(entry, "group").unwrap_or_else(|| panic!("{id} has no group over there")),
+            "{id}: which heading it is listed under",
+        );
         checked += 1;
     }
     assert!(checked > 30, "only {checked} actions were found over there");
+}
+
+/// `label: "…"` out of one entry of the app's table, unescaped as far as its
+/// own strings need — which is `\"` and nothing else, because the file is
+/// prose and not data.
+fn quoted(entry: &str, key: &str) -> Option<String> {
+    let at = entry.find(&format!("{key}: \""))? + key.len() + 3;
+    let rest = &entry[at..];
+    let mut out = String::new();
+    let mut escaped = false;
+    for ch in rest.chars() {
+        match ch {
+            _ if escaped => {
+                out.push(ch);
+                escaped = false;
+            }
+            '\\' => escaped = true,
+            '"' => return Some(out),
+            _ => out.push(ch),
+        }
+    }
+    None
 }
 
 /* -------------------------------------------------------------- in words */

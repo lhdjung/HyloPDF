@@ -287,7 +287,7 @@ pub fn remove(path: &str, page: usize, index: usize) -> Result<(), String> {
 /// from a path reads from that path for as long as it lives. Loading a copy
 /// into memory for the length of one edit is the version of this that cannot
 /// read half of one file and half of another.
-fn edit(
+pub(crate) fn edit(
     path: &str,
     change: impl FnOnce(&mut PdfDocument<'static>) -> Result<(), String>,
 ) -> Result<(), String> {

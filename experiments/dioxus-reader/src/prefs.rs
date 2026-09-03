@@ -98,7 +98,7 @@ pub fn Settings(viewer: Signal<Viewer>, frame: crate::app::Frame) -> Element {
 /// switch in that window says what it is for in a sentence, which is most of
 /// why the window reads as calm rather than as a form.
 #[component]
-fn Field(label: String, #[props(default)] note: Option<String>, children: Element) -> Element {
+pub(crate) fn Field(label: String, #[props(default)] note: Option<String>, children: Element) -> Element {
     rsx! {
         div { class: "field",
             div { class: "field-head",
@@ -651,15 +651,37 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
     }
 }
 
+/// **A plain key typed into a field is not a shortcut**, and every field in
+/// this reader has to say so for itself.
+///
+/// The root's `onkeydown` hears every key in the window, because that is how a
+/// key with nothing focused reaches the reader at all — see the root element in
+/// `app.rs`. A field with the focus therefore gets its keystroke *and* so does
+/// the keymap, so typing a name into the theme editor scrolled the document
+/// behind it: `space` is a screen down and `d` is half of one. The password
+/// field carries this rule inline and named it "the same two rules every field
+/// in this file has", which was true of that field and of no other.
+///
+/// A key with a modifier is let through, deliberately, so that ⌘A, ⌘C, ⌘V and
+/// ⌘Z still mean what they mean in a field — and so that ⌘, still closes
+/// Settings from inside one.
+fn typing_is_not_a_shortcut(event: &KeyboardEvent) {
+    let modified = event.modifiers().meta() || event.modifiers().ctrl() || event.modifiers().alt();
+    if !modified {
+        event.stop_propagation();
+    }
+}
+
 /// A line of text somebody types. The app's `ui.textField`.
 #[component]
-fn TextField(value: String, onchange: EventHandler<String>) -> Element {
+pub(crate) fn TextField(value: String, onchange: EventHandler<String>) -> Element {
     rsx! {
         input {
             class: "text-field",
             r#type: "text",
             value: "{value}",
             oninput: move |event| onchange.call(event.value()),
+            onkeydown: |event: KeyboardEvent| typing_is_not_a_shortcut(&event),
         }
     }
 }
@@ -680,6 +702,7 @@ fn ColorField(value: String, onchange: EventHandler<String>) -> Element {
                 class: "text-field color-hex",
                 r#type: "text",
                 value: "{value}",
+                onkeydown: |event: KeyboardEvent| typing_is_not_a_shortcut(&event),
                 oninput: move |event| {
                     if let Some(read) = crate::palette::read_colour(&event.value()) {
                         onchange.call(crate::palette::hex(read));

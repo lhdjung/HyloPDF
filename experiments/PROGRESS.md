@@ -3960,6 +3960,170 @@ does.
 
 ---
 
+## Four surfaces nothing was comparing
+
+`tests/parity.rs` judges the port against a fixture taken from the running app
+in WebKit, which is the right shape, and it had been pointed at the toolbar,
+the menus, the sidebar's tabs, the find bar and the Settings window. Four
+surfaces were outside it. A surface nothing compares is a surface that drifts,
+so `take-inventory.mjs` takes all four now:
+
+- **The start screen**, which is the first thing anybody sees. Taken from a
+  second launch with nothing in it rather than by closing the document in the
+  first, because closing one is a gesture with a *history* — the shelf has the
+  paper just put down at the top of it — and what the port has to match is the
+  screen a reader meets on opening the app.
+- **The Information window**, the title menu's last item, and the only window
+  in the app that is neither Settings nor a question. The rows a document
+  produces rather than all ten: a paper with no `/Subject` has no Subject row
+  in either reader, so the fixture's own answer is the question.
+- **The theme editor**, which is Appearance's second half — eight fields *and
+  the sentence under each*, and the sentences are the half a comparison of
+  labels would have missed. A colour called "Accent" with no sentence under it
+  is a field whose meaning the reader has to guess.
+- **The three things said over a page**: the way back to a toolbar that has
+  been put away, what a dragged file is told, and the page pill.
+
+The port agreed on every one of them, which is the answer worth having and is
+now the answer a change has to keep.
+
+**And the Keyboard page, three columns wide rather than one.**
+`every_row_agrees_with_the_app_s_own_table` read `needsDocument` and nothing
+else, which is the column nobody sees; the label and the group are the two a
+reader reads on every visit to that page, and they had been carried across by
+hand with nothing comparing them. They agree; now they have to.
+
+Two things learned driving it, and both are about the difference between a
+harness that clicks a *selector* and one that clicks a *point*. A button under
+fourteen theme cards is below the foot of the pane at the size the fixture is
+taken at, so a pointer cannot reach it until the pane is scrolled — a browser's
+`.click()` reaches an element wherever it is, which is why the theme editor had
+never been opened by a test at all. And the peek handle is not on screen until
+somebody reaches for the top edge, which is the app's own rule and the reason
+it is a handle rather than a button.
+
+### What is left, now
+
+- **`.loading` and `.page-placeholder` are dead CSS in the app.** Both were on
+  the list of things the port did not have. Neither is ever applied: nothing in
+  `src/`, `index.html`, `tests/` or `scripts/` creates an element with either
+  class, and `.page-placeholder` appears exactly once in the whole tree, in
+  `styles.css`. There is nothing to port. The rules are the app's to delete and
+  not this branch's.
+- **`.title-drag`** is macOS window dragging with the toolbar hidden, and it
+  does not apply: `titleBarStyle: Overlay` runs the app's document up under the
+  title bar and leaves no native strip to drag by, and this window keeps its
+  own. The question is answered rather than outstanding.
+- **`popover-*` against `menu-*`** is a naming difference and stays one. What a
+  port owes the app is the same elements, labels, order, behaviour and look,
+  not the same class names.
+
+## Signing, which is the first thing here the app cannot do
+
+`signing-assessment.md` was written when a reader asked whether the app could
+sign documents. Its answer was that two unrelated features travel under that
+word: a **visible signature**, which is a picture of a name placed on a page
+and proves nothing, and a **cryptographic signature**, which is a `/Sig`
+dictionary holding a detached CMS blob over a byte range and says who signed
+and that nothing has changed since. It recommended building the first and
+treating the second as its own decision, because a signature nobody's software
+trusts is not a signature.
+
+The first is built, on this branch, in `src/sign.rs`. A reader draws their name
+once, keeps it, and drops it onto a page.
+
+**Ink rather than a stamp**, which is where this parts company with the
+assessment's own plan. It reached for `create_stamp_annotation` and
+`PdfPageImageObject`, which is what Preview writes. `/Ink` is better here for
+three reasons and the third decided it: it is vector, so a signature read at
+400% is drawn from its strokes rather than resampled; it needs no rasteriser,
+and the only one in this crate is behind the `harness` feature and deliberately
+not in the binary; and it is *the annotation that means this* — `/Ink` is what
+the specification has for a mark made by hand, and every other reader shows one
+as what it is and offers to delete it.
+
+**Which settles the one caveat the assessment said to settle before shipping
+rather than after.** It wrote: *it cannot be removed afterwards*, and that is
+true of the app — `Annotation.save()` is not overridden by any markup subtype,
+so nothing already in a file comes out through `saveDocument()` at all. Here it
+is `FPDFPage_RemoveAnnot`, the same one call a highlight comes out through. So
+the Sign window lists what is already on the document and each row has a bin
+beside it. A signature on the wrong page is the ordinary case, not the corner.
+
+**What it reuses is the whole markup write path**, which is what the assessment
+predicted: `markup::edit` releases the file, loads the bytes, changes the
+document and writes it back atomically; `markup::backup` leaves
+`.hylopdf-original` beside it the first time; and the reader is put back where
+they were through the path a LaTeX recompile already uses. `sign::standing` is
+`markup::standing` with one question renamed — a read-only file, an encrypted
+document, and whether this one carries a cryptographic signature.
+
+**That last is asked and not refused.** It is their document, and an
+incremental update is exactly what a signature exists to detect — except that
+pdfium's save is `FPDF_SaveAsCopy`, a *full rewrite*, so it is not even
+incremental. So a signed document can still be signed with ink and the reader
+is told once, before it happens, in a sentence that names the consequence
+rather than the mechanism: *this will make that signature stop verifying, and
+the original is kept beside it.* Nobody signing a contract needs to know what
+`FPDF_SaveAsCopy` is.
+
+**The window says what it is in its first sentence**, above everything else in
+it, because a reader who wanted the other kind of signing should find that out
+before they have drawn anything.
+
+### One scale, in three places, and two of them had two
+
+A signature goes through three scalings between the pad and the page —
+`keep_signature`, `Signature::trimmed` and `sign::place` — and the first two
+divided x and y by *different* numbers. Each on its own looks reasonable:
+"put the drawing into a unit box" is a sentence that reads correctly and
+throws the shape away. The result is that every signature ever saved came
+back square: a name written across a pad arrived on the page as a tall narrow
+scribble.
+
+Nothing that asks *whether* a signature is in the file can see this, which is
+why `a_wide_name_lands_wide` measures the box it landed in and
+`a_wide_name_keeps_its_shape` measures the trim on its own. The strokes are
+**normalised by height** now: y runs 0 to 1 and x runs 0 to however wide the
+hand made it, so `aspect` is a real number and one multiplication does both
+axes. Height is the unit because height is what a reader means by how big a
+signature should be.
+
+### Two faults the feature found in what was already there
+
+**A press in the middle of an empty pad was measured from the wrong corner.**
+An event carries coordinates relative to the node it *landed on*, and the pad's
+"Draw your name here" hint sat at `top: 50%` — which is exactly where anybody
+starts drawing. So a signature begun in the middle came out measured from the
+middle, and its whole first half clamped to the top edge. The hint fills the
+pad now and carries `pointer-events: none`, which says the same thing a second
+way so that a change to the layout cannot bring it back.
+
+**A plain key typed into a text field was also a shortcut.** The root's
+`onkeydown` hears every key in the window — that is how a key with nothing
+focused reaches the reader at all — so a field with the focus gets its
+keystroke *and* so does the keymap. Typing "A Reader" into the Sign window's
+Name field sent `space` and `d` to the document behind it, which is a screen
+down and half of one.
+
+This was not the Sign window's bug. The password field carries the rule inline
+and its comment calls it "the same two rules every field in this file has",
+which was true of that field and of no other: **the theme editor's Name field
+had it the whole time**, and typing a theme name scrolled the document. The
+rule lives in `prefs::typing_is_not_a_shortcut` now, called by `TextField` and
+by `ColorField`, so every field in the reader carries it. Keys with a modifier
+still pass, so ⌘A, ⌘C, ⌘V and ⌘Z mean what they mean in a field.
+
+### What is not built, and is not a gap
+
+No date field and no typed-name-in-a-script-face, which the assessment listed
+beside the drawing. Both are the same feature with a different capture, and
+neither is what makes this useful. Cryptographic signing is where the
+assessment left it: not blocked by anything in this codebase, blocked by the
+fact that a signature nobody's software trusts is not a signature.
+
+---
+
 ## Three things to carry forward
 
 1. **Write the test with the feature.** The harness is a quarter-second for

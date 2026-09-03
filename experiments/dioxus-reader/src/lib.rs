@@ -14,7 +14,19 @@
 //! What is not built: nothing on the app's own list of things a reader can
 //! ask for. The theme editor was the last of it and the password prompt was
 //! the last of that — an encrypted document is asked about now rather than
-//! refused, which is [`app::Locked`] and the window over it. Every one of the
+//! refused, which is [`app::Locked`] and the window over it.
+//!
+//! **And one thing is built that the app has no counterpart for**, which is
+//! the first time that has been true: [`sign`]. A reader draws their name
+//! once, keeps it, and drops it onto a page as the specification's own
+//! `/Ink` annotation. It is not parity and does not pretend to be — it is in
+//! `tests/parity.rs` as a named exception, the way `keymap::EXTRA` names the
+//! three keyboard actions this reader has and the app has not. It is also not
+//! a *digital* signature and the window says so in its first sentence; see
+//! `signing-assessment.md` for the two things that word means and why only one
+//! of them is reachable from either renderer.
+//!
+//! Every one of the
 //! app's forty-three keyboard actions answers here — the last three to arrive were dark mode,
 //! help and print, which are the three that are about something outside the
 //! document — so an action added to [`keymap`] and not handled in [`app`] is
@@ -137,6 +149,7 @@ pub mod select;
 pub mod session;
 pub mod shell;
 pub mod sidebar;
+pub mod sign;
 pub mod single;
 pub mod stats;
 pub mod steady;

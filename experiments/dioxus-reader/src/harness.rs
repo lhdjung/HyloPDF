@@ -988,6 +988,30 @@ impl Reader {
         self.settle();
     }
 
+    /// Draw on the Sign window's pad: a press, several moves and a release,
+    /// as fractions of the pad's own box.
+    ///
+    /// A gesture of its own rather than a `sweep` over the pad, because the
+    /// two differ in the way that matters here — a sweep sends two moves and a
+    /// signature is a *path*, so a stroke drawn with two points is a straight
+    /// line whatever was meant by it. This sends one move per point, which is
+    /// what a hand does.
+    pub fn scrawl(&mut self, points: &[(f32, f32)]) {
+        let Some(first) = points.first() else { return };
+        let (x, y, width, height) = self.box_of(".sign-pad").expect("the pad is on screen");
+        let onto = |at: &(f32, f32)| (x + at.0 * width, y + at.1 * height);
+        let (from_x, from_y) = onto(first);
+        self.harness.mouse_down_at(from_x, from_y);
+        for point in points.iter().skip(1) {
+            let (to_x, to_y) = onto(point);
+            self.harness.move_mouse_to(to_x, to_y);
+        }
+        let (last_x, last_y) = onto(points.last().unwrap_or(first));
+        self.harness.mouse_up_at(last_x, last_y);
+        self.give_keyboard_back();
+        self.settle();
+    }
+
     /// A sweep across one line of a page, given as fractions of that page's
     /// box: a test says "a fifth of the way down, from a tenth across to
     /// nine tenths" and does not have to know where the page is on screen.
@@ -1260,6 +1284,16 @@ impl Reader {
     /// reader already agree on — so the width is the only thing in the
     /// interface that says whether the font is the same font, laid out the
     /// same way.
+    /// Where the first node matching `selector` is laid out and how big it is,
+    /// in CSS pixels — which is what a gesture over something needs and
+    /// `width_of` beside it answers a quarter of.
+    pub fn box_of(&self, selector: &str) -> Option<(f32, f32, f32, f32)> {
+        self.harness.query(selector).map(|node| {
+            let rect = self.harness.layout_rect_of(node);
+            (rect.x, rect.y, rect.width, rect.height)
+        })
+    }
+
     pub fn width_of(&self, selector: &str) -> Option<f64> {
         self.harness
             .query(selector)

@@ -124,6 +124,34 @@ tail as certificate formats and trust lists move.
   for the incremental update and a CMS crate for the blob, with the key coming
   from the platform store. This is the real version of the estimate above.
 
+## What was built
+
+**The visible signature is built, on the `dioxus-experiment` branch**, in
+`experiments/dioxus-reader/src/sign.rs`. It follows the recommendation below
+with one deliberate departure and one caveat settled the other way.
+
+*Ink, not a stamp.* `/Ink` is the specification's own annotation for a mark
+made by hand; `create_stamp_annotation` with an image in it is a rubber stamp.
+Ink is vector — a signature read at 400% is drawn from its strokes rather than
+resampled — it needs no rasteriser, and every other reader shows it as what it
+is and offers to delete it.
+
+*Which settles the caveat above.* "It cannot be removed afterwards" is true of
+this app and not of pdfium: `FPDFPage_RemoveAnnot` is one call, the same one a
+highlight comes out through. So the Sign window lists what is already on the
+document with a bin beside each row, and the feature ships with the caveat
+answered rather than carried.
+
+*A signed document is asked about, not refused.* pdfium's save is a full
+rewrite, so ink into a cryptographically signed document ends the signature it
+carried. The reader is told once, before it happens, in a sentence that names
+the consequence rather than the mechanism.
+
+`experiments/PROGRESS.md` has the long form, including the two faults the
+feature turned up in code that was already there.
+
+Nothing of it is on `main`. Everything below stands as written.
+
 ## Recommendation
 
 Build the visible signature — it is a natural neighbour of the markup that is

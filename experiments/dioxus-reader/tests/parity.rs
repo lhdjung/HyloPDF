@@ -210,6 +210,19 @@ fn the_surfaces_are_the_size_of_the_app_s() {
 /// The app's own five: Open, the document's name, the zoom readout, Theme and
 /// the cog. A rule is a row in this comparison because where the rules fall is
 /// half of what a menu reads like.
+/// **What this port has that the app does not, named here rather than
+/// tolerated.**
+///
+/// A port that quietly grew items would be a port whose parity claim means
+/// nothing, so the exceptions are a list — the same arrangement
+/// `keymap::EXTRA` has for the three keyboard actions this reader has and the
+/// app has not. There is one, and it is signing: see `src/sign.rs`, and
+/// `signing-assessment.md` for the two things that word means and which of
+/// them this is.
+///
+/// Adding a row here is a decision. Anything not in it is drift.
+const OURS: [(&str, &str); 1] = [("document", "Sign…")];
+
 #[test]
 fn every_menu_lists_what_the_app_s_lists() {
     let mut reader = reader();
@@ -244,10 +257,18 @@ fn every_menu_lists_what_the_app_s_lists() {
             })
             .collect();
         reader.click(chip);
-        let got = reader.text_all(&format!(
-            ".menu.{menu} .menu-label, .menu.{menu} .menu-row-label, \
-             .menu.{menu} .menu-section, .menu.{menu} .menu-rule"
-        ));
+        let got: Vec<String> = reader
+            .text_all(&format!(
+                ".menu.{menu} .menu-label, .menu.{menu} .menu-row-label, \
+                 .menu.{menu} .menu-section, .menu.{menu} .menu-rule"
+            ))
+            .into_iter()
+            // The port's own, taken out before the comparison rather than
+            // written into the fixture: the fixture is what the *app* holds,
+            // and editing it to say otherwise would be the copy going stale in
+            // the one direction nothing could see. See `OURS`.
+            .filter(|label| !OURS.contains(&(menu, label.as_str())))
+            .collect();
         assert_eq!(got, want, "the {menu} menu");
         reader.press("Escape");
     }

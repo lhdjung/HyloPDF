@@ -54,6 +54,13 @@ pub fn path(name: &str) -> Option<&'static str> {
         "info" => r#"<circle cx="12" cy="12" r="8.2"/><path d="M12 11v5.2"/><path d="M12 7.9h.01"/>"#,
         "settings" => r#"<path d="M9.4 3.4h5.2l.2 2.3 1.3.7 2-1 2.7 4.6-1.9 1.3v1.4l1.9 1.3-2.7 4.6-2-1-1.3.7-.2 2.3H9.4l-.2-2.3-1.3-.7-2 1L3.2 14l1.9-1.3v-1.4L3.2 10l2.7-4.6 2 1 1.3-.7zM15.1 12a3.1 3.1 0 1 0-6.2 0 3.1 3.1 0 0 0 6.2 0z" fill="currentColor" fill-rule="evenodd"/><circle cx="12" cy="12" r="3.1"/>"#,
         "crop" => r#"<path d="M7.5 3.5v13h13"/><path d="M3.5 7.5h13v13"/>"#,
+        // **The second one not in `icons.ts`**, and for the same kind of
+        // reason: the app cannot sign a document, so it never needed a
+        // drawing for it. A nib with a name trailing off it — the shape every
+        // application uses for this, and the one that reads as *ink* rather
+        // than as a certificate, which is the whole distinction
+        // [`crate::sign`] is built around.
+        "sign" => r#"<path d="M3.5 18.5c3-.6 4.4-2.6 5.2-5.1.7-2.2 1-4.6 2.3-4.6 1.1 0 1 1.6.3 2.8-.8 1.3-2 1.8-2 3 0 .8.7 1.2 1.6 1.2 1.6 0 2.6-1.1 3.6-1.1.7 0 1 .5 1 1.1"/><path d="M17.5 15.8c1.4 0 2.2-.6 3-1.4"/><path d="M14.2 8.4l4.6-4.6a1.7 1.7 0 0 1 2.4 2.4l-4.6 4.6-2.9.5z"/>"#,
         _ => return None,
     })
 }

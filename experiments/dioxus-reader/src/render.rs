@@ -362,6 +362,20 @@ pub trait PageSource: Send + Sync {
         Vec::new()
     }
 
+    /// Every signature in the document, in reading order.
+    ///
+    /// The neighbour of [`Self::markup`] and read the same way, for the same
+    /// reason: a list has to be assembled before it can be shown. What it
+    /// answers is where each one sits and how big it is, which is all the
+    /// interface needs — the strokes themselves are the document's business
+    /// once they are in it, and this reader draws none of them.
+    ///
+    /// Empty for a renderer that cannot answer, and a reader over one still
+    /// reads.
+    fn signatures(&self) -> Vec<crate::sign::Placed> {
+        Vec::new()
+    }
+
     /// Let go of the file, because something is about to write to it.
     ///
     /// **This exists because pdfium reads a page when the page is asked

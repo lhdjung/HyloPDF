@@ -1148,6 +1148,69 @@ body { margin: 0;
    carries a margin for the pages in Settings where it follows a long list. */
 .ask-actions { margin-top: 0; justify-content: flex-end; }
 
+/* The Sign window, which has no counterpart in the app — see `sign.rs`. Wider
+   than a note and narrower than Settings, because the widest thing in it is
+   the pad and the pad is as wide as a signature needs. Its size is on the
+   element rather than here: see `app::PAD_WIDTH`. */
+.sign-window { width: 520px; height: auto; max-height: 88%; }
+.sign-body {
+  padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px;
+  overflow: scroll; scrollbar-width: thin;
+}
+.sign-body .pane-lede { margin: 0; }
+.sign-body .pane-group { margin: 4px 0 0 0; }
+.sign-list { display: flex; flex-direction: column; gap: 6px; }
+.sign-row { display: flex; align-items: center; gap: 6px; }
+/* A row is the drawing and the name, and the drawing is the larger half of it
+   — a list of signatures is chosen from by looking, not by reading. */
+.sign-use {
+  flex: 1 1 auto; display: flex; align-items: center; gap: 14px;
+  min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); color: var(--text); text-align: left;
+}
+.sign-use:hover { background: var(--hover); border-color: var(--accent); }
+.sign-name { flex: 1 1 0; min-width: 0; font-weight: 500; }
+/* A row for a signature already in the document is a fact rather than a
+   choice: there is nothing to press on it but the bin, so it is not a button
+   and does not look like one. */
+.sign-placed {
+  flex: 1 1 auto; display: flex; align-items: baseline; gap: 10px;
+  min-width: 0; padding: 6px 10px;
+}
+.sign-where { color: var(--faint); font-size: 12.5px; }
+.sign-forget {
+  flex: 0 0 auto; width: 30px; height: 30px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 9px; background: transparent;
+}
+.sign-forget:hover { background: var(--hover); }
+/* The pad. A dashed edge, because it is a place to *do* something rather than
+   a thing to read — the same shape the app draws around a document being
+   dragged over the window, and for the same reason. */
+.sign-pad {
+  position: relative; display: block;
+  border: 1px dashed var(--line); border-radius: 12px; background: var(--sunk);
+}
+/* **The hint fills the pad, and that is not a matter of taste.** An event
+   here carries coordinates relative to the node it *landed on*, and the press
+   handler on the pad turns them into a point in the pad — so a child sitting
+   at any other origin measures the press from the wrong corner. This span was
+   `top: 50%`, which is the middle of the pad and is exactly where anybody
+   starts drawing: a signature begun in the middle of an empty pad came out
+   measured from the middle, which clamped its whole first half to the top
+   edge. `pointer-events: none` says the same thing a second way, so that a
+   change to the layout cannot bring it back. */
+.sign-pad-hint {
+  position: absolute; inset: 0; display: flex;
+  align-items: center; justify-content: center;
+  color: var(--faint); pointer-events: none;
+}
+.scrawl { display: block; }
+/* A signature is waiting for somewhere to go, and until it has one every page
+   is a target. The crosshair is the whole of what says so once the window has
+   closed — that, and the line at the foot of the screen. */
+.root.placing .page { cursor: crosshair; }
+
 /* The Information window: what the document says about itself, a row a fact.
    `showDocumentDetails` in `main.ts` and `ui.field` under it. */
 .details-window { min-width: 420px; max-width: 560px; }

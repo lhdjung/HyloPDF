@@ -454,6 +454,42 @@ impl PageSource for Document {
         marks
     }
 
+    /// Every signature in the document, read the way the highlights are.
+    ///
+    /// **An `/Ink` annotation is not necessarily a signature**, and this does
+    /// not pretend otherwise: what it reads is every ink annotation, whoever
+    /// put it there and whatever they meant by it. That is the honest answer
+    /// and it is also the useful one — a reader who wants their signature off
+    /// a page can take it off, and so can they with a scribble somebody else
+    /// left, which is a thing they would also like to be able to do.
+    fn signatures(&self) -> Vec<crate::sign::Placed> {
+        let _library = library();
+        let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(document) = held.document.as_ref() else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        for (number, page) in document.pages().iter().enumerate() {
+            let height = page.height().value as f64;
+            for (index, annotation) in page.annotations().iter().enumerate() {
+                let PdfPageAnnotation::Ink(ink) = &annotation else {
+                    continue;
+                };
+                let at = crate::markup::down(&ink.bounds().unwrap_or(PdfRect::ZERO), height);
+                if at.width <= 0.0 || at.height <= 0.0 {
+                    continue;
+                }
+                found.push(crate::sign::Placed {
+                    page: number + 1,
+                    index,
+                    at,
+                    by: ink.creator().unwrap_or_default(),
+                });
+            }
+        }
+        found
+    }
+
     /// Close the file, keeping everything else. See
     /// [`PageSource::release`] for why this exists at all.
     ///

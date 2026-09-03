@@ -771,6 +771,27 @@ impl Frame {
 /// itself and there is no reason to leave it anonymous.
 const AUTHOR: &str = "HyloPDF";
 
+/// How tall a signature is dropped, in the page's own points.
+///
+/// A fixed height rather than a fraction of the page, and the reason is that a
+/// signature is a fact about a hand and not about the paper: a name written on
+/// a postcard and the same name written on a poster are the same size. Forty
+/// points is about 14mm, which is what a signature on a printed form measures.
+/// Every other size question in this reader is the page's; this one is not.
+const HAND_HEIGHT: f64 = 40.0;
+
+/// The drawing pad in the Sign window, in CSS pixels.
+///
+/// Written down rather than measured, and that is the one awkward thing about
+/// the pad: a stroke arrives as a point inside the element, and turning it into
+/// the unit box needs the element's size — which the handler cannot ask for.
+/// Blitz gives an event its coordinates and not its target's box, so the pad
+/// is sized from these on the element itself rather than in `styles.rs` — the
+/// sheet is a `const &str` and cannot interpolate, and two numbers that have to
+/// agree is exactly the copy this codebase keeps warning about.
+pub const PAD_WIDTH: f64 = 440.0;
+pub const PAD_HEIGHT: f64 = 150.0;
+
 /// One row of the markup list, wherever the mark itself is being kept.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MarkRow {
@@ -931,6 +952,38 @@ pub struct Locked {
     pub wrong: bool,
 }
 
+/// The Sign window: what is drawn on the pad, and what it will be called.
+///
+/// **The pad is the one place in this reader where the pointer draws.**
+/// Everything else it does is choosing — a word, a page, a colour — and this
+/// is the one gesture whose whole content is the path the pointer took. So the
+/// points are kept as they arrive, in the pad's own space, and normalised into
+/// the unit box only when the pad's size is in hand; see [`Viewer::draw_to`].
+///
+/// The strokes are *not* a `Signature` while they are being drawn, deliberately:
+/// a signature is a thing on disk in a unit box, and these are pixels on a pad.
+/// The conversion happens once, at the moment it is kept.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Signing {
+    /// What the reader is calling it. A name is asked for because several are
+    /// the ordinary case — a full name and a set of initials — and a list of
+    /// rows all called the same thing is a list nobody can choose from.
+    pub name: String,
+    /// The strokes so far, in the pad's own pixels from its top left.
+    pub strokes: Vec<Vec<[f64; 2]>>,
+    /// Whether the pointer is down, which is what makes a move add a point to
+    /// the last stroke rather than start one.
+    pub drawing: bool,
+    /// How big the pad was when it was last drawn on, so that the strokes can
+    /// be put into the unit box without asking the DOM. Written by the pad's
+    /// own press handler, which is the one place the size is known.
+    pub pad: (f64, f64),
+    /// Where the pad's top left corner is in the window, worked out at the
+    /// press from the difference between the two coordinate systems the event
+    /// carries. See [`Viewer::draw_from`].
+    pub origin: (f64, f64),
+}
+
 pub struct Viewer {
     pub document: Arc<dyn PageSource>,
     pub layout: Layout,
@@ -1072,6 +1125,23 @@ pub struct Viewer {
     /// draft is installed as the live theme while it is being made, which is
     /// how the app around you becomes the preview.
     pub editing: Option<crate::theme::Theme>,
+    /// The Sign window, when it is up. See [`Signing`], and [`crate::sign`]
+    /// for what the word does and does not mean here.
+    pub signing: Option<Signing>,
+    /// A signature chosen and waiting for somewhere to go.
+    ///
+    /// **Signing is two gestures, and this is the gap between them.** Choosing
+    /// which name to sign with and choosing where on the page it goes are
+    /// different questions, and a window that answered both would have to
+    /// contain the page. So the window closes, this is armed, the pointer
+    /// becomes the thing that answers the second question, and one click on
+    /// a page puts it there. Escape disarms it, like everything else that
+    /// waits.
+    pub placing: Option<crate::sign::Signature>,
+    /// Whether the reader has been told, for this document, that signing it
+    /// rewrites the file and breaks the cryptographic signature it carries.
+    /// Once, and before it happens — see [`crate::sign::BREAKS_A_SIGNATURE`].
+    said_rewrites: bool,
     /// The text of the pages the pointer has touched, and where every
     /// character of it is.
     ///
@@ -1309,6 +1379,9 @@ impl Viewer {
             locked: None,
             details_open: false,
             editing: None,
+            signing: None,
+            placing: None,
+            said_rewrites: false,
             pill_up: false,
             pill_token: 0,
             peek: false,
@@ -2845,6 +2918,283 @@ impl Viewer {
             self.label(sweep.span().0.page)
         );
         Some((format!("“{quoted}” — {where_from}"), where_from))
+    }
+
+    /* --------------------------------------------------------------- ink */
+
+    /// Open the Sign window, or say why it cannot be.
+    ///
+    /// The refusals are asked *here* rather than at the moment the signature
+    /// is placed, which is the opposite of what markup does and is right for
+    /// the opposite reason: a mark is one gesture, so it may as well try and
+    /// report; signing is a window, a drawing and a click, and finding out at
+    /// the end of all three that the file is read-only is the reader's time
+    /// spent on nothing.
+    pub fn open_signing(&mut self) -> bool {
+        if self.empty() {
+            return false;
+        }
+        let standing = crate::sign::standing(
+            self.document.path(),
+            self.document.encrypted(),
+        );
+        if !standing.into_file {
+            self.notice = format!("{} — so it cannot be signed.", standing.refused);
+            return false;
+        }
+        self.menu = None;
+        self.signing = Some(Signing {
+            // The pad opens empty and the name opens empty with it. A default
+            // of "Signature" is what `sign::save` falls back to, and putting
+            // it in the field would mean a reader who types their own name has
+            // to clear somebody else's word out of the way first.
+            ..Default::default()
+        });
+        true
+    }
+
+    /// Take it down. `false` when it was not up, which is what lets Escape go
+    /// on to the next thing it means.
+    pub fn close_signing(&mut self) -> bool {
+        self.signing.take().is_some()
+    }
+
+    /// Where the signatures are kept, which is the config directory this
+    /// reader was given rather than the ambient one. See [`crate::sign::dir`].
+    pub fn signatures(&self) -> Vec<crate::sign::Signature> {
+        crate::sign::load_all(self.store.dir())
+    }
+
+    /// A press on the pad: begin a stroke, and note where the pad is.
+    ///
+    /// `on` is where the press landed inside the pad and `client` is where it
+    /// landed in the window; the difference between them is the pad's top left
+    /// corner, which is the one thing a later move needs and cannot ask for.
+    /// `begin_sweep` records the same number for the same reason.
+    pub fn draw_from(&mut self, on: (f64, f64), client: (f64, f64), pad: (f64, f64)) {
+        let Some(signing) = self.signing.as_mut() else {
+            return;
+        };
+        signing.pad = pad;
+        signing.origin = (client.0 - on.0, client.1 - on.1);
+        signing.drawing = true;
+        signing.strokes.push(vec![[on.0, on.1]]);
+    }
+
+    /// The pointer moved in the window with the button down, while a stroke is
+    /// running. Taken into the pad's own space and clamped to it: a hand that
+    /// runs off the edge should stop at the edge rather than write a signature
+    /// whose box is the whole window.
+    pub fn draw_on_pad(&mut self, client: (f64, f64)) {
+        let Some((origin, pad)) = self
+            .signing
+            .as_ref()
+            .filter(|signing| signing.drawing)
+            .map(|signing| (signing.origin, signing.pad))
+        else {
+            return;
+        };
+        self.draw_to((
+            (client.0 - origin.0).clamp(0.0, pad.0),
+            (client.1 - origin.1).clamp(0.0, pad.1),
+        ));
+    }
+
+    /// One point onto the stroke that is running, in the pad's own space.
+    pub fn draw_to(&mut self, at: (f64, f64)) {
+        let Some(signing) = self.signing.as_mut() else {
+            return;
+        };
+        if !signing.drawing {
+            return;
+        }
+        let Some(stroke) = signing.strokes.last_mut() else {
+            return;
+        };
+        // A point that has not moved is a point that says nothing, and a
+        // signature drawn slowly would otherwise be a thousand of them. Half a
+        // pixel is below what anybody can see and above what a jittering
+        // trackpad reports while a finger rests.
+        if stroke
+            .last()
+            .is_some_and(|last| (last[0] - at.0).abs() < 0.5 && (last[1] - at.1).abs() < 0.5)
+        {
+            return;
+        }
+        stroke.push([at.0, at.1]);
+    }
+
+    /// And the button let go. A stroke of one point is kept: a dot over an i
+    /// is a stroke of one point, and [`crate::sign::place`] knows what to do
+    /// with one.
+    pub fn draw_done(&mut self) {
+        if let Some(signing) = self.signing.as_mut() {
+            signing.drawing = false;
+        }
+    }
+
+    /// Throw away what is on the pad, leaving the window up. The thing anybody
+    /// wants after the first attempt at signing with a trackpad.
+    pub fn clear_pad(&mut self) {
+        if let Some(signing) = self.signing.as_mut() {
+            signing.strokes.clear();
+            signing.drawing = false;
+        }
+    }
+
+    /// Keep what is on the pad, and answer whether it was kept.
+    ///
+    /// **The strokes go across as drawn**, in the pad's own pixels, and
+    /// `sign::save` normalises them. That is one division rather than two, and
+    /// the two were the bug: dividing x by the pad's width and y by its height
+    /// scales the axes differently, so a name written across a pad three times
+    /// wider than it is tall arrived a third as wide as it was drawn. A pad
+    /// pixel is square, so handing over pixels loses nothing — see
+    /// [`crate::sign::Signature::trimmed`], which is the one place a signature
+    /// is ever rescaled.
+    pub fn keep_signature(&mut self) -> bool {
+        let Some(signing) = self.signing.clone() else {
+            return false;
+        };
+        if signing.strokes.iter().all(|stroke| stroke.is_empty()) {
+            self.notice = "Draw a signature first, and this keeps it.".into();
+            return false;
+        }
+        let drawn = crate::sign::Signature {
+            name: signing.name.trim().to_string(),
+            id: String::new(),
+            strokes: signing.strokes.clone(),
+        };
+        match crate::sign::save(self.store.dir(), &drawn) {
+            Ok(stored) => {
+                self.notice = format!("Kept {}.", stored.name);
+                // The pad is cleared rather than the window closed: keeping a
+                // signature and using one are two things, and a reader who has
+                // just drawn one very often wants to draw the initials too.
+                self.clear_pad();
+                if let Some(signing) = self.signing.as_mut() {
+                    signing.name.clear();
+                }
+                true
+            }
+            Err(why) => {
+                self.notice = why;
+                false
+            }
+        }
+    }
+
+    /// Take one off the list, and off the disk.
+    pub fn forget_signature(&mut self, id: &str) {
+        if let Err(why) = crate::sign::forget(self.store.dir(), id) {
+            self.notice = why;
+        }
+    }
+
+    /// Every signature already in the document this window is showing.
+    pub fn signed_here(&self) -> Vec<crate::sign::Placed> {
+        self.document.signatures()
+    }
+
+    /// **Take a signature back out of the document.**
+    ///
+    /// The assessment that led to this feature named exactly one caveat worth
+    /// deciding before shipping rather than after — *it cannot be removed
+    /// afterwards* — and that was written about the app, where
+    /// `Annotation.save()` is not overridden by any subtype and nothing
+    /// already in a file can come out through `saveDocument()` at all. Here it
+    /// is `FPDFPage_RemoveAnnot`, which is the same one call a highlight comes
+    /// out through, so the caveat does not apply and there is no reason to
+    /// ship the feature without it. A signature somebody put on the wrong page
+    /// is the ordinary case, not the corner.
+    ///
+    /// Answers the scan to restart, as everything that reopens the document
+    /// does.
+    pub fn unsign(&mut self, page: usize, index: usize) -> Option<u64> {
+        let path = self.document.path().to_string();
+        self.document.release();
+        let taken = crate::markup::remove(&path, page, index);
+        let restarted = self.reopen(&path);
+        match taken {
+            Ok(()) => self.notice = format!("Signature taken off page {page}."),
+            Err(refused) => self.notice = refused,
+        }
+        restarted
+    }
+
+    /// Choose a signature and go looking for somewhere to put it.
+    ///
+    /// The window closes, because the next question is *where* and the answer
+    /// to it is on the page the window is covering.
+    pub fn sign_with(&mut self, signature: crate::sign::Signature) {
+        self.signing = None;
+        self.placing = Some(signature);
+        self.notice = "Click on the page where the signature should go.".into();
+    }
+
+    /// Put it down again unsigned. `false` when nothing was armed, which is
+    /// what lets Escape go on to the next thing it means.
+    pub fn put_down(&mut self) -> bool {
+        if self.placing.take().is_some() {
+            self.notice = "Signing cancelled.".into();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// **The click that signs.** `on` is where the pointer landed on the page,
+    /// in the screen pixels a page is laid out in; `unplace_on` takes it the
+    /// rest of the way, through the crop and the rotation, into the page's own
+    /// points.
+    ///
+    /// The point is where the *middle of the left edge* of the signature goes,
+    /// not its top left, because what a reader is aiming at when they click on
+    /// a line is the line — so the signature sits on it rather than hanging
+    /// below it.
+    ///
+    /// Answers the scan to restart, when the find bar was up, which is the
+    /// convention [`Viewer::document_changed`] sets for everything that
+    /// reopens the document underneath the reader.
+    pub fn sign_at(&mut self, page: usize, on: (f64, f64)) -> Option<u64> {
+        let signature = self.placing.take()?;
+        let index = page.checked_sub(1)?;
+        let (x, y) = self.layout.unplace_on(index, on.0, on.1);
+        let height = HAND_HEIGHT;
+        let at = Rect {
+            left: x,
+            top: y - height / 2.0,
+            width: 0.0,
+            height,
+        };
+        let path = self.document.path().to_string();
+
+        // Said once, before it happens, and only for the document that has
+        // something to lose. See `sign::BREAKS_A_SIGNATURE`.
+        let warning = if self.standing.signed && !self.said_rewrites {
+            self.said_rewrites = true;
+            format!(" {}", crate::sign::BREAKS_A_SIGNATURE)
+        } else {
+            String::new()
+        };
+
+        // Let go of the file before writing it and reopen whatever happens —
+        // `mark_selection`'s own rule, and see
+        // [`crate::render::PageSource::release`] for why it is not optional.
+        self.document.release();
+        let written = crate::sign::place(&path, page, at, &signature, crate::sign::INK);
+        let restarted = self.reopen(&path);
+        match written {
+            Ok(()) => self.notice = format!("Signed on page {page}.{warning}"),
+            // Nothing is kept beside the document here, which is where this
+            // parts company with a mark. A highlight kept in the journal is
+            // still a passage the reader marked and can be shown to them; a
+            // signature that did not go into the file is not a signature at
+            // all, and a list of names this reader had failed to write would
+            // be a promise it cannot keep.
+            Err(refused) => self.notice = refused,
+        }
+        restarted
     }
 
     /* ------------------------------------------------------------- markup */
@@ -5180,6 +5530,28 @@ pub fn Reader(
     } else {
         Vec::new()
     };
+    // The Sign window, and the signatures already kept. The list is read off
+    // the disk, so it is read while the window is open and not otherwise —
+    // the same bargain the recents shelf strikes one paragraph down.
+    let signing = held.signing.clone();
+    let kept = if signing.is_some() {
+        held.signatures()
+    } else {
+        Vec::new()
+    };
+    // And what is already on the document, which is read from the file rather
+    // than remembered — see `PageSource::signatures`.
+    let signed_here = if signing.is_some() {
+        held.signed_here()
+    } else {
+        Vec::new()
+    };
+    // Whether a signature is looking for somewhere to go, which changes what
+    // a click on a page means and what the pointer looks like over one.
+    let placing = held.placing.is_some();
+    // Asked before the list is consumed by the rows below it, which is the
+    // only reason it is a variable.
+    let nothing_kept = kept.is_empty();
     let note_page = note_open
         .as_ref()
         .map(|(page, _)| held.label(*page))
@@ -5391,7 +5763,16 @@ pub fn Reader(
             // Presenting is a class rather than a pile of conditions: the
             // chrome is gone from the DOM either way, and what is left for
             // CSS is the ground the document sits on.
-            class: if presenting { "root presenting" } else { "root" },
+            class: match (presenting, placing) {
+                // A signature waiting for somewhere to go changes what a click
+                // on the page means, so it changes what the pointer looks like
+                // over one. Nothing else in this reader arms a click, and a
+                // mode with nothing on screen saying so is a mode a reader
+                // discovers by signing something they did not mean to.
+                (true, _) => "root presenting",
+                (false, true) => "root placing",
+                (false, false) => "root",
+            },
             style: "{variables}",
             tabindex: 0,
             onkeydown: on_key,
@@ -5476,10 +5857,25 @@ pub fn Reader(
                 }
             },
             onmousemove: move |event| {
-                let (resizing, sweeping) = {
+                let (resizing, sweeping, drawing) = {
                     let held = viewer.read();
-                    (held.resize_from.is_some(), held.sweeping())
+                    (
+                        held.resize_from.is_some(),
+                        held.sweeping(),
+                        held.signing.as_ref().is_some_and(|pad| pad.drawing),
+                    )
                 };
+                // **A hand signing a name leaves the pad**, which is the whole
+                // reason this is here and not on the pad itself. The point is
+                // taken in the pad's own space, which means subtracting where
+                // the pad is — and a handler cannot ask an element where it
+                // is, so it is remembered at the press. See
+                // [`Viewer::draw_from`].
+                if drawing {
+                    let at = event.client_coordinates();
+                    viewer.write().draw_on_pad((at.x, at.y));
+                    return;
+                }
                 if resizing {
                     let x = event.client_coordinates().x;
                     viewer.write().drag_sidebar(x);
@@ -5507,6 +5903,7 @@ pub fn Reader(
                     let held = viewer.read();
                     (held.resize_from.is_some(), held.sweeping())
                 };
+                viewer.write().draw_done();
                 if resizing {
                     viewer.write().finish_resize_sidebar();
                 }
@@ -5842,6 +6239,24 @@ pub fn Reader(
                                     Icon { name: "mark", stroke: ink.clone() }
                                     span { class: "menu-label", "Mark this page" }
                                     span { class: "menu-key", "{key_mark}" }
+                                }
+                                // **The one item in this menu the app has
+                                // no counterpart for.** Signing is not
+                                // parity — see [`crate::sign`], and
+                                // `signing-assessment.md` for the two things
+                                // the word means and which of them this is.
+                                // It sits beside Mark this page because the
+                                // two are the same kind of gesture: something
+                                // done *to* the document, as against the
+                                // three below, which are ways of taking it
+                                // somewhere else.
+                                button {
+                                    class: "menu-item",
+                                    "data-item": "sign",
+                                    onclick: move |_| { viewer.write().open_signing(); },
+                                    span { class: "menu-tick", "" }
+                                    Icon { name: "sign", stroke: ink.clone() }
+                                    span { class: "menu-label", "Sign…" }
                                 }
                                 // Printing prints nothing: the document goes
                                 // to a program that does. See [`Printer`].
@@ -6943,6 +7358,187 @@ pub fn Reader(
                     }
                 }
             }
+            // **The Sign window**, which has no counterpart in the app: see
+            // [`crate::sign`]. A window rather than a panel for the reason the
+            // two above are windows — it is opened on purpose, answered, and
+            // dismissed — and it is the only one in this reader with a
+            // *drawing surface* in it.
+            if let Some(pad) = signing {
+                div {
+                    class: "window-scrim",
+                    onmousedown: move |event| {
+                        event.stop_propagation();
+                        viewer.write().close_signing();
+                    },
+                    div {
+                        class: "window sign-window",
+                        role: "dialog",
+                        "aria-modal": "true",
+                        "aria-label": "Sign this document",
+                        onmousedown: move |event| event.stop_propagation(),
+                        div { class: "window-bar",
+                            span { class: "window-title", "Sign this document" }
+                            button {
+                                class: "chip window-close",
+                                "aria-label": "Close",
+                                onclick: move |_| { viewer.write().close_signing(); },
+                                Icon { name: "close", stroke: ink.clone() }
+                            }
+                        }
+                        div { class: "sign-body",
+                            // **The sentence that keeps this honest**, and it
+                            // is the first thing in the window rather than a
+                            // footnote under it. A reader who wanted the other
+                            // kind of signing should find that out before they
+                            // have drawn anything.
+                            p { class: "pane-lede",
+                                "Ink on the page, the way a pen is. It is written into the document and any reader can see it — and it is not a digital signature: it proves nothing about who signed or whether the file has changed since."
+                            }
+                            // **What is already on this document**, first,
+                            // because a reader who opens this window on a
+                            // document they have signed is at least as likely
+                            // to be here to take one off as to add another.
+                            if !signed_here.is_empty() {
+                                h3 { class: "pane-group", "On this document" }
+                                div { class: "sign-list",
+                                    for placed in signed_here {
+                                        div {
+                                            key: "{placed.page}-{placed.index}",
+                                            class: "sign-row",
+                                            span { class: "sign-placed",
+                                                span { class: "sign-name",
+                                                    {if placed.by.is_empty() {
+                                                        "Ink".to_string()
+                                                    } else {
+                                                        placed.by.clone()
+                                                    }}
+                                                }
+                                                span { class: "sign-where", "page {placed.page}" }
+                                            }
+                                            button {
+                                                class: "sign-forget",
+                                                "aria-label": "Take this signature off the document",
+                                                onclick: {
+                                                    let (page, index) = (placed.page, placed.index);
+                                                    move |_| { viewer.write().unsign(page, index); }
+                                                },
+                                                Icon { name: "trash", stroke: ink.clone() }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if !nothing_kept {
+                                h3 { class: "pane-group", "Kept" }
+                                div { class: "sign-list",
+                                    for entry in kept {
+                                        div { key: "{entry.id}", class: "sign-row",
+                                            button {
+                                                class: "sign-use",
+                                                onclick: {
+                                                    let entry = entry.clone();
+                                                    move |_| viewer.write().sign_with(entry.clone())
+                                                },
+                                                // The signature itself, drawn
+                                                // from the strokes on disk —
+                                                // which is the only honest
+                                                // preview there is, and it is
+                                                // the same arithmetic
+                                                // `sign::place` does onto a
+                                                // page.
+                                                Scrawl { signature: entry.clone(), width: 132.0, height: 44.0 }
+                                                span { class: "sign-name", "{entry.name}" }
+                                            }
+                                            button {
+                                                class: "sign-forget",
+                                                "aria-label": "Delete this signature",
+                                                onclick: {
+                                                    let id = entry.id.clone();
+                                                    move |_| viewer.write().forget_signature(&id)
+                                                },
+                                                Icon { name: "trash", stroke: ink.clone() }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            h3 { class: "pane-group",
+                                {if nothing_kept { "Draw one" } else { "Or draw another" }}
+                            }
+                            // **The pad.** A press begins a stroke; the moves
+                            // and the release are heard on the root, for the
+                            // reason a sweep down the document is — a hand
+                            // signing a name leaves the box it started in more
+                            // often than not, and the root is the one ancestor
+                            // that spans the window.
+                            div {
+                                class: "sign-pad",
+                                // **The size is written here and nowhere
+                                // else.** The stylesheet is a `const &str` and
+                                // cannot interpolate, so a pad sized in CSS
+                                // and read in Rust would be two numbers that
+                                // have to agree — and the handler's arithmetic
+                                // is wrong by exactly their difference, which
+                                // shows up as a signature drawn slightly off
+                                // the hand. One source, on the element.
+                                style: "width: {PAD_WIDTH}px; height: {PAD_HEIGHT}px;",
+                                onmousedown: move |event| {
+                                    event.stop_propagation();
+                                    let on = event.element_coordinates();
+                                    let client = event.client_coordinates();
+                                    viewer.write().draw_from(
+                                        (on.x, on.y),
+                                        (client.x, client.y),
+                                        (PAD_WIDTH, PAD_HEIGHT),
+                                    );
+                                },
+                                Scrawl {
+                                    signature: crate::sign::Signature {
+                                        name: String::new(),
+                                        id: String::new(),
+                                        // In the pad's own pixels, which is
+                                        // what `literal` below draws in.
+                                        strokes: pad.strokes.clone(),
+                                    },
+                                    width: PAD_WIDTH,
+                                    height: PAD_HEIGHT,
+                                    // The pad draws what was drawn, at the place
+                                    // it was drawn — not stretched to its own
+                                    // extent, which is what the saved ones are
+                                    // shown at and would make the ink jump
+                                    // under the hand drawing it.
+                                    literal: true,
+                                }
+                                if pad.strokes.iter().all(|stroke| stroke.is_empty()) {
+                                    span { class: "sign-pad-hint", "Draw your name here" }
+                                }
+                            }
+                            crate::prefs::Field { label: "Name",
+                                crate::prefs::TextField {
+                                    value: pad.name.clone(),
+                                    onchange: move |value| {
+                                        if let Some(signing) = viewer.write().signing.as_mut() {
+                                            signing.name = value;
+                                        }
+                                    },
+                                }
+                            }
+                            div { class: "pane-actions",
+                                button {
+                                    class: "chip action",
+                                    onclick: move |_| viewer.write().clear_pad(),
+                                    "Clear"
+                                }
+                                button {
+                                    class: "chip action primary",
+                                    onclick: move |_| { viewer.write().keep_signature(); },
+                                    "Keep this signature"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             // A document that will not open without a password.
             // `ui.askForPassword` in the app, and it is a window there for the
             // reason the two above are: it is the only thing on screen worth
@@ -7207,6 +7803,82 @@ fn Start(viewer: Signal<Viewer>, pick: Pick, frame: Frame) -> Element {
     }
 }
 
+/// A signature, drawn.
+///
+/// **The only thing in this reader that draws a document's own ink**, and it
+/// draws it the same way the page will: an SVG `polyline` per stroke, in the
+/// same ballpoint blue, with round caps and joins so that a name looks written
+/// rather than plotted.
+///
+/// `literal` is the difference between the pad and the list. A signature in the
+/// list is shown stretched to the box it is given, which is what it will look
+/// like on the page — `sign::place` scales it to the height it is dropped at
+/// and the strokes on disk are already trimmed to their own extent. The pad
+/// must not do that: stretching what is being drawn as it is drawn means the
+/// ink moves out from under the hand, and the second stroke of a name lands
+/// somewhere the first one has just been dragged away from.
+#[component]
+pub(crate) fn Scrawl(
+    signature: crate::sign::Signature,
+    width: f64,
+    height: f64,
+    #[props(default)] literal: bool,
+) -> Element {
+    // Fitted into the box, or taken as written. **One scale either way**, which
+    // is the same rule `sign::place` follows and for the same reason: the
+    // strokes are height-normalised, so x and y are in one unit and scaling
+    // them differently is what turns a name into a scribble.
+    let aspect = signature.aspect();
+    let (scale, drawn_width, drawn_height) = if literal {
+        // The pad's own space, where a point is already a pixel.
+        (1.0, width, height)
+    } else {
+        // Whichever of the two constraints binds first, so a wide signature in
+        // a short box is fitted across rather than clipped.
+        let fitted = height.min(width / aspect.max(f64::EPSILON));
+        (fitted, fitted * aspect, fitted)
+    };
+    let across = (width - drawn_width) / 2.0;
+    let down = (height - drawn_height) / 2.0;
+    let lines: Vec<String> = signature
+        .strokes
+        .iter()
+        .filter(|stroke| !stroke.is_empty())
+        .map(|stroke| {
+            stroke
+                .iter()
+                .map(|point| {
+                    format!(
+                        "{:.2},{:.2}",
+                        across + point[0] * scale,
+                        down + point[1] * scale
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    rsx! {
+        svg {
+            class: "scrawl",
+            width: "{width}",
+            height: "{height}",
+            view_box: "0 0 {width} {height}",
+            for (at, points) in lines.iter().enumerate() {
+                polyline {
+                    key: "{at}",
+                    points: "{points}",
+                    fill: "none",
+                    stroke: crate::sign::INK,
+                    "stroke-width": "2",
+                    "stroke-linecap": "round",
+                    "stroke-linejoin": "round",
+                }
+            }
+        }
+    }
+}
+
 /// One icon, at the size the chrome wants it.
 ///
 /// **The colour is an attribute rather than `currentColor`, and that is
@@ -7368,6 +8040,16 @@ fn Page(
             onmousedown: move |event| {
                 let on = event.element_coordinates();
                 let client = event.client_coordinates();
+                // **A signature waiting for somewhere to go takes this press
+                // instead of the sweep.** Signing is the one gesture in this
+                // reader that turns a click on a page into a write, so it has
+                // to be the first thing a press is asked about — a sweep
+                // begun here would put the selection down over the very page
+                // the reader is aiming at.
+                if viewer.read().placing.is_some() {
+                    viewer.write().sign_at(index + 1, (on.x, on.y));
+                    return;
+                }
                 viewer.write().begin_sweep(
                     index + 1,
                     (on.x, on.y),
@@ -7728,6 +8410,18 @@ fn perform(
             // up the same kind of window and the app's modal closes on Escape
             // whatever is in it.
             if viewer.write().close_details() {
+                return;
+            }
+            // The Sign window, and then a signature that is looking for
+            // somewhere to go. Two arms rather than one, and in this order,
+            // because they are two states and the reader is in one of them:
+            // the window is over the page, so Escape means the window; and a
+            // signature waiting to be placed has no window at all, so Escape
+            // there is the only way to put it down without signing something.
+            if viewer.write().close_signing() {
+                return;
+            }
+            if viewer.write().put_down() {
                 return;
             }
             // And the password window. Below the rest because a reader inside

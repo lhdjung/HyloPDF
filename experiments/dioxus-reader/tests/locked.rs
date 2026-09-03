@@ -125,7 +125,6 @@ fn a_wrong_password_says_so_and_asks_again() {
     assert_eq!(reader.state().pages, 3);
 }
 
-
 /// What is drawn is bullets. Blitz builds a text editor for
 /// `type="password"` and gives it the right accessibility role, and it does
 /// not mask it — so the reader does, by taking the ink out of the field and

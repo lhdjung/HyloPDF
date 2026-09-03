@@ -3185,7 +3185,7 @@ give way.
 - **The theme editor**, which is the whole of Appearance's second half and the
   three items the theme menu is still missing: New theme…, Edit this
   theme… / Make a copy…, Delete this theme. The largest thing outstanding, and
-  the oldest.
+  the oldest. *(Built — see "Parity, measured rather than asserted" below.)*
 - **A password prompt.** `ui.askForPassword` has no counterpart here; an
   encrypted document opens as an error. *(Built — see "A document behind a
   password" below.)*
@@ -3840,7 +3840,9 @@ neither renderer can write a `/Sig` today, and the three ways round it.
 
 `ui.askForPassword` was the largest item on the previous section's list, and
 the sentence beside it was the whole complaint: *an encrypted document opens as
-an error*, in a reader whose premise is that it opens what you give it.
+an error*, in a reader whose premise is that it opens what you give it. It
+asks now, in the app's own window with the app's own two sentences, and it
+opens on the answer.
 
 **Locked is a question and everything else is a failure, and the type says
 so.** `render::open` used to answer `Result<_, String>`, which is right for
@@ -3856,7 +3858,8 @@ message, which works until pdfium rewords one.
 Which of the two sentences goes over the field — "It needs a password before it
 can be opened" or "That password was not right" — is decided by the *caller*,
 because pdfium reports both as the same error and the difference is whether a
-password was supplied.
+password was supplied. That is `open_here_with`, and it is the whole of the
+state machine.
 
 **A locked document makes a window rather than refusing one.** `window_on` used
 to answer `None` for anything that would not open, and a window is exactly
@@ -3943,6 +3946,17 @@ thread of its own and nothing says when it is up — no later round could ever
 produce an event, and the test spent thirty-two seconds proving it. Each round
 renames the theme now, which is also what an editor saving twice actually
 does.
+
+### What is left
+
+- **`.loading` and `.page-placeholder`**, which is what the app shows where a
+  page has not been drawn yet.
+- **`.title-drag`**, which is macOS window dragging with the toolbar hidden.
+  It may not apply — this window keeps its own title bar — and that is a
+  question to answer rather than a thing to build.
+- **`popover-*` against `menu-*`.** The two files name the same components
+  differently, deliberately: what a port owes the app is the same elements,
+  labels, order, behaviour and look, not the same class names.
 
 ---
 

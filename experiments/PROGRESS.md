@@ -3932,6 +3932,18 @@ sentence that had been deliberately taken out.* "Reloaded — the document
 changed on disk" went two commits ago and the assertion went with the reason
 rather than with the code. It now says the opposite, which is the decision.
 
+*`the_watcher_is_wired_to_the_reader` could not succeed once it had failed
+once, and the retry loop was what made it look like a flake.* The watcher
+decides a theme reload by comparing what it has just loaded against **the last
+set it handed over** — `known` in `watch.rs` — and that is the right rule,
+because the app writes into that directory itself on every launch and a write
+that changes nothing is not news. The test's six rounds all saved the *same
+bytes*, so the moment round one's news was missed — the watch is set up on a
+thread of its own and nothing says when it is up — no later round could ever
+produce an event, and the test spent thirty-two seconds proving it. Each round
+renames the theme now, which is also what an editor saving twice actually
+does.
+
 ---
 
 ## Three things to carry forward

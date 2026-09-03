@@ -325,11 +325,23 @@ fn the_watcher_is_wired_to_the_reader() {
     // failure — and saving the same file again is what an editor does anyway.
     // Each round is longer than the watcher's own settle window, or the burst
     // never ends and nothing is ever reported.
+    //
+    // **And each round writes a different name**, which is the half that was
+    // missing and made this test fail for good rather than slowly. The
+    // watcher decides a theme reload by comparing what it has just loaded
+    // against the last set it handed over — `known` in `watch.rs`, and that
+    // is the right rule: the app writes into this directory itself on every
+    // launch, and a write that changes nothing is not news. So a round that
+    // saved the same bytes as the round before produced no event at all, and
+    // once the first round's news had been missed no later round could ever
+    // arrive. Renaming per round is what an editor saving twice actually
+    // does, and it is what the retry needs to mean anything.
     let mut noticed = false;
-    for _ in 0..6 {
+    for round in 1..=6 {
+        let renamed = format!("Renamed {round}");
         std::thread::sleep(std::time::Duration::from_millis(600));
-        save_theme(&dir, "Mine", "Renamed", "#101010", "#f0f0f0");
-        if reader.wait_until(4.0, |reader| reader.state().theme == "Renamed") {
+        save_theme(&dir, "Mine", &renamed, "#101010", "#f0f0f0");
+        if reader.wait_until(4.0, |reader| reader.state().theme == renamed) {
             noticed = true;
             break;
         }

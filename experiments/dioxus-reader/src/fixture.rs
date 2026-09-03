@@ -23,12 +23,25 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A body of PDF objects, numbered from 1, and the file they make.
+///
+/// The objects are bytes rather than `String`s, and only one fixture needs
+/// them to be: an encrypted document's streams are RC4 over arbitrary bytes,
+/// and there is no encoding under which those are text. Everything else here
+/// still writes a `String` and is converted on the way in.
 struct Pdf {
-    objects: Vec<String>,
+    objects: Vec<Vec<u8>>,
     /// The `/Info` dictionary, if this document has one. Named in the trailer
     /// rather than reachable from the catalogue, which is where a PDF keeps
     /// the title it calls itself by and is why it is a field here.
     info: Option<usize>,
+    /// The `/Encrypt` dictionary, if this document has one, and the file
+    /// identifier the key was derived from. Both live in the trailer, and
+    /// neither is reachable from the catalogue — which is the whole reason a
+    /// reader can tell a locked document from a corrupt one without a
+    /// password: the *structure* is in the clear and only the contents are
+    /// not. See [`locked_pdf`].
+    encrypt: Option<usize>,
+    id: Option<[u8; 16]>,
 }
 
 impl Pdf {
@@ -36,6 +49,8 @@ impl Pdf {
         Pdf {
             objects: Vec::new(),
             info: None,
+            encrypt: None,
+            id: None,
         }
     }
 
@@ -44,15 +59,15 @@ impl Pdf {
     /// parent, its siblings and its page, and half of them are written after
     /// it.
     fn reserve(&mut self) -> usize {
-        self.objects.push(String::new());
+        self.objects.push(Vec::new());
         self.objects.len()
     }
 
-    fn put(&mut self, id: usize, body: impl Into<String>) {
+    fn put(&mut self, id: usize, body: impl Into<Vec<u8>>) {
         self.objects[id - 1] = body.into();
     }
 
-    fn add(&mut self, body: impl Into<String>) -> usize {
+    fn add(&mut self, body: impl Into<Vec<u8>>) -> usize {
         let id = self.reserve();
         self.put(id, body);
         id
@@ -64,7 +79,9 @@ impl Pdf {
         let mut offsets = Vec::with_capacity(self.objects.len());
         for (index, body) in self.objects.iter().enumerate() {
             offsets.push(out.len());
-            let _ = write!(out, "{} 0 obj\n{}\nendobj\n", index + 1, body);
+            let _ = writeln!(out, "{} 0 obj", index + 1);
+            out.extend_from_slice(body);
+            out.extend_from_slice(b"\nendobj\n");
         }
         let xref = out.len();
         let _ = write!(
@@ -79,9 +96,17 @@ impl Pdf {
             Some(id) => format!(" /Info {id} 0 R"),
             None => String::new(),
         };
+        // `/Encrypt` and `/ID` travel together: the identifier is one of the
+        // four things the encryption key is derived from, so a file that
+        // names one and not the other cannot be opened by anybody, with the
+        // password or without it.
+        let locked = match (self.encrypt, self.id) {
+            (Some(id), Some(bytes)) => format!(" /Encrypt {id} 0 R /ID [<{0}> <{0}>]", hex(&bytes)),
+            _ => String::new(),
+        };
         let _ = write!(
             out,
-            "trailer\n<< /Size {} /Root 1 0 R{info} >>\nstartxref\n{}\n%%EOF\n",
+            "trailer\n<< /Size {} /Root 1 0 R{info}{locked} >>\nstartxref\n{}\n%%EOF\n",
             self.objects.len() + 1,
             xref,
         );
@@ -748,4 +773,230 @@ fn first_and_last(ids: &[usize]) -> String {
         (Some(first), Some(last)) => format!("/First {first} 0 R /Last {last} 0 R"),
         _ => String::new(),
     }
+}
+
+/// The password [`locked_pdf`] is written under.
+///
+/// A constant rather than a parameter because a fixture is cached by its file
+/// name and two passwords would want two files, and because what the tests
+/// need is one document that is locked, one password that opens it and any
+/// other string to be wrong.
+pub const LOCKED_PASSWORD: &str = "hylo";
+
+/// Three pages behind a password: the PDF standard security handler, revision
+/// 2, RC4 at 40 bits.
+///
+/// **The oldest and weakest thing the spec describes, chosen for exactly that
+/// reason.** What is being tested is that the reader notices a locked
+/// document, asks, and opens it with the answer — none of which is about the
+/// cipher. Revision 2 is the one variant whose key derivation is a single MD5
+/// with no iteration, so the whole handler below is forty lines rather than a
+/// dependency, and every reader that reads PDFs at all reads it.
+///
+/// What a locked document actually looks like is worth knowing, because it is
+/// what makes the prompt possible: **the structure is in the clear and only
+/// the contents are not.** The catalogue, the page tree, the page dictionaries
+/// and the `xref` are all readable without the password; the streams and the
+/// strings are not. So a reader can tell a locked document from a corrupt one
+/// before it has anything to unlock it with — which is what pdfium's
+/// `FPDF_ERR_PASSWORD` is saying, and it is a different answer from
+/// `FPDF_ERR_FORMAT`.
+pub fn locked_pdf() -> String {
+    written("hylopdf-locked.pdf", build_locked)
+}
+
+fn build_locked() -> Vec<u8> {
+    // Fixed rather than random, because a fixture that is different every run
+    // is a fixture that cannot be cached and cannot be compared.
+    let id: [u8; 16] = *b"HyloPDF fixture ";
+    // The owner password is the user password here. A document may perfectly
+    // well have two, and nothing this reader does distinguishes them: pdfium
+    // takes one string and tries it as both.
+    let owner = rc4(&md5(&padded(LOCKED_PASSWORD))[..5], &padded(LOCKED_PASSWORD));
+    let key = encryption_key(LOCKED_PASSWORD, &owner, &id);
+    let user = rc4(&key, &PAD);
+
+    let mut pdf = Pdf::new();
+    let catalog = pdf.reserve();
+    let tree = pdf.reserve();
+    let font = pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let page_ids: Vec<usize> = (0..3).map(|_| pdf.reserve()).collect();
+    for (index, &id_of_page) in page_ids.iter().enumerate() {
+        // Reserved before it is written, because a stream is encrypted under a
+        // key derived from its own object number — see [`object_key`] — so
+        // the number has to be known before the bytes can be made.
+        let content = pdf.reserve();
+        let stream = format!("BT /F1 18 Tf 72 700 Td (Locked page {}.) Tj ET", index + 1);
+        let sealed = rc4(&object_key(&key, content), stream.as_bytes());
+        // `/Length` is the length of what is actually in the file, which is
+        // the ciphertext. RC4 is a stream cipher, so it is also the length of
+        // the plaintext; that they agree is a property of this cipher rather
+        // than a rule.
+        let mut body = format!("<< /Length {} >>\nstream\n", sealed.len()).into_bytes();
+        body.extend_from_slice(&sealed);
+        body.extend_from_slice(b"\nendstream");
+        pdf.put(content, body);
+        pdf.put(
+            id_of_page,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 612 792] \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R >>"
+            ),
+        );
+    }
+    pdf.put(
+        tree,
+        format!(
+            "<< /Type /Pages /Count 3 /Kids [{}] >>",
+            page_ids
+                .iter()
+                .map(|id| format!("{id} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    );
+    pdf.put(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    // The one dictionary in the file whose own strings are *not* encrypted,
+    // for the obvious reason: they are what the key is checked against.
+    pdf.encrypt = Some(pdf.add(format!(
+        "<< /Filter /Standard /V 1 /R 2 /O <{}> /U <{}> /P -1 >>",
+        hex(&owner),
+        hex(&user),
+    )));
+    pdf.id = Some(id);
+    pdf.bytes()
+}
+
+/// The 32 bytes every password in the standard security handler is padded
+/// with, from the spec's own table.
+const PAD: [u8; 32] = [
+    0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
+    0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A,
+];
+
+/// A password as the handler wants it: its first 32 bytes, made up to 32 with
+/// the padding above. A password longer than 32 bytes has the rest ignored,
+/// which is the spec's rule and not an oversight here.
+fn padded(password: &str) -> [u8; 32] {
+    let mut out = PAD;
+    let given = password.as_bytes();
+    let taken = given.len().min(32);
+    out[..taken].copy_from_slice(&given[..taken]);
+    out[taken..].copy_from_slice(&PAD[..32 - taken]);
+    out
+}
+
+/// The file encryption key: the spec's Algorithm 2 at revision 2, which is one
+/// MD5 over the padded password, the `/O` entry, the permissions and the file
+/// identifier, cut to five bytes.
+fn encryption_key(password: &str, owner: &[u8], id: &[u8; 16]) -> Vec<u8> {
+    let mut fed = Vec::with_capacity(32 + 32 + 4 + 16);
+    fed.extend_from_slice(&padded(password));
+    fed.extend_from_slice(owner);
+    // `/P -1`, as four bytes, low one first. Every permission granted, which
+    // is what a document locked only to be read says.
+    fed.extend_from_slice(&(-1i32).to_le_bytes());
+    fed.extend_from_slice(id);
+    md5(&fed)[..5].to_vec()
+}
+
+/// The key one object's bytes are encrypted under: the spec's Algorithm 1,
+/// which mixes the file key with the object's own number so that two identical
+/// streams do not encrypt to the same bytes. Generation is always 0 here.
+fn object_key(key: &[u8], object: usize) -> Vec<u8> {
+    let mut fed = key.to_vec();
+    fed.extend_from_slice(&(object as u32).to_le_bytes()[..3]);
+    fed.extend_from_slice(&[0, 0]);
+    let taken = (key.len() + 5).min(16);
+    md5(&fed)[..taken].to_vec()
+}
+
+/// RC4, which is the whole of what revision 2 encrypts with. Twenty lines, and
+/// they are the same twenty lines in every description of it.
+fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut state: [u8; 256] = std::array::from_fn(|i| i as u8);
+    let mut j = 0usize;
+    for i in 0..256 {
+        j = (j + state[i] as usize + key[i % key.len()] as usize) % 256;
+        state.swap(i, j);
+    }
+    let (mut i, mut j) = (0usize, 0usize);
+    data.iter()
+        .map(|&byte| {
+            i = (i + 1) % 256;
+            j = (j + state[i] as usize) % 256;
+            state.swap(i, j);
+            byte ^ state[(state[i] as usize + state[j] as usize) % 256]
+        })
+        .collect()
+}
+
+/// MD5, for the key derivation above and for nothing else in this tree.
+///
+/// Written here rather than taken as a dependency because it is used by one
+/// fixture, in test builds only, to make a file that is deliberately weak —
+/// and because a hash in a dependency is a hash somebody may reach for later
+/// believing it is fit for something. This one is not.
+fn md5(input: &[u8]) -> [u8; 16] {
+    const SHIFTS: [u32; 64] = [
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5,
+        9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10,
+        15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+    ];
+    // The constants are the first 32 bits of the fractional part of the sine
+    // of the round number, which is how the algorithm defines them.
+    let table: [u32; 64] =
+        std::array::from_fn(|i| ((i as f64 + 1.0).sin().abs() * 4294967296.0) as u32);
+
+    let mut message = input.to_vec();
+    let bits = (input.len() as u64).wrapping_mul(8);
+    message.push(0x80);
+    while message.len() % 64 != 56 {
+        message.push(0);
+    }
+    message.extend_from_slice(&bits.to_le_bytes());
+
+    let mut hash: [u32; 4] = [0x6745_2301, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476];
+    for chunk in message.chunks(64) {
+        let words: [u32; 16] = std::array::from_fn(|i| {
+            u32::from_le_bytes([chunk[i * 4], chunk[i * 4 + 1], chunk[i * 4 + 2], chunk[i * 4 + 3]])
+        });
+        let [mut a, mut b, mut c, mut d] = hash;
+        for round in 0..64 {
+            let (mixed, index) = match round / 16 {
+                0 => ((b & c) | (!b & d), round),
+                1 => ((d & b) | (!d & c), (5 * round + 1) % 16),
+                2 => (b ^ c ^ d, (3 * round + 5) % 16),
+                _ => (c ^ (b | !d), (7 * round) % 16),
+            };
+            let mixed = mixed
+                .wrapping_add(a)
+                .wrapping_add(table[round])
+                .wrapping_add(words[index]);
+            a = d;
+            d = c;
+            c = b;
+            b = b.wrapping_add(mixed.rotate_left(SHIFTS[round]));
+        }
+        for (slot, add) in hash.iter_mut().zip([a, b, c, d]) {
+            *slot = slot.wrapping_add(add);
+        }
+    }
+    let mut out = [0u8; 16];
+    for (index, word) in hash.iter().enumerate() {
+        out[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    out
+}
+
+/// Bytes as the digits a PDF hexadecimal string is written in.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// MD5 of some bytes, as hexadecimal — the one door onto [`md5`], so that a
+/// test can check it against the RFC's vectors without the function itself
+/// becoming part of this module's surface.
+pub fn digest_for_test(bytes: &[u8]) -> String {
+    hex(&md5(bytes))
 }

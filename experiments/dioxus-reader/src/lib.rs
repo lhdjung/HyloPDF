@@ -27,7 +27,8 @@
 //! of them is reachable from either renderer. The other one is *read* here,
 //! though — [`sign::Seal`] is every `/Sig` the document already carries, and
 //! its own comment is where the assessment's "signed by X, intact" is
-//! corrected to the four facts that can honestly be had.
+//! corrected to the four facts that can honestly be had. A date or a line of
+//! type goes down beside a name, by the same click: [`sign::place_text`].
 //!
 //! Every one of the
 //! app's forty-three keyboard actions answers here — the last three to arrive were dark mode,

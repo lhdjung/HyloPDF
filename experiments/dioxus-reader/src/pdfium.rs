@@ -472,19 +472,28 @@ impl PageSource for Document {
         for (number, page) in document.pages().iter().enumerate() {
             let height = page.height().value as f64;
             for (index, annotation) in page.annotations().iter().enumerate() {
-                let PdfPageAnnotation::Ink(ink) = &annotation else {
-                    continue;
+                // Ink is a hand and a stamp is a line of type — the two things
+                // this reader writes, listed together because they come off the
+                // page the same way and a reader taking one off does not think
+                // of them as two features.
+                let (kind, bounds, by) = match &annotation {
+                    PdfPageAnnotation::Ink(ink) => (
+                        crate::sign::Written::Hand,
+                        ink.bounds(),
+                        ink.creator().unwrap_or_default(),
+                    ),
+                    PdfPageAnnotation::Stamp(stamp) => (
+                        crate::sign::Written::Line,
+                        stamp.bounds(),
+                        stamp.contents().unwrap_or_default(),
+                    ),
+                    _ => continue,
                 };
-                let at = crate::markup::down(&ink.bounds().unwrap_or(PdfRect::ZERO), height);
+                let at = crate::markup::down(&bounds.unwrap_or(PdfRect::ZERO), height);
                 if at.width <= 0.0 || at.height <= 0.0 {
                     continue;
                 }
-                found.push(crate::sign::Placed {
-                    page: number + 1,
-                    index,
-                    at,
-                    by: ink.creator().unwrap_or_default(),
-                });
+                found.push(crate::sign::Placed { kind, page: number + 1, index, at, by });
             }
         }
         found

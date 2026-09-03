@@ -433,6 +433,49 @@ mod through_the_reader {
         );
     }
 
+    /// **A date goes on the page the same way a name does.**
+    ///
+    /// One armed slot and one click, whichever of the two it is — see
+    /// `app::Placing`. The button that fills the field does not place
+    /// anything, so a reader who wants a different date can edit it.
+    #[test]
+    fn a_date_typed_in_the_window_lands_on_the_page() {
+        let (mut reader, pdf) = reader("dated");
+        open_the_window(&mut reader);
+
+        reader.click(".sign-today");
+        reader.click(".sign-place-text");
+        // Mid-page, because 0.6 of a page is below the foot of an 800px
+        // window at fit width and a pointer cannot reach what is not there.
+        reader.click_on_page(1, (0.3, 0.5));
+
+        let placed = render::open(pdf.to_str().expect("a path"))
+            .expect("reopened")
+            .signatures();
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].kind, dioxus_reader::sign::Written::Line);
+        assert_eq!(placed[0].by, dioxus_reader::sign::today());
+        assert_eq!(placed[0].page, 1);
+    }
+
+    /// An empty field is not a thing to place, and pressing the button says so
+    /// rather than arming a click that would write nothing.
+    #[test]
+    fn an_empty_line_is_not_placed() {
+        let (mut reader, pdf) = reader("empty-line");
+        open_the_window(&mut reader);
+        reader.click(".sign-place-text");
+        assert_eq!(
+            reader.text_all(".notice"),
+            vec!["There is nothing typed to put on the page.".to_string()],
+        );
+        reader.click_on_page(1, (0.3, 0.6));
+        assert!(render::open(pdf.to_str().expect("a path"))
+            .expect("reopened")
+            .signatures()
+            .is_empty());
+    }
+
     /// **The whole gesture, end to end**: draw a name, keep it, take it up,
     /// click on a page, and find ink in the file.
     #[test]
@@ -619,6 +662,136 @@ mod through_the_reader {
         reader.type_text("A Reader");
         assert_eq!(reader.state().scroll, before, "the document stayed put");
     }
+}
+
+/* -------------------------------------------- a date, and a line of text */
+
+/// **A line of text goes onto the page and is drawn there.**
+///
+/// The assessment asks for this beside the drawing — *the form under a
+/// signature usually wants both* — and the interesting half is that it is
+/// drawn at all: a `/FreeText` annotation with no appearance stream is text
+/// nobody renders, pdfium included, which is why this is a `/Stamp` with a
+/// real text object in it. Counting dark pixels is the only way to tell those
+/// two apart, because both of them read back out of the file.
+#[test]
+fn a_line_of_text_is_drawn_on_the_page() {
+    let path = scratch("typed");
+    let file = path.to_str().expect("a path");
+    let at = Rect { left: 100.0, top: 300.0, width: 0.0, height: sign::LINE_HEIGHT };
+
+    let dark = |file: &str| {
+        let document = render::open(file).expect("opens");
+        let size = document.size_of(0);
+        let (width, height) = (size.width.round() as u32, size.height.round() as u32);
+        let mut counted = 0u32;
+        document
+            .render(0, width, height, dioxus_reader::layout::View::WHOLE, &mut |bitmap| {
+                for y in 290..312u32 {
+                    for x in 95..260u32 {
+                        let at = ((y * bitmap.width + x) * 4) as usize;
+                        if bitmap.bgra[at + 2] < 200 {
+                            counted += 1;
+                        }
+                    }
+                }
+            })
+            .expect("the page draws");
+        counted
+    };
+
+    assert_eq!(dark(file), 0, "nothing is written there yet");
+    sign::place_text(file, 1, at, "14 March 2024", sign::INK).expect("written");
+    assert!(dark(file) > 50, "and now there is type on the page");
+}
+
+/// It reads back beside the ink, because a reader taking something off a page
+/// does not think of the two as separate features — and it says what it says.
+#[test]
+fn a_line_of_text_is_listed_and_comes_off_again() {
+    let path = scratch("typed-off");
+    let file = path.to_str().expect("a path");
+    sign::place_text(
+        file,
+        2,
+        Rect { left: 72.0, top: 400.0, width: 0.0, height: sign::LINE_HEIGHT },
+        "Reading, 14 March 2024",
+        sign::INK,
+    )
+    .expect("written");
+
+    let placed = render::open(file).expect("reopened").signatures();
+    assert_eq!(placed.len(), 1);
+    assert_eq!(placed[0].kind, sign::Written::Line);
+    assert_eq!(placed[0].page, 2);
+    assert_eq!(placed[0].by, "Reading, 14 March 2024");
+
+    dioxus_reader::markup::remove(file, placed[0].page, placed[0].index).expect("taken off");
+    assert!(render::open(file).expect("reopened again").signatures().is_empty());
+}
+
+/// A hand and a line on one page are two annotations and two rows, and each
+/// says which it is.
+#[test]
+fn a_signature_and_a_date_sit_side_by_side() {
+    let path = scratch("both");
+    let file = path.to_str().expect("a path");
+    sign::place(
+        file,
+        1,
+        Rect { left: 80.0, top: 600.0, width: 0.0, height: 40.0 },
+        &scrawl().trimmed(),
+        sign::INK,
+    )
+    .expect("signed");
+    sign::place_text(
+        file,
+        1,
+        Rect { left: 300.0, top: 610.0, width: 0.0, height: sign::LINE_HEIGHT },
+        &sign::today(),
+        sign::INK,
+    )
+    .expect("dated");
+
+    let placed = render::open(file).expect("reopened").signatures();
+    assert_eq!(placed.len(), 2);
+    let kinds: Vec<sign::Written> = placed.iter().map(|one| one.kind).collect();
+    assert!(kinds.contains(&sign::Written::Hand));
+    assert!(kinds.contains(&sign::Written::Line));
+}
+
+/// Nothing typed is not a thing to put on a page, and it is refused with a
+/// sentence rather than written as an empty annotation.
+#[test]
+fn nothing_typed_is_not_placed() {
+    let path = scratch("blank-line");
+    let file = path.to_str().expect("a path");
+    let at = Rect { left: 100.0, top: 300.0, width: 0.0, height: sign::LINE_HEIGHT };
+    assert!(sign::place_text(file, 1, at, "   ", sign::INK).is_err());
+    assert!(render::open(file).expect("opens").signatures().is_empty());
+}
+
+/// Today is a date somebody would write on a form, and it round-trips through
+/// the reader that shows a document's own dates.
+#[test]
+fn today_is_a_date_a_person_would_write() {
+    let today = sign::today();
+    let parts: Vec<&str> = today.split(' ').collect();
+    assert_eq!(parts.len(), 3, "day, month and year: {today}");
+    assert!(parts[0].parse::<u32>().is_ok_and(|day| (1..=31).contains(&day)));
+    assert!(parts[1].chars().all(|c| c.is_alphabetic()));
+    assert!(parts[2].parse::<i64>().is_ok_and(|year| year >= 2024));
+}
+
+/// The day arithmetic, against dates whose answers are known: the epoch, a
+/// leap day, the day before one, and a century that is not a leap year.
+#[test]
+fn the_day_count_becomes_the_right_date() {
+    // `civil` is not public — it is reached through the one caller that is,
+    // which is the whole of what it exists for.
+    assert_eq!(sign::in_words("D:19700101000000"), "1 January 1970");
+    assert_eq!(sign::in_words("D:20000229000000"), "29 February 2000");
+    assert_eq!(sign::in_words("D:19000228000000"), "28 February 1900");
 }
 
 /* ------------------------------------ what the document is already signed with */

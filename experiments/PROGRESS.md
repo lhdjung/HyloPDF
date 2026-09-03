@@ -4116,11 +4116,12 @@ still pass, so ⌘A, ⌘C, ⌘V and ⌘Z mean what they mean in a field.
 
 ### What is not built, and is not a gap
 
-No date field and no typed-name-in-a-script-face, which the assessment listed
-beside the drawing. Both are the same feature with a different capture, and
-neither is what makes this useful. Cryptographic signing is where the
-assessment left it: not blocked by anything in this codebase, blocked by the
-fact that a signature nobody's software trusts is not a signature.
+No typed-name-in-a-script-face, which the assessment listed beside the drawing:
+it needs a cursive font bundled with the binary, and a signature in somebody
+else's handwriting is a strange thing to offer a reader who has a trackpad.
+Cryptographic signing is where the assessment left it: not blocked by anything
+in this codebase, blocked by the fact that a signature nobody's software trusts
+is not a signature.
 
 ## And reading the ones a document already carries
 
@@ -4169,6 +4170,42 @@ warning fired was passing on it, and every reader of every contract with a
 blank signature line was being told the same thing. `/Contents` is what tells
 them apart, and `fixture::signed_pdf` is a document that carries a real `/Sig`
 so that the two cases can be tested against each other.
+
+## And the line beside the signature
+
+*The form under a signature usually wants both* is the assessment's whole
+argument for a date field, and it is right: a signature on its own is half of
+what anybody is actually asked to fill in. So the Sign window has a second
+half — a line of text, a **Today** button that fills it with today's date, and
+the same click on the page that puts a signature down.
+
+**One armed slot, not two.** `app::Placing` is `Hand(Signature)` or
+`Line(String)`, and everything downstream of it — the crosshair, Escape, the
+click on a page, the notice — is the same code. Placing something on a page is
+one gesture to a reader whichever of the two it is, and it would be two
+features if it were written as two.
+
+**A `/Stamp`, and not the annotation named for this.** `/FreeText` is what the
+specification has for a line of type on a page, and it is unreachable:
+`pdfium-render` exposes `objects_mut()` on ink and stamp alone, and a free text
+annotation whose appearance stream is empty is text that no reader draws —
+pdfium's own renderer included, which is how it would have shipped invisible.
+A stamp holding a real Helvetica text object is drawn by everything, because
+there is nothing left to generate. The test counts dark pixels on the rendered
+page rather than reading the annotation back, because reading it back is
+exactly the check that would have passed on the invisible version.
+
+Both kinds read back out of the page together and both come off with the same
+bin: `sign::Written` is which of the two a row is, `Placed.by` is the name for a
+hand and the words themselves for a line, and the notice says which one was
+taken off. A stamp this reader did not write shows as "A stamp" rather than
+being hidden — it is on the page, and a reader who wants it off should be able
+to say so.
+
+**Today is UTC**, because there is no timezone crate here and adding one to
+fill in a text field would be the wrong trade. It is offered as the initial
+value of a field somebody can edit, not stamped on their behalf, which is what
+makes that acceptable rather than a bug waiting for a reader in Auckland.
 
 ---
 

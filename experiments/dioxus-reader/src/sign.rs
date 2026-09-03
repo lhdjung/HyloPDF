@@ -56,8 +56,8 @@
 //! nothing about the screen it was drawn on.
 
 use pdfium_render::prelude::{
-    PdfColor, PdfDocument, PdfPageAnnotationCommon, PdfPageObjectsCommon, PdfPagePathObject,
-    PdfPoints, PdfRect,
+    PdfColor, PdfDocument, PdfPageAnnotationCommon, PdfPageObjectCommon, PdfPageObjectsCommon,
+    PdfPagePathObject, PdfPoints, PdfRect,
 };
 use serde::{Deserialize, Serialize};
 
@@ -220,16 +220,29 @@ impl Signature {
 /// asking pdfium to hand back path segments this reader would then have to
 /// keep in step with the page. Nothing draws these — the renderer draws them,
 /// because they are in the file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Written {
+    /// Ink: a name drawn by a hand, in an `/Ink` annotation.
+    Hand,
+    /// Type: a date or a line of text, in a `/Stamp`. See [`place_text`] for
+    /// why a stamp and not the `/FreeText` the specification has for it.
+    Line,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Placed {
+    /// Which of the two things this reader writes it is.
+    pub kind: Written,
     /// One-based, as every page number in this crate is.
     pub page: usize,
     /// Where it sits among the annotations of that page.
     pub index: usize,
     /// Its box, in the page's own points counting from the top left.
     pub at: Rect,
-    /// What the annotation says made it, which is the signature's name — set
-    /// by [`place`] and left alone for one this reader did not write.
+    /// What it is called in the list: for ink, the annotation's creator, which
+    /// is the signature's name; for a line, the words themselves. Both are set
+    /// by the write and left alone for an annotation this reader did not put
+    /// there.
     pub by: String,
 }
 
@@ -478,6 +491,11 @@ pub fn seals(path: &str) -> Vec<Seal> {
         .collect()
 }
 
+const MONTHS: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June", "July", "August", "September",
+    "October", "November", "December",
+];
+
 /// A PDF date in words: `D:20240314093000+01'00'` becomes `14 March 2024`.
 ///
 /// Anything that is not that shape is handed back **unchanged** rather than
@@ -485,10 +503,6 @@ pub fn seals(path: &str) -> Vec<Seal> {
 /// two wrong answers are showing nothing and showing a date that is not the
 /// one written down; showing the string as written is neither.
 pub fn in_words(raw: &str) -> String {
-    const MONTHS: [&str; 12] = [
-        "January", "February", "March", "April", "May", "June", "July", "August", "September",
-        "October", "November", "December",
-    ];
     let digits = raw.strip_prefix("D:").unwrap_or(raw);
     let number = |from: usize, to: usize| digits.get(from..to).and_then(|s| s.parse::<usize>().ok());
     match (number(0, 4), number(4, 6), number(6, 8)) {
@@ -497,6 +511,40 @@ pub fn in_words(raw: &str) -> String {
         }
         _ => raw.to_string(),
     }
+}
+
+/// Today, written the way somebody dates a form: `14 March 2024`.
+///
+/// **In UTC**, and there is no timezone crate here to do better. A date is
+/// wrong by a day for a few hours either side of midnight in the far east and
+/// the far west, and the answer to that is that it is offered as the *initial*
+/// value of a field somebody can type into rather than stamped on their behalf.
+/// Reaching for a timezone database to fill in a text field would be the wrong
+/// trade.
+pub fn today() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs() as i64)
+        .unwrap_or(0);
+    let (year, month, day) = civil(seconds.div_euclid(86_400));
+    format!("{day} {} {year}", MONTHS[(month - 1) as usize])
+}
+
+/// Days since the epoch, as a date. Howard Hinnant's `civil_from_days`, which
+/// is the standard answer and is exact for every date this will ever be handed.
+fn civil(days: i64) -> (i64, u32, u32) {
+    // Shifted so that the era begins on 1 March, which is what makes the leap
+    // day the last day of the year and the whole thing branchless.
+    let shifted = days + 719_468;
+    let era = if shifted >= 0 { shifted } else { shifted - 146_096 } / 146_097;
+    let day_of_era = shifted - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let months = (5 * day_of_year + 2) / 153;
+    let day = (day_of_year - (153 * months + 2) / 5 + 1) as u32;
+    let month = if months < 10 { months + 3 } else { months - 9 } as u32;
+    (year_of_era + era * 400 + i64::from(month <= 2), month, day)
 }
 
 /// Ask the disk and the document, once.
@@ -634,6 +682,109 @@ fn ink_one(
             .add_path_object(path)
             .map_err(|e| format!("a stroke was refused: {e}"))?;
     }
+    Ok(())
+}
+
+/* --------------------------------------------------- a date, and a line of text */
+
+/// How tall a line of text is put down, in points. A signature is 40 and this
+/// is deliberately smaller: the name is the thing being said and the date under
+/// it is a note about the name.
+pub const LINE_HEIGHT: f64 = 11.0;
+
+/// Put a line of text on a page — a date, a place, a name in type, whatever
+/// the form under a signature is asking for.
+///
+/// `signing-assessment.md` names this beside the drawing and gives the reason
+/// in six words: *the form under a signature usually wants both*. A signature
+/// on its own is half of what people are actually asked to fill in.
+///
+/// **It is a `/Stamp` and not a `/FreeText`**, which is the annotation the
+/// specification has for exactly this and is unreachable. `pdfium-render`
+/// exposes `objects_mut()` on ink and stamp alone, and a free text annotation
+/// with nothing in its appearance stream is text no reader draws — pdfium's own
+/// included. So the text goes into a stamp's appearance stream as a real text
+/// object in Helvetica, which every reader draws because there is nothing to
+/// generate.
+pub fn place_text(path: &str, page: usize, at: Rect, line: &str, ink: &str) -> Result<(), String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return Err("There is nothing typed to put on the page.".into());
+    }
+    let (red, green, blue) = crate::markup::read_color(ink).ok_or("That is not a colour.")?;
+    let line = line.to_string();
+    crate::markup::edit(path, |document| {
+        text_one(document, page, at, &line, (red, green, blue))
+    })
+}
+
+/// One line on one page, inside the one open the gesture costs.
+fn text_one(
+    document: &mut PdfDocument<'static>,
+    page: usize,
+    at: Rect,
+    line: &str,
+    (red, green, blue): (u8, u8, u8),
+) -> Result<(), String> {
+    let page_height = {
+        let page_ref = document
+            .pages()
+            .get(page.saturating_sub(1) as i32)
+            .map_err(|e| format!("page {page}: {e}"))?;
+        page_ref.height().value as f64
+    };
+    let size = at.height.max(1.0);
+    // The font is asked for first: `fonts_mut` takes the document mutably and
+    // the text object takes it again, so the token has to be out before the
+    // second borrow begins. A token is a handle and not a borrow, which is why
+    // this works at all.
+    let font = document.fonts_mut().helvetica();
+    let mut object =
+        pdfium_render::prelude::PdfPageTextObject::new(document, line, font, PdfPoints::new(size as f32))
+            .map_err(|e| format!("the text could not be set: {e}"))?;
+    object
+        .set_fill_color(PdfColor::new(red, green, blue, 255))
+        .map_err(|e| format!("the text could not be coloured: {e}"))?;
+    // **`at.top` is the top of the line and a text object sits on its
+    // baseline**, so the descender's worth of room comes off before the flip.
+    // A fifth of the size is Helvetica's, near enough for a date on a form and
+    // the difference nobody would see.
+    let baseline = page_height - at.top - size * 0.8;
+    object
+        .translate(PdfPoints::new(at.left as f32), PdfPoints::new(baseline as f32))
+        .map_err(|e| format!("the text could not be placed: {e}"))?;
+    // Asked of the object rather than guessed from the character count,
+    // because Helvetica is proportional and a date is mostly digits and spaces.
+    // A refusal falls back to half the size a character, which is about right
+    // for type and is only ever the annotation's box.
+    let width = object
+        .width()
+        .map(|points| points.value as f64)
+        .unwrap_or(size * 0.5 * line.chars().count() as f64);
+
+    let mut page_ref = document
+        .pages()
+        .get(page.saturating_sub(1) as i32)
+        .map_err(|e| format!("page {page}: {e}"))?;
+    let mut annotation = page_ref
+        .annotations_mut()
+        .create_stamp_annotation()
+        .map_err(|e| format!("the text could not be placed: {e}"))?;
+    annotation
+        .set_bounds(PdfRect::new(
+            PdfPoints::new((page_height - at.top - size * 1.1) as f32),
+            PdfPoints::new(at.left as f32),
+            PdfPoints::new((page_height - at.top + size * 0.3) as f32),
+            PdfPoints::new((at.left + width) as f32),
+        ))
+        .map_err(|e| format!("the text could not be placed: {e}"))?;
+    // What it says, so that the row in the window listing it can show the words
+    // rather than "a stamp".
+    let _ = annotation.set_contents(line);
+    annotation
+        .objects_mut()
+        .add_text_object(object)
+        .map_err(|e| format!("the text was refused: {e}"))?;
     Ok(())
 }
 

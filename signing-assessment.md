@@ -147,6 +147,14 @@ rewrite, so ink into a cryptographically signed document ends the signature it
 carried. The reader is told once, before it happens, in a sentence that names
 the consequence rather than the mechanism.
 
+*And the line beside it.* "Also a date field and a plain text field, because
+the form under a signature usually wants both" — both are there, as one field
+with a **Today** button beside it, placed by the same click that places a
+signature. They go in as a `/Stamp` holding a Helvetica text object rather than
+the `/FreeText` the specification has for this: `pdfium-render` exposes
+`objects_mut()` on ink and stamp alone, and a free text annotation with an
+empty appearance stream is text no reader draws, pdfium's own included.
+
 *And the document's own signatures are read.* The recommendation below asks
 for this beside the writing and it is built: the Sign window lists every
 `/Sig` the document carries, before the pad and under the sentence saying what

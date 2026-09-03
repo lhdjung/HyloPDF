@@ -982,6 +982,28 @@ pub struct Signing {
     /// press from the difference between the two coordinate systems the event
     /// carries. See [`Viewer::draw_from`].
     pub origin: (f64, f64),
+    /// **The other half of a signature**, which `signing-assessment.md` names
+    /// in six words: *the form under a signature usually wants both*. A date,
+    /// a place, a printed name — whatever the line beside the signature is
+    /// asking for. Kept beside the strokes rather than in a window of its own
+    /// because it is the same errand, and the reader who is about to sign is
+    /// the reader who is about to date it.
+    pub line: String,
+}
+
+/// What is armed and waiting for a click on a page.
+///
+/// **Signing is two gestures and this is the gap between them.** Choosing what
+/// to put down and choosing where it goes are different questions, and a
+/// window that answered both would have to contain the page. So the window
+/// closes, this is armed, the pointer answers the second question, and Escape
+/// disarms it like everything else in this reader that waits.
+pub enum Placing {
+    /// A name, drawn. Goes in as `/Ink`.
+    Hand(crate::sign::Signature),
+    /// A date or a line of text. Goes in as a `/Stamp` — see
+    /// [`crate::sign::place_text`] for why not the annotation named for it.
+    Line(String),
 }
 
 pub struct Viewer {
@@ -1137,7 +1159,7 @@ pub struct Viewer {
     /// becomes the thing that answers the second question, and one click on
     /// a page puts it there. Escape disarms it, like everything else that
     /// waits.
-    pub placing: Option<crate::sign::Signature>,
+    pub placing: Option<Placing>,
     /// Whether the reader has been told, for this document, that signing it
     /// rewrites the file and breaks the cryptographic signature it carries.
     /// Once, and before it happens — see [`crate::sign::BREAKS_A_SIGNATURE`].
@@ -3118,13 +3140,18 @@ impl Viewer {
     ///
     /// Answers the scan to restart, as everything that reopens the document
     /// does.
-    pub fn unsign(&mut self, page: usize, index: usize) -> Option<u64> {
+    pub fn unsign(&mut self, page: usize, index: usize, kind: crate::sign::Written) -> Option<u64> {
         let path = self.document.path().to_string();
         self.document.release();
         let taken = crate::markup::remove(&path, page, index);
         let restarted = self.reopen(&path);
         match taken {
-            Ok(()) => self.notice = format!("Signature taken off page {page}."),
+            Ok(()) => {
+                self.notice = match kind {
+                    crate::sign::Written::Hand => format!("Signature taken off page {page}."),
+                    crate::sign::Written::Line => format!("Text taken off page {page}."),
+                }
+            }
             Err(refused) => self.notice = refused,
         }
         restarted
@@ -3136,8 +3163,21 @@ impl Viewer {
     /// to it is on the page the window is covering.
     pub fn sign_with(&mut self, signature: crate::sign::Signature) {
         self.signing = None;
-        self.placing = Some(signature);
+        self.placing = Some(Placing::Hand(signature));
         self.notice = "Click on the page where the signature should go.".into();
+    }
+
+    /// The same, for a date or a line of text. One gesture and one armed
+    /// slot, because a reader placing something on a page is doing one thing
+    /// whichever of the two it is.
+    pub fn type_with(&mut self, line: String) {
+        if line.trim().is_empty() {
+            self.notice = "There is nothing typed to put on the page.".into();
+            return;
+        }
+        self.signing = None;
+        self.placing = Some(Placing::Line(line));
+        self.notice = "Click on the page where the text should go.".into();
     }
 
     /// Put it down again unsigned. `false` when nothing was armed, which is
@@ -3165,10 +3205,16 @@ impl Viewer {
     /// convention [`Viewer::document_changed`] sets for everything that
     /// reopens the document underneath the reader.
     pub fn sign_at(&mut self, page: usize, on: (f64, f64)) -> Option<u64> {
-        let signature = self.placing.take()?;
+        let placing = self.placing.take()?;
         let index = page.checked_sub(1)?;
         let (x, y) = self.layout.unplace_on(index, on.0, on.1);
-        let height = HAND_HEIGHT;
+        // A hand is drawn to a height it chose and a line of type to a
+        // smaller one: the name is the thing being said, and a date under it
+        // is a note about the name.
+        let height = match &placing {
+            Placing::Hand(_) => HAND_HEIGHT,
+            Placing::Line(_) => crate::sign::LINE_HEIGHT,
+        };
         let at = Rect {
             left: x,
             top: y - height / 2.0,
@@ -3190,10 +3236,19 @@ impl Viewer {
         // `mark_selection`'s own rule, and see
         // [`crate::render::PageSource::release`] for why it is not optional.
         self.document.release();
-        let written = crate::sign::place(&path, page, at, &signature, crate::sign::INK);
+        let (written, done) = match &placing {
+            Placing::Hand(signature) => (
+                crate::sign::place(&path, page, at, signature, crate::sign::INK),
+                format!("Signed on page {page}."),
+            ),
+            Placing::Line(line) => (
+                crate::sign::place_text(&path, page, at, line, crate::sign::INK),
+                format!("Written on page {page}."),
+            ),
+        };
         let restarted = self.reopen(&path);
         match written {
-            Ok(()) => self.notice = format!("Signed on page {page}.{warning}"),
+            Ok(()) => self.notice = format!("{done}{warning}"),
             // Nothing is kept beside the document here, which is where this
             // parts company with a mark. A highlight kept in the journal is
             // still a passage the reader marked and can be shown to them; a
@@ -7440,20 +7495,28 @@ pub fn Reader(
                                             class: "sign-row",
                                             span { class: "sign-placed",
                                                 span { class: "sign-name",
-                                                    {if placed.by.is_empty() {
+                                                    // The words for a line of
+                                                    // type, the name for a
+                                                    // hand — and for either
+                                                    // one this reader did not
+                                                    // write, what it is.
+                                                    {if !placed.by.is_empty() {
+                                                        placed.by.clone()
+                                                    } else if placed.kind == crate::sign::Written::Hand {
                                                         "Ink".to_string()
                                                     } else {
-                                                        placed.by.clone()
+                                                        "A stamp".to_string()
                                                     }}
                                                 }
                                                 span { class: "sign-where", "page {placed.page}" }
                                             }
                                             button {
                                                 class: "sign-forget",
-                                                "aria-label": "Take this signature off the document",
+                                                "aria-label": "Take this off the document",
                                                 onclick: {
                                                     let (page, index) = (placed.page, placed.index);
-                                                    move |_| { viewer.write().unsign(page, index); }
+                                                    let kind = placed.kind;
+                                                    move |_| { viewer.write().unsign(page, index, kind); }
                                                 },
                                                 Icon { name: "trash", stroke: ink.clone() }
                                             }
@@ -7566,6 +7629,48 @@ pub fn Reader(
                                     class: "chip action primary",
                                     onclick: move |_| { viewer.write().keep_signature(); },
                                     "Keep this signature"
+                                }
+                            }
+                            // **The other half of signing something**, which
+                            // is the line beside the name: a date, a place, a
+                            // printed version of what was just drawn. It is
+                            // here rather than in a window of its own because
+                            // it is the same errand — the reader about to sign
+                            // is the reader about to date it — and it is last
+                            // because the signature is the thing being asked
+                            // for and this is the note beside it.
+                            h3 { class: "pane-group", "Or a date, or a line of text" }
+                            crate::prefs::Field { label: "Text",
+                                crate::prefs::TextField {
+                                    value: pad.line.clone(),
+                                    onchange: move |value| {
+                                        if let Some(signing) = viewer.write().signing.as_mut() {
+                                            signing.line = value;
+                                        }
+                                    },
+                                }
+                            }
+                            div { class: "pane-actions",
+                                button {
+                                    class: "chip action sign-today",
+                                    // Fills the field rather than placing
+                                    // anything, so a reader who wants a
+                                    // different date can edit it and one who
+                                    // wants today's is one press from it.
+                                    onclick: move |_| {
+                                        if let Some(signing) = viewer.write().signing.as_mut() {
+                                            signing.line = crate::sign::today();
+                                        }
+                                    },
+                                    "Today"
+                                }
+                                button {
+                                    class: "chip action primary sign-place-text",
+                                    onclick: {
+                                        let line = pad.line.clone();
+                                        move |_| viewer.write().type_with(line.clone())
+                                    },
+                                    "Place this on the page"
                                 }
                             }
                         }

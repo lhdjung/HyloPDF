@@ -2858,7 +2858,7 @@ impl Viewer {
         self.standing = if path.is_empty() {
             crate::markup::Standing::default()
         } else {
-            crate::markup::standing(&path)
+            crate::markup::standing(&path, self.document.encrypted())
         };
         self.sync_journal();
     }

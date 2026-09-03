@@ -3911,6 +3911,17 @@ frame: the first `RedrawRequested` a window draws hands the keyboard back, and
 the query that costs walks the document — which is the one thing a scroll must
 not grow. The harness does the same one line after its first settle.
 
+### And markup does not go into an encrypted document
+
+This is the arm the port did not have, and it arrived with the prompt: before
+there was one, a locked document never got as far as being markable. pdfium's
+only way to write a document back is `FPDF_SaveAsCopy`, which is a full
+rewrite, and what that makes of a document opened with a password is not a
+thing to find out over somebody's file. So `Standing` asks it first, before the
+disk — an encrypted document may sit in a folder anybody can write to and still
+be one this reader will not rewrite — and the mark goes into the journal
+instead, which is what the journal has always been for.
+
 ---
 
 ## Three things to carry forward

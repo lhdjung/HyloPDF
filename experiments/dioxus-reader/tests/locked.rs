@@ -228,3 +228,17 @@ fn answering_it_opens_the_document_in_place() {
         reader.asks(),
     );
 }
+
+/// **Markup does not go into an encrypted document.** pdfium's only way to
+/// write one back is `FPDF_SaveAsCopy`, which is a full rewrite, and what that
+/// makes of a document opened with a password is not a thing to find out over
+/// somebody's file. So the mark is kept beside the document instead, which is
+/// what the journal has always been for, and the reader is told in one line.
+#[test]
+fn a_mark_on_an_encrypted_document_stays_beside_it() {
+    let opened = dioxus_reader::render::open_with(&fixture::locked_pdf(), Some(LOCKED_PASSWORD))
+        .expect("the password opens it");
+    let standing = dioxus_reader::markup::standing(opened.path(), opened.encrypted());
+    assert!(!standing.into_file, "nothing is written into it");
+    assert_eq!(standing.refused, "this document is encrypted");
+}

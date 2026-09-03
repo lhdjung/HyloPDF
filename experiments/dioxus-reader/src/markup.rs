@@ -98,10 +98,11 @@ impl Mark {
 /// Where markup on this document can go, asked once when it opens rather than
 /// found out halfway through the reader's gesture.
 ///
-/// The app's `MarkupStanding`, minus the two questions this reader cannot ask
-/// and plus nothing. *Encrypted* is missing because a document this reader
-/// cannot open is not a document it can mark — there is no password prompt
-/// here yet, so an encrypted file never gets this far. *Too large* is missing
+/// The app's `MarkupStanding`, minus the one question this reader does not
+/// need to ask. *Encrypted* is here, and it arrived with the password prompt:
+/// before there was one, a locked document never got this far. It refuses for
+/// a reason of its own rather than the app's — see [`standing`]. *Too large* is
+/// missing
 /// because the app's limit is a fact about its bridge: `saveDocument()` pulls
 /// the whole file into the worker and hands the whole file back across the
 /// IPC boundary, and a hundred megabytes of that is the reader's gesture
@@ -128,7 +129,18 @@ pub struct Standing {
 /// none of them can be worked out by looking at the metadata. It is the app's
 /// `document_writability`, which reached the same conclusion from the same
 /// starting point.
-pub fn standing(path: &str) -> Standing {
+pub fn standing(path: &str, encrypted: bool) -> Standing {
+    // **Asked before the disk is**, because it is the one refusal that has
+    // nothing to do with the file's permissions: an encrypted document may sit
+    // in a folder anybody can write to and still be a document this reader
+    // will not rewrite. See [`crate::render::PageSource::encrypted`] for why.
+    if encrypted {
+        return Standing {
+            into_file: false,
+            refused: "this document is encrypted".to_string(),
+            signed: false,
+        };
+    }
     match std::fs::OpenOptions::new().write(true).open(path) {
         Ok(_) => Standing {
             into_file: true,

@@ -104,6 +104,10 @@ pub struct Options {
     /// the watcher would; this is for the one test that has to prove the
     /// watcher is really wired to it.
     pub watch: bool,
+    /// A document this window is to ask the password for, if there is one —
+    /// the prop `Session::window_on` hands a window it made on a locked file.
+    /// See [`Reader::locked`].
+    pub asking: Option<String>,
     /// What the picker answers with, in order — one path per Open, and
     /// nothing left means the reader cancelled.
     ///
@@ -155,6 +159,7 @@ impl Default for Options {
             settings: Vec::new(),
             picks: Vec::new(),
             watch: false,
+            asking: None,
             appearance: None,
             config: scratch_config(),
         }
@@ -484,6 +489,16 @@ impl Reader {
         Self::over(crate::render::nothing(), options)
     }
 
+    /// A window made on a document that will not open without a password,
+    /// which is what `Session::window_on` makes when pdfium refuses one:
+    /// nothing in the window, and the question over it.
+    pub fn locked(path: &str) -> Self {
+        Self::empty(Options {
+            asking: Some(path.to_string()),
+            ..Options::default()
+        })
+    }
+
     pub fn open_with(path: &str, options: Options) -> Self {
         let document = render::open(path).unwrap_or_else(|err| panic!("{err}"));
         Self::over(document, options)
@@ -512,6 +527,7 @@ impl Reader {
                 document: Handle(document.clone()),
                 chosen,
                 config,
+                asking: options.asking.clone(),
             },
         );
         // What the shell provides out of the winit window, provided out of the

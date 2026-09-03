@@ -3187,7 +3187,8 @@ give way.
   theme… / Make a copy…, Delete this theme. The largest thing outstanding, and
   the oldest.
 - **A password prompt.** `ui.askForPassword` has no counterpart here; an
-  encrypted document opens as an error.
+  encrypted document opens as an error. *(Built — see "A document behind a
+  password" below.)*
 - **`.loading` and `.page-placeholder`**, which is what the app shows where a
   page has not been drawn yet.
 - **`.title-drag`**, which is macOS window dragging with the toolbar hidden.
@@ -3856,6 +3857,17 @@ Which of the two sentences goes over the field — "It needs a password before i
 can be opened" or "That password was not right" — is decided by the *caller*,
 because pdfium reports both as the same error and the difference is whether a
 password was supplied.
+
+**A locked document makes a window rather than refusing one.** `window_on` used
+to answer `None` for anything that would not open, and a window is exactly
+where the question has to be asked — so a launch on a locked file now comes up
+empty with the prompt over it. Until it is answered the window is showing
+*nothing*, which is what it is: the desk, the restore list and the window's
+title are all about a document that has been opened, and the answer goes back
+out through the `Ask::Showing` that ⌘O already uses. The question travels as a
+prop rather than as news down the mailbox, because it is true before the first
+frame: a window made to ask has never had anything else in it, and a message
+posted to a window that has not rendered is a question about arrival order.
 
 ### A window that comes up with a field in it had no way to get the keyboard
 

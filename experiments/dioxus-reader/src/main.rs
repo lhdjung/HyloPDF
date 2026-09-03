@@ -176,6 +176,13 @@ fn main() {
             "reader: nothing to open — the start screen | {:.0}MB resident before any window",
             stats::rss_mb(),
         ),
+        // A locked document is not a launch that failed: the window comes up
+        // and asks. See `Session::window_on`.
+        Some(Err(render::Refusal::Locked)) => println!(
+            "reader: {} is locked — the window will ask for the password | {:.0}MB resident before any window",
+            path.as_deref().unwrap_or_default(),
+            stats::rss_mb(),
+        ),
         Some(Err(err)) => {
             eprintln!("{err}");
             // The one mistake worth a second sentence, because the documented

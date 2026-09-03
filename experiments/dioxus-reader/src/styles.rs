@@ -1125,6 +1125,18 @@ body { margin: 0;
 .note-text { margin: 0; color: var(--text); }
 .note-said { margin: 0; color: var(--faint); font-size: 12.5px; }
 
+/* The password window. `.window-ask` in the app, and it is the one window in
+   this reader that fits what is in it in both directions: a lede, a field and
+   two buttons is four rows, and a 600px frame around them would be a window
+   asking a one-line question in a hall. */
+.ask-window { width: 420px; height: auto; }
+.ask-body { padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+.ask-body .pane-lede { margin: 0; }
+.ask-field { width: 100%; height: 32px; }
+/* The gap above is the column's, not the row's — see `.pane-actions`, which
+   carries a margin for the pages in Settings where it follows a long list. */
+.ask-actions { margin-top: 0; justify-content: flex-end; }
+
 /* The Information window: what the document says about itself, a row a fact.
    `showDocumentDetails` in `main.ts` and `ui.field` under it. */
 .details-window { min-width: 420px; max-width: 560px; }

@@ -911,6 +911,26 @@ impl Menu {
 }
 
 /// Everything the reader is looking at, and everything that changes it.
+/// A document that will not open without a password, and what has been said
+/// to it so far.
+///
+/// `ui.askForPassword` in the app, which is a window with a field in it and a
+/// promise the load is waiting on. There is nothing to wait here: pdfium
+/// answers at open, so a locked document is a piece of *state* — this window
+/// is showing whatever it was showing, and there is a question over it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Locked {
+    /// The document being asked about. Not opened, and not the document this
+    /// window is showing: a reader who declines keeps what they had.
+    pub path: String,
+    /// What has been typed, in the clear. What is on screen is bullets — see
+    /// [`Viewer::type_password`].
+    pub typed: String,
+    /// Whether an answer has already been given and refused, which is the
+    /// difference between the two sentences over the field.
+    pub wrong: bool,
+}
+
 pub struct Viewer {
     pub document: Arc<dyn PageSource>,
     pub layout: Layout,
@@ -1041,6 +1061,9 @@ pub struct Viewer {
     /// The note the reader has opened, if any. See the note window in
     /// [`Reader`] — `showNote` in `main.ts`.
     pub note_open: Option<(usize, crate::render::Note)>,
+    /// The document waiting on a password, if one is. `ui.askForPassword` in
+    /// the app, and see [`Locked`].
+    pub locked: Option<Locked>,
     /// Whether the Information window is up. `showDocumentDetails` in
     /// `main.ts`: what the document says about itself, which nothing else in
     /// this reader shows.
@@ -1283,6 +1306,7 @@ impl Viewer {
             results_borrowed: false,
             offered_results: false,
             note_open: None,
+            locked: None,
             details_open: false,
             editing: None,
             pill_up: false,
@@ -2278,6 +2302,38 @@ impl Viewer {
 
     pub fn close_note(&mut self) -> bool {
         self.note_open.take().is_some()
+    }
+
+    /// What has been typed into the password field so far.
+    ///
+    /// Kept here rather than in the field because the field does not hold it:
+    /// Blitz renders `type="password"` as plain text, so what is on screen is
+    /// a row of bullets and this is the string they stand for. See the field
+    /// in [`Reader`], which is where the two are kept in step.
+    pub fn type_password(&mut self, typed: &str) {
+        if let Some(locked) = self.locked.as_mut() {
+            locked.typed = typed.to_string();
+        }
+    }
+
+    /// "Not now": the question is withdrawn and the reader is left with
+    /// whatever they had — which at launch is the start screen.
+    ///
+    /// **Declining is not answering with an empty password**, which is the
+    /// app's own hard-won note about pdf.js: a reader who has decided not to
+    /// open this document must not be asked again on their way out of the
+    /// question.
+    pub fn stop_unlocking(&mut self) -> bool {
+        self.locked.take().is_some()
+    }
+
+    /// The reader has answered. Answers whether the document opened, because
+    /// the caller has the same bookkeeping to do as [`Self::open_here`]'s.
+    pub fn unlock(&mut self) -> bool {
+        let Some(locked) = self.locked.clone() else {
+            return false;
+        };
+        self.open_here_with(&locked.path, Some(&locked.typed))
     }
 
     /// What the document says about itself, in the app's own order — see
@@ -4246,17 +4302,43 @@ impl Viewer {
     /// a query asked of the next book, and the matches were positions in a
     /// document nobody is looking at any more.
     pub fn open_here(&mut self, path: &str) -> bool {
+        self.open_here_with(path, None)
+    }
+
+    /// The same, with the password for a document that wants one.
+    ///
+    /// **Locked is not an error here, it is a question**, and this is the one
+    /// place that turns it into one: a document that will not open without a
+    /// password puts [`Locked`] up and leaves this window showing whatever it
+    /// had, exactly as any other refusal does. The reader answers, the answer
+    /// comes back through [`Self::unlock`], and this runs again with it.
+    ///
+    /// Whether the sentence over the field says "it needs a password" or
+    /// "that one was not right" is decided here rather than by pdfium, which
+    /// reports both as `FPDF_ERR_PASSWORD`: the difference is whether this
+    /// call supplied one.
+    fn open_here_with(&mut self, path: &str, password: Option<&str>) -> bool {
         if path == self.document.path() {
             self.notice = "That document is already open here.".into();
             return false;
         }
-        let opened = match crate::render::open(path) {
+        let opened = match crate::render::open_with(path, password) {
             Ok(document) => document,
+            Err(crate::render::Refusal::Locked) => {
+                self.locked = Some(Locked {
+                    path: path.to_string(),
+                    typed: String::new(),
+                    wrong: password.is_some(),
+                });
+                return false;
+            }
             Err(refused) => {
+                self.locked = None;
                 self.notice = format!("Could not open that document: {refused}");
                 return false;
             }
         };
+        self.locked = None;
         // Where the reader was in the document being put down, written before
         // the store stops pointing at it. `remember` hands it to the scribe,
         // which keeps one place per document — so this cannot be skipped on
@@ -4576,7 +4658,19 @@ pub fn give_keyboard_back(doc: &mut blitz_dom::BaseDocument) {
 /// The whole window.
 ///
 #[component]
-pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
+pub fn Reader(
+    document: Handle,
+    chosen: Chosen,
+    config: Config,
+    /// A document this window is to ask for the password to, if there is one.
+    ///
+    /// A prop rather than a message down the mailbox because it is true
+    /// *before* the first frame: a window made on a locked document has never
+    /// had anything else in it, and a question posted to a window that has not
+    /// rendered yet is a question about arrival order. See `Session::window_on`.
+    #[props(default)]
+    asking: Option<String>,
+) -> Element {
     // The viewport, taken from the window rather than from the element.
     //
     // `get_client_rect` is the obvious way and it panics: a `MountedData` call
@@ -4624,6 +4718,14 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
         // takes the collision away rather than dodging it.
         let (width, height, _scale) = screen.get();
         viewer.fit_window(width, height);
+        // And the question, if this window was made to ask one.
+        if let Some(path) = asking.clone() {
+            viewer.locked = Some(Locked {
+                path,
+                typed: String::new(),
+                wrong: false,
+            });
+        }
         viewer
     });
     // Where a link out of the document goes. See [`Away`]: the default is the
@@ -5065,6 +5167,7 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
     // rather than the position, which is what `showNote` says too.
     let worn_built_in = held.store.theme().built_in;
     let note_open = held.note_open.clone();
+    let locked = held.locked.clone();
     let details_open = held.details_open;
     let details_rows = if details_open {
         held.details()
@@ -6834,6 +6937,131 @@ pub fn Reader(document: Handle, chosen: Chosen, config: Config) -> Element {
                     }
                 }
             }
+            // A document that will not open without a password.
+            // `ui.askForPassword` in the app, and it is a window there for the
+            // reason the two above are: it is the only thing on screen worth
+            // attending to, and the answer decides whether there is a document
+            // at all.
+            if let Some(asking) = locked {
+                div {
+                    class: "window-scrim",
+                    // A press outside is not "not now": the app's own window
+                    // has no light dismiss either, and a question with a field
+                    // in it is not something to lose by clicking beside it.
+                    onmousedown: move |event| event.stop_propagation(),
+                    div {
+                        class: "window ask-window",
+                        role: "dialog",
+                        "aria-modal": "true",
+                        "aria-label": "This document is locked",
+                        onmousedown: move |event| event.stop_propagation(),
+                        div { class: "window-bar",
+                            span { class: "window-title", "This document is locked" }
+                            button {
+                                class: "chip window-close",
+                                "aria-label": "Close",
+                                onclick: move |_| { viewer.write().stop_unlocking(); },
+                                Icon { name: "close", stroke: ink.clone() }
+                            }
+                        }
+                        div { class: "ask-body",
+                            p { class: "pane-lede",
+                                {if asking.wrong {
+                                    "That password was not right. Try again."
+                                } else {
+                                    "It needs a password before it can be opened."
+                                }}
+                            }
+                            // Blitz builds a text editor for
+                            // `type="password"` and gives it the right
+                            // accessibility role. It does not mask it, which
+                            // is the next commit.
+                            input {
+                                class: "text-field ask-field",
+                                r#type: "password",
+                                value: "{asking.typed}",
+                                "aria-label": "Password",
+                                "data-keyboard": "password",
+                                onmounted: move |event| {
+                                    let node = event.data();
+                                    let task = node.set_focus(true);
+                                    spawn(async move { let _ = task.await; });
+                                },
+                                oninput: move |event| {
+                                    viewer.write().type_password(&event.value());
+                                },
+                                // The same two rules every field in this file
+                                // has — a plain key would otherwise scroll the
+                                // document behind the window — plus the two
+                                // this one is for.
+                                onkeydown: {
+                                    let frame = frame.clone();
+                                    move |event: KeyboardEvent| {
+                                        let plain = !event.modifiers().meta()
+                                            && !event.modifiers().ctrl()
+                                            && !event.modifiers().alt();
+                                        match event.key() {
+                                            Key::Enter => {
+                                                event.stop_propagation();
+                                                event.prevent_default();
+                                                if viewer.write().unlock() {
+                                                    let path = viewer
+                                                        .read()
+                                                        .document
+                                                        .path()
+                                                        .to_string();
+                                                    let title = viewer
+                                                        .read()
+                                                        .store
+                                                        .title()
+                                                        .to_string();
+                                                    frame.ask(Ask::Showing { path, title });
+                                                }
+                                            }
+                                            Key::Escape => {
+                                                event.stop_propagation();
+                                                viewer.write().stop_unlocking();
+                                            }
+                                            _ if plain => event.stop_propagation(),
+                                            Key::Character(ref typed)
+                                                if matches!(
+                                                    typed.as_str(),
+                                                    "a" | "c" | "v" | "x" | "z"
+                                                ) => {}
+                                            _ => event.prevent_default(),
+                                        }
+                                    }
+                                },
+                            }
+                            div { class: "pane-actions ask-actions",
+                                button {
+                                    class: "chip action",
+                                    "data-item": "not-now",
+                                    onclick: move |_| { viewer.write().stop_unlocking(); },
+                                    "Not now"
+                                }
+                                button {
+                                    class: "chip action primary",
+                                    "data-item": "unlock",
+                                    onclick: {
+                                        let frame = frame.clone();
+                                        move |_| {
+                                            if viewer.write().unlock() {
+                                                let path =
+                                                    viewer.read().document.path().to_string();
+                                                let title =
+                                                    viewer.read().store.title().to_string();
+                                                frame.ask(Ask::Showing { path, title });
+                                            }
+                                        }
+                                    },
+                                    "Open"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             // And Settings, over all of it. Last in the root so that it is
             // last in paint order too — Blitz paints by the rules, and a
             // scrim that comes before the document is a scrim behind it.
@@ -7449,6 +7677,15 @@ fn perform(
             // it is over the reader, and Escape inside a window means that
             // window.
             if viewer.write().close_note() {
+                return;
+            }
+            // And the password window. Below the rest because a reader inside
+            // it is inside a field, so this arm is only reached when the
+            // pointer has taken the keyboard somewhere else — the field's own
+            // Escape is what usually answers. Withdrawing the question is not
+            // answering it with an empty password: see
+            // [`Viewer::stop_unlocking`].
+            if viewer.write().stop_unlocking() {
                 return;
             }
             let (typing, finding, selected, presenting, full) = {

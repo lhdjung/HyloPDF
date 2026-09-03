@@ -101,16 +101,29 @@ impl Session {
     /// the config, the contexts — is the same because it is about a window
     /// rather than about a document.
     fn window_on(&self, path: Option<&str>) -> Option<WindowSpec> {
-        let document = match path {
+        // **A locked document makes a window rather than refusing one**, and
+        // that is the whole of what the password prompt costs out here: the
+        // window comes up empty with the question over it, because there is
+        // nowhere else to ask. Every other refusal is still a line on the
+        // terminal and no window at all — there is nothing a reader could do
+        // about a file that is missing or is not a PDF.
+        let (document, asking) = match path {
             Some(path) => match render::open(path) {
-                Ok(document) => document,
+                Ok(document) => (document, None),
+                Err(render::Refusal::Locked) => (render::nothing(), Some(path.to_string())),
                 Err(refused) => {
                     eprintln!("{refused}");
                     return None;
                 }
             },
-            None => render::nothing(),
+            None => (render::nothing(), None),
         };
+        // …and until it is answered this window is showing *nothing*, which is
+        // what it is: the desk, the restore list and the window's own title
+        // are all about a document that has been opened. The answer comes back
+        // through `Ask::Showing`, which is the one path that sets all three —
+        // the same path ⌘O uses.
+        let path = if asking.is_some() { None } else { path };
         let label = self.desk.name();
         self.desk.set(&label, path);
         // What the next launch comes back to, written as each window opens.
@@ -147,6 +160,7 @@ impl Session {
                 // painted. See `main.rs`.
                 chosen: Chosen::new(palette::FALLBACK),
                 config,
+                asking,
             },
         );
         let watching = self.watching.clone();

@@ -5168,6 +5168,12 @@ pub fn Reader(
     let worn_built_in = held.store.theme().built_in;
     let note_open = held.note_open.clone();
     let locked = held.locked.clone();
+    // The bullets the password field shows, counted here because a format
+    // hole in `rsx!` cannot hold a string literal of its own. See the field.
+    let locked_shown = locked
+        .as_ref()
+        .map(|locked| "\u{2022}".repeat(locked.typed.chars().count()))
+        .unwrap_or_default();
     let details_open = held.details_open;
     let details_rows = if details_open {
         held.details()
@@ -6972,66 +6978,103 @@ pub fn Reader(
                                     "It needs a password before it can be opened."
                                 }}
                             }
-                            // Blitz builds a text editor for
-                            // `type="password"` and gives it the right
-                            // accessibility role. It does not mask it, which
-                            // is the next commit.
-                            input {
-                                class: "text-field ask-field",
-                                r#type: "password",
-                                value: "{asking.typed}",
-                                "aria-label": "Password",
-                                "data-keyboard": "password",
-                                onmounted: move |event| {
-                                    let node = event.data();
-                                    let task = node.set_focus(true);
-                                    spawn(async move { let _ = task.await; });
-                                },
-                                oninput: move |event| {
-                                    viewer.write().type_password(&event.value());
-                                },
-                                // The same two rules every field in this file
-                                // has — a plain key would otherwise scroll the
-                                // document behind the window — plus the two
-                                // this one is for.
-                                onkeydown: {
-                                    let frame = frame.clone();
-                                    move |event: KeyboardEvent| {
-                                        let plain = !event.modifiers().meta()
-                                            && !event.modifiers().ctrl()
-                                            && !event.modifiers().alt();
-                                        match event.key() {
-                                            Key::Enter => {
-                                                event.stop_propagation();
-                                                event.prevent_default();
-                                                if viewer.write().unlock() {
-                                                    let path = viewer
-                                                        .read()
-                                                        .document
-                                                        .path()
-                                                        .to_string();
-                                                    let title = viewer
-                                                        .read()
-                                                        .store
-                                                        .title()
-                                                        .to_string();
-                                                    frame.ask(Ask::Showing { path, title });
+                            // **What is on screen is bullets and what is in
+                            // the field is the password.** Blitz reads
+                            // `type="password"` — it builds a text editor for
+                            // it and gives it the right accessibility role —
+                            // and it does not *mask* it, so a field left to
+                            // itself would show somebody's password to the
+                            // room.
+                            //
+                            // So the ink is taken away and the bullets are
+                            // drawn over the top: `color: transparent` with a
+                            // `caret-color` of its own, and a span above it
+                            // holding one bullet a character. The attribute is
+                            // still `password`, because the accessibility role
+                            // is worth having and because the day Blitz masks
+                            // it this becomes a bullet under a bullet rather
+                            // than a fault.
+                            //
+                            // **The other way round was tried and is the one
+                            // to know about.** Putting the bullets in the
+                            // field's own `value` and keeping the password
+                            // beside it works until somebody presses a key
+                            // twice: `set_text` in `blitz-dom` only touches
+                            // the editor when the string it is given differs
+                            // from the one it holds, and setting it collapses
+                            // the selection to the front — so a masked field
+                            // has its caret thrown to offset 0 after every
+                            // keystroke and "hylo" is typed in as "olyh". The
+                            // page field beside it never sees this because
+                            // what it writes back is what was typed, so the
+                            // guard skips and the caret stays. And Backspace
+                            // could not be intercepted to work around it: on
+                            // macOS it is not a keystroke at all but a
+                            // `doCommandBySelector:` the editor answers
+                            // directly, which no handler here can decline.
+                            //
+                            // The cost is that the password is in the DOM, in
+                            // this window, while the question is up — which is
+                            // where a browser keeps it too.
+                            span { class: "ask-field-wrap",
+                                input {
+                                    class: "text-field ask-field",
+                                    r#type: "password",
+                                    value: "{asking.typed}",
+                                    "aria-label": "Password",
+                                    "data-keyboard": "password",
+                                    onmounted: move |event| {
+                                        let node = event.data();
+                                        let task = node.set_focus(true);
+                                        spawn(async move { let _ = task.await; });
+                                    },
+                                    oninput: move |event| {
+                                        viewer.write().type_password(&event.value());
+                                    },
+                                    // The same two rules every field in this
+                                    // file has — a plain key would otherwise
+                                    // scroll the document behind the window —
+                                    // plus the two this one is for.
+                                    onkeydown: {
+                                        let frame = frame.clone();
+                                        move |event: KeyboardEvent| {
+                                            let plain = !event.modifiers().meta()
+                                                && !event.modifiers().ctrl()
+                                                && !event.modifiers().alt();
+                                            match event.key() {
+                                                Key::Enter => {
+                                                    event.stop_propagation();
+                                                    event.prevent_default();
+                                                    if viewer.write().unlock() {
+                                                        let path = viewer
+                                                            .read()
+                                                            .document
+                                                            .path()
+                                                            .to_string();
+                                                        let title = viewer
+                                                            .read()
+                                                            .store
+                                                            .title()
+                                                            .to_string();
+                                                        frame.ask(Ask::Showing { path, title });
+                                                    }
                                                 }
+                                                Key::Escape => {
+                                                    event.stop_propagation();
+                                                    viewer.write().stop_unlocking();
+                                                }
+                                                _ if plain => event.stop_propagation(),
+                                                Key::Character(ref typed)
+                                                    if matches!(
+                                                        typed.as_str(),
+                                                        "a" | "c" | "v" | "x" | "z"
+                                                    ) => {}
+                                                _ => event.prevent_default(),
                                             }
-                                            Key::Escape => {
-                                                event.stop_propagation();
-                                                viewer.write().stop_unlocking();
-                                            }
-                                            _ if plain => event.stop_propagation(),
-                                            Key::Character(ref typed)
-                                                if matches!(
-                                                    typed.as_str(),
-                                                    "a" | "c" | "v" | "x" | "z"
-                                                ) => {}
-                                            _ => event.prevent_default(),
                                         }
-                                    }
-                                },
+                                    },
+                                }
+                                span { class: "ask-bullets", "{locked_shown}" }
                             }
                             div { class: "pane-actions ask-actions",
                                 button {

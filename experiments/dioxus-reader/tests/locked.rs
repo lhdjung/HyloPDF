@@ -126,6 +126,30 @@ fn a_wrong_password_says_so_and_asks_again() {
 }
 
 
+/// What is drawn is bullets. Blitz builds a text editor for
+/// `type="password"` and gives it the right accessibility role, and it does
+/// not mask it — so the reader does, by taking the ink out of the field and
+/// drawing one bullet a character over the top. The password is in the field's
+/// value while the question is up, which is where a browser keeps it too.
+#[test]
+fn the_field_shows_bullets_and_not_the_password() {
+    let mut reader = Reader::locked(&fixture::locked_pdf());
+    reader.type_text("secret");
+    assert_eq!(
+        reader.text_all(".ask-bullets"),
+        vec!["••••••".to_string()],
+        "one bullet a character",
+    );
+    // And what is tried is the password rather than the bullets, which is the
+    // half that would break silently: six bullets are a wrong password too.
+    reader.press("Enter");
+    let window = reader.harness.text_content(".ask-window");
+    assert!(
+        window.contains("That password was not right"),
+        "it tried what was typed: {window:?}",
+    );
+}
+
 /// "Not now" withdraws the question and leaves the reader with what they had.
 ///
 /// **Declining is not answering with an empty password**, which is the app's

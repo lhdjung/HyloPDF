@@ -3869,6 +3869,33 @@ prop rather than as news down the mailbox, because it is true before the first
 frame: a window made to ask has never had anything else in it, and a message
 posted to a window that has not rendered is a question about arrival order.
 
+### Masking, which Blitz does not do and the obvious workaround gets wrong
+
+Blitz reads `type="password"` — `create_text_editor` accepts it and
+`accessibility.rs` gives it `Role::PasswordInput` — and it does not mask it. A
+field left to itself shows somebody's password to the room.
+
+The obvious answer is to put bullets in the field's `value` and keep the
+password beside it. **It works until somebody presses a key twice.**
+`InputData::set_text` in `blitz-dom` only touches the editor when the string it
+is given differs from the one it holds, and `PlainEditor::set_text` collapses
+the selection to the front — so a field whose value never matches what was
+typed has its caret thrown to offset 0 after every keystroke, and "hylo" is
+typed in as "olyh". The page field beside it has never seen this because what
+it writes back is what was typed, so the guard skips and the caret stays; the
+mask is what breaks the invariant. Nor could it be worked around by
+intercepting the keys: **Backspace is not a keystroke on macOS**, it is a
+`doCommandBySelector:` the editor answers directly, and no handler in this
+reader can decline it. That is the same fact the bar round found about the find
+bar, arriving from the other side.
+
+So the field holds the password and does not show it: `color: transparent`
+with a `caret-color` of its own, and a span over the top holding one bullet a
+character. Editing, selection, Backspace and paste are all the editor's own and
+all correct, and the password is in the DOM of that window while the question
+is up — which is where a browser keeps it too. The day Blitz masks the field
+this becomes a bullet under a bullet rather than a fault.
+
 ### A window that comes up with a field in it had no way to get the keyboard
 
 `app::KEYBOARD` is the account of why a component here cannot focus itself and
@@ -3903,7 +3930,14 @@ not grow. The harness does the same one line after its first settle.
    what was on this list *can* be, once the rules are separated from the
    windows they are about.
 
-## Seventeen things worth raising upstream, and none of them is blocking
+## Eighteen things worth raising upstream, and none of them is blocking
+
+- `type="password"` is accepted, given `Role::PasswordInput` and then rendered
+  in the clear. It is the one input type whose whole meaning is what it does
+  *not* draw, and the two ways an application can work around it are both
+  wrong: masking through `value` fights `set_text`'s selection collapse, and
+  intercepting the keys cannot reach macOS's `doCommandBySelector:`. See "A
+  document behind a password" above for the workaround this reader carries.
 
 - `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
   comment in the source already says it should be. A tenth of every one of

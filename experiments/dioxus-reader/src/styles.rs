@@ -1132,7 +1132,18 @@ body { margin: 0;
 .ask-window { width: 420px; height: auto; }
 .ask-body { padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
 .ask-body .pane-lede { margin: 0; }
-.ask-field { width: 100%; height: 32px; }
+/* The field holds the password and does not show it: the ink is taken away,
+   the caret is given a colour of its own so that it is still there, and the
+   bullets are a span over the top. See the field in `app.rs` for why it is
+   this way round and not the obvious one. */
+.ask-field-wrap { position: relative; display: block; }
+.ask-field { width: 100%; height: 32px; color: transparent; caret-color: var(--text); }
+/* 9px is the field's 8px of padding and its 1px of border, so a bullet stands
+   where the character it stands for would have. */
+.ask-bullets {
+  position: absolute; left: 9px; top: 0; height: 32px; line-height: 32px;
+  color: var(--text); font-size: 13.5px; letter-spacing: 1px;
+}
 /* The gap above is the column's, not the row's — see `.pane-actions`, which
    carries a margin for the pages in Settings where it follows a long list. */
 .ask-actions { margin-top: 0; justify-content: flex-end; }

@@ -626,6 +626,13 @@ impl Reader {
             printed,
         };
         reader.focus_root();
+        // …and then to whatever inside it asks for the keyboard more
+        // particularly, which is the shell's own first-frame handback — see
+        // `Shell::painted`. A window that comes up with a field already in it
+        // is the password window and only that; every other field here is
+        // opened by a key or a click, both of which do this afterwards
+        // already.
+        reader.give_keyboard_back();
         reader.settle();
         reader
     }

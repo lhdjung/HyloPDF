@@ -277,6 +277,17 @@ pub struct Shell {
     swap: Option<Swap>,
     /// Which window has the keyboard, reported as winit says so.
     focus: Option<Box<dyn FnMut(Option<String>)>>,
+    /// Which windows have drawn at least once.
+    ///
+    /// **So that a window which comes up with a field already in it gets the
+    /// keyboard**, which is the password window and nothing else so far: every
+    /// other field in this reader is opened by a key or a click, and both of
+    /// those already hand the focus back afterwards. A window made *asking*
+    /// for a password has had no event at all, so the field it exists for sat
+    /// there unfocused until the reader touched something. Once per window
+    /// rather than once per frame, because the query below walks the document
+    /// and a scroll is the one path in this app that must not grow work.
+    painted: std::collections::HashSet<WindowId>,
     /// That a window changed size. See [`Shell::on_resized`].
     resized: Option<Resized>,
     /// That two fingers moved apart or together on it.
@@ -321,6 +332,7 @@ impl Shell {
             tidy: None,
             swap: None,
             focus: None,
+            painted: std::collections::HashSet::new(),
             resized: None,
             pinched: None,
             themed: None,
@@ -848,6 +860,12 @@ impl ApplicationHandler for Shell {
                 .or(Some(Drag::Refused)),
             _ => None,
         };
+        // …and the first frame a window draws, which is the one moment a field
+        // can already be on screen without anything having happened. See
+        // [`Shell::painted`]. Asked before the event is handed on, because
+        // that consumes it.
+        let first_paint =
+            matches!(event, WindowEvent::RedrawRequested) && self.painted.insert(window_id);
         self.inner.window_event(event_loop, window_id, event);
         if resized {
             // The size goes with the news, because the one thing that wants
@@ -893,7 +911,7 @@ impl ApplicationHandler for Shell {
                 tell(&label, drag);
             }
         }
-        if moved_focus {
+        if moved_focus || first_paint {
             if let Some(view) = self.inner.windows.get_mut(&window_id) {
                 crate::app::give_keyboard_back(&mut view.doc.inner_mut());
                 view.request_redraw();

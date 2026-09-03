@@ -3857,6 +3857,21 @@ can be opened" or "That password was not right" — is decided by the *caller*,
 because pdfium reports both as the same error and the difference is whether a
 password was supplied.
 
+### A window that comes up with a field in it had no way to get the keyboard
+
+`app::KEYBOARD` is the account of why a component here cannot focus itself and
+the window has to hand the keyboard back. What that machinery had never been
+asked for is a field that is on screen *before anything has happened*: every
+other field in this reader is opened by a key or a click, and both already
+hand the focus back afterwards. A window made asking for a password has had no
+event at all, so the one thing anybody came to it for would sit there
+unfocused until they touched something.
+
+`Shell::painted` is the answer, and it is once per window rather than once per
+frame: the first `RedrawRequested` a window draws hands the keyboard back, and
+the query that costs walks the document — which is the one thing a scroll must
+not grow. The harness does the same one line after its first settle.
+
 ---
 
 ## Three things to carry forward

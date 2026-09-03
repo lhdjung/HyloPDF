@@ -7722,6 +7722,14 @@ fn perform(
             if viewer.write().close_note() {
                 return;
             }
+            // The Information window, which is the note's neighbour in every
+            // other respect and was missing from this list: Escape closed the
+            // note beside it and left this one up. `showDocumentDetails` puts
+            // up the same kind of window and the app's modal closes on Escape
+            // whatever is in it.
+            if viewer.write().close_details() {
+                return;
+            }
             // And the password window. Below the rest because a reader inside
             // it is inside a field, so this arm is only reached when the
             // pointer has taken the keyboard somewhere else — the field's own

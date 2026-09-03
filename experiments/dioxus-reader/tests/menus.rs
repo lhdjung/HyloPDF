@@ -281,3 +281,27 @@ fn opening_what_is_already_open_says_so() {
         "and told nobody anything had changed",
     );
 }
+
+/// Escape closes the Information window, which it did not.
+///
+/// The note window and this one are the same kind of thing in the same place
+/// — a window over the reader, read once and dismissed — and `Action::Dismiss`
+/// worked outward through the menus, the popovers, Settings and the note and
+/// then stepped straight over this one. So a reader who opened it with the
+/// pointer had to close it with the pointer, in an app where Escape closes
+/// everything else that floats.
+#[test]
+fn escape_closes_the_information_window() {
+    let mut reader = reader();
+    reader.click(".chip.title");
+    reader.click("[data-item='information']");
+    assert!(
+        reader.harness.query(".details-window").is_some(),
+        "the window is up",
+    );
+    reader.press("Escape");
+    assert!(
+        reader.harness.query(".details-window").is_none(),
+        "and Escape puts it away, like every other window over the reader",
+    );
+}

@@ -211,7 +211,17 @@ fn a_recompiled_document_is_reopened_where_the_reader_was() {
     let state = reader.state();
     assert_eq!(state.pages, 20, "the new draft was not read");
     assert_eq!(state.page, 6, "the reader lost their place");
-    assert!(state.notice.contains("changed on disk"), "{}", state.notice);
+    // **And nothing is said about it.** The reload notice was taken out — a
+    // reader watching a paper rebuild sees the page redraw and, when the
+    // `\title{}` moved, the toolbar change, which is the whole of the news;
+    // the sentence only told somebody who does not know what a reload is that
+    // something they did not do had happened to their file. This assertion
+    // used to be its opposite, and was left behind when the notice went.
+    assert!(
+        !state.notice.contains("changed on disk"),
+        "a reload is not news: {}",
+        state.notice,
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

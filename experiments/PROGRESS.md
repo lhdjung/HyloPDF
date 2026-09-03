@@ -3922,6 +3922,16 @@ disk — an encrypted document may sit in a folder anybody can write to and stil
 be one this reader will not rewrite — and the mark goes into the journal
 instead, which is what the journal has always been for.
 
+### Two the suite was already red on
+
+`cargo test` was failing two before any of the above, and both are worth
+writing down.
+
+*`a_recompiled_document_is_reopened_where_the_reader_was` was asserting a
+sentence that had been deliberately taken out.* "Reloaded — the document
+changed on disk" went two commits ago and the assertion went with the reason
+rather than with the code. It now says the opposite, which is the decision.
+
 ---
 
 ## Three things to carry forward

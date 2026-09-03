@@ -11,7 +11,7 @@
 //! forty lines of MD5 and RC4 and no dependency. See its own comment for why
 //! the weakest variant in the spec is the right one to test against.
 
-use dioxus_reader::fixture;
+use dioxus_reader::fixture::{self, LOCKED_PASSWORD};
 
 /// MD5 against the RFC's own vectors, because everything below stands on it:
 /// a key derivation that is quietly wrong makes a fixture no reader can open,
@@ -37,11 +37,25 @@ fn the_digest_the_key_is_derived_with_is_md5() {
     }
 }
 
-/// And the document it makes is one no reader opens without the password.
+/// The renderer's own answer, under the interface: locked is a *kind* of
+/// refusal and not a sentence, which is what lets everything above it tell a
+/// question from a failure.
 #[test]
-fn the_fixture_is_really_locked() {
-    assert!(
-        dioxus_reader::render::open(&fixture::locked_pdf()).is_err(),
-        "opened a locked document with no password",
+fn pdfium_says_locked_rather_than_broken() {
+    let path = fixture::locked_pdf();
+    assert_eq!(
+        dioxus_reader::render::open(&path).err(),
+        Some(dioxus_reader::render::Refusal::Locked),
+        "a locked document with no password",
     );
+    let wrong = dioxus_reader::render::open_with(&path, Some("not the password"));
+    assert_eq!(
+        wrong.err(),
+        Some(dioxus_reader::render::Refusal::Locked),
+        "and a wrong one, which pdfium reports identically",
+    );
+    let opened = dioxus_reader::render::open_with(&path, Some(LOCKED_PASSWORD))
+        .unwrap_or_else(|err| panic!("the password did not open it: {err}"));
+    assert_eq!(opened.pages(), 3);
+    assert!(opened.encrypted(), "and it knows it came in through a lock");
 }

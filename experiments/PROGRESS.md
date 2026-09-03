@@ -3835,6 +3835,30 @@ neither renderer can write a `/Sig` today, and the three ways round it.
 
 ---
 
+## A document behind a password, which was the oldest thing left
+
+`ui.askForPassword` was the largest item on the previous section's list, and
+the sentence beside it was the whole complaint: *an encrypted document opens as
+an error*, in a reader whose premise is that it opens what you give it.
+
+**Locked is a question and everything else is a failure, and the type says
+so.** `render::open` used to answer `Result<_, String>`, which is right for
+every way a document can refuse — missing, not a PDF, the library did not load
+— because there is nothing a reader can do about any of them but read a
+sentence. A locked document is the one case where there *is* something to do,
+so `Refusal` has two arms and `Locked` is one of them. pdfium is what makes
+that possible: `FPDF_ERR_PASSWORD` is a different answer from `FPDF_ERR_FORMAT`,
+so a document that wants a password and a document that is broken do not
+arrive looking the same. The alternative was matching on English in an error
+message, which works until pdfium rewords one.
+
+Which of the two sentences goes over the field — "It needs a password before it
+can be opened" or "That password was not right" — is decided by the *caller*,
+because pdfium reports both as the same error and the difference is whether a
+password was supplied.
+
+---
+
 ## Three things to carry forward
 
 1. **Write the test with the feature.** The harness is a quarter-second for

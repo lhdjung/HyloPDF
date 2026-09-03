@@ -387,15 +387,65 @@ pub trait PageSource: Send + Sync {
     /// the handle.
     fn release(&self) {}
 
+    /// Whether this document was behind a password.
+    ///
+    /// Asked for one reason: **markup must not go into an encrypted file**.
+    /// pdfium's only way to write a document back is `FPDF_SaveAsCopy`, which
+    /// is a full rewrite, and what comes out of it for a document opened with
+    /// a password is not a question worth guessing at over somebody's file.
+    /// The app refuses the same case for its own reason, and the mark goes
+    /// beside the document instead — which is what the journal is for. See
+    /// [`crate::markup::Standing`].
+    fn encrypted(&self) -> bool {
+        false
+    }
+
     /// What opening the document cost, in milliseconds — the other half of the
     /// comparison with pdf.js, which spends most of a document open starting
     /// its worker.
     fn opened_in(&self) -> f64;
 }
 
+/// Why a document would not open.
+///
+/// **Two arms, and the whole point is the first one.** Everything a reader can
+/// do about a document that will not open is nothing — the file is missing,
+/// the bytes are not a PDF, the library did not load — and for all of those a
+/// sentence in the notice line is the whole of the answer. A document that is
+/// *locked* is the one case where there is something for them to do, so it is
+/// the one case the type distinguishes. Matching on English in an error
+/// message would work today and stop working the day pdfium rewords one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// It wants a password — or the one it was given was not right, which
+    /// pdfium reports identically and the caller tells apart by knowing
+    /// whether it supplied one.
+    Locked,
+    /// Anything else, already said in a sentence.
+    Said(String),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // Said in full here because this is what the terminal prints at
+            // launch, where there is no window to ask in.
+            Refusal::Locked => write!(f, "That document is locked. It needs a password."),
+            Refusal::Said(said) => write!(f, "{said}"),
+        }
+    }
+}
+
 /// A document, opened by whichever renderer this build carries.
-pub fn open(path: &str) -> Result<Arc<dyn PageSource>, String> {
-    Ok(Arc::new(crate::pdfium::Document::open(path)?))
+pub fn open(path: &str) -> Result<Arc<dyn PageSource>, Refusal> {
+    open_with(path, None)
+}
+
+/// The same, with the password for a document that wants one.
+pub fn open_with(path: &str, password: Option<&str>) -> Result<Arc<dyn PageSource>, Refusal> {
+    Ok(Arc::new(crate::pdfium::Document::open_with(
+        path, password,
+    )?))
 }
 
 /// A window with nothing in it.

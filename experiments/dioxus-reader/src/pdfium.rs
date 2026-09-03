@@ -86,6 +86,9 @@ pub struct Document {
     /// What the document says about itself, read at open with everything else
     /// that costs a page load. See [`PageSource::details`].
     details: Vec<(String, String)>,
+    /// Whether a password was needed to get in. See
+    /// [`PageSource::encrypted`], which is the one thing that asks.
+    encrypted: bool,
     opened_in: f64,
 }
 
@@ -154,20 +157,49 @@ impl Drop for Document {
 }
 
 impl Document {
+    /// A document with no password, which is nearly all of them.
     pub fn open(path: &str) -> Result<Self, String> {
+        Self::open_with(path, None).map_err(|refused| refused.to_string())
+    }
+
+    /// A document, with the password if it needs one.
+    ///
+    /// **The error type is the whole reason this is not one function with an
+    /// `Option` on it.** Everything else that can go wrong here is a sentence
+    /// to show the reader and nothing more; a locked document is a *question*,
+    /// and the caller has to be able to tell the two apart without reading
+    /// English out of a string. See [`crate::render::Refusal`].
+    pub fn open_with(path: &str, password: Option<&str>) -> Result<Self, crate::render::Refusal> {
         let began = Instant::now();
+        let encrypted = password.is_some();
         // Asked before pdfium is, because pdfium answers it badly: a missing
         // file comes back as `IoError(Os { code: 2, kind: NotFound, … })`,
         // which is a Rust type name and a struct in front of the one fact
         // worth saying. It is also much the commonest way to fail here.
         if !std::path::Path::new(path).is_file() {
-            return Err(format!("{path}: there is no such file."));
+            return Err(crate::render::Refusal::Said(format!(
+                "{path}: there is no such file."
+            )));
         }
         let _library = library();
-        let pdfium = pdfium()?;
-        let document = pdfium
-            .load_pdf_from_file(path, None)
-            .map_err(|e| format!("{path}: {e}"))?;
+        let pdfium = pdfium().map_err(crate::render::Refusal::Said)?;
+        // **The one error worth telling apart from the rest**, and pdfium is
+        // the reason it can be: `FPDF_ERR_PASSWORD` is a different answer from
+        // `FPDF_ERR_FORMAT`, so a locked document and a corrupt one do not
+        // arrive here looking the same. Which of the two questions it is —
+        // "this needs a password" or "that password was not right" — is the
+        // caller's to know, because the caller is the one who did or did not
+        // supply one.
+        let document = pdfium.load_pdf_from_file(path, password).map_err(|e| {
+            if matches!(
+                e,
+                PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError)
+            ) {
+                crate::render::Refusal::Locked
+            } else {
+                crate::render::Refusal::Said(format!("{path}: {e}"))
+            }
+        })?;
         // One pass, because loading a page is what both of these cost and
         // `pages().iter()` loads each one. Four hundred pages is a few
         // milliseconds; asking twice would be twice that for no reason.
@@ -197,6 +229,7 @@ impl Document {
             outline,
             title,
             details,
+            encrypted,
             opened_in: began.elapsed().as_secs_f64() * 1000.0,
             inner: Mutex::new(Open {
                 document: Some(document),
@@ -433,6 +466,10 @@ impl PageSource for Document {
         let _library = library();
         let mut held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         held.document = None;
+    }
+
+    fn encrypted(&self) -> bool {
+        self.encrypted
     }
 
     fn opened_in(&self) -> f64 {

@@ -101,6 +101,24 @@ pub fn variables(theme: &Palette) -> String {
     )
 }
 
+/// **Let the sheet ask for a font's variation axes.**
+///
+/// `font-variation-settings` is behind `layout.variable_fonts.enabled` in
+/// Stylo, which is `false` by default; Blitz turns five prefs on when it makes
+/// a document and not this one, so the declaration was parsed and thrown away
+/// with nothing said. This has to run before a document exists, which is why
+/// it is called rather than written down — `main` and `Reader::over` are the
+/// two places a document is made, and both do.
+///
+/// It is a store to an atomic, so calling it twice costs nothing and there is
+/// no `Once` around it.
+///
+/// See `body` in [`SHEET`] for what the sheet does with it, which is the whole
+/// reason this exists.
+pub fn use_variable_fonts() {
+    stylo_static_prefs::set_pref!("layout.variable_fonts.enabled", true);
+}
+
 /// The sheet itself, which never changes and is therefore parsed once.
 pub const SHEET: &str = r#"
 /* `* { box-sizing: border-box }` is the first line of `styles.css` and it was
@@ -120,22 +138,36 @@ body { margin: 0;
   /* **The same font as the app's, and this line is what makes it the same
      type.** Both sides resolve `-apple-system` to the identical file —
      `/System/Library/Fonts/SFNS.ttf`, which fontique reaches through
-     `GenericFamily::SystemUi` and WebKit through `system-ui` — and at 27px
-     and above the two lay out the same string to within a third of a pixel.
-     Below that they diverge by about a tenth, and the reason is SF's `trak`
-     table: the system font carries tracking that grows as the size falls,
-     WebKit applies it, and parley does not read the table at all.
+     `GenericFamily::SystemUi` and WebKit through `system-ui` — and then draw
+     two different faces out of it, because SF is a variable font and `opsz`
+     is one of its four axes. Read off the `fvar` table: `opsz` runs from 17
+     to 96 and **defaults to 28**. So parley, which sets no variation
+     coordinates at all, has been drawing every word in this application in
+     the design meant for a 28pt headline — narrow, tight, high in contrast —
+     while WebKit sets the axis from the font size and gets the 17 that is
+     meant to be read at.
 
-     So the chrome came out tighter and darker than the app's — the "more
-     machine-like, a tiny bit too strong" of the complaint, which is what a
-     UI face looks like with its small-size tracking taken away. Measured
-     against WebKit over the same string at every size this sheet uses, the
-     missing advance is 0.61px a character at 11px, 0.59px at 13.5px and
-     0.55px at 16px — flat enough across the band that one number says it,
-     and 0.6px is that number. It is wrong above about 17px, where SF's
-     tracking falls away towards nothing; the two headings that live up
-     there say so themselves. */
-  letter-spacing: 0.6px; }
+     Which is a difference of *design*, not of tracking, and that is what a
+     reader could see and not name: the letterforms were narrow and the gaps
+     between them were not. Measured in WebKit over "Contents" at 13.5px:
+     56.86px at `opsz` 17, 50.89px at 28. That is 10.5% of the word, and it
+     is the whole of what was wrong.
+
+     It was a flat `letter-spacing: 0.6px` before this, chosen by measuring
+     the total width of strings and averaging the shortfall. It made the
+     totals right and everything else worse — a constant added between
+     letters cannot put back what a narrower letterform took out, so the
+     words came out the right length with the wrong rhythm. And it explained
+     itself by `trak`, SF's tracking table, which parley genuinely does not
+     read; that is real and it is about a tenth of what `opsz` is, which is
+     why it looked like a complete explanation.
+
+     17 rather than the size, because 17 is where the axis starts and WebKit
+     clamps to it: `opsz normal` and `opsz 17` lay out identically at both
+     13.5px and 14.5px, which is what says the clamp is what it does. The two
+     rules above that size set their own. */
+  letter-spacing: 0px;
+  font-variation-settings: "opsz" 17; }
 
  /* `position: relative` so that the Settings scrim, which is absolute, is
    measured against the window rather than against whatever Blitz would
@@ -974,7 +1006,11 @@ body { margin: 0;
 .start-inner { width: min(460px, 82vw); display: flex; flex-direction: column; }
 .start-name {
   margin: 0; text-align: center;
-  font-size: 30px; font-weight: 600; letter-spacing: -0.01em; color: var(--text);
+  /* Its own optical size, because this is above where the axis starts and
+     `body`'s 17 would draw a headline in a face meant to be read at 17. See
+     `body`. */
+  font-size: 30px; font-variation-settings: "opsz" 30;
+  font-weight: 600; letter-spacing: -0.01em; color: var(--text);
 }
 .start-sub {
   margin: 6px 0 22px; text-align: center; color: var(--note); font-size: 15.5px;
@@ -1141,8 +1177,10 @@ body { margin: 0;
    beside `filter` and hands both to `PaintScene::push_layer`. Every anyrender
    backend then names the parameter `_backdrop_filter` and drops it —
    `anyrender_vello_hybrid 0.10.0`, `anyrender_vello 0.14.0` — so the
-   declaration is accepted and nothing happens, which is the same silent shape
-   as `font-variation-settings` in `PROGRESS.md`. Blurring the *document*
+   declaration is accepted and nothing happens. Not the same fault as
+   `font-variation-settings`, which turned out to be a Stylo pref and is fixed
+   — this one is carried correctly the whole way and dropped by every
+   backend, so there is nothing on this side to turn on. Blurring the *document*
    instead, with an ordinary `filter` on the content behind the scrim, is a
    filter over the whole window every frame a window is up, and it makes a
    stacking context of the reader — which is the one thing Blitz's hit testing
@@ -1341,7 +1379,9 @@ body { margin: 0;
 /* `letter-spacing` is the app's own `-0.01em`, and it does a second job here:
    the 0.6px of tracking `body` stands in with is right for the 11-16px band
    the rest of this sheet lives in and too much at nineteen. See `body`. */
-.pane-title { margin: 0 0 4px 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+/* Its own optical size, for the reason `.start-name` has one. */
+.pane-title { margin: 0 0 4px 0; font-size: 19px; font-variation-settings: "opsz" 19;
+  font-weight: 600; letter-spacing: -0.01em; }
 /* **Every sentence in this window was a shade too quiet and a size too
    small.** `--text-note` is the app's shade for the small print beside a
    setting, and `themes.ts` carries the reason next to the number: at 0.38 it

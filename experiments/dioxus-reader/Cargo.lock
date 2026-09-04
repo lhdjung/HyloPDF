@@ -1198,6 +1198,7 @@ dependencies = [
  "pollster 1.0.1",
  "serde",
  "serde_json",
+ "stylo_static_prefs",
  "toml 0.8.23",
  "unicode-normalization",
  "webbrowser",

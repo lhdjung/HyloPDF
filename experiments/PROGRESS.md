@@ -381,6 +381,27 @@ questions were added, and each is the general form of what it caught:
   on white — so a cross-reference is now *known* to be the colour the app
   paints it rather than assumed to be.
 
+**The type was the last of it, and the explanation had been wrong.** The
+chrome measured about 5% tight, and the sheet carried a flat
+`letter-spacing: 0.6px` on `body` to make up the difference — chosen by
+averaging the shortfall over strings, and explained by SF's `trak` table,
+which parley genuinely does not read. It made the totals right and the
+rhythm wrong: a constant added between letters cannot put back what a
+narrower letterform took out, so the words came out the right length and
+visibly spaced. The reader who reported it could see exactly that and had no
+name for it.
+
+The cause was `opsz`. SF is a variable font whose optical-size axis defaults
+to 28 — a 28pt headline design — and parley sets no variation coordinates, so
+every word in the application was drawn in it; WebKit sets the axis from the
+font size. Measured in WebKit over "Contents" at 13.5px: 56.86px at `opsz`
+17 against 50.89px at 28, which is 10.5% and the whole of the discrepancy.
+Reaching it needed the Stylo pref above. With `"opsz" 17` on `body`, its own
+number on the two rules above that size, and no letter-spacing at all, the
+nine measured controls land at +0.1 to +1.0px of the app's, eight of them
+exactly `ceil` of it. The 30px heading had always matched, which in
+hindsight was the clue: 30 is close enough to 28 that the axis barely moved.
+
 **And what is still asserted rather than measured**, because saying so is the
 point of the section. Nothing in this file compares a *document*: a page's
 glyphs are pdfium's and the app's are pdf.js's, and the two rasterise
@@ -577,17 +598,46 @@ harness this whole argument rests on can never come from crates.io.
   selector, and some rule must depend on the state bits. Either side could fix
   it. `stylo 0.20.0`, `blitz-dom 0.3.0-beta.2`.
 
-- **`font-variation-settings` is parsed and dropped.** `stylo_to_parley.rs`
-  converts it and hands it on, and `'wght' 100` and `'wght' 900` lay out
-  identically — so a variable font's axes cannot be reached from CSS at all,
-  including the `opsz` axis that would otherwise answer the entry below. The
-  declaration is accepted and nothing happens.
+- **`font-variation-settings` is behind a pref nothing turns on** — and this
+  entry used to say the property was simply dropped, which was the symptom.
+  `stylo_to_parley.rs` converts it correctly and parley applies it; what
+  happens is that `stylo` puts the longhand behind `servo_pref =
+  "layout.variable_fonts.enabled"`, which is `false` in
+  `stylo_static_prefs/preferences.toml`, and `blitz-dom`'s `Document::new`
+  turns five prefs on without turning this one on. So the declaration is
+  parsed and thrown away, `'wght' 100` and `'wght' 900` lay out identically,
+  and nothing anywhere says why. `styles::use_variable_fonts` is one
+  `set_pref!` and it goes when Blitz sets the pref itself.
+  `stylo 0.20.0`, `blitz-dom 0.3.0-beta.2`.
 
-- **The system font's `trak` table is not read**, so every UI face that has one
-  lays out too tight below about 17px — on macOS that is SF, which is to say
-  every application that says `system-ui` and does not set its own tracking. A
-  browser applies it; parley does not, and the difference is a tenth of the
-  width of a word at the sizes an interface is actually written at.
+- **Nothing sets the `opsz` axis, so a variable UI font is drawn at its
+  default optical size** — which for SF is 28, the design meant for a 28pt
+  headline. Read off `fvar` in `/System/Library/Fonts/SFNS.ttf`: `opsz` runs
+  17 to 96 and defaults to 28. A browser sets the axis from the font size
+  (clamped to 17 at the bottom, which is why `opsz normal` and `opsz 17`
+  measure identically in WebKit at 13.5px and at 14.5px); parley sets no
+  coordinates at all. The cost is 10.5% of the width of a word — "Contents"
+  at 13.5px is 56.86px at `opsz` 17 and 50.89px at 28 — and it is a
+  difference of *letterform*, so what a reader sees is narrow letters in
+  normal gaps. `font-optical-sizing: auto` is the CSS for this and does not
+  exist here; the sheet names `opsz` per size instead. **This is the entry
+  above's whole consequence**, and the two were filed separately for a while
+  because the pref made the first look like a dead end.
+
+- **`font-optical-sizing` is not read at all**, which is the property that
+  would have made the entry above unnecessary. Stylo has the longhand (behind
+  the same pref) and `stylo_to_parley.rs` never looks at it, so `auto` — which
+  is a browser's default and the whole of what a browser does here — has no
+  effect. Hence three explicit `"opsz"` declarations in the sheet, one per
+  size band, where one line would do. `blitz-dom 0.3.0-beta.2`.
+
+- **The system font's `trak` table is not read.** True, and much smaller than
+  it looked: it was this file's explanation for a chrome that measured tight,
+  and the flat `letter-spacing: 0.6px` in `body` was built on it. `opsz` was
+  the fault. With the axis set and the letter-spacing gone, every measured
+  control in `tests/parity.rs` lands within a pixel of the app's — eight of
+  nine exactly on `ceil` of it — so whatever `trak` is worth at these sizes is
+  under the pixel Blitz rounds a box to.
 
 - **`anyrender_vello_hybrid` ignores `brush_transform` for a texture.** `fill`
   has an arm for `PaintRef::Resource` that reads the shape's *origin*, draws the

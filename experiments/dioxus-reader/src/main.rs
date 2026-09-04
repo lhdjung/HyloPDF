@@ -34,6 +34,9 @@ use dioxus_reader::windows::Desk;
 use dioxus_reader::{render, stats, store, watch};
 
 fn main() {
+    // Before a document exists, which is what this has to be. See its own
+    // comment, and `body` in `styles.rs` for what it buys.
+    dioxus_reader::styles::use_variable_fonts();
     let args: Vec<String> = std::env::args().collect();
     let flag = |name: &str, fallback: usize| -> usize {
         args.iter()

@@ -489,17 +489,13 @@ fn the_start_screen_is_laid_out_like_the_app_s() {
         // whose *height* is the sum of everything in it — a number that says
         // nothing on its own and would fail for whichever part of it moved.
         let wanted = box_of("width").expect("a width");
-        // Three pixels here where the toolbar's controls get two, and the
-        // extra one is the flat tracking constant in `body`: 0.6px a
-        // character is measured against WebKit at 13.5px, which is what the
-        // bar is written in, and "Open a document" is fifteen characters at
-        // 14.5. The residual is 2.9px on a button of 176. Widening the
-        // constant per size would be four more numbers in the sheet for a
-        // fault nobody can see; what this number still catches is the two
-        // that could be seen — a button 460 wide, and a screen written in the
-        // body's size, which would come out at about 165.
+        // The same two pixels every other measured control gets. It was three
+        // for a while, to carry the 2.9px the flat `letter-spacing` left on
+        // this button — the longest label in the interface, so the one that
+        // showed it worst. Setting the font's optical size instead took that
+        // to 0.1px and the allowance went back with it.
         assert!(
-            (width as f64 - wanted).abs() <= 3.0,
+            (width as f64 - wanted).abs() <= 2.0,
             "{name} is {width} wide and the app's is {wanted}",
         );
         if let Some(wanted) = box_of("height").filter(|_| name == "open") {

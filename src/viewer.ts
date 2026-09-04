@@ -116,30 +116,17 @@ const PAGE_CACHE = 48;
 /**
  * …and how many of those may be pages that turned out to carry pictures.
  *
- * The count above is the wrong unit on its own, and a scanned book is where
- * that shows. A page of type costs a few kilobytes of parsed operator list; a
- * scanned page is one decoded image, and at the resolution a scanner works at
- * that is sixty megabytes, held in the GPU process until `cleanup()` is
- * called on the page. Forty-eight of those is three gigabytes — measured, on a
- * machine with eight — while forty-eight pages of a typeset book is nothing at
- * all and worth keeping.
+ * The count above is the wrong unit on its own: a page of type costs a few
+ * kilobytes of parsed operator list, where a scanned page is one decoded image
+ * held until `cleanup()`. So pages with pictures get a cap of their own —
+ * which is which is remembered once found, see `holdsPictures`.
  *
- * So pages with pictures on them get a cap of their own and the plain ones
- * keep theirs. Which is which is not guessed — see `holdsPictures` — and it is
- * remembered once found, because a page does not change its mind about what is
- * printed on it.
- *
- * Three, because `OVERSCAN` keeps three pages mounted and a mounted page is
- * never evicted — so three is the mounted set and no room behind it, and the
- * room behind it is what the measurement says costs. What it charges for that
- * is one page decode when a reader scrolls further back than the screen.
- *
- * The cap survived `isOffscreenCanvasSupported: false` (see `load`), which took
- * away most of what it was holding back. What a cached page costs is smaller
- * now and it is on the JavaScript heap rather than in the GPU process, but it
- * is still there — on forty pages of scan, three against forty-eight is 263MB
- * against 338MB, and on twenty-seven pages of photographs it is 231MB against
- * 579MB. Photographs are the case that needs it now; a scan barely does.
+ * Three, because `OVERSCAN` keeps three mounted and a mounted page is never
+ * evicted: three is the mounted set and no room behind it, which is what the
+ * measurement says costs. It charges one page decode when a reader scrolls
+ * further back than the screen. On forty pages of scan, three against
+ * forty-eight is 263MB against 338MB; on twenty-seven pages of photographs,
+ * 231MB against 579MB. Photographs are the case that needs it.
  */
 const IMAGE_PAGE_CACHE = 3;
 /** How far beyond the viewport pages are kept alive, in viewport heights. */
@@ -152,16 +139,13 @@ const WHEEL_TURN = 60;
 const MAX_CANVAS_PIXELS = 12_000_000;
 
 /**
- * Trimming the margins: how many pages are looked at to decide where the ink
- * on this document begins, how much blank is left around it, and how much of
- * a side may be taken away at most.
+ * Trimming the margins: how many pages decide where the ink begins, how much
+ * blank is left around it, and how much of a side may be taken away.
  *
- * One crop for the whole document rather than one per page, because a
- * per-page crop changes the scale from page to page, and in continuous
- * scrolling that is a document that breathes as you read it. The union over a
- * sample is exact for anything typeset — every page of a book has the same
- * margins — and the pad and the ceiling are what keep it honest for the
- * documents that are not.
+ * One crop for the whole document rather than one per page: a per-page crop
+ * changes the scale from page to page, which in continuous scrolling is a
+ * document that breathes as you read it. The union over a sample is exact for
+ * anything typeset; the pad and the ceiling keep it honest for the rest.
  */
 const CROP_SAMPLE = 8;
 /** Blank left around the ink, as a fraction of the page. */
@@ -304,13 +288,10 @@ export type ViewerCallbacks = {
 };
 
 /**
- * Reading a document in pieces.
- *
- * pdf.js is given the length of the file and a way to ask for parts of it, so
- * it fetches the cross-reference table at the end and then only the pages
- * being looked at. The alternative — handing it the whole file — meant three
- * copies of every document in memory at once, and reading all of a five
- * hundred megabyte scan before showing any of it.
+ * Reading a document in pieces: pdf.js is given the file's length and a way to
+ * ask for parts of it, so it fetches the cross-reference table and then only
+ * the pages being looked at. Handing it the whole file meant three copies of
+ * every document in memory, and reading all of a 500MB scan before showing any.
  */
 class FileRange extends PDFDataRangeTransport {
   private cancelled = false;
@@ -450,24 +431,16 @@ export class Viewer {
   /**
    * Draw the selected words again, in the theme's selection colours.
    *
-   * The obvious way to colour selected text is to give `::selection` a
-   * `color`, and it is wrong here. The layer that holds the selection is
-   * pdf.js's text layer, whose spans exist to be selected and not to be seen:
-   * they carry no weight, no style and a generic family — `serif`, whatever
-   * the page was set in — with a per-span horizontal scale that stretches the
-   * wrong glyphs to the right total width. Painting them puts that on screen.
-   * Bold stops being bold, a mathematical symbol becomes a box, and every
-   * letter shifts a little as the line is stretched to fit.
+   * Giving `::selection` a `color` is the obvious way and it is wrong here: it
+   * puts pdf.js's text layer on screen, whose spans exist to be selected and
+   * not seen — no weight, no style, a generic family, each stretched
+   * horizontally to the total width the printer used. Bold stops being bold, a
+   * mathematical symbol becomes a box, and every letter shifts.
    *
-   * So the words that get coloured are the printed ones. For each rectangle
-   * the selection covers, the pixels underneath are copied off the page canvas
-   * and run through the same luminance ramp that recolours a page — ink lands
-   * on the selection's text colour, paper on the selection's own — and the
-   * result is laid back over the line at the size it came from. Real glyphs,
-   * real weight, real symbols, in the colours the theme asked for.
-   *
-   * The copies are small, they are only ever the lines the reader dragged
-   * across, and they are thrown away the moment the selection is.
+   * So the words coloured are the printed ones: the pixels under each
+   * rectangle are copied off the page canvas, run through the same luminance
+   * ramp that recolours a page, and laid back over the line. The copies are
+   * only the lines the reader dragged across, and go with the selection.
    */
   private paintSelection(): void {
     const theme = this.theme;
@@ -518,12 +491,10 @@ export class Viewer {
   /**
    * One page's share of the selection, redrawn from the page itself.
    *
-   * A run already on screen at the same place, in the same colours, off a
-   * canvas of the same density is the same picture, so it is kept rather than
-   * drawn again. That is what makes a drag cheap: pulling a selection down a
-   * page adds a line at a time, and only the line that changed is new work.
-   * Repainting all of it every frame was thirty-odd milliseconds a frame on a
-   * page of a textbook, which is a drag that visibly lags the pointer.
+   * A run already on screen at the same place, colours and density is the same
+   * picture, so it is kept. That is what makes a drag cheap — only the line
+   * that changed is new work. Repainting all of it every frame was thirty-odd
+   * milliseconds on a page of a textbook, which visibly lags the pointer.
    */
   private drawSelection(slot: Slot, rects: DOMRect[], painting: Theme): void {
     const canvas = slot.canvas!;
@@ -619,18 +590,15 @@ export class Viewer {
 
   /**
    * The current selection's rectangles, grouped by the page each is on —
-   * captured now rather than left to be read again later.
+   * captured now rather than read again later.
    *
-   * That matters because of what "later" means here: the reader picks a
-   * colour from a popover, and clicking anything — the swatch included —
-   * collapses the browser's own selection before its click handler ever
-   * runs. Reading `window.getSelection()` inside that handler would see
-   * nothing. So the popover captures this the moment it opens, while the
-   * selection is still the reader's, and hands the same snapshot to
-   * `markSelection` however long the popover stays open.
+   * Clicking anything, the swatch included, collapses the browser's selection
+   * before the click handler runs, so `window.getSelection()` inside that
+   * handler sees nothing. The popover captures this the moment it opens and
+   * hands the same snapshot to `markSelection` however long it stays open.
    *
    * `null` where there is nothing to capture — no selection, or one outside
-   * the pages, such as one made in the sidebar or the settings window.
+   * the pages.
    */
   captureSelection(): MarkupSelection | null {
     const selection = window.getSelection();
@@ -659,34 +627,22 @@ export class Viewer {
    * single page, so a selection that runs over a page break becomes two
    * annotations rather than one.
    *
-   * This builds the `annotationStorage` entry pdf.js's own highlight editor
-   * would build, by hand — see `markup-assessment.md`'s "Write the storage
-   * entries directly", the recommendation over adopting the whole editor
-   * layer. `AnnotationEditorType.HIGHLIGHT` is also the *only* markup style
-   * this version of pdf.js can create through `saveDocument()`: reading the
-   * shipped worker shows `UnderlineAnnotation`, `SquigglyAnnotation` and
-   * `StrikeOutAnnotation` have no `createNewAnnotation`/`createNewDict` of
-   * their own, and `AnnotationFactory.saveNewAnnotations`'s switch has no
-   * case for them — only `FREETEXT`, `HIGHLIGHT`, `INK`, `STAMP` and
-   * `SIGNATURE` are buildable at all. So this is highlight-only for now; the
-   * other three stay readable (`markupOf`) but not writable.
+   * This builds by hand the `annotationStorage` entry pdf.js's own highlight
+   * editor would build. `HIGHLIGHT` is the *only* markup style this version can
+   * create through `saveDocument()`: `saveNewAnnotations`'s switch has cases for
+   * `FREETEXT`, `HIGHLIGHT`, `INK`, `STAMP` and `SIGNATURE` alone, so underline,
+   * strike-out and squiggly stay readable (`markupOf`) and not writable.
    *
    * The shape below — `quadPoints`, `outlines`, `rect`, the
-   * `pdfjs_internal_editor_` key prefix `getNewAnnotationsMap` in the worker
-   * looks for — is read straight out of `pdf.mjs` and `pdf.worker.mjs` for
-   * pdfjs-dist 5.7 rather than from any documented API, exactly the risk
-   * the plan calls out. If a version bump ever makes this produce a file
-   * Preview cannot open, that pair of files is where to look first.
+   * `pdfjs_internal_editor_` prefix the worker looks for — is read out of
+   * `pdf.mjs` and `pdf.worker.mjs` rather than any documented API, which is the
+   * risk this carries. If a version bump ever produces a file Preview cannot
+   * open, that pair is where to look first.
    *
-   * Returns `null` where nothing could be saved — an empty capture, or one
-   * whose pages have since scrolled out of the mounted window — rather than
-   * throwing: "select something first" is the caller's to say, not this
-   * method's to raise. Nothing here touches the disk or the journal. The
-   * caller writes the bytes back and lets the write's own reload re-read the
-   * file, which is what both the journal and the drawing already do on every
-   * open — see `syncMarkup` and `markupOf`. That is also why there is no
-   * in-place invalidation here: a full reload already rebuilds every cache
-   * this would otherwise have to bump by hand.
+   * Returns `null` rather than throwing where nothing could be saved: "select
+   * something first" is the caller's to say. Nothing here touches the disk or
+   * the journal, and there is no in-place invalidation because the caller's
+   * write reloads the document, which rebuilds every cache.
    */
   async markSelection(
     captured: MarkupSelection,
@@ -703,10 +659,9 @@ export class Viewer {
    * page's own PDF coordinate space.
    *
    * Split out of `markSelection` because the journal wants the same numbers
-   * without anything being written: a document that cannot be written at all
-   * (see `App.markupStanding`) still keeps its markup beside it, and that
-   * entry has to carry real quads or nothing could ever put it back into the
-   * file later.
+   * with nothing written: a document that cannot be written at all still keeps
+   * its markup beside it, and that entry needs real quads or nothing could put
+   * it back into the file later.
    */
   async quadsFor(captured: MarkupSelection): Promise<MarkupRun[]> {
     const runs: MarkupRun[] = [];
@@ -742,13 +697,10 @@ export class Viewer {
    * the half of `markSelection` that touches pdf.js's annotation storage,
    * given the geometry rather than working it out.
    *
-   * Two callers, and the second is the reason this is its own method:
-   * `App.restoreMarkup` puts markup back into a document that was rebuilt
-   * underneath the reader, where the quads come from re-anchoring a quote
-   * (`findQuote`) and there is no selection anywhere on screen. Every entry
-   * goes into the storage before a single `saveDocument()`, so restoring
-   * thirty highlights is one incremental update and one write rather than
-   * thirty of each.
+   * Its own method for `App.restoreMarkup`, which puts markup back into a
+   * rebuilt document from re-anchored quotes with no selection on screen. Every
+   * entry goes into the storage before one `saveDocument()`, so restoring
+   * thirty highlights is one update and one write rather than thirty of each.
    */
   async markQuads(marks: MarkupMark[]): Promise<Uint8Array | null> {
     const doc = this.doc;
@@ -801,21 +753,15 @@ export class Viewer {
    * Where a quoted passage sits in the document now — the quads a highlight
    * of it would need, read out of the page's own text.
    *
-   * This is the recompile path, and it is the one thing the journal exists
-   * for that a file cannot do for itself: a paper rebuilt by LaTeX is a new
-   * file, and every annotation in the old one is gone with it. The words
-   * usually are not. So a lost highlight is offered back by looking its quote
-   * up again, through the same fold `search.ts` matches with — ligatures
-   * split, accents dropped, the soft hyphen a line break left behind taken
-   * out — because a passage that has moved down half a page has very often
-   * also been re-typeset on the way.
+   * The recompile path, and the one thing the journal exists for that a file
+   * cannot do for itself: a paper rebuilt by LaTeX is a new file and every
+   * annotation went with it, but the words usually did not. So a lost highlight
+   * is offered back by looking its quote up through the same fold `search.ts`
+   * matches with — a passage that moved has very often been re-typeset.
    *
    * The search starts at the page the highlight used to be on and works
-   * outwards, because a rebuild moves a passage by a page or two far more
-   * often than it moves it to the other end of the book, and stops at the
-   * first page that carries the quote. `null` when nothing does: a passage
-   * that was rewritten is not a passage that moved, and guessing at the
-   * nearest thing to it would put the reader's markup on words they never
+   * outwards. `null` when nothing carries it: a passage that was rewritten is
+   * not a passage that moved, and guessing would put markup on words nobody
    * marked.
    */
   async findQuote(quote: string, near: number): Promise<MarkupRun | null> {
@@ -858,35 +804,28 @@ export class Viewer {
       disableStream: true,
       // Let the worker hand over image *data* rather than ready-made bitmaps.
       //
-      // With this on — pdf.js's default in a browser — the worker expands every
-      // image to RGBA, paints it into an `OffscreenCanvas` at the image's own
-      // resolution and transfers an `ImageBitmap`. The page proxy then holds
-      // that bitmap until `cleanup()`, and a bitmap lives in the GPU process at
-      // four bytes a pixel whatever the image was: a bitonal scan page of
-      // 3600×4400 arrives as sixty megabytes of a picture that is one bit per
-      // pixel on the disk. That is the whole of what `IMAGE_PAGE_CACHE` was
-      // invented to contain.
+      // On — pdf.js's default in a browser — the worker expands every image to
+      // RGBA and transfers an `ImageBitmap`, which the page proxy holds until
+      // `cleanup()` at four bytes a pixel in the GPU process whatever the image
+      // was: a bitonal 3600×4400 scan page arrives as sixty megabytes of a
+      // picture that is one bit per pixel on disk.
       //
-      // Off, the worker sends the decoded data as it stands — the scan stays
-      // 1bpp — and the main thread builds the mask canvas per render, which is
-      // freed when the render ends. Measured on forty pages of bitonal scan:
-      // 630MB down to 263MB, and flat. Twenty-seven pages of photographs: 348MB
-      // to 231MB. A single 12000×16000 page, which is where the default is at
-      // its worst: 2489MB to 248MB.
+      // Off, the worker sends the decoded data as it stands and the main thread
+      // builds the mask canvas per render, freed when the render ends. Forty
+      // pages of bitonal scan: 630MB to 263MB, flat. Twenty-seven pages of
+      // photographs: 348MB to 231MB. A single 12000×16000 page: 2489MB to
+      // 248MB.
       //
-      // It is not a trade against speed — the page is quicker to draw, because
-      // what crosses out of the worker is the compressed thing rather than the
-      // expanded one (92ms to 71ms on the scan, 122ms to 110ms on the slides,
-      // unchanged on type). It is a trade against *where* the work happens: the
-      // expansion is on the main thread now, so drawing an image-heavy page
-      // costs one frame of about 60ms that used to be spent in the worker. The
-      // pixels are identical either way — every screenshot compared came back
-      // at an RMSE of zero, under both themes and with picture recolouring both
-      // on and off.
+      // Not a trade against speed — the page is quicker to draw, what crosses
+      // out of the worker being compressed rather than expanded (92ms to 71ms
+      // on the scan). It is a trade against *where* the work happens: the
+      // expansion is on the main thread, so an image-heavy page costs one frame
+      // of about 60ms that used to be the worker's. The pixels are identical,
+      // at an RMSE of zero under both themes.
       //
-      // What it gives up is pdf.js's `ImageResizer`, which only runs on this
-      // path and shrinks an image the browser could not make a canvas for. The
-      // 12000×16000 measurement above is that case, and it is better without it.
+      // What it gives up is `ImageResizer`, which runs only on this path and
+      // shrinks an image the browser could not make a canvas for. The
+      // 12000×16000 case is better without it.
       isOffscreenCanvasSupported: false,
       cMapUrl: asset("pdfjs/cmaps/"),
       cMapPacked: true,
@@ -932,16 +871,12 @@ export class Viewer {
     }
     this.doc = doc;
 
-    // Measure the first page and paint. The rest are measured behind the
-    // reader's back.
-    //
-    // Every page used to be fetched and measured before anything appeared, on
-    // the grounds that a page proxy is cheap next to a render — which is true
-    // of one page and not of two thousand. Nothing was on screen until the
-    // last of them came back. Most documents are one size throughout, so the
-    // first page is a good guess for all of them, and where it is wrong the
-    // correction arrives within a second and moves pages the reader has not
-    // reached yet.
+    // Measure the first page and paint; the rest are measured behind the
+    // reader's back. A page proxy is cheap next to a render, which is true of
+    // one page and not of two thousand — measuring all of them first left
+    // nothing on screen until the last came back. Most documents are one size
+    // throughout, and where the guess is wrong the correction arrives within a
+    // second, on pages the reader has not reached.
     this.readLabels(doc);
 
     const first = await this.page(0);
@@ -1149,19 +1084,15 @@ export class Viewer {
 
   /** Take a theme, and repaint every page if it is not the one already in use.
    *
-   * The copy is the point. The theme editor previews by handing over the draft
-   * it is editing and then editing it further in place, so holding the object
-   * meant holding the new colours under the name of the old ones: every
-   * comparison below found the two sides equal, nothing repainted, and a
-   * background changed in the editor moved the app around the page while the
-   * page itself stayed as it was printed until the next launch.
+   * The copy is the point: the theme editor previews by handing over the draft
+   * and then editing it in place, so holding the object meant holding the new
+   * colours under the name of the old — every comparison found the two sides
+   * equal and nothing repainted.
    *
-   * Two questions, not one. The pages repaint when something that is baked
-   * into a bitmap moves; the selection is drawn from the page every time, so
-   * it repaints on its own terms. Asking only the first question meant the
-   * selection colours were not on the list at all — change one in the editor
-   * with a sentence selected, and the sentence kept the colours it already
-   * had until the reader happened to move the selection. */
+   * Two questions, not one. The pages repaint when something baked into a
+   * bitmap moves; the selection is drawn from the page every time and repaints
+   * on its own terms. Asking only the first left the selection colours off the
+   * list entirely. */
   setTheme(theme: Theme, preserveImages: boolean): void {
     const before = this.theme;
     const repaint =
@@ -1246,12 +1177,11 @@ export class Viewer {
 
   /** Continuous or one page at a time.
    *
-   * The wheel listener comes and goes with the mode, and that is the point of
-   * doing this here. It has to be non-passive — turning a page means stopping
-   * the window rubber-banding against an edge it is about to leave — and a
-   * non-passive wheel listener on a scroll container makes the browser wait
-   * for the main thread before it will scroll at all. Left permanently
-   * attached, continuous scrolling paid for a page-turning gesture it does not
+   * The wheel listener comes and goes with the mode, which is the point of
+   * doing it here: it has to be non-passive — turning a page means stopping the
+   * rubber-band against an edge it is about to leave — and a non-passive wheel
+   * listener makes the browser wait for the main thread before it will scroll
+   * at all. Left attached, continuous scrolling pays for a gesture it does not
    * have. */
   setScrollMode(mode: ScrollMode): void {
     if (mode === this.mode && this.wheelBound === (mode === "paged")) {
@@ -1272,12 +1202,10 @@ export class Viewer {
 
   /** Repaint when the window moves to a screen of a different density.
    *
-   * How sharply a page is drawn comes from `devicePixelRatio`, and the density
-   * is part of what identifies a rendered page — so a canvas drawn for a
-   * Retina screen is wrong on the 1× monitor next to it, and vice versa.
-   * Nothing announces this: `matchMedia` on the current resolution fires once
-   * when it stops being the current one, and then has to be asked again about
-   * the new one. */
+   * The density is part of what identifies a rendered page, so a canvas drawn
+   * for a Retina screen is wrong on the 1× monitor beside it. Nothing announces
+   * this: `matchMedia` on the current resolution fires once when it stops being
+   * current, and has to be re-armed for the new one. */
   private watchDensity(): void {
     const arm = () => {
       const ratio = window.devicePixelRatio || 1;
@@ -1431,14 +1359,12 @@ export class Viewer {
   }
 
   /**
-   * Put a layer that is measured in whole pages over a box that is not.
+   * Put a layer measured in whole pages over a box that is not.
    *
-   * The canvas is the cropped part of the page and fills its box. The text
-   * layer and the links are not: pdf.js lays its spans out as percentages of
-   * the page, and a link's rectangle is a fraction of the page, so both have
-   * to be the size the whole page would be and hang out past the box, which
-   * `.page` clips. With no crop this is the box, exactly, and the offsets are
-   * zero.
+   * The canvas is the cropped part of the page and fills its box; the text
+   * layer and the links are not, pdf.js laying its spans out as percentages of
+   * the page. So both are the size the whole page would be and hang out past
+   * the box, which `.page` clips. With no crop this is the box exactly.
    */
   private placeOverlay(el: HTMLElement, index: number, scale: number): void {
     const crop = this.crop;
@@ -1470,17 +1396,14 @@ export class Viewer {
 
   /** Turning the page with the wheel, one page at a time.
    *
-   * In paged mode the scroll container holds exactly one page, so a page that
-   * fits the window cannot be scrolled at all and a taller one stops dead at
-   * its own bottom edge. Either way the reader pushes and nothing happens,
-   * which is the one gesture everybody tries first. Past the edge, the scroll
-   * turns the page instead.
+   * In paged mode the container holds exactly one page, so a page that fits
+   * cannot be scrolled and a taller one stops dead at its bottom edge — either
+   * way the reader pushes and nothing happens, which is the gesture everybody
+   * tries first. Past the edge, the scroll turns the page.
    *
-   * One page per gesture: a trackpad flick keeps sending events for about a
-   * second after the fingers have gone, and a page each would be a flick
-   * through the whole chapter. A gap in the events is what counts as letting
-   * go, and the threshold keeps a nudge against the end of a page from
-   * turning it. */
+   * One page per gesture: a trackpad flick sends events for about a second
+   * after the fingers have gone, and a page each would be a flick through the
+   * chapter. A gap in the events counts as letting go. */
   private onWheel = (event: WheelEvent): void => {
     if (this.mode !== "paged" || event.deltaY === 0) return;
     const now = performance.now();
@@ -1682,11 +1605,8 @@ export class Viewer {
    * Take the margins off, or put them back.
    *
    * A scanned book and a LaTeX paper both spend a quarter of the window on
-   * white paper, and fit width fits the paper rather than the words. This is
-   * the answer every reader built for reading rather than for printing has —
-   * Sumatra calls it fit content, Zathura and Sioyek call it cropping — and
-   * it is worth more than any zoom preset on exactly the documents this app
-   * is for.
+   * white paper, and fit width fits the paper rather than the words. Sumatra
+   * calls it fit content; Zathura and Sioyek call it cropping.
    */
   setTrimMargins(on: boolean): void {
     if (on === this.trimming) return;
@@ -1714,15 +1634,13 @@ export class Viewer {
   /**
    * Find the ink.
    *
-   * A sample rather than the whole document: measuring a page means drawing
-   * it, and drawing nine hundred of them to decide on a margin is not a
-   * trade anybody would make. First page, last page and evenly spaced between
-   * them, because the shapes that vary are the front matter, the plates and
-   * the index, and those are where they live.
+   * A sample rather than the whole document, because measuring a page means
+   * drawing it. First, last and evenly spaced between: the shapes that vary are
+   * the front matter, the plates and the index.
    *
-   * The union of what the sample finds, padded, and refused outright if what
-   * is left is nearly the whole page (there was nothing to trim) or a sliver
-   * of it (something was misread — a blank page, a page that failed to draw).
+   * The union of what the sample finds, padded, and refused outright if what is
+   * left is nearly the whole page (nothing to trim) or a sliver of it (a blank
+   * page, or one that failed to draw).
    */
   private async measureCrop(): Promise<void> {
     const doc = this.doc;
@@ -1785,12 +1703,10 @@ export class Viewer {
   /**
    * Where the ink is on one page, as fractions of it.
    *
-   * The page is drawn small — a hundred and sixty pixels wide, which is a
-   * millisecond or two of work and enough to find a margin to within a
-   * character — and then read row by row and column by column for anything
-   * that is not paper. `CROP_INK` is the same threshold `WHITE_POINT` uses
-   * for the same question, so a hairline printed at 90% white counts as paper
-   * here exactly as it does when a page is recoloured.
+   * Drawn small — a hundred and sixty pixels wide, a millisecond or two, and
+   * enough to find a margin to within a character — then read row by row for
+   * anything that is not paper. `CROP_INK` is `WHITE_POINT`'s threshold, so a
+   * hairline printed at 90% white is paper here as it is when recolouring.
    */
   private async inkBox(index: number): Promise<Crop | null> {
     let page: PDFPageProxy | null = null;
@@ -1851,15 +1767,12 @@ export class Viewer {
   /**
    * Turn the document a quarter at a time.
    *
-   * A sideways scan and a landscape table are ordinary things to meet in a
-   * document somebody else made, and every reader answers them with one
-   * keystroke. It is a way of looking rather than a property of the file, so
-   * it is not written down and does not survive the document being closed —
-   * which is also what Preview, Acrobat and Sumatra do.
+   * A way of looking rather than a property of the file, so it is not written
+   * down and does not survive the document being closed — which is what
+   * Preview, Acrobat and Sumatra do.
    *
-   * The rotation is added to the page's own, because a page that says it is
-   * printed sideways has already been turned once and the reader is asking
-   * for one more.
+   * Added to the page's own rotation, because a page that says it is printed
+   * sideways has already been turned once.
    */
   rotate(quarterTurns: number): void {
     const before = this.rotation;
@@ -1925,12 +1838,10 @@ export class Viewer {
 
   /** Whether any page on screen has text on it to select.
    *
-   * The honest answer to "is this a scan" for the purpose of a gesture that
-   * works off a selection: the search knows for the whole document but only
-   * once it has scanned it, and a reader who has never searched should still
-   * be told plainly that there is nothing here to mark rather than to select
-   * something first. Every mounted page having an empty text layer is that
-   * answer, a page and a half of document at a time. */
+   * The honest answer to "is this a scan" for a gesture that works off a
+   * selection. The search knows for the whole document, but only once it has
+   * scanned it — and a reader who has never searched should still be told there
+   * is nothing here to mark rather than to select something first. */
   hasSelectableText(): boolean {
     for (const slot of this.slots.values()) {
       if (slot.textEl && slot.textEl.childElementCount > 0) return true;
@@ -1941,15 +1852,12 @@ export class Viewer {
   /**
    * Select everything on one page.
    *
-   * ⌘A in a document like this one has nothing good to select. Only the pages
-   * near the window are in the DOM, so "everything" is a page and a half of
-   * document plus whatever else is on screen — the contents panel, the names
-   * in a menu — and the reader who presses it and then ⌘C gets a fragment
-   * they did not ask for and cannot see the edges of.
+   * ⌘A has nothing good to select here: only the pages near the window are in
+   * the DOM, so "everything" is a page and a half plus the contents panel and
+   * the names in a menu, and ⌘C after it gets a fragment nobody asked for.
    *
-   * A page is a unit somebody means. It is also the largest one this app can
-   * honestly offer, for the same reason: the text of the page below is not
-   * there to be selected until it has been mounted.
+   * A page is a unit somebody means, and the largest this app can honestly
+   * offer — the page below is not there to be selected until it is mounted.
    */
   selectPage(page: number): boolean {
     const slot = this.slots.get(page - 1);
@@ -2000,18 +1908,16 @@ export class Viewer {
    * What the document calls its own pages.
    *
    * A book's front matter is numbered i, ii, iii and its body starts again at
-   * 1, so the twelfth page of the file is page xii and page 314 of the index
-   * is not the 314th thing in the file. A reader typing a number off a
-   * citation, or reading the number in the toolbar, means the printed one.
+   * 1, so page 314 of the index is not the 314th thing in the file. A reader
+   * typing a number off a citation means the printed one.
    *
    * Asked for without waiting: the answer is in the catalogue and usually
-   * arrives before the first page is drawn, and the page number shown until
-   * then is right for the great majority of documents, which have no labels at
-   * all. When it does land, the toolbar is told again.
+   * arrives before the first page is drawn. The toolbar is told again when it
+   * lands.
    *
-   * Labels that merely restate the position are dropped. A document that
-   * labels its pages 1 to n has said nothing, and keeping the list would mean
-   * every lookup below runs for no reason.
+   * Labels that merely restate the position are dropped — a document numbering
+   * its pages 1 to n has said nothing, and every lookup below would run for no
+   * reason.
    */
   private readLabels(doc: PDFDocumentProxy): void {
     void doc
@@ -2064,9 +1970,8 @@ export class Viewer {
    * Drag the page around with the middle button.
    *
    * Zoomed in past the window there is no way sideways but the scrollbar, and
-   * the left button belongs to selecting text — which is what it should do on
-   * a page of words. The middle button is free, is what every map and every
-   * drawing program uses for this, and needs no mode to be entered first.
+   * the left button belongs to selecting text. The middle button is free, is
+   * what every map uses for this, and needs no mode entered first.
    */
   private panning: { id: number; x: number; y: number; left: number; top: number } | null = null;
   /** Set by a drag that actually moved, and read by the link layer: a middle
@@ -2116,17 +2021,14 @@ export class Viewer {
   /**
    * Go somewhere the reader asked to go, remembering where they were.
    *
-   * The distinction this draws is between moving *through* a document and
-   * jumping *across* it. Scrolling, turning a page and stepping through search
-   * results are the first kind and leave no trace: a history that recorded
-   * them would be a history of the last twenty keystrokes, which is no use to
-   * anybody. Following a cross-reference, picking a chapter out of the
-   * contents and typing a page number are the second kind, and they are
-   * exactly the moves that leave a reader stranded — the citation on page 12
-   * that lands on page 190 is the reason this exists.
+   * Moving *through* a document — scrolling, turning a page, stepping through
+   * matches — leaves no trace: a history of those would be a history of the
+   * last twenty keystrokes. Jumping *across* it does: a cross-reference, a
+   * chapter, a typed page number. The citation on page 12 that lands on page
+   * 190 is the reason this exists.
    *
    * A jump made after stepping back throws away what was ahead, which is what
-   * every back button does and what nobody is ever surprised by.
+   * every back button does.
    */
   jumpTo(page: number, offset = 0): void {
     const from = this.position();
@@ -2359,14 +2261,11 @@ export class Viewer {
       return;
     }
 
-    // Everything from here to the moment the canvas is put on screen can be
-    // abandoned: the reader scrolls on and the slot is discarded, the theme
-    // changes, the document is closed, the render is cancelled. Every one of
-    // those paths used to drop the canvas rather than release it, and dropping
-    // the last reference to one is not the same as freeing it — which is the
-    // whole reason `release` exists, and is said two screens up about the
-    // canvas a discarded slot leaves behind. A fast scroll abandons renders
-    // steadily, so this is the same leak by a different door.
+    // Everything from here to the moment the canvas is on screen can be
+    // abandoned — a discarded slot, a theme change, a closed document, a
+    // cancelled render — and dropping the last reference to a canvas is not the
+    // same as freeing it, which is what `release` is for. A fast scroll abandons
+    // renders steadily, so this is the same leak by a different door.
     let adopted = false;
     try {
       const wantsImages = Boolean(theme?.recolor) && this.preserveImages;
@@ -2415,13 +2314,11 @@ export class Viewer {
           (region) => region.style === "highlight",
         );
         // `page.imageCoordinates`, not `task.imageCoordinates`: the RenderTask
-        // getter reads `_internalRenderTask.imageCoordinates`, which pdf.js
-        // never sets — the `complete` callback inside `PDFPageProxy.render`
-        // writes the page's own field instead, before resolving the task's
-        // promise. Reading the task's copy meant this was always null, so
-        // every picture was recoloured whatever "Recolour pictures too" said.
-        // Which is now what it says by default, for the reason in
-        // `settings.rs`; this is what makes turning it off do anything.
+        // getter reads a field pdf.js never sets — the `complete` callback
+        // writes the page's own instead. Reading the task's copy meant this was
+        // always null, so every picture was recoloured whatever the setting
+        // said. That is now the default; this is what makes turning it off do
+        // anything.
         const coordinates: ArrayLike<number> | null = wantsImages
           ? page.imageCoordinates
           : null;
@@ -2483,14 +2380,11 @@ export class Viewer {
 
   /** The selectable text over a page.
    *
-   * Built once per mounted page and then only rescaled. pdf.js lays its spans
-   * out in percentages and sizes them from `--total-scale-factor`, which
-   * `place()` sets on every layout — so a zoom has already moved the text
-   * layer by the time anything else happens, and `update` only has to agree
-   * about the number. Rebuilding it instead meant streaming the page's text
-   * out of the worker again and laying out several hundred absolutely
-   * positioned spans, per visible page, per step of a zoom — and it threw away
-   * whatever the reader had selected while doing it. */
+   * Built once per mounted page and thereafter only rescaled: pdf.js lays its
+   * spans out in percentages and sizes them from `--total-scale-factor`, which
+   * `place()` sets on every layout, so `update` only has to agree about the
+   * number. Rebuilding meant re-streaming the page's text out of the worker on
+   * every zoom step — and throwing away whatever the reader had selected. */
   private async renderText(slot: Slot, page: PDFPageProxy, scale: number): Promise<void> {
     const viewport = this.viewportFor(page, scale);
 
@@ -2593,16 +2487,14 @@ export class Viewer {
   /**
    * The notes somebody else left on this page, made readable.
    *
-   * pdf.js paints an annotation's own appearance into the page, so a sticky
-   * note arrives as the little icon it was drawn as and a highlight arrives
-   * highlighted. What does not arrive is the text behind either of them:
-   * that lives in a popup annotation this app does not build, so the icon sat
-   * there looking like a button and was not one.
+   * pdf.js paints an annotation's appearance into the page, so a sticky note
+   * arrives as the icon it was drawn as. What does not arrive is the text
+   * behind it, which lives in a popup annotation this app does not build — so
+   * the icon sat there looking like a button and was not one.
    *
-   * A note that is icon-sized gets a hit area over the whole of it. A note
-   * that is a passage of text — a comment on a highlight — gets a narrow strip
-   * at its right edge instead, because covering the passage would take the
-   * words underneath out of reach of the pointer that wants to select them.
+   * An icon-sized note gets a hit area over the whole of it; a note that is a
+   * passage of text gets a narrow strip at its right edge, because covering the
+   * passage would take the words underneath out of the pointer's reach.
    */
   private renderNotes(slot: Slot): void {
     if (slot.noteEl) return;
@@ -2682,26 +2574,21 @@ export class Viewer {
       link.style.width = `${width * 100}%`;
       link.style.height = `${height * 100}%`;
 
-      // Deliberately not an `href`.
-      //
-      // An anchor that carries the address navigates on a middle click, and on
-      // a modifier click on some platforms, neither of which goes anywhere
-      // near the click handler — so the webview left the app, taking the open
-      // document with it, and landed on whatever the PDF pointed at. The
-      // address is not needed here: every destination goes out through
-      // `onExternalLink`, which is the only thing allowed to decide what
-      // opening a link means.
+      // Deliberately not an `href`: an anchor carrying the address navigates on
+      // a middle click, which never reaches the click handler — so the webview
+      // left the app, taking the open document with it. Every destination goes
+      // out through `onExternalLink`, which is the only thing allowed to decide
+      // what opening a link means.
       link.setAttribute("role", "link");
       link.tabIndex = 0;
-      // A name, because the element has no text of its own — it is a bare
-      // rectangle over printed words, and the words are in the text layer
-      // where this cannot reach them. Without one, every cross-reference was
-      // an unlabelled tab stop and a page of them read as "link, link, link".
+      // A name, because the element has no text of its own — a bare rectangle
+      // over printed words, whose words are in the text layer where this cannot
+      // reach them. Without one, a page of cross-references reads as "link,
+      // link, link".
       //
-      // An external link says where it goes. An internal one does not name its
-      // page: resolving a destination is a trip into the worker each, and a
-      // page of typeset mathematics has hundreds of them — that cost is
-      // already deferred to the moment somebody follows one.
+      // An external link says where it goes; an internal one does not name its
+      // page, because resolving a destination is a trip into the worker each and
+      // a page of mathematics has hundreds.
       link.setAttribute("aria-label", url ?? "Elsewhere in this document");
       const follow = (event: Event) => {
         event.preventDefault();
@@ -2805,13 +2692,11 @@ export class Viewer {
 
   /** Go to a match and put it under the reader's eyes.
    *
-   * Landing on the right page is the easy half. The hard half is that a match
-   * is a rectangle in the text layer, and the text layer of a page that was
-   * not already on screen does not exist yet — it is built after the canvas
-   * has been drawn, which is a render away. Scrolling to the top of the page
-   * and stopping there is what "it went to the page but I cannot see the
-   * word" looks like. So the reveal is remembered, and whichever comes second
-   * — this frame or the text layer — finishes the job. */
+   * A match is a rectangle in the text layer, and the text layer of a page that
+   * was not already on screen does not exist yet — it is built after the canvas,
+   * a render away. Scrolling to the top of the page and stopping there is what
+   * "it went to the page but I cannot see the word" looks like. So the reveal is
+   * remembered, and whichever comes second finishes the job. */
   revealMatch(index: number): void {
     const match = this.matches[index];
     if (!match) return;
@@ -2911,15 +2796,12 @@ function linkColor(theme: Theme): string {
  * The rectangles a selection covers on one page, in that page's own
  * coordinates, tidied into the runs a reader would draw with a highlighter.
  *
- * Two things are done to them. They are rounded outwards, because two
- * rectangles that meet — the end of one run of type and the start of the next
- * — meet at a fraction, and a copy that stopped short of it left a hairline of
- * unselected page between them. And rectangles on the same line with a word's
- * worth of space between them are joined, because pdf.js's spans do not abut:
- * the browser's own selection shows those gaps as white lines through the
- * middle of a highlighted sentence, and there is no reason to copy the fault.
- * A gap wider than half the line is left alone — that is a column of its own,
- * not a space.
+ * Rounded outwards, because two rectangles that meet do so at a fraction and a
+ * copy stopping short leaves a hairline of unselected page. And rectangles on
+ * one line with a word's worth of space between them are joined, because
+ * pdf.js's spans do not abut and the gaps otherwise show as white rules through
+ * a highlighted sentence. A gap wider than half the line is a column of its
+ * own, not a space.
  */
 function joinRuns(rects: DOMRect[], page: DOMRect): Rect[] {
   const runs = rects
@@ -2951,10 +2833,9 @@ function joinRuns(rects: DOMRect[], page: DOMRect): Rect[] {
 /**
  * The annotations on a page that carry something to read.
  *
- * Every kind of annotation can have text on it, so this goes by whether there
- * *is* any rather than by subtype — a comment on a highlight and a sticky
- * note are the same thing to a reader. Links are the exception: their text is
- * where they go, and that is already on the link itself.
+ * By whether there *is* text rather than by subtype, because a comment on a
+ * highlight and a sticky note are the same thing to a reader. Links are the
+ * exception: their text is where they go, which is already on the link.
  */
 function notesIn(
   annotations: {
@@ -3010,15 +2891,13 @@ const MARKUP_STYLES: Record<string, HighlightStyle> = {
  * Coloured markup on a page, ready to paint — one `MarkupRegion` per run of
  * `/QuadPoints`, in fractions of the page like a link's rectangle.
  *
- * This is `linksFor`'s own conversion, not `toHighlight`'s below: the drawing
- * path wants a run on screen, in the units everything else it draws in is
- * already in, and the journal wants the run in the file's own coordinate
- * space, because that is what a later save writes back unchanged. The two
- * never have to agree with each other, only with the same annotation.
+ * `linksFor`'s conversion, not `toHighlight`'s below: the drawing path wants a
+ * run on screen and the journal wants it in the file's own space, because that
+ * is what a later save writes back. The two need only agree with the same
+ * annotation.
  *
- * All four quads of a run are converted and the axis-aligned box around them
- * kept — the same simplification a link's own `/Rect` already is, and a fair
- * one for the horizontal text every quad in practice anchors.
+ * All four quads are converted and the axis-aligned box around them kept — the
+ * same simplification a link's `/Rect` already is.
  */
 function markupRegionsFrom(
   annotations: {
@@ -3084,18 +2963,13 @@ type MarkupAnnotation = {
  * One annotation, read as coloured markup — or `null` where it is not one of
  * the four subtypes above, or carries no quads to anchor it.
  *
- * The quads are kept exactly as pdf.js reports them: four numbers per run, in
- * the page's own PDF coordinate space — the space `/QuadPoints` is written
- * in — and not converted to a fraction of a viewport the way a link's or a
- * note's rectangle is. That space is what the file itself agrees on and what
- * a later save writes straight back into; a viewport fraction would have to
- * be un-converted before it meant anything to a PDF reader that is not this
- * one.
+ * The quads are kept exactly as pdf.js reports them, in the page's own PDF
+ * space rather than as a fraction of a viewport: that is what the file agrees
+ * on and what a later save writes straight back into.
  *
- * `quote` is read out from under the quad, using the same PDF-space text item
- * positions `quoteFor` compares against — see there for why that is the same
- * space and `at` is when this was read rather than when it was drawn: this is
- * markup the reader did not just make, so the moment is not known.
+ * `quote` is read from under the quad, and `at` is when this was *read* rather
+ * than drawn — this is markup the reader did not just make, so the moment is
+ * not known.
  */
 function toHighlight(annotation: MarkupAnnotation, page: number, items: TextItem[]): Highlight | null {
   const style = MARKUP_STYLES[annotation.subtype ?? ""];
@@ -3129,14 +3003,12 @@ const MARKUP_TYPES = new Set<number>([
 ]);
 
 /**
- * A page's text items, read for their position rather than for a running
- * transcript — `quoteFor` below is the only caller, and it needs each item's
- * own box, not the joined string `search.ts`'s `readTextRuns` builds from the
- * same stream.
+ * A page's text items, read for their position rather than for a transcript:
+ * `quoteFor` needs each item's own box, not the joined string `readTextRuns`
+ * builds from the same stream.
  *
- * Deliberately not `getTextContent()`, for the reason `readTextRuns` in
- * `search.ts` gives: it iterates the stream with `for await`, which WebKit's
- * `ReadableStream` has no async iterator for.
+ * Deliberately not `getTextContent()`, which iterates the stream with `for
+ * await` — WebKit's `ReadableStream` has no async iterator.
  */
 async function readTextItems(page: PDFPageProxy): Promise<TextItem[]> {
   const reader = page.streamTextContent().getReader();
@@ -3178,20 +3050,15 @@ function outwards(near: number, count: number): number[] {
  * The quads a highlight over `wanted` would need on the page these text items
  * came from — or `null` where the page does not carry those words.
  *
- * `wanted` is already folded; the page's own text is folded the same way here
- * and matched as one string, because that is the only way a quote that runs
- * across the boundary between two text items can be found at all, which is
- * most of them: a producer splits a line wherever the font or the kerning
- * changes, so "the quick brown fox" is routinely four items and matching them
- * one at a time would find none of it.
+ * The page's text is folded the same way and matched as one string, because a
+ * quote routinely runs across the boundary between text items: a producer
+ * splits a line wherever the font or kerning changes, so "the quick brown fox"
+ * is four items and matching them one at a time finds none of it.
  *
- * `origin` maps each folded character back to an offset in the page's real
- * text, and `owner` maps each of *those* back to the item it came from, so a
- * hit becomes a set of items rather than a pair of numbers. One quad per line
- * — items are grouped by baseline, the way a reader would draw a highlighter
- * across a line and start again on the next — and each line's box is padded
- * below the baseline so that it covers the descenders, which is what makes
- * `quoteFor` read the same words back out of it afterwards.
+ * `origin` maps each folded character back into the page's real text and
+ * `owner` maps that back to its item, so a hit is a set of items. One quad per
+ * line, grouped by baseline, each padded below it to cover the descenders —
+ * which is what makes `quoteFor` read the same words back out afterwards.
  */
 function quadsAround(items: TextItem[], wanted: string): number[] | null {
   if (items.length === 0) return null;
@@ -3255,24 +3122,17 @@ function quadsAround(items: TextItem[], wanted: string): number[] | null {
 
 /**
  * The words under a highlight's quads, read back out of the page rather than
- * carried from the gesture that drew them — which is what keeps this correct
- * for a highlight this app did not draw, and is the reason there is only one
- * path here rather than one for each.
+ * carried from the gesture that drew them — which is what makes this correct
+ * for a highlight this app did not draw, and why there is one path rather than
+ * two.
  *
- * A text item's `transform` places its baseline origin in the page's own PDF
- * space — the same space `/QuadPoints` is written in, both fixed regardless
- * of the app's own display rotation — so an item counts as under a run of
- * quad points when it sits *wholly* inside that run's bounding box, not
- * merely centred in it: a producer that writes a whole line as one item — a
- * single `Tj` call, which is common — hands back an item far wider than any
- * highlight drawn over part of it, and a centre-point test would have credited
- * the highlight with the rest of the line merely because the line's middle
- * happened to fall inside the box. Requiring the item's whole span costs the
- * case where only part of a wide item is actually marked — nothing is
- * attributed rather than the wrong thing being attributed, which is the safer
- * of the two failures. Rotated glyphs and vertical writing are not accounted for
- * either, which is the same limit `joinRuns` accepts for the screen; both are
- * rare enough in practice to leave for whoever hits one.
+ * An item counts as under a run of quad points when it sits *wholly* inside
+ * that run's bounding box, not merely centred in it: a producer writing a whole
+ * line as one `Tj` hands back an item far wider than a highlight over part of
+ * it, and a centre-point test would credit the highlight with the rest of the
+ * line. The cost is that partly-marked wide items attribute nothing, which is
+ * the safer failure. Rotated glyphs and vertical writing are not accounted for,
+ * the same limit `joinRuns` accepts for the screen.
  */
 function quoteFor(quads: ArrayLike<number>, items: TextItem[]): string {
   const runs: { xMin: number; xMax: number; yMin: number; yMax: number }[] = [];
@@ -3311,23 +3171,18 @@ function quoteFor(quads: ArrayLike<number>, items: TextItem[]): string {
  * Every highlight, underline, strike-out and squiggly the document already
  * carries, read in one trip rather than one page at a time.
  *
- * This is what the journal in `library.toml` is rebuilt from on open — see
- * `markup-assessment.md`, step 3, and `App.syncMarkup` in `main.ts`, which
- * calls this once and replaces the journal outright with what comes back.
- * It has to be the whole document and not the pages a reader happens to
- * scroll past: a replace built from a partial scroll would discard the
- * entries for every page nobody has looked at yet in this session, which is
- * worse than never having read them, because the file still carries them.
+ * What the journal in `library.toml` is rebuilt from on open — `App.syncMarkup`
+ * calls this once and replaces the journal outright. It must be the whole
+ * document: a replace built from a partial scroll would discard the entries for
+ * every page nobody has looked at, which the file still carries.
  *
- * pdf.js answers this by reading every page's own `/Annots` dictionary — a
- * structural read, no appearance stream and no canvas — the same shape of
- * trip `doc.getFieldObjects()` already makes for form fields, and each
- * annotation comes back carrying the `pageIndex` it was found on.
+ * pdf.js reads every page's `/Annots` dictionary — a structural read, no
+ * appearance stream and no canvas — and each annotation comes back carrying its
+ * `pageIndex`.
  *
- * Getting the quoted text back costs one more trip per *marked* page — its
- * text content, for `quoteFor` to search — which is why annotations are
- * grouped by page first: a page with three highlights on it pays for its text
- * once, and a document with none pays nothing at all.
+ * The quoted text costs one more trip per *marked* page, which is why
+ * annotations are grouped by page first: a page with three highlights pays for
+ * its text once, and a document with none pays nothing.
  */
 export async function markupOf(doc: PDFDocumentProxy): Promise<Highlight[]> {
   let annotations: MarkupAnnotation[] | null;
@@ -3388,13 +3243,12 @@ function inCrop<T extends { x: number; y: number; width: number; height: number 
 /**
  * Colour the links on a page that has just been recoloured.
  *
- * The obvious way — a tinted box over each link, blended into the ink below —
- * is at the mercy of the compositor, and where the blend is dropped the reader
- * gets a solid band across the line instead of a coloured word. So the tint is
- * painted into the bitmap: the untouched page is put back inside the link's
- * rectangle and recoloured again, this time towards the link colour rather
- * than the text colour. The paper maps to the same background either way, so
- * only the letters change, and the edges of the rectangle leave no seam.
+ * A tinted box blended into the ink below is at the mercy of the compositor,
+ * and a dropped blend is a solid band across the line. So the tint is painted
+ * into the bitmap: the untouched page is put back inside the link's rectangle
+ * and recoloured towards the link colour instead of the text colour. The paper
+ * maps to the same background either way, so only the letters change and the
+ * rectangle's edges leave no seam.
  */
 function tintLinks(
   ctx: CanvasRenderingContext2D,
@@ -3440,21 +3294,18 @@ function tintLinks(
 }
 
 /**
- * Redraw a page's saved highlights over the recolouring `recolor` just did —
- * option 3 of "the trap" in `markup-assessment.md`. A highlighter wash is
- * translucent paint a shade or two off white, `WHITE_POINT` calls anything
- * that pale paper, and the ramp above has already flattened every one of them
- * into the theme's plain background by the time this runs. So the affected
- * quads are put back from the pristine copy and recoloured a second time,
- * this time towards `markupWashColor` instead of the background — the same
- * shape `tintLinks` is, restore-then-reflatten over a clip, generalised to
- * more than one destination colour because two highlights can disagree.
+ * Redraw a page's saved highlights over the recolouring `recolor` just did.
  *
- * Only `/Highlight` runs need this. An underline, a strike-out or a squiggly
- * draws a solid stroke rather than a wash — well below `WHITE_POINT` on any
- * page it was worth drawing on — so `recolor`'s own colour-keeping pass
- * already carries it across a theme correctly, the same way it carries a
- * plotted curve.
+ * A highlighter wash is translucent paint a shade or two off white,
+ * `WHITE_POINT` calls anything that pale paper, and the ramp has already
+ * flattened it into the theme's background. So the affected quads are put back
+ * from the pristine copy and recoloured towards `markupWashColor` — the same
+ * restore-then-reflatten `tintLinks` does, generalised to more than one
+ * destination because two highlights can disagree.
+ *
+ * Only `/Highlight` runs need it: an underline, strike-out or squiggly draws a
+ * solid stroke well below `WHITE_POINT`, which `recolor`'s colour-keeping pass
+ * already carries across a theme.
  */
 function tintMarkup(
   ctx: CanvasRenderingContext2D,
@@ -3526,12 +3377,11 @@ function copyCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
 /** Whether a drawn page is holding decoded pictures.
  *
  * `recordImages` cannot answer this: it reports where pdf.js painted image
- * XObjects, and a bitonal scan — which is the expensive case and the reason
- * any of this exists — arrives as an image *mask* and is not among them. The
- * page's own object store is the honest answer, because holding those objects
- * is the cost being counted. It is iterable in pdf.js's public types; the ids
- * are all that is wanted, and the data behind an image id may well be null by
- * the time anyone looks, because the pixels went to the compositor. */
+ * XObjects, and a bitonal scan — the expensive case, and the reason any of this
+ * exists — arrives as an image *mask* and is not among them. The page's own
+ * object store is the honest answer, because holding those objects is the cost
+ * being counted. Only the ids are wanted; the data behind one may be null by
+ * the time anyone looks. */
 function holdsPictures(page: PDFPageProxy): boolean {
   try {
     for (const [id] of page.objs) {

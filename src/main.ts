@@ -118,19 +118,15 @@ const MARKUP_OPACITY = 0.35;
 /** Past this much document, markup is kept beside the file rather than
     written into it.
  *
- * `saveDocument()` begins by pulling the whole document into the worker —
- * `requestLoadedStream()`, the one place a file this app has deliberately
- * been reading 64KB at a time is read from end to end — and then the new
- * bytes come back across the bridge and are written out again. For a paper
- * that is nothing. For a scanned volume it is the reader's gesture stalling
- * on hundreds of megabytes, twice, every time they mark a sentence.
+ * `saveDocument()` pulls the whole document into the worker —
+ * `requestLoadedStream()`, the one place a file read 64KB at a time is read end
+ * to end — and hands the whole file back across the bridge. For a paper that is
+ * nothing; for a scanned volume it is the gesture stalling on hundreds of
+ * megabytes, twice, every time a sentence is marked.
  *
- * A hundred megabytes is roughly a thousand pages of typeset text or a few
- * dozen of photographs, which is to say: past the size where anybody would
- * describe what they are reading as a paper. The number is here rather than
- * in the settings table because it is a fact about the round trip, not a
- * preference — see `markup-assessment.md`, step 7, and the Rust-side
- * incremental writer it keeps in its back pocket for exactly this case. */
+ * A hundred megabytes is roughly a thousand pages of typeset text. The number is
+ * here rather than in the settings table because it is a fact about the round
+ * trip, not a preference. */
 const MARKUP_IN_FILE_LIMIT = 100 * 1024 * 1024;
 
 /** Where markup on the open document can go, decided once when it opens
@@ -349,17 +345,14 @@ class App {
     await this.listenForDocuments();
     await this.listenForFileChanges();
     const startWith = await signalReady();
-    // A document named on the command line, or double-clicked to start the
-    // app, beats the one that happened to be open last: it is what this
-    // launch was *for*.
+    // A document named on the command line, or double-clicked to start the app,
+    // beats the one that happened to be open last: it is what this launch was
+    // *for*.
     //
     // `open_document` is empty unless there is really something to reopen —
-    // `reopen_last_document` is read on the Rust side now, by `bootstrap` and
-    // by `setup` together. It used to arrive whatever the setting said, with
-    // this line the only thing declining it, and that left Rust believing the
-    // launch window held a document it was never going to show: a file
-    // double-clicked afterwards opened a second window rather than filling
-    // the empty one already on screen.
+    // `reopen_last_document` is read on the Rust side, by `bootstrap` and
+    // `setup` together. Arriving whatever the setting said left Rust believing
+    // the launch window held a document it was never going to show.
     if (startWith) await this.open(startWith);
     else if (data.open_document) await this.open(data.open_document);
 
@@ -393,13 +386,9 @@ class App {
   /** A document handed over by the system — "Open with", the dock, the command
    *  line.
    *
-   * It used to arrive on top of whatever was already open, because there was
-   * one window and it had to give way: double-clicking a file closed the
-   * document being read, which is nothing anybody asked for by double-clicking
-   * a file. Rust now picks a window with nothing in it, or makes one, and
-   * names the window it picked — so by the time this runs, the window it is
-   * running in has nothing to lose and there is nothing to say about it. See
-   * `hand_over` in lib.rs.
+   * Rust picks a window with nothing in it, or makes one, and names the window
+   * it picked — so by the time this runs, the window it is running in has
+   * nothing to lose. See `hand_over` in lib.rs.
    */
   private async openFromOutside(path: string): Promise<void> {
     await this.open(path);
@@ -425,21 +414,17 @@ class App {
 
   /** A theme file was written — by hand, by an LLM, or by this app saving one.
    *
-   * Whatever is in use is reapplied from the new set, so that editing a theme
-   * beside the app shows up in the app. It goes through `useTheme` with
-   * `remember` off: nobody chose a theme here, and remembering would write
-   * `settings.toml` for every save an editor makes. A theme whose file has
-   * gone takes the reader somewhere else rather than leaving the colours of
-   * something that no longer exists on screen.
+   * Whatever is in use is reapplied from the new set, so editing a theme beside
+   * the app shows up in it. Through `useTheme` with `remember` off: nobody chose
+   * a theme, and remembering would write `settings.toml` for every save an
+   * editor makes. A theme whose file has *gone* takes the reader somewhere else.
    *
    * None of that applies while a theme is being written. The draft is the live
    * theme for as long as the editor is open — that is how the app around you
-   * becomes the preview — and a new one has no id at all, so looking it up in
-   * the new set finds nothing and the branch below reads that as "the theme
-   * you are reading in has been deleted". It would then throw the preview
-   * away, write a theme choice nobody made, and say so out loud. The list
-   * still updates, and the window still redraws; the colours on screen belong
-   * to the draft until the reader saves it or backs out. */
+   * becomes the preview — and a new one has no id, so the branch below would
+   * read that as "the theme you are reading in has been deleted", throw the
+   * preview away and write a choice nobody made. The list still updates and the
+   * window still redraws; only the colours are left alone. */
   private themesChanged(themes: Theme[]): void {
     const before = this.theme;
     this.themes = themes;
@@ -611,17 +596,14 @@ class App {
   /**
    * Call the document what it calls itself.
    *
-   * `2310.06825v3.pdf` is not a name, and a shelf of them is unreadable — but
-   * the file usually knows better, because whatever produced it wrote the
-   * title in. So the toolbar, the window and the recently-read list take the
-   * document's own title where there is one worth having.
+   * `2310.06825v3.pdf` is not a name and a shelf of them is unreadable, but the
+   * file usually knows better. So the toolbar, the window and the recently-read
+   * list take the document's own title where there is one worth having.
    *
-   * "Worth having" is doing real work. A great many PDFs carry a title field
-   * filled in by the program that made them and not by anybody: the file name
-   * again, the file name of the *source* — "Microsoft Word - report.doc" — or
-   * the word "untitled". Each of those is worse than the file name, because
-   * it looks deliberate. Anything that fails the test leaves the file name
-   * alone, which is what it was before.
+   * "Worth having" does real work: a great many PDFs carry a title written by
+   * the producer rather than by anybody — the file name again, the source's file
+   * name ("Microsoft Word - report.doc"), or "untitled". Each is worse than the
+   * file name, because it looks deliberate.
    */
   private async adoptDocumentTitle(path: string, fileName: string): Promise<void> {
     const { info } = await this.viewer.details();
@@ -639,18 +621,15 @@ class App {
 
   /** A form that cannot be filled in should say so.
    *
-   * pdf.js paints a widget's appearance stream into the page, so a form
-   * arrives looking exactly as it does everywhere else — the boxes are there,
-   * and so is anything already typed into them. What is not there is any way
-   * to type: that needs an interactive annotation layer, which this app does
-   * not have. So the fields look live, click like nothing, and leave the
-   * reader wondering which half is broken. Said once, when the document
-   * opens, rather than on the click — by then they have already tried.
+   * pdf.js paints a widget's appearance stream into the page, so a form arrives
+   * looking exactly as it does everywhere else. What is not there is any way to
+   * type — that needs an interactive annotation layer this app does not have —
+   * so the fields look live and click like nothing. Said once when the document
+   * opens rather than on the click, by which time they have already tried.
    *
-   * Answers, as well, whether one of those fields is a signature. That is the
-   * same question asked of the same trip into the worker, and the one caller
-   * that wants it is `readMarkupStanding`: writing markup into a signed
-   * document is exactly the change a signature exists to detect. */
+   * Answers, as well, whether one of those fields is a signature: the same
+   * question off the same trip into the worker, wanted by
+   * `readMarkupStanding`. */
   private async reportFormFields(doc: PDFDocumentProxy): Promise<boolean> {
     try {
       const fields = await doc.getFieldObjects();
@@ -960,15 +939,13 @@ class App {
   /**
    * Take the light or the dark theme, according to the machine.
    *
-   * Nothing here decides *which* light theme or *which* dark one: those are
-   * the two slots the reader has already chosen, and this only says which of
-   * them is in force. So a reader with Sepia by day and Tokyo Night by night
-   * gets exactly that pair, and one who has never thought about it gets the
-   * defaults.
+   * Nothing here decides *which* light or dark theme: those are the two slots
+   * the reader has already chosen, and this says which is in force. So Sepia by
+   * day and Tokyo Night by night is exactly that pair.
    *
    * Called at startup as well as on every change, because the system can have
-   * changed its mind while the app was shut — and called before the first
-   * paint, so a machine in dark mode never sees a white page on the way in.
+   * changed its mind while the app was shut — and before the first paint, so a
+   * machine in dark mode never sees a white page on the way in.
    */
   followSystemTheme(): void {
     if (!this.settings.follow_system_theme) return;
@@ -1018,13 +995,11 @@ class App {
   /**
    * Say when a theme file names a colour the app cannot read.
    *
-   * The whole argument for keeping themes as TOML is that somebody — or
-   * something asked on their behalf — can write one by hand, and what they
-   * will get wrong is the notation: `steelblue`, `rgb(30, 42, 59)`, a stray
-   * character in a hex string. Every one of those fell through to a fallback,
-   * which for the ink is black and for the paper is white, and nothing
-   * anywhere said so. The file was wrong and the screen looked like a bug in
-   * the app.
+   * The argument for keeping themes as TOML is that somebody can write one by
+   * hand, and the notation is what they will get wrong: `steelblue`, `rgb(30,
+   * 42, 59)`, a stray character in a hex string. Every one of those fell through
+   * to a fallback — black ink on white paper — and nothing said so, so the file
+   * was wrong and the screen looked like a bug in the app.
    */
   private reportUnreadableColors(theme: Theme): void {
     const bad = unreadableColors(theme);
@@ -1195,15 +1170,12 @@ class App {
   /**
    * Put a pin in this page, or take the same pin out.
    *
-   * A mark is navigation and not markup, which is the whole of why it stays
-   * out of the file. Markup is a change to the document and is written into
-   * it, where it belongs and where every other reader can see it; a mark is
-   * the reader's note of where they were going back to, and putting a sticky
-   * note on page 40 of somebody's shared PDF because they wanted to find it
-   * again is not what marking a page means. So marks live in `library.toml`
-   * beside the page each document was left on. Writing them into the file as
-   * `/Text` annotations is a setting this could grow, not a principle it is
-   * keeping — see `markup-assessment.md`.
+   * A mark is navigation and not markup, which is why it stays out of the file:
+   * markup is a change to the document that every other reader can see, and a
+   * mark is the reader's note of where they were going back to. Putting a sticky
+   * note on page 40 of somebody's shared PDF is not what marking a page means.
+   * So marks live in `library.toml`. Writing them in as `/Text` annotations is a
+   * setting this could grow, not a principle it is keeping.
    */
   private async toggleMark(page = this.viewer.pageNumber): Promise<void> {
     if (!this.path || this.viewer.isEmpty) return;
@@ -1238,33 +1210,27 @@ class App {
   /* -------------------------------------------------------------- markup */
 
   /**
-   * What standing this app has to write markup into the document that has
-   * just opened — step 7 of `markup-assessment.md`, and the part of this
-   * feature that decides whether people trust it.
+   * What standing this app has to write markup into the document that has just
+   * opened — the part of this feature that decides whether people trust it.
    *
-   * Four questions, asked in the order of how completely they settle it:
+   * Four questions, in the order of how completely they settle it:
    *
-   * *Is it encrypted?* pdf.js's writer does encrypt what it writes, and this
-   * app has one encrypted-document test. Markup that lands in a file nobody
-   * can open again is the worst outcome available here, so it goes beside
-   * the document instead until there is a test suite that says otherwise.
+   * *Encrypted?* pdf.js's writer does encrypt what it writes, and this app has
+   * one encrypted-document test. Markup landing in a file nobody can open again
+   * is the worst outcome here, so it goes beside the document instead.
    *
-   * *Can the file be written at all?* Read-only files, read-only volumes and
-   * folders somebody shared without write access are ordinary, and the honest
-   * moment to find out is before the reader has marked anything — not from a
-   * failed rename halfway through the gesture. Rust asks the disk; see
-   * `document_writability`.
+   * *Writable at all?* Asked of the disk before the gesture rather than found
+   * out from a failed rename halfway through it — see `document_writability`.
    *
-   * *Is it too large to rewrite?* `saveDocument()` pulls the whole file into
-   * the worker and hands the whole file back. See `MARKUP_IN_FILE_LIMIT`.
+   * *Too large to rewrite?* `saveDocument()` pulls the whole file into the
+   * worker and hands the whole file back. See `MARKUP_IN_FILE_LIMIT`.
    *
-   * *Is it signed, or syncing?* Neither is a refusal. A signature is a thing
-   * the reader gets to decide about, because the document is theirs and an
-   * incremental update is exactly what a signature is for; a syncing folder
-   * is worth one sentence about which copy wins.
+   * *Signed, or syncing?* Neither is a refusal. The document is theirs, and an
+   * incremental update is exactly what a signature is for; a syncing folder is
+   * worth one sentence about which copy wins.
    *
-   * Nothing here says anything. The notice belongs to the first mark, which
-   * is when it means something — see `markSelection`.
+   * Nothing here says anything: the notice belongs to the first mark, which is
+   * when it means something.
    */
   private async readMarkupStanding(path: string, doc: PDFDocumentProxy): Promise<void> {
     const standing = writableStanding();
@@ -1315,35 +1281,27 @@ class App {
    * Reconcile this document's markup journal with what the file itself says,
    * the moment the file can be read.
    *
-   * The file is the authority, and it used to be the only one: this replaced
-   * the journal outright with what `markupOf` found. Step 7 is where that
-   * stopped being enough, because there are now two ways for the journal to
-   * know about a highlight the file does not carry, and they mean opposite
-   * things:
+   * The file is the authority. What survives the rebuild is only what a file
+   * cannot carry, and there are two of those:
    *
    * *Never written.* The document cannot be written into — read-only,
-   * encrypted, too large — so the mark was kept beside it instead (see
-   * `markSelection`). The journal is the only copy there is, and replacing it
-   * with the file's answer would throw the reader's markup away on the next
-   * open, silently, which is the failure this whole feature exists not to
-   * have.
+   * encrypted, too large — so the mark was kept beside it (see
+   * `markSelection`). The journal is the only copy, and replacing it with the
+   * file's answer would throw the reader's markup away silently on the next
+   * open.
    *
-   * *Written, and then the file was rebuilt underneath it.* A paper
-   * recompiled by LaTeX is a new file and every annotation in the old one is
-   * gone with it — the case this app goes out of its way to support
-   * everywhere else. The words are usually still there, so the entry is kept
-   * and offered back rather than dropped: see `restoreMarkup`, which is what
-   * the "Put back" button in the Contents panel runs.
+   * *Written, and then the file was rebuilt underneath it.* A paper recompiled
+   * by LaTeX is a new file and every annotation went with it. The words are
+   * usually still there, so the entry is kept and offered back — see
+   * `restoreMarkup`.
    *
-   * Both are kept with `annotation_id: null`, which is precisely what they
-   * now have in common — the journal knows about them and the file does not.
-   * Everything the file *does* carry is taken from the file, whoever wrote
-   * it, so the authority rule is unchanged for every highlight that has one.
+   * Both are held with `annotation_id: null`, which is what they have in
+   * common. Everything the file *does* carry is taken from the file, whoever
+   * wrote it.
    *
    * Called on every open, including the reload `markSelection` causes: a
-   * highlight this app just wrote is not added to the journal directly, it
-   * is read back the same way any other application's would be, which is
-   * what keeps there being exactly one path in rather than two.
+   * highlight this app just wrote is read back the same way any other
+   * application's would be, which keeps one path in rather than two.
    */
   private async syncMarkup(
     path: string,
@@ -1379,18 +1337,15 @@ class App {
    * Put markup the file no longer carries back into it, by finding the words
    * again.
    *
-   * This is the journal earning its keep. A highlight anchors to
-   * `/QuadPoints` in a particular file, and a recompiled paper is a different
-   * file — so the anchor is gone and the quote is not, and re-anchoring by
-   * the quote through the same fold the search uses (`Viewer.findQuote`) is
-   * the only thing that can survive a rebuild at all.
+   * The journal earning its keep. A highlight anchors to `/QuadPoints` in a
+   * particular file and a recompiled paper is a different file, so the anchor is
+   * gone and the quote is not — re-anchoring through the same fold the search
+   * uses (`Viewer.findQuote`) is the only thing that can survive a rebuild.
    *
-   * One write for the lot: every re-anchored run goes into pdf.js's
-   * annotation storage and then a single `saveDocument()`, so putting thirty
-   * highlights back is one incremental update rather than thirty. What could
-   * not be found is left in the journal exactly as it was — a passage that
-   * was rewritten is not a passage that moved, and the honest thing is to say
-   * how many rather than to put the markup on the nearest words.
+   * One write for the lot, so putting thirty highlights back is one incremental
+   * update rather than thirty. What could not be found is left in the journal
+   * and counted out loud: a passage that was rewritten is not a passage that
+   * moved.
    */
   private async restoreMarkup(): Promise<void> {
     const path = this.path;

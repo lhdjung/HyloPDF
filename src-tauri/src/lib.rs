@@ -21,12 +21,11 @@ use tauri_plugin_dialog::DialogExt;
 /// write beside the target, then rename over it, which is atomic on every
 /// system we ship to.
 ///
-/// The temp file is named for this process and this write. Sharing one temp
-/// path — which is what `with_extension("toml.tmp")` gave us — meant two
-/// writers could overwrite each other's staging file and then rename the wrong
-/// bytes into place, or find it already gone and fail. The locks in `settings`
-/// and `library` make that unreachable within one process; the unique name
-/// makes it unreachable full stop.
+/// The temp file is named for this process and this write. One shared temp
+/// path meant two writers could overwrite each other's staging file and rename
+/// the wrong bytes into place. The locks in `settings` and `library` make that
+/// unreachable within one process; the unique name makes it unreachable full
+/// stop.
 pub(crate) fn atomic_write(target: &Path, body: &[u8]) -> Result<(), String> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -119,12 +118,10 @@ impl Pending {
 /// can be read, which keeps `read_range` a way of reading the document the
 /// asking window is showing rather than a way of reading any file on the disk.
 ///
-/// Keyed by window label, and that keying is the whole of what a second window
-/// costs on this side. There was one slot, and it was the reason two documents
-/// at once could not work: the second window's `open_for_reading` replaced the
-/// first window's handle, and every `read_range` from the first window after
-/// that came back "That is not the document that is open" — in the middle of a
-/// scroll, with no way to recover short of reopening.
+/// Keyed by window label, which is the whole of what a second window costs on
+/// this side. With one slot the second window's `open_for_reading` replaced the
+/// first window's handle, and every `read_range` after that came back "That is
+/// not the document that is open", mid-scroll.
 #[derive(Default)]
 struct OpenFiles(Mutex<HashMap<String, (String, File)>>);
 
@@ -173,15 +170,13 @@ impl OpenFiles {
     /// update pdf.js produced, original bytes untouched and new objects
     /// appended — and report the new length.
     ///
-    /// Locked the same way `range` is: one `Mutex` over every window's
-    /// handle, so a read and a write for the same document cannot interleave
-    /// mid-operation. Coarser than a per-document lock would be, and there is
-    /// only one document worth writing at a time in practice, so this is the
-    /// existing shape rather than a new one.
+    /// Locked the same way `range` is — one `Mutex` over every window's handle
+    /// — so a read and a write for one document cannot interleave. Coarser than
+    /// a per-document lock, and there is only one document worth writing at a
+    /// time.
     ///
-    /// The first write to a given document leaves `.hylopdf-original` beside
-    /// it — untouched by every write after the first, because it exists to
-    /// answer for all of them, not just the last one.
+    /// The first write leaves `.hylopdf-original` beside the document,
+    /// untouched by every write after it: it answers for all of them.
     fn write(&self, window: &str, path: &str, bytes: &[u8]) -> Result<u64, String> {
         let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let Some((open, _)) = held.get(window) else {
@@ -228,19 +223,15 @@ impl OpenFiles {
 
 /// What each window is showing, in the order the windows claimed a document.
 ///
-/// This is the only source of two answers. The first is what `library.open` is
-/// written from, so that a launch can put back every window that was open
-/// rather than only the last one. The second is which window a document handed
-/// over by the system should go to: a window not named here has nothing in it,
-/// and `hand_over` claims it here the moment it picks it, so two files
+/// The only source of two answers: what `library.open` is written from, so a
+/// launch puts back every window that was open; and which window a document
+/// handed over by the system goes to — a window not named here has nothing in
+/// it, and `hand_over` claims it the moment it picks it, so two files
 /// double-clicked at once do not both land in the same empty window.
 ///
-/// A window closing takes its entry out — closing a window is putting its
-/// document down, and a document put down should not come back. See
-/// `tidy_after`, which is where that happens and where the one case it cannot
-/// mean that is handled: quitting. Putting a *document* down without the
-/// window — the reader's own Close, which says `None` here — is remembered the
-/// same way.
+/// A window closing takes its entry out, because a document put down should not
+/// come back. `tidy_after` is where that happens and where the one case it
+/// cannot mean is handled: quitting.
 #[derive(Default)]
 struct OpenDocuments(Mutex<Vec<(String, String)>>);
 
@@ -280,18 +271,15 @@ impl OpenDocuments {
 
 /// Whether the app is on its way out.
 ///
-/// A window going means two different things and they are told apart by
-/// nothing else. Closed by the reader, it means they have finished with that
-/// document. Closed because the app is quitting, it means nothing at all — the
-/// document was open at the end, which is exactly what the next launch is
-/// meant to put back. So everything that ends the app raises this first, and
-/// `tidy_after` forgets nothing once it is up.
+/// A window going means two things and nothing else tells them apart. Closed by
+/// the reader, the document is finished with; closed because the app is
+/// quitting, it means only that it was open at the end — which is what the next
+/// launch puts back. So everything that ends the app raises this first, and
+/// `tidy_after` forgets nothing while it is up.
 ///
-/// Three things can raise it: `quit_app`, which is how the app is left on the
-/// platforms with no menu bar to put Quit in; `RunEvent::ExitRequested`; and
-/// `RunEvent::Exit`, which on macOS is what ⌘Q arrives as — AppKit terminates
-/// the process without closing the windows one at a time, so the flag is up
-/// before any of them can be mistaken for a reader closing it.
+/// Three things raise it: `quit_app`, `RunEvent::ExitRequested`, and
+/// `RunEvent::Exit` — which on macOS is what ⌘Q arrives as, AppKit terminating
+/// the process with no window events at all.
 #[derive(Default)]
 struct Exiting(AtomicBool);
 
@@ -330,14 +318,12 @@ struct Opened {
 
 /// Whether the reader asked to come back to what was open last.
 ///
-/// One reading, in one place, because two sides of the app act on it: the
-/// launch window's own document (`bootstrap`) and every other window the last
-/// session had (`Restore`, in `setup`) — and `setup` also *claims* the launch
-/// window in `OpenDocuments` on the strength of it. That claim was made
-/// unconditionally, so with the setting off the launch window sat on the start
-/// screen while this side believed it was holding a document: `idle_window`
-/// skipped it, and the next file double-clicked opened a second window rather
-/// than filling the empty one already on screen.
+/// One reading in one place, because two sides act on it: the launch window's
+/// own document (`bootstrap`) and every other window the last session had
+/// (`Restore`). `setup` also *claims* the launch window in `OpenDocuments` on
+/// the strength of it — claimed unconditionally, the launch window sat on the
+/// start screen while this side believed it held a document, so the next file
+/// double-clicked opened a second window rather than filling the empty one.
 fn wants_reopening(settings: &settings::Settings) -> bool {
     settings
         .get("reopen_last_document")
@@ -362,16 +348,14 @@ fn file_name(path: &str) -> String {
 /// Every command that touches the disk is `async`, and that is the whole
 /// reason for the keyword here — none of them await anything.
 ///
-/// A synchronous Tauri command runs on the thread that received the IPC
-/// message, which is the main thread: the one drawing the window. Reading a
-/// document, or rewriting `settings.toml`, would stop the app dead for as long
-/// as the disk took. `remember_position` alone fires on every pause in a
-/// scroll, so that stall would land squarely in the middle of the one gesture
-/// this app exists to make smooth. Marked `async`, the body is handed to the
-/// runtime's thread pool instead and the window keeps painting.
+/// A synchronous Tauri command runs on the thread that received the IPC message,
+/// which is the thread drawing the window — so rewriting `settings.toml` stops
+/// the app dead for as long as the disk takes. `remember_position` fires on
+/// every pause in a scroll, so that stall lands in the middle of the one gesture
+/// this app exists to make smooth.
 ///
-/// The price is that two of them can now genuinely run at once, which is why
-/// `settings` and `library` hold a lock across read-modify-write.
+/// The price is that two can now run at once, which is why `settings` and
+/// `library` hold a lock across read-modify-write.
 #[tauri::command]
 async fn bootstrap(window: WebviewWindow, paths: State<'_, Paths>) -> Result<Bootstrap, String> {
     let stored = library::prune(&library::load(&paths.config));
@@ -416,12 +400,9 @@ async fn set_settings(
 /// one go, like everything else.
 ///
 /// And only ever of the launch window. There is one remembered geometry and
-/// there are several windows, so somebody has to own it; letting whichever
-/// window last moved own it meant the number crept down and across a little
-/// every session, because the windows it was reading back were themselves
-/// cascaded off it. The rule is simple to say and it holds still: the window
-/// HyloPDF opens with is the one whose size and place are remembered, and the
-/// rest cascade off that one each time.
+/// several windows, so somebody has to own it — letting whichever window last
+/// moved own it made the number creep down and across every session, because
+/// what it read back were windows cascaded off it.
 // Async for a second reason as well as the one above: the window getters below
 // hand their work to the main thread and wait for it, which would deadlock a
 // command already running there. The same goes for `ready`.
@@ -517,13 +498,10 @@ async fn open_document(paths: State<'_, Paths>, path: String) -> Result<Opened, 
 /// Open a document for reading and report how long it is.
 ///
 /// Nothing is read here. pdf.js is given the length and asks for the pieces it
-/// needs — the cross-reference table at the end, then the pages actually being
-/// looked at — through `read_range`. Handing it the whole file instead meant
-/// three copies of every document in memory at once: the buffer read here, the
-/// array it became on the way through the bridge, and the copy the pdf.js
-/// worker keeps. A five hundred megabyte scan cost well over a gigabyte before
-/// a single page was drawn, and every one of those bytes was read before the
-/// first one was shown.
+/// needs through `read_range`. Handing it the whole file meant three copies of
+/// every document in memory — the buffer here, the array it became crossing the
+/// bridge, and the worker's own — so a 500MB scan cost over a gigabyte before a
+/// single page was drawn.
 #[tauri::command]
 async fn open_for_reading(
     window: WebviewWindow,
@@ -557,14 +535,12 @@ async fn read_range(
 /// over the document a window has open, and tell that window to reload the
 /// same way it would for a change made outside the app.
 ///
-/// The reload is deliberate rather than left to the watcher: `open.write`
-/// already knows the write landed, so this fires `document-changed` for the
-/// writing window itself, and `watching.wrote` tells the watcher that the
-/// burst of file-system events the write is about to cause is not news — the
-/// baseline moves right here, before the real burst arrives, rather than
-/// racing it. A second window with the same document open is not touched by
-/// either call and gets the ordinary reload once the watcher notices on its
-/// own, which is correct: its transport really is stale.
+/// The reload is deliberate rather than left to the watcher: `open.write` knows
+/// the write landed, so this fires `document-changed` for the writing window,
+/// and `watching.wrote` moves the watcher's baseline before the burst arrives
+/// rather than racing it. A second window with the same document open gets the
+/// ordinary reload once the watcher notices, which is correct — its transport
+/// really is stale.
 #[tauri::command]
 async fn write_document(
     window: WebviewWindow,
@@ -582,12 +558,11 @@ async fn write_document(
 /// What standing this app has to write markup into a document — asked before
 /// the reader marks anything rather than discovered by trying.
 ///
-/// Two answers, and they are different in kind. `writable` is a fact about
-/// the disk: false means an attempt would fail, so the gesture keeps the
-/// markup in the journal instead and says so once. `cloud` is not a refusal
-/// at all — a file in a syncing folder can be written perfectly well, and the
-/// thing worth saying is that the service, not this app, decides which copy
-/// wins if it is open on two machines at once.
+/// Two answers, different in kind. `writable` is a fact about the disk: false
+/// means an attempt would fail, so the mark stays in the journal and the reader
+/// is told once. `cloud` is not a refusal — a file in a syncing folder writes
+/// perfectly well, and what is worth saying is that the service decides which
+/// copy wins.
 #[derive(Debug, Clone, Serialize)]
 pub struct Writability {
     writable: bool,
@@ -642,19 +617,15 @@ fn cloud_service(path: &Path) -> Option<String> {
 /// Whether the disk would refuse this write, and what to say if it does.
 ///
 /// The file is asked by opening it for writing and closing it again, which is
-/// the only question with an answer that is actually true: a read-only file,
-/// a read-only volume, a file somebody else owns and a sandbox that has not
-/// granted this path all come back the same way, and none of them can be read
-/// off the permission bits alone. Nothing is written by the probe — no
-/// `truncate`, no `append` — so a document that survives it is exactly as it
-/// was.
+/// the only question whose answer is actually true: permission bits, a read-only
+/// volume, another owner and a sandbox all come back the same way. Nothing is
+/// written by the probe, so a document that survives it is exactly as it was.
 ///
-/// The folder is asked separately and more cheaply, because an incremental
-/// update is written *beside* the document and renamed over it (see
-/// `atomic_write`), so a writable file in an unwritable folder is still a
-/// write that cannot happen. That half is read off the permission bits and is
-/// therefore the half that can be wrong; the write itself still fails safely
-/// and reports, so this is a better message rather than the only guard.
+/// The folder is asked separately and more cheaply, because an update is written
+/// *beside* the document and renamed over it — so a writable file in an
+/// unwritable folder is still a write that cannot happen. That half is read off
+/// the permission bits and is the half that can be wrong; the write itself still
+/// fails safely, so this is a better message rather than the only guard.
 fn refuses_writing(path: &Path) -> Option<String> {
     let name = file_name(&path.to_string_lossy());
     match std::fs::OpenOptions::new().write(true).open(path) {
@@ -741,18 +712,15 @@ async fn set_open_document(
 
 /// A second window, reading a second document.
 ///
-/// Everything an open document needs is per-window already: the whole
-/// interface is one `App` object inside one webview, so a window is a reader
-/// with its own viewer, its own search index and its own sidebar for nothing
-/// more than the cost of the webview. What was not per-window was on this
-/// side — the file handle and the document watch — and both are keyed by
-/// window label now.
+/// Everything an open document needs is per-window already: the interface is
+/// one `App` object inside one webview, so a window is a whole second reader for
+/// the cost of the webview. What was not per-window was on this side — the file
+/// handle and the document watch — and both are keyed by window label now.
 ///
-/// What stays shared is what belongs to the app rather than to a window: the
-/// settings, the themes and the library. That is also the reason this is a
-/// second *window* and not a second process — one process is what keeps two
-/// windows from writing over each other's `settings.toml`, which is what the
-/// single-instance plugin has always been for.
+/// What stays shared is what belongs to the app: the settings, the themes and
+/// the library. That is also why this is a second *window* and not a second
+/// process, one process being what keeps two windows from writing over each
+/// other's `settings.toml`.
 #[tauri::command]
 async fn new_window(app: AppHandle, path: Option<String>) -> Result<(), String> {
     spawn_window(&app, path)
@@ -779,30 +747,23 @@ async fn quit_app(app: AppHandle) {
 
 /// Hand a document to whatever this system prints PDFs with.
 ///
-/// HyloPDF does not print. Everything it would take to print well — a page
-/// range, a paper size, a preview, a printer — is a dialog this app does not
-/// have, and the routes that avoid writing one are all worse than they sound:
-/// the webview on macOS answers `window.print()` by doing nothing at all, and
-/// `lpr` and its cousins print immediately, to the default printer, with no
-/// dialog and no way back. Sending four hundred pages to a printer nobody
-/// chose is the one failure here that costs paper.
+/// HyloPDF does not print. Printing well means a page range, a paper size, a
+/// preview and a printer — a dialog this app does not have — and the routes that
+/// avoid writing one are worse: `window.print()` does nothing at all in the
+/// macOS webview, and `lpr` prints immediately to the default printer with no
+/// way back. Sending four hundred pages to a printer nobody chose is the one
+/// failure here that costs paper.
 ///
-/// So this hands the file to a program that does print, and says so. Not to
-/// the *print* verb, on any platform: where a system has one it prints
-/// immediately, which is the failure above wearing a different hat. What is
+/// So this hands the file to a program that does print, and says so. Not to the
+/// *print* verb on any platform, which is the same immediate failure: what is
 /// wanted is the file open somewhere with a File menu in it.
 ///
-/// Which program is named where it can be. On macOS that is Preview, rather
-/// than "the default application", because once HyloPDF is installed the
-/// default application for a PDF may well be HyloPDF, and handing it to
-/// ourselves is a loop. Windows names Edge for the same reason — it ships with
-/// every supported version, it prints PDFs properly, and it is somewhere else
-/// — and falls back to the default handler where it has been removed. Linux
-/// has no viewer that can be assumed, so `xdg-open` is all there is.
-///
-/// So the loop is still reachable on those two, and `hand_over` is where it
-/// stops: a document already open comes to the front instead of opening a
-/// second time. The reader gets their own window back rather than a duplicate.
+/// The program is **named** where it can be — Preview on macOS, Edge by
+/// absolute path on Windows — because the default handler for a PDF may well be
+/// HyloPDF once it is installed, and handing it to ourselves is a loop. Linux
+/// has no viewer that can be assumed, so `xdg-open` is all there is, and
+/// `hand_over` is what stops the loop there: a document already open comes to
+/// the front instead of opening twice.
 #[tauri::command]
 async fn print_document(path: String) -> Result<(), String> {
     let file = PathBuf::from(&path);
@@ -820,14 +781,12 @@ async fn print_document(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let command = {
         // Edge by name, the way macOS names Preview: it ships with every
-        // supported Windows, it prints a PDF properly, and — the point — it is
-        // not us. `ShellExec_RunDLL` alone opens the file with whatever the
-        // *default* handler is, which after installing this app may well be
-        // this app.
-        //
-        // By absolute path rather than by name, because Edge is not on `PATH`.
-        // Where it has been removed, the default handler is still better than
-        // nothing; `hand_over` is what keeps that from becoming a loop.
+        // supported Windows, prints a PDF properly, and is not us —
+        // `ShellExec_RunDLL` alone opens the file with the *default* handler,
+        // which after installing this app may well be this app. By absolute
+        // path, because Edge is not on `PATH`; where it has been removed the
+        // default handler is better than nothing, and `hand_over` keeps that
+        // from becoming a loop.
         let edge = std::env::var("ProgramFiles(x86)")
             .or_else(|_| std::env::var("ProgramFiles"))
             .map(|root| PathBuf::from(root).join(r"Microsoft\Edge\Application\msedge.exe"))
@@ -1191,20 +1150,16 @@ const MIN_HEIGHT: f64 = 400.0;
 /// A "New Window" item on the icon in the Dock, above the standard ones.
 ///
 /// The one route to a second window that does not need HyloPDF to be in front
-/// already, which is exactly the moment somebody wants one: they are looking
-/// at something else and want this document beside it. Firefox, Safari and
+/// already, which is exactly the moment somebody wants one. Firefox, Safari and
 /// Preview all have it.
 ///
-/// It is also the one place in this app that writes "New Window" in title
-/// case. The Dock menu is the system's furniture and everything in it is
-/// spelled the system's way; the app's own menus keep the sentence case they
-/// use everywhere else.
+/// It is also the one place in this app that writes "New Window" in title case:
+/// the Dock menu is the system's furniture and is spelled the system's way.
 ///
-/// Nothing in Tauri or in muda reaches the Dock menu, so this goes to AppKit
-/// directly — the same as the traffic lights above, and for the same reason. A
-/// menu item needs a *target*, and a target is an Objective-C object with a
-/// selector on it, so one class is built at runtime, one instance of it is
-/// made, and both are left alive for as long as the process is.
+/// Nothing in Tauri or muda reaches the Dock menu, so this goes to AppKit
+/// directly. A menu item needs a *target*, which is an Objective-C object with
+/// a selector on it — so one class is built at runtime, one instance made, and
+/// both left alive for the life of the process.
 #[cfg(target_os = "macos")]
 mod dock {
     use std::ffi::CStr;
@@ -1288,16 +1243,13 @@ const CASCADE: f64 = 28.0;
 
 /// Where a window has been told to go, until it is up and can be put there.
 ///
-/// The position handed to the builder does not survive on macOS. A window made
-/// with one comes up where it was told to, and then *showing* it moves the
-/// window onto the launch window's frame — so every window ends up exactly on
-/// top of every other, which looks precisely like the app still only having
-/// one. Setting it again right after `build` does not help, and neither does
-/// setting it just before `show`, because `show` is the thing that does it. So
-/// the place is worked out when the window is made, kept here, and applied by
-/// `place` immediately after the window is shown, which is the first moment
-/// that is the last word. Nothing is seen in between: the two happen in one
-/// turn of the main thread.
+/// The position handed to the builder does not survive on macOS: the window
+/// comes up where it was told to, and then *showing* it moves it onto the launch
+/// window's frame — so every window lands exactly on top of every other, which
+/// looks precisely like the app still only having one. Setting it again after
+/// `build` does not help, and neither does just before `show`. So the place is
+/// kept here and applied by `place` immediately after `show`, in the same turn
+/// of the main thread, so nothing is seen in between.
 #[derive(Default)]
 struct Placements(Mutex<HashMap<String, (f64, f64)>>);
 
@@ -1311,13 +1263,11 @@ fn corner(window: &WebviewWindow) -> Option<(f64, f64)> {
 /// Where to put a new window: one step down and across from the window in
 /// front of it, and on again while that spot is taken.
 ///
-/// Off the *front* window rather than off the remembered position, which is
-/// what this did first and is worth saying why it did not work. Restoring
-/// three windows makes them in one burst, so all three cascaded from the same
-/// number and landed within a few pixels of each other — a stack that looks
-/// exactly like one window, which is the failure this whole feature exists to
-/// avoid. Stepping past what is already there is also what makes ⌘N four times
-/// give four windows rather than four windows in one place.
+/// Off the *front* window rather than the remembered position: restoring three
+/// windows makes them in one burst, so all three would cascade from the same
+/// number and land within a few pixels of each other. Stepping past what is
+/// already there is also what makes ⌘N four times give four windows rather than
+/// four windows in one place.
 ///
 /// `None` means there is nothing to cascade from, and the window is centred.
 fn placement(app: &AppHandle, stored: &settings::Settings) -> Option<(f64, f64)> {
@@ -1479,21 +1429,16 @@ fn place(app: &AppHandle, window: &WebviewWindow) {
 /// was still holding for it. None of them is the reader's business and none
 /// can be asked for from the frontend, which by then is gone.
 ///
-/// The entry is the interesting one, because a window going means two things.
-/// A window the reader closed is a document they have finished with, and it
-/// should not be back on the screen next launch — that was the complaint. A
-/// window closing *because the app is quitting* means only that it was open at
-/// the end, which is the whole of what the next launch is meant to put back.
-/// `Exiting` is what tells them apart, and it is raised by everything that
-/// ends the app before any window has gone.
+/// The entry is the interesting one, because a window going means two things: a
+/// window the reader closed is a document finished with, and one closing because
+/// the app is quitting was merely open at the end. `Exiting` tells them apart
+/// and is raised by everything that ends the app before any window goes.
 ///
-/// One case is left that no flag can reach: closing the last window, which on
-/// every platform ends the app, and which is how most people quit it. There is
-/// no signal that separates "I have finished with this" from "goodbye" there,
-/// so this never writes an *empty* list — a close can forget any window but
-/// the last, and quitting with one document open still comes back to it. The
-/// reader who means the other thing has Close, which empties the list from the
-/// frontend and is the gesture that says so.
+/// One case no flag can reach: closing the last window, which ends the app on
+/// every platform and is how most people quit it. So this never writes an
+/// *empty* list — a close can forget any window but the last, and quitting with
+/// one document open still comes back to it. The reader who means the other
+/// thing has Close, which empties the list from the frontend.
 ///
 /// The write is made here on the main thread rather than handed to one of its
 /// own, unlike every other write in this file: the windows of a quit close one

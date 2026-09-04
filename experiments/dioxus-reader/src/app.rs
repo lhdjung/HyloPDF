@@ -74,18 +74,10 @@ impl PartialEq for Handle {
 
 /// What handing the document to something that prints does.
 ///
-/// A context holding one closure, for the reason [`Away`] is one, and it is
-/// the same answer the app arrives at from the other side: this application
-/// does not print, it hands the file to one that does. `print_document` in
-/// the app's `lib.rs` is `open -a Preview` on macOS, Edge by absolute path on
-/// Windows and `xdg-open` on Linux, and the reasoning under those choices is
-/// worth having rather than restating — the point of naming a program is that
-/// it is **not us**, because the system's default handler for a PDF may well
-/// be this reader, and handing a document to ourselves to print it is a loop.
-///
-/// A test must not be able to open Preview, which is why this is a door at
-/// all: `cargo test` printing four hundred pages would be a worse trespass
-/// than [`Clip`]'s.
+/// A context holding one closure, for the reason [`Away`] is one. The program
+/// is **named** rather than left to the system's default handler, because that
+/// default may well be this reader and handing a document to ourselves to
+/// print is a loop. A test must not be able to open Preview.
 /// What handing a document over came to: nothing, or a sentence for the
 /// notice line.
 type Handover = Rc<dyn Fn(&str) -> Result<(), String>>;
@@ -171,11 +163,8 @@ impl Printer {
 }
 
 /// The document, shown where it lives — "Show in Finder", and its two other
-/// names on the two other platforms.
-///
-/// A door of its own beside [`Printer`] and for the same reason: it hands a
-/// path to a program outside this process, which is exactly what a test must
-/// not do. `revealDocument` in `api.ts`.
+/// names on the two other platforms. A door beside [`Printer`] and for the
+/// same reason: it hands a path to a program outside this process.
 #[derive(Clone)]
 pub struct Reveal(Handover);
 
@@ -260,21 +249,15 @@ pub struct Config {
     pub dir: std::path::PathBuf,
     /// `--theme N`, which chooses for this run without writing it down.
     pub theme: Option<usize>,
-    /// Whether to watch the themes directory and the open document for
-    /// changes made by somebody else — see [`crate::watch`], which is the
-    /// app's own file mounted here.
+    /// Whether to watch the themes directory and the open document — see
+    /// [`crate::watch`].
     ///
-    /// **Only the harness reads this now.** The binary provides one
-    /// `Arc<Watching>` for the whole process as a context — there is one
-    /// themes directory and one document per window, which is the shape
-    /// `watch.rs` already has — and a window that is handed one uses it
-    /// whatever this says. What is left is the case with no context: off, and
-    /// the reason is a thread. `Watching` has no way to stop, so the thread
-    /// outlives the handle; one per process is nothing and one per test is a
-    /// hundred threads and a hundred file-system watches on a `cargo test`.
-    /// So a test posts news into the mailbox itself, which is the
-    /// deterministic thing to do anyway, and the one test that wants the real
-    /// watcher asks for it.
+    /// **Only the harness reads this now**: the binary provides one
+    /// `Arc<Watching>` per process as a context and a window uses it whatever
+    /// this says. Off with no context, because `Watching` has no way to stop —
+    /// the thread outlives the handle, which is nothing at one per process and
+    /// a hundred threads on a `cargo test`. A test posts news into the mailbox
+    /// itself; one test asks for the real watcher.
     pub watch: bool,
     /// What this window is called — `main`, then `reader-1`, and so on.
     ///
@@ -306,19 +289,14 @@ impl Config {
     }
 }
 
-/// How big the window is, asked of whatever knows.
+/// How big the window is, asked of whatever knows: width and height in
+/// logical pixels, and the scale factor.
 ///
-/// This used to be `use_window()`, which consumes an `Arc<dyn winit::Window>`
-/// from a context — and that is the one thing a headless test cannot provide:
-/// `dyn Window` is thirty-odd methods about a thing that does not exist. So
-/// the component asks for a number instead, the shell answers it out of the
-/// real window, and the harness answers it out of its own viewport. Width and
-/// height in logical pixels, and the scale factor beside them.
-///
-/// It is also the more honest shape. A component reaching into winit is a
-/// component that knows what it is running under, and the whole argument for
-/// keeping the seams narrow — `api.ts` in the app, `render.rs` here — says it
-/// should not.
+/// A number rather than `use_window()`, which consumes an `Arc<dyn
+/// winit::Window>` a headless test cannot provide. The shell answers it out of
+/// the real window and the harness out of its own viewport — and a component
+/// that reaches into winit is a component that knows what it is running
+/// under.
 #[derive(Clone)]
 pub struct Screen(Rc<dyn Fn() -> (f64, f64, f64)>);
 
@@ -343,17 +321,13 @@ impl Screen {
     }
 }
 
-/// Whether the machine is in dark mode, asked of whatever knows.
+/// Whether the machine is in dark mode, asked of whatever knows. [`Screen`]'s
+/// sibling, for the same reason.
 ///
-/// [`Screen`]'s sibling, and for the same reason: a component that asks winit
-/// what the system appearance is cannot be built without winit, and the
-/// harness has no window. The shell answers it out of `Window::theme()`, the
-/// harness out of a cell a test can set, and nothing else answers it at all.
-///
-/// It answers `Option<bool>` where the app's `matchMedia` answers `bool`,
-/// because winit says `Option<Theme>` and the absence is real: a platform
-/// that does not report an appearance must leave the reader wearing what they
-/// chose rather than be read as "light". See [`crate::store::Store::outside`].
+/// `Option<bool>` where the app's `matchMedia` answers `bool`, because winit
+/// says `Option<Theme>` and the absence is real: a platform that does not
+/// report an appearance must leave the reader wearing what they chose rather
+/// than be read as "light". See [`crate::store::Store::outside`].
 #[derive(Clone)]
 pub struct Appearance(Rc<dyn Fn() -> Option<bool>>);
 
@@ -388,12 +362,10 @@ pub const FOLLOWING_OFF: &str =
 /// The toolbar's height, the notice line's, and the hairline between them and
 /// the document.
 ///
-/// The app measures these off the elements; here they are stated, because
-/// there is no `ResizeObserver` and no `get_client_rect` that can be called
-/// safely from an event — see `resize_from_window` below. They are three
-/// numbers rather than one because either of the first two can be taken away
-/// now: ⌘T puts the toolbar down, and presenting puts everything down. See
-/// [`Viewer::chrome`].
+/// Stated rather than measured: there is no `ResizeObserver` and no
+/// `get_client_rect` callable safely from an event. Three numbers rather than
+/// one because either of the first two can be taken away — ⌘T puts the toolbar
+/// down, presenting puts everything down. See [`Viewer::chrome`].
 pub const TOOLBAR: f64 = 46.0;
 /// The toolbar's own bottom border, and the only hairline left: the notice
 /// line used to be a row of the flex column under it and had one too.
@@ -406,13 +378,10 @@ pub const CHROME: f64 = TOOLBAR + HAIRLINE;
 /// How far one press of an arrow moves the page.
 const LINE: f64 = 60.0;
 
-/// What a screen keeps of itself when a screen is scrolled: the last lines of
-/// the old screen are the first lines of the new one, which is how somebody
-/// reading a paragraph across the join does not lose it. `scrollByViewport` in
-/// `viewer.ts` is the same number, and half a screen is half of *this* rather
-/// than half of the window — otherwise `d` twice and Space once land in two
-/// different places, which is exactly the sort of thing a reader notices and
-/// cannot name.
+/// What a screen keeps of itself when a screen is scrolled, so a paragraph
+/// read across the join is not lost. `scrollByViewport` in `viewer.ts` is the
+/// same number. Half a screen is half of *this* rather than half the window,
+/// or `d` twice and Space once land in two different places.
 const OVERLAP: f64 = 60.0;
 
 /// How many places back a reader can step.
@@ -427,20 +396,16 @@ const REVEAL: f64 = 0.3;
 
 /// How many pages of text are kept for the sake of a selection.
 ///
-/// A page is about a hundred kilobytes of characters and boxes, and a sweep
-/// is over the pages on screen — which at any zoom this reader offers is at
-/// most a spread and its neighbours. Eight is that with room either side, and
-/// it is 800KB against the 23MB two page textures already cost. See
-/// [`Viewer::texts`], which is the one cache in this file that is bounded
-/// where the links beside it are not.
+/// A page is about 100KB of characters and boxes and a sweep covers at most a
+/// spread and its neighbours, so eight is that with room either side: 800KB
+/// against the 23MB two page textures cost. See [`Viewer::texts`], the one
+/// cache in this file that is bounded where the links beside it are not.
 const TEXT_CACHE: usize = 8;
 
 /// How long after a press a second one in the same place is the same gesture.
-///
-/// Blitz's own number for the text fields it owns, restated here because a
-/// page cannot be told about a double click and has to count one — see
-/// [`Viewer::begin_sweep`]. Two windows disagreeing about what a double click
-/// is would be worse than either answer.
+/// Blitz's own number for the fields it owns, restated because a page cannot
+/// be told about a double click and has to count one — see
+/// [`Viewer::begin_sweep`].
 /// How long a message stays on the notice line. `ui.notice` in the app.
 const NOTICE_LASTS: std::time::Duration = std::time::Duration::from_millis(4200);
 
@@ -458,13 +423,10 @@ const PILL_LASTS: std::time::Duration = std::time::Duration::from_millis(1100);
 
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// How long a zoom gesture goes on being one after the last event of it.
-///
-/// A trackpad's magnification events arrive about a frame apart and a
-/// ⌃-wheel's rather further, so this is the gap that says the fingers have
-/// stopped rather than paused — long enough that a slow drag is not cut into
-/// three gestures, short enough that the page comes back sharp before the
-/// reader has read a line of it. See [`Viewer::settle_zoom`].
+/// How long a zoom gesture goes on being one after its last event: long
+/// enough that a slow drag is not cut into three, short enough that the page
+/// comes back sharp before the reader has read a line. See
+/// [`Viewer::settle_zoom`].
 const ZOOM_SETTLES: std::time::Duration = std::time::Duration::from_millis(180);
 
 /// The zoom ladder, in the app's own steps.
@@ -477,16 +439,12 @@ const ZOOMS: [f64; 16] = [
 
 /// What opening a link outside the document does.
 ///
-/// A context rather than a call, for the reason [`Screen`] is one: the thing
-/// it stands for does not exist in a test. `webbrowser::open` is the right
-/// answer in the app and is the *default* here, so a shell that provides
-/// nothing still opens links — but a harness that provides its own can watch
-/// where a link would have gone without a browser window arriving on somebody
-/// else's screen halfway through `cargo test`.
-///
-/// It is the same door `nav.rs` already is for a `<a href>` inside the
-/// chrome; a document's own links do not go through the DOM at all, so they
-/// need their own way out.
+/// A context rather than a call, for the reason [`Screen`] is one.
+/// `webbrowser::open` is the default, so a shell providing nothing still opens
+/// links; a harness providing its own can watch where a link would have gone
+/// without a browser window arriving on somebody's screen mid-`cargo test`.
+/// A document's own links do not go through the DOM, so they need their own
+/// way out — `nav.rs` is the same door for an `<a href>` in the chrome.
 #[derive(Clone)]
 pub struct Away(Rc<dyn Fn(&str)>);
 
@@ -525,19 +483,13 @@ impl Away {
 
 /// Where a copied passage goes.
 ///
-/// A context holding one closure, for the reason [`Away`] is one: the thing it
-/// stands for does not exist in a test, and a suite that took the real one
-/// would empty the clipboard of whoever is running `cargo test` — which is a
-/// worse trespass than opening a browser window, because it takes something
-/// away rather than adding something.
+/// A context holding one closure, for the reason [`Away`] is one: a suite that
+/// took the real clipboard would empty the clipboard of whoever is running
+/// `cargo test`.
 ///
-/// **The app has no equivalent and needs none**, which is the whole of why
-/// this is here. There, ⌘C is the webview's own: the browser owns the
-/// selection, so it owns copying it, and `main.ts` reaches for the clipboard
-/// only for the one thing the browser cannot do for itself — a quote with its
-/// page number attached. Here the selection is the reader's own
-/// ([`crate::select`]), so copying it is too, and the clipboard is a door in
-/// the shell like every other door in this crate.
+/// **The app has no equivalent and needs none**: there the webview owns the
+/// selection, so it owns copying it. Here the selection is the reader's own
+/// ([`crate::select`]), so copying it is too.
 #[derive(Clone)]
 pub struct Clip(Rc<dyn Fn(&str)>);
 
@@ -583,18 +535,13 @@ impl Clip {
 /// shell like the clipboard beside it rather than a dependency of its own.
 ///
 /// **It asks and does not answer, and that is a crash rather than a taste.**
-/// `rfd` shows an `NSOpenPanel` and runs it *modally*, which spins a nested
-/// run loop — and a nested run loop delivers events to winit, which is already
-/// inside `EventHandler::handle` because a click on a menu item is what got us
-/// here. That handler holds a `RefMut` on itself for exactly this reason and
-/// panics on re-entry: `tried to handle event while another event is currently
-/// being handled`, from a stack with nothing of this app in it. So the picker
-/// is opened from a thread of its own, where `rfd` dispatches it back onto the
-/// main queue — which the main thread reaches *after* the click has been
-/// handled and the handler is free. The answer comes back the way every other
-/// answer from a thread comes back in this reader, as news in the mailbox, and
-/// is handled beside the document dropped on the window and the document
-/// handed over by a second launch, both of which were already that shape.
+/// `rfd` runs `NSOpenPanel` *modally*, which spins a nested run loop, which
+/// delivers events to winit while it is still inside `EventHandler::handle` —
+/// a click on a menu item is what got us here. That handler panics on
+/// re-entry, correctly. So the picker opens on a thread of its own, where
+/// `rfd` dispatches it back onto the main queue once the click has been
+/// handled, and the answer comes back as news in the mailbox like the document
+/// dropped on the window and the one handed over by a second launch.
 ///
 /// A picker the reader closed sends nothing, which is what cancelling means.
 #[derive(Clone)]
@@ -682,15 +629,10 @@ impl Pick {
 
 /// What the *window* can be asked to do, which is not the page's business.
 ///
-/// A context holding one closure, for the reason [`Screen`] and [`Away`] are
-/// contexts: the thing it stands for does not exist in a test. A shell answers
-/// these against winit; the harness writes them down, which is how "⌘N asks
-/// for a window" is a test rather than a thing somebody checked once by hand.
-///
-/// It is deliberately one closure and an enum rather than five closures. The
-/// asks are a small closed set, they are all "tell whoever owns the window",
-/// and a test that wants to know what the reader asked for wants the list in
-/// order — which is a `Vec<Ask>` and not five counters.
+/// A shell answers these against winit; the harness writes them down, which is
+/// how "⌘N asks for a window" is a test rather than something checked by hand.
+/// One closure and an enum rather than five closures, because a test that
+/// wants to know what the reader asked for wants the list in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ask {
     /// A window of its own. The document is chosen by whoever answers, which
@@ -710,14 +652,12 @@ pub enum Ask {
     /// This window is showing a different document now: where it is, and what
     /// to call it.
     ///
-    /// Three things outside the reader have to be told and none of them is
-    /// the reader's to reach. The desk, which is what the restore list is
-    /// read from, and the watch, which is following the file that was open a
-    /// moment ago — both belong to the process. And the window's own title,
-    /// which belongs to winit. The name travels with the path because the
-    /// reader has already worked it out (`store::called`, which is
-    /// `worth_calling` deciding between a document's `/Title` and its file
-    /// name) and asking pdfium again would mean opening the file again.
+    /// Three things outside the reader have to be told and none is the
+    /// reader's to reach: the desk (the restore list), the watch (still
+    /// following the file open a moment ago) and the window's own title. The
+    /// name travels with the path because the reader has already worked it out
+    /// — `store::called` — and asking pdfium again means opening the file
+    /// again.
     Showing { path: String, title: String },
     /// Full screen, on or off. Presenting is this and the chrome taken away,
     /// and the second half is the page's own — see [`Viewer::present`].
@@ -758,22 +698,18 @@ const AUTHOR: &str = "HyloPDF";
 
 /// How tall a signature is dropped, in the page's own points.
 ///
-/// A fixed height rather than a fraction of the page, and the reason is that a
-/// signature is a fact about a hand and not about the paper: a name written on
-/// a postcard and the same name written on a poster are the same size. Forty
-/// points is about 14mm, which is what a signature on a printed form measures.
-/// Every other size question in this reader is the page's; this one is not.
+/// Fixed rather than a fraction of the page: a signature is a fact about a
+/// hand and not about the paper, and a name on a postcard is the same size as
+/// the same name on a poster. Forty points is about 14mm.
 const HAND_HEIGHT: f64 = 40.0;
 
 /// The drawing pad in the Sign window, in CSS pixels.
 ///
-/// Written down rather than measured, and that is the one awkward thing about
-/// the pad: a stroke arrives as a point inside the element, and turning it into
-/// the unit box needs the element's size — which the handler cannot ask for.
-/// Blitz gives an event its coordinates and not its target's box, so the pad
-/// is sized from these on the element itself rather than in `styles.rs` — the
-/// sheet is a `const &str` and cannot interpolate, and two numbers that have to
-/// agree is exactly the copy this codebase keeps warning about.
+/// Written down rather than measured, because a stroke arrives as a point
+/// inside the element and Blitz gives an event its coordinates and not its
+/// target's box. Sized from these on the element itself rather than in
+/// `styles.rs`, which is a `const &str` and cannot interpolate — two numbers
+/// that have to agree is the copy this codebase keeps warning about.
 pub const PAD_WIDTH: f64 = 440.0;
 pub const PAD_HEIGHT: f64 = 150.0;
 
@@ -791,12 +727,11 @@ pub struct MarkRow {
 
 /// How to find a mark again in order to take it out.
 ///
-/// **The two halves of this enum are the whole of what item 11 found.** A
-/// mark in the file is named by where it sits and is removed by removing it;
-/// a mark beside the file is named by an id this reader made up and is
-/// removed from a TOML table. In the app every mark is the second kind for
-/// the purposes of removal, because the first kind cannot be removed at all —
-/// which is why its journal needs a durable id and this one does not.
+/// A mark in the file is named by where it sits and removed by removing it; a
+/// mark beside the file is named by an id this reader made up and removed from
+/// a TOML table. In the app every mark is the second kind for removal, because
+/// the first kind cannot be removed at all — which is why its journal needs a
+/// durable id and this one does not.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MarkKey {
     /// In the document: the page, and where among that page's annotations.
@@ -821,13 +756,10 @@ fn name_of(fit: Fit) -> &'static str {
 
 /// Which page of the Settings window is open.
 ///
-/// **A window in the flow rather than a window of the system's**, which is
-/// what the app does too: `showWindow` in `ui.ts` is a scrim and a frame in
-/// the same document, not a second webview. That matters more here than
-/// there — a second winit window would be a second `Viewer` over a second
-/// `Store`, and every setting changed in it would reach the reader on its
-/// next launch. See `AGENTS.md` on exactly that staleness between two reader
-/// windows.
+/// **A window in the flow rather than one of the system's**, as in the app. It
+/// matters more here: a second winit window would be a second `Viewer` over a
+/// second `Store`, and every setting changed in it would reach the reader on
+/// its next launch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pane {
     Reading,
@@ -869,18 +801,11 @@ impl Pane {
     }
 }
 
-/// The toolbar's three menus.
+/// The toolbar's three menus: what document is open, what it looks like, and
+/// how it is laid out — which is where the app's are and what they are about.
 ///
-/// **This is the piece the port had been doing without, and the chips were
-/// standing in for it.** Fourteen themes reached by pressing `t` fourteen
-/// times, three spread modes on `s`, and a fit chip that could only ever mean
-/// *fit width* are all the same shape: a list of choices with no room to show
-/// itself. `keymap::EXTRA`'s first two entries exist because of it and say so
-/// in their own comment — "this reader has no menus yet".
-///
-/// Three rather than one, because that is where the app's are and what they
-/// are about: what document is open, what it looks like, and how it is laid
-/// out.
+/// The chips stood in for these, and a list of choices with no room to show
+/// itself is what `keymap::EXTRA`'s first two entries exist for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Menu {
     /// Under the document's name: what can be done with the document that is
@@ -920,10 +845,10 @@ impl Menu {
 /// A document that will not open without a password, and what has been said
 /// to it so far.
 ///
-/// `ui.askForPassword` in the app, which is a window with a field in it and a
-/// promise the load is waiting on. There is nothing to wait here: pdfium
-/// answers at open, so a locked document is a piece of *state* — this window
-/// is showing whatever it was showing, and there is a question over it.
+/// The app's `ui.askForPassword` is a promise the load waits on. There is
+/// nothing to wait here: pdfium answers at open, so a locked document is a
+/// piece of *state* — the window shows whatever it was showing, with a
+/// question over it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Locked {
     /// The document being asked about. Not opened, and not the document this
@@ -939,15 +864,11 @@ pub struct Locked {
 
 /// The Sign window: what is drawn on the pad, and what it will be called.
 ///
-/// **The pad is the one place in this reader where the pointer draws.**
-/// Everything else it does is choosing — a word, a page, a colour — and this
-/// is the one gesture whose whole content is the path the pointer took. So the
-/// points are kept as they arrive, in the pad's own space, and normalised into
-/// the unit box only when the pad's size is in hand; see [`Viewer::draw_to`].
-///
-/// The strokes are *not* a `Signature` while they are being drawn, deliberately:
-/// a signature is a thing on disk in a unit box, and these are pixels on a pad.
-/// The conversion happens once, at the moment it is kept.
+/// **The pad is the one place in this reader where the pointer draws**, so the
+/// points are kept as they arrive, in the pad's own space, and normalised only
+/// when the pad's size is in hand; see [`Viewer::draw_to`]. They are
+/// deliberately not a `Signature` until then: a signature is a thing on disk
+/// in a unit box, and these are pixels on a pad.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Signing {
     /// What the reader is calling it. A name is asked for because several are
@@ -967,12 +888,9 @@ pub struct Signing {
     /// press from the difference between the two coordinate systems the event
     /// carries. See [`Viewer::draw_from`].
     pub origin: (f64, f64),
-    /// **The other half of a signature**, which `signing-assessment.md` names
-    /// in six words: *the form under a signature usually wants both*. A date,
-    /// a place, a printed name — whatever the line beside the signature is
-    /// asking for. Kept beside the strokes rather than in a window of its own
-    /// because it is the same errand, and the reader who is about to sign is
-    /// the reader who is about to date it.
+    /// **The other half of a signature** — a date, a place, a printed name.
+    /// Kept beside the strokes rather than in a window of its own because it
+    /// is the same errand.
     pub line: String,
 }
 
@@ -998,18 +916,13 @@ pub struct Viewer {
     /// Where the window sits across the document, as the fraction of the
     /// content its middle is over. Half, always, until somebody pans.
     ///
-    /// **A fraction rather than an offset, and that is what makes the page
-    /// stay centred.** `#pages` in the app is `margin: 0 auto` inside a
-    /// `#viewer` that is `overflow: auto`, so a page narrower than the window
-    /// is centred by the box model and a page wider than it scrolls. Here the
-    /// pages are placed absolutely against a box `layout.rs` sizes, so both
-    /// halves are arithmetic — and a stored *offset* would have to be
-    /// recomputed at every one of the dozen places that relay the document
-    /// out. A fraction needs recomputing nowhere: [`Viewer::scroll_left`]
-    /// resolves it against whatever the content is now, so a page that has
-    /// just become wider than the window arrives with its middle in the
-    /// middle, which is the answer for a zoom step and the answer for a
-    /// window made narrower.
+    /// **A fraction rather than an offset, and that is what keeps the page
+    /// centred.** The app gets centring from `margin: 0 auto`; here the pages
+    /// are placed absolutely, so it is arithmetic — and an offset would have
+    /// to be recomputed at every one of the dozen places that relay the
+    /// document out. [`Viewer::scroll_left`] resolves a fraction against
+    /// whatever the content is now, which is the answer for a zoom step and
+    /// for a window made narrower alike.
     across: f64,
     /// The settings table and the themes, which is everything this reader
     /// remembers between runs. It is not a signal and does not need to be:
@@ -1037,24 +950,18 @@ pub struct Viewer {
     /// The panel on the left, and what it is showing. All three are settings,
     /// so a reader who reads with the contents open gets them back.
     pub sidebar_open: bool,
-    /// **Whether the panel on screen is one the search borrowed.** A count in
-    /// the find bar is the answer to "is it in here" and the list behind it is
-    /// the answer to "which one did I mean" — the app makes the count the way
-    /// through to the list, and this reader does too. What the app does not
-    /// have is a way back: it opens the panel and leaves it open, because
-    /// closing something the reader can see is the sort of tidying that loses
-    /// people their place. Here the panel came up on its own, so it goes away
-    /// on its own — one Escape takes the bar down and the panel with it, and
-    /// only when the panel was shut to begin with. A reader who was already
-    /// reading with the contents open keeps them.
+    /// **Whether the panel on screen is one the search borrowed.** The count
+    /// in the find bar is the way through to the list, as in the app. What the
+    /// app does not have is a way back: a panel that came up on its own goes
+    /// away on its own, so one Escape takes the bar down and the panel with
+    /// it — but only when the panel was shut to begin with.
     results_borrowed: bool,
     /// The page pill: whether it is up, and which flash put it there.
     ///
-    /// A token rather than a timer, exactly as the notice line is done — see
-    /// the `use_effect` in [`Reader`]: the thread that will take the pill down
-    /// carries the number it was started for, so a scroll during the second
-    /// it is up keeps it up rather than having it vanish on the first one's
-    /// clock.
+    /// A token rather than a timer, as the notice line is: the thread that
+    /// takes the pill down carries the number it was started for, so a scroll
+    /// while it is up keeps it up rather than letting it vanish on the first
+    /// one's clock.
     pill_up: bool,
     pill_token: u64,
     /// Whether the handle that gives the toolbar back is down. See
@@ -1075,11 +982,9 @@ pub struct Viewer {
     /// Which toolbar menu is down, if any. `None` almost always.
     ///
     /// **One at a time, and the state is the reader's rather than the
-    /// button's**, which is `showPopover` in `ui.ts` and the same reason:
-    /// opening a second menu has to close the first, and nothing that lives
-    /// inside one menu can know about another. Escape closes it, and so does
-    /// a press anywhere the menu is not — see the root's `onmousedown` and
-    /// [`Menu`].
+    /// button's**, for `showPopover`'s reason: opening a second menu has to
+    /// close the first, and nothing inside one menu can know about another.
+    /// Escape closes it, and so does a press anywhere the menu is not.
     pub menu: Option<Menu>,
     /// Which page of Settings is up, if any. See [`Pane`].
     pub pane: Option<Pane>,
@@ -1100,19 +1005,15 @@ pub struct Viewer {
     labels: Vec<String>,
     /// The links on each page that has been asked about, kept.
     ///
-    /// **The one piece of state here behind a `RefCell`**, because it is the
-    /// one that has to be filled while the reader is being *read*: a page's
-    /// links are wanted by the render that mounts it, and a render holds a
-    /// `read()` of this whole struct. Filling it from the outside instead
-    /// would mean every method that changes which pages are mounted
-    /// remembering to — `scroll_to`, `resize`, `set_fit`, `zoom`,
-    /// `set_spread`, `go_to_page` — and the failure of forgetting one is a
-    /// page whose cross-references quietly do nothing.
+    /// **Behind a `RefCell` because it is filled while the reader is being
+    /// *read***: a page's links are wanted by the render that mounts it, and a
+    /// render holds a `read()` of this struct. Filling it from outside would
+    /// mean every method that changes which pages are mounted remembering to,
+    /// and forgetting one is a page whose cross-references quietly do nothing.
     ///
-    /// It is not trimmed. A link is a rectangle and a target; a book of four
-    /// hundred pages of mathematics is a few hundred kilobytes of them, which
-    /// is a fiftieth of one page's texture, and the whole point of the caches
-    /// this experiment does keep an eye on is that they hold *pixels*.
+    /// Not trimmed: a link is a rectangle and a target, and four hundred pages
+    /// of them is a fiftieth of one page's texture. The caches worth watching
+    /// hold *pixels*.
     links: RefCell<HashMap<usize, Rc<Vec<Link>>>>,
     /// And the notes on it, kept the same way and for the same reason: a
     /// document that carries none — which is most of them — asks pdfium once
@@ -1135,15 +1036,7 @@ pub struct Viewer {
     /// The Sign window, when it is up. See [`Signing`], and [`crate::sign`]
     /// for what the word does and does not mean here.
     pub signing: Option<Signing>,
-    /// A signature chosen and waiting for somewhere to go.
-    ///
-    /// **Signing is two gestures, and this is the gap between them.** Choosing
-    /// which name to sign with and choosing where on the page it goes are
-    /// different questions, and a window that answered both would have to
-    /// contain the page. So the window closes, this is armed, the pointer
-    /// becomes the thing that answers the second question, and one click on
-    /// a page puts it there. Escape disarms it, like everything else that
-    /// waits.
+    /// A signature chosen and waiting for somewhere to go. See [`Placing`].
     pub placing: Option<Placing>,
     /// Whether the reader has been told, for this document, that signing it
     /// rewrites the file and breaks the cryptographic signature it carries.
@@ -1153,21 +1046,15 @@ pub struct Viewer {
     /// character of it is.
     ///
     /// Behind a `RefCell` for the reason the links are, and **bounded where
-    /// the links are not**, because the two are not the same size at all: a
-    /// link is a rectangle and a target, and a page of text is a `char` and a
-    /// `Rect` per character — about thirty-six bytes each, so a page of
-    /// typeset mathematics is a hundred kilobytes and a four-hundred-page book
-    /// read end to end would be forty megabytes. That is a quarter of what
-    /// this whole reader costs, held for a feature nobody may have used.
+    /// the links are not**: a page of text is a `char` and a `Rect` per
+    /// character, about thirty-six bytes each, so a four-hundred-page book read
+    /// end to end would be 40MB — a quarter of what this reader costs, held for
+    /// a feature nobody may have used. [`TEXT_CACHE`] pages, oldest out first.
     ///
-    /// [`TEXT_CACHE`] pages, oldest out first, which is the same shape the
-    /// search's index has and a two-hundredth of the size: a sweep is over the
-    /// pages on screen, and the pages on screen are a handful. The search
-    /// keeps its own copy while the find bar is up and gives it back when the
-    /// bar goes ([`Search::forget`]), and the two do not share one — a
-    /// selection outlives the find bar, and a cache that emptied when
-    /// somebody closed a search would be a selection that stopped being
-    /// copyable for no reason the reader could see.
+    /// The search keeps its own copy while the find bar is up and gives it back
+    /// with [`Search::forget`]; the two do not share one, because a selection
+    /// outlives the find bar and would otherwise stop being copyable for no
+    /// reason the reader could see.
     texts: RefCell<Vec<(usize, Rc<PageText>)>>,
     /// What the reader has swept over, or nothing.
     ///
@@ -1178,12 +1065,12 @@ pub struct Viewer {
     /// Every highlight in the document, read out of the file at open and
     /// again after every reload. See [`crate::markup`].
     ///
-    /// **The file is the record and this is a reading of it**, which is why
-    /// there is nothing to keep in step: a mark is written, the document is
-    /// reopened through the path a recompile already uses, and this is filled
-    /// from what came back. The app has a journal that has to be reconciled
-    /// against the file on every open because its writes and its reads are on
-    /// opposite sides of a bridge; here they are the same call.
+    /// **The file is the record and this is a reading of it**, so there is
+    /// nothing to keep in step: a mark is written, the document is reopened
+    /// through the path a recompile already uses, and this is filled from what
+    /// came back. The app needs a journal reconciled on every open because its
+    /// writes and reads are on opposite sides of a bridge; here they are the
+    /// same call.
     pub markup: Vec<crate::markup::Mark>,
     /// Where a mark can go on this document, asked once when it opened.
     standing: crate::markup::Standing,
@@ -1194,20 +1081,14 @@ pub struct Viewer {
     /// The colour popover: which page it is over and where on that page, in
     /// the same space as a mark's own quads.
     ///
-    /// `None` almost always. It opens where the selection ends rather than
-    /// off a toolbar button, because nothing in the toolbar is what it is
-    /// about — which is `showMarkupPopover` in `main.ts` making a throwaway
-    /// element over the selection's own rectangle, said in a reader that can
-    /// simply put the node on the page.
+    /// `None` almost always. It opens where the selection ends rather than off
+    /// a toolbar button, because nothing in the toolbar is what it is about.
     pub markup_at: Option<(usize, Rect)>,
     /// The mark the pointer was last clicked on, and what to say about it:
     /// which page, where on it, what colour it is and how to take it out.
     ///
-    /// **The whole of what "I cannot remove a highlight" turned out to
-    /// be.** Removal was built, tested and reachable — from a ten-pixel × on
-    /// a row in the Contents panel, behind a tab the panel does not open on.
-    /// A mark is a thing on a page, so the way to take it off is on the page:
-    /// click it and it says so. Nothing about the removal itself changed.
+    /// A mark is a thing on a page, so the way to take it off is on the page —
+    /// a × on a row in a panel behind a tab is reachable and is not findable.
     pub mark_open: Option<(usize, Rect, MarkKey, String)>,
     /// Where the last press landed, in the page's own space, so that letting
     /// go without having swept anywhere can ask what is under it.
@@ -1215,21 +1096,17 @@ pub struct Viewer {
     /// Where the content's top left is, in the coordinates a mouse event
     /// arrives in, worked out from the press that began the sweep.
     ///
-    /// **Not asked of the DOM, because it cannot be asked from here.** A
+    /// **Not asked of the DOM, because it cannot be asked from here** — a
     /// `MountedData` call borrows the document and every place a component can
-    /// call one from is already inside a borrow of it — the same wall
-    /// `Screen` is here for. What is available is that the press arrives with
+    /// call one from is already inside a borrow of it. The press arrives with
     /// both its client coordinates and its coordinates within the page it
-    /// landed on, and the layout knows where that page is: subtract, and the
-    /// origin falls out. It is worked out once per sweep and the scroll
-    /// offset is added back on every move, so scrolling mid-sweep — which is
-    /// what a reader dragging to the bottom of the window does — extends the
-    /// selection through the text that scrolls past rather than through the
-    /// pixels it happens to be over.
+    /// landed on, and the layout knows where that page is: subtract. Worked
+    /// out once per sweep, with the scroll offset added back on every move, so
+    /// scrolling mid-sweep extends the selection through the text that goes
+    /// past rather than through the pixels the pointer is over.
     ///
-    /// `None` outside a sweep, which is what root's `onmousemove` checks
-    /// before touching the signal at all — see the sidebar's `resize_from`,
-    /// which is the same shape for the same reason.
+    /// `None` outside a sweep, which root's `onmousemove` checks before
+    /// touching the signal at all.
     sweep_from: Option<(f64, f64)>,
     /// When and where the pointer last went down on a page, which is the whole
     /// of what tells a second click from a first one. See
@@ -1237,24 +1114,20 @@ pub struct Viewer {
     pressed: Option<(std::time::Instant, f64, f64)>,
     /// The scale a zoom gesture began at, while one is under way.
     ///
-    /// A pinch and a ⌃-wheel are a stream rather than a step — see
-    /// [`Viewer::zoom_by`] — and this is what makes the stream one gesture:
-    /// every page keeps the texture it was drawn at when the fingers went
-    /// down and is stretched to whatever the layout says this frame. The
-    /// number is the scale to divide by to get back to that size, which is
-    /// what the component key needs so that nothing is re-keyed either. See
-    /// [`crate::page::Chosen::holding`].
+    /// A pinch is a stream rather than a step, and this is what makes the
+    /// stream one gesture: every page keeps the texture it was drawn at when
+    /// the fingers went down and is stretched to whatever the layout says this
+    /// frame. Dividing by it gets back to that size, which is what keeps the
+    /// component key still. See [`crate::page::Chosen::holding`].
     zoom_from: Option<f64>,
     /// Which gesture the settle timer is for; see [`Viewer::settle_zoom`].
     zoom_token: u64,
     /// Where the reader has jumped from, and where they came back from.
     ///
-    /// The distinction the app draws and the reason both lists exist: moving
-    /// *through* a document leaves no trace — scrolling, turning a page,
-    /// stepping through search results — and jumping *across* it does.
-    /// Following a cross-reference, picking a chapter out of the contents and
-    /// typing a page number are the moves that leave a reader stranded, and
-    /// they are exactly the three that go through [`Viewer::jump_to`].
+    /// Moving *through* a document leaves no trace — scrolling, turning a
+    /// page, stepping through matches. Jumping *across* it does: a
+    /// cross-reference, a chapter, a typed page number. Those three are what
+    /// go through [`Viewer::jump_to`].
     past: Vec<Anchor>,
     future: Vec<Anchor>,
     /// Whether the reader is typing a page number into the field in the
@@ -1264,17 +1137,12 @@ pub struct Viewer {
     /// and what has been typed when somebody is.
     ///
     /// **It arrives holding the page it is on, and the first thing typed
-    /// replaces the lot** — which is what selecting the contents comes to for
-    /// anybody who then types, and it is what the app does
-    /// (`el.pageNumber.select()`). It used to arrive empty, because
-    /// `select()` has no equivalent here: parley will select all when it is
-    /// *asked by a keystroke* and there is no imperative door onto it from a
-    /// component. So the selection is emulated one level up — `page_fresh`
-    /// below is the "everything in here is selected" state, and the keydown
-    /// handler in `Reader` is where it is spent. The reason the empty field
-    /// was wrong is not that it was harder to use: it is that the number
-    /// disappearing is the reader losing the one thing the field was showing
-    /// them.
+    /// replaces the lot**, which is what the app's `el.pageNumber.select()`
+    /// comes to. There is no `select()` here — parley selects all only when
+    /// *asked by a keystroke*, with no imperative door from a component — so
+    /// the selection is emulated: `page_fresh` below is the "all of it is
+    /// selected" state, spent in `Reader`'s keydown handler. An empty field
+    /// would lose the reader the one thing the field was showing them.
     pub typing_page: bool,
     pub page_typed: String,
     /// Whether what is in the field is the page it opened on rather than
@@ -1334,27 +1202,20 @@ pub struct Viewer {
     ///
     /// **A held place rather than a scroll offset, because there is no
     /// viewport yet.** `Viewer::new` runs before anything is mounted, so the
-    /// layout has a viewport of 0×0 and every page in it is zero high — a
-    /// place turned into an offset there is turned back into page one the
-    /// moment the window says how big it is. So it is kept as what it is, a
-    /// page and a fraction of it, and [`Viewer::resize`] spends it on the
-    /// first layout that has room in it.
+    /// layout is 0×0 and every page in it zero high — a place turned into an
+    /// offset there comes back as page one the moment the window says how big
+    /// it is. [`Viewer::resize`] spends it on the first layout with room in it.
     ///
-    /// It is also what stops the restore from writing over itself:
-    /// [`Viewer::remember_place`] says nothing while this is pending, or the
-    /// relayouts on the way to the first frame would record page one over the
-    /// place being restored.
+    /// It is also what stops the restore writing over itself:
+    /// [`Viewer::remember_place`] says nothing while one is pending.
     place: Option<Anchor>,
     /// Which draft of the document this is.
     ///
     /// **In the page's key, and it is the only thing that could be.** A page
-    /// keeps its texture for as long as its key does not move — the page
-    /// number, the size, the theme, the view — and a recompile changes none
-    /// of those while changing every pixel. `generation` cannot do it: it is
-    /// bumped by opening the sidebar, which must not throw a texture away.
-    /// So a document replaced under the reader is a new number here, every
-    /// mounted page is a new node, and Blitz releases the old textures
-    /// between frames the way it does for a zoom.
+    /// keeps its texture while its key does not move — page, size, theme,
+    /// view — and a recompile changes none of those while changing every
+    /// pixel. `generation` cannot do it: opening the sidebar bumps that, and
+    /// that must not throw a texture away.
     edition: u64,
 }
 
@@ -1457,12 +1318,12 @@ impl Viewer {
         viewer
     }
 
-    /// Put back what the last run left, which is the brief's first promise
-    /// about settings: they survive, and they are independent of each other.
+    /// Put back what the last run left: settings survive, and are independent
+    /// of each other.
     ///
-    /// Read once, at the start, and then never again — the settings table is
-    /// this window's copy from here on, which is the same thing the app says
-    /// about two windows and a setting changed in one of them.
+    /// Read once and then never again — the table is this window's copy from
+    /// here on, so a setting changed in another window is not seen until this
+    /// one opens again.
     fn restore(&mut self) {
         self.layout.fit = match self.store.text("fit_mode").as_str() {
             "page" => Fit::Page,
@@ -1508,11 +1369,9 @@ impl Viewer {
             .number("sidebar_width")
             .clamp(crate::sidebar::MIN_WIDTH, crate::sidebar::MAX_WIDTH);
         // Which tab is showing is not a setting — the app has none either,
-        // and inventing one here would mean adding a key to the app's own
-        // `settings.rs`, which is the file this crate mounts rather than
-        // edits. A document with no contents opens on the pages, which is
-        // what `setDocument` does and is the difference between a panel and
-        // an empty box.
+        // and adding one means adding a key to `settings.rs`, which this crate
+        // mounts rather than edits. A document with no contents opens on the
+        // pages, which is the difference between a panel and an empty box.
         if self.headings.is_empty() {
             self.tab = Tab::Pages;
         }
@@ -1522,13 +1381,10 @@ impl Viewer {
             self.measure_crop();
         }
         self.chosen.set(self.store.palette());
-        // A theme naming a colour that cannot be read is the one thing here
-        // worth a sentence on the screen, and `store` has already worked out
-        // whether there is one.
-        // Two things can be wrong with the reader's files at startup and
-        // there is one line to say so in. The theme wins, because it is about
-        // what is on the screen right now; the keyboard's is still there on
-        // the next keystroke that does nothing.
+        // Two things can be wrong with the reader's files at startup and there
+        // is one line to say so in. The theme wins, because it is about what is
+        // on screen right now; the keyboard's is still there at the next
+        // keystroke that does nothing.
         if let Some(said) = self
             .store
             .complaint
@@ -1557,13 +1413,11 @@ impl Viewer {
         self.store.theme().name.clone()
     }
 
-    /// The window changed size, or the sidebar did. Everything below the
-    /// layout is a function of this, so it is the one entry point that both
-    /// relays out and puts the reader back where they were.
+    /// The window changed size, or the sidebar did. The one entry point that
+    /// both relays out and puts the reader back where they were.
     ///
-    /// The width handed in is the *window's*; what the document gets is that
-    /// minus the panel, which is why opening the sidebar is a resize and not
-    /// merely something appearing beside the page.
+    /// The width handed in is the *window's*; the document gets that minus the
+    /// panel, which is why opening the sidebar is a resize.
     pub fn resize(&mut self, width: f64, height: f64) {
         self.window_width = width;
         let width = self.document_width();
@@ -1618,12 +1472,9 @@ impl Viewer {
         self.set_sidebar(!self.sidebar_open, true);
     }
 
-    /// The panel, opened or shut — and whether that is a fact about the
-    /// reader or only about what is on screen for the moment.
-    ///
-    /// `remember` is the whole of the difference: a panel the reader opened is
-    /// a setting and comes back next time, and a panel the search borrowed is
-    /// neither.
+    /// The panel, opened or shut. `remember` is the difference between a fact
+    /// about the reader and a fact about what is on screen: a panel the reader
+    /// opened is a setting, and one the search borrowed is not.
     fn set_sidebar(&mut self, open: bool, remember: bool) {
         if self.sidebar_open == open {
             return;
@@ -1654,25 +1505,18 @@ impl Viewer {
     /// window without a drag costing a render it did not ask for.
     ///
     /// **Only the panel's own width moves here — the document does not.**
-    /// `sidebar_width` is in `PageWidget`'s key alongside the page and the
-    /// theme (see `page.rs`), so relaying the document out at every width a
-    /// drag passes through is a fresh pdfium render and texture upload for
-    /// every mounted page, every frame, with nothing to show while either
-    /// runs: exactly the white flicker a reader sees. `.sidebar`'s own width
-    /// is a plain style attribute, so the boundary line still follows the
-    /// pointer — flexbox gives the `.viewer` box the room it has left for
-    /// free — and `finish_resize_sidebar` is the one relayout the drag
-    /// deferred, once, at wherever it landed.
+    /// `sidebar_width` is in `PageWidget`'s key, so relaying the document out
+    /// at every width a drag passes through is a fresh pdfium render and
+    /// texture upload for every mounted page, every frame, with nothing to
+    /// show while either runs. `.sidebar`'s width is a plain style attribute,
+    /// so the boundary still follows the pointer, and
+    /// `finish_resize_sidebar` is the one deferred relayout.
     ///
-    /// **The column of thumbnails is the exception, and it was wrong to
-    /// treat it as one of the pages.** A thumbnail is a fifth of a page
-    /// across and a twenty-fifth of one in area, so the whole visible column
-    /// costs less to draw than a single page of the document does — and it is
-    /// the thing directly under the pointer, so a panel whose pictures stay
-    /// the size they were while its edge moves is the one place the deferral
-    /// is visible as a fault rather than as a saving. `relay_column` is
-    /// therefore live and the document's relayout is still deferred: the two
-    /// halves of what was one decision, taken separately now.
+    /// **The column of thumbnails is the exception.** A thumbnail is a
+    /// twenty-fifth of a page in area, so the whole visible column costs less
+    /// than one page — and it is directly under the pointer, which is the one
+    /// place the deferral reads as a fault rather than a saving. So
+    /// `relay_column` is live and the document's relayout is not.
     pub fn drag_sidebar(&mut self, client_x: f64) {
         let Some((start_x, start_width)) = self.resize_from else {
             return;
@@ -1709,19 +1553,12 @@ impl Viewer {
 
     /// What the chrome costs on screen right now.
     ///
-    /// **Only the toolbar costs anything now.** The notice used to be a row
-    /// of the flex column under it, so it took 30px off the document whether
-    /// or not it had anything to say — which meant a window that had once
-    /// been told a zoom percentage wore that percentage along its bottom edge
-    /// for the rest of the session. It is a pill over the document now, the
-    /// way the app has always had it, and it goes away by itself. See
-    /// [`Viewer::notice`] and the "notice-timeout" arm in [`Reader`].
-    ///
-    /// It still outlives the toolbar, which is the part that was right: the
-    /// message saying how to get the toolbar back is written on it, and a
-    /// line that disappeared along with the thing it explains would be a joke
-    /// at the reader's expense. Presenting is the case where everything goes,
-    /// which is what presenting *is*.
+    /// **Only the toolbar costs anything.** The notice is a pill over the
+    /// document, as in the app, and goes away by itself — as a row of the flex
+    /// column it took 30px off the document whether or not it had anything to
+    /// say. It still outlives the toolbar, because the message saying how to
+    /// get the toolbar back is written on it. Presenting is where everything
+    /// goes, which is what presenting *is*.
     pub fn chrome(&self) -> f64 {
         if self.presenting || !self.toolbar {
             return 0.0;
@@ -1731,10 +1568,9 @@ impl Viewer {
 
     /// The window is this big. What the document gets is the rest.
     ///
-    /// The one place the chrome is subtracted, which is why it is a method
-    /// rather than a constant taken off at the call: the chrome comes and
-    /// goes now, and a subtraction at the call site is a subtraction that
-    /// only knows what was on screen when it was written.
+    /// The one place the chrome is subtracted, and a method rather than a
+    /// constant because the chrome comes and goes: a subtraction at the call
+    /// site only knows what was on screen when it was written.
     pub fn fit_window(&mut self, width: f64, height: f64) {
         self.window_height = height;
         self.resize(width, (height - self.chrome()).max(120.0));
@@ -1748,10 +1584,9 @@ impl Viewer {
 
     /// The toolbar, put away or brought back.
     ///
-    /// The notice is the app's own and is the reason the notice line survives
-    /// this: with the toolbar gone there is nothing on screen that says how to
-    /// get it back, and the key that does it is whatever `keys.toml` says it
-    /// is — so the message reads the keymap rather than stating a chord.
+    /// With it gone there is nothing on screen saying how to get it back, so
+    /// the notice says — reading the keymap rather than stating a chord,
+    /// because `keys.toml` decides which key it is.
     pub fn toggle_toolbar(&mut self) {
         self.toolbar = !self.toolbar;
         self.store
@@ -1782,13 +1617,10 @@ impl Viewer {
         self.full_screen = on;
     }
 
-    /// Presenting: full screen with nothing else on it.
-    ///
-    /// Answers what full screen should now be, which is the interesting part.
-    /// Presenting turns it on; *stopping* presenting puts it back to whatever
-    /// the reader had asked for themselves rather than turning it off — so
-    /// somebody who was reading in full screen, presented, and then stopped is
-    /// still in full screen, which is where they were.
+    /// Presenting: full screen with nothing else on it. Answers what full
+    /// screen should now be — presenting turns it on, and *stopping* puts it
+    /// back to whatever the reader asked for themselves rather than turning it
+    /// off, so somebody who was already in full screen stays there.
     pub fn present(&mut self, on: bool) -> bool {
         self.presenting = on;
         self.notice = if on {
@@ -1804,21 +1636,17 @@ impl Viewer {
     /// How to ask for this action from the keyboard, as it should be read —
     /// ⌘O on a Mac, Ctrl+O elsewhere — or nothing where it is not bound.
     ///
-    /// **Read off the keymap rather than written beside the menu item**, for
-    /// the reason the app's Keyboard page is drawn from the keymap: a menu
-    /// that states its own shortcut cannot show a rebound one, and the
-    /// hand-written table this replaces in the app had already drifted. A
-    /// reader who unbinds ⌘O in `keys.toml` sees a menu item with no chord on
-    /// it, which is true.
+    /// **Read off the keymap rather than written beside the menu item**: a
+    /// menu that states its own shortcut cannot show a rebound one, and a
+    /// reader who unbinds ⌘O sees a menu item with no chord on it, which is
+    /// true.
     pub fn chord_for(&self, action: Action) -> String {
         let bindings = self.keymap.by_action.get(&action);
         let shown = bindings.and_then(|bindings| {
             // **A bare function key is the system's on a Mac.** F11 is
-            // Mission Control and F1 is the brightness, so a menu offering
-            // either as the way to do something is offering a key that will
-            // not arrive. Where an action has a chord as well, that is the one
-            // to name — which is what `FULLSCREEN_KEYS` in `main.ts` hard-codes
-            // for exactly this row, said here as the rule behind it.
+            // Mission Control and F1 the brightness, so a menu naming either
+            // is naming a key that will not arrive. Where an action has a
+            // chord as well, that is the one to show.
             if self.keymap.mac() {
                 if let Some(chord) = bindings.iter().find(|binding| binding.contains("mod+")) {
                     return Some(chord);
@@ -1839,14 +1667,11 @@ impl Viewer {
         // name, and two of them open at once is the thing `showPopover` in
         // `ui.ts` exists to prevent.
         self.markup_at = None;
-        // **And the find bar is one of the things that go down.** `wire()` in
-        // `main.ts` wraps every control in the bar that opens something of its
-        // own in `opens(…)`, which closes the search first, and its reason is
-        // the reason: two panels claiming the same corner of the screen, one
-        // of them still holding the keyboard, is not a place anybody meant to
-        // be. The five menus are all of them; the chips that merely move
-        // around the document — the page arrows, the two rotations, the zoom
-        // steppers — leave the bar alone, there and here.
+        // **And the find bar is one of the things that go down**, because two
+        // panels claiming the same corner with one of them still holding the
+        // keyboard is not a place anybody meant to be. The menus are all of
+        // it; the chips that merely move around the document — page arrows,
+        // rotations, zoom steppers — leave the bar alone, there and here.
         self.close_find();
         self.menu = if self.menu == Some(menu) {
             None
@@ -1860,9 +1685,8 @@ impl Viewer {
     /// Put the Settings window up, on the page it was last left on.
     ///
     /// Coming back to the same page is what a window with a nav column is
-    /// expected to do, and it is `currentPage` in `settings.ts` — module
-    /// scope there, a field here, which is the same lifetime said in Rust:
-    /// as long as the reader, not as long as the window.
+    /// expected to do. It lives as long as the reader, not as long as the
+    /// window.
     pub fn open_settings(&mut self) {
         self.close_menu();
         self.pane = Some(self.pane_last);
@@ -1921,9 +1745,8 @@ impl Viewer {
     /// What the page on screen is actually drawn at, as a percentage.
     ///
     /// **Not the remembered zoom**, which in a fit mode is a number nobody is
-    /// looking at: `zoomPercent` in `viewer.ts` exists for the same reason and
-    /// is read in the same place — the stepper in the zoom menu starts from
-    /// what is on the screen, because that is what somebody types over.
+    /// looking at. The stepper starts from what is on screen, because that is
+    /// what somebody types over.
     pub fn zoom_percent(&self) -> f64 {
         self.layout
             .box_of(self.page().saturating_sub(1))
@@ -1952,16 +1775,14 @@ impl Viewer {
 
     /// Zoom by a proportion of where we are, which is what a pinch asks for.
     ///
-    /// **A pinch and a ⌃-wheel cannot be steps on the ladder.** A trackpad
-    /// sends a stream of small events and a mouse sends one large one, so
-    /// stepping on each took 125% to 400% in one gesture — the app's own note,
-    /// and its answer: each event is a proportion, and the proportions are
-    /// applied as they arrive. Leaving a fit mode starts from the size the fit
-    /// had reached, so the first squeeze changes the page by a little rather
-    /// than jumping to whatever the remembered zoom was.
+    /// **A pinch and a ⌃-wheel cannot be steps on the ladder**: a trackpad
+    /// sends a stream of small events and a mouse one large one, so stepping
+    /// on each took 125% to 400% in one gesture. Leaving a fit mode starts
+    /// from the size the fit had reached, so the first squeeze moves the page
+    /// a little rather than jumping to the remembered zoom.
     ///
-    /// The setting is written through `set_soon`, because a pinch produces one
-    /// of these a frame and the file only needs the one it ends on.
+    /// Written through `set_soon`: a pinch produces one of these a frame and
+    /// the file only needs the one it ends on.
     pub fn zoom_by(&mut self, factor: f64) {
         let current = if self.layout.fit == Fit::Actual {
             self.layout.zoom
@@ -1975,15 +1796,12 @@ impl Viewer {
         if (next - current).abs() < 0.0005 {
             return;
         }
-        // **The gesture begins here and is what keeps the document on the
-        // screen while it lasts.** Every page holds the texture it already
-        // has and is stretched to the size the layout is asking for, so the
-        // words grow under the reader's fingers instead of the document going
-        // blank until they stop. `zoom_from` is the scale that was on when
-        // the fingers went down, which is what the page key divides by to
-        // stay the same key for the whole gesture — see
-        // [`crate::page::Chosen::holding`] for what it costs and why the
-        // alternative is not an option.
+        // **The gesture begins here and is what keeps the document on screen
+        // while it lasts.** Every page holds the texture it has and is
+        // stretched to the size the layout asks for, so the words grow under
+        // the fingers instead of the document going blank until they stop.
+        // The page key divides by `zoom_from` to stay one key for the whole
+        // gesture — see [`crate::page::Chosen::holding`].
         if self.zoom_from.is_none() {
             self.zoom_from = Some(current);
             self.chosen.hold(true);
@@ -2006,11 +1824,8 @@ impl Viewer {
     }
 
     /// How much smaller than the box a page is currently drawn, while a zoom
-    /// gesture is under way: 1.0 when there is none.
-    ///
-    /// The key every page is built with is multiplied by this, so it is the
-    /// size the page had when the gesture began — a number that does not move
-    /// while the gesture does, which is the whole point of it.
+    /// gesture is under way: 1.0 when there is none. Every page's key is
+    /// multiplied by it, so the key does not move while the gesture does.
     pub fn zoom_held_at(&self) -> f64 {
         match (self.zoom_from, self.layout.fit) {
             (Some(from), Fit::Actual) if self.layout.zoom > 0.0 => from / self.layout.zoom,
@@ -2058,10 +1873,9 @@ impl Viewer {
 
     /// Read `keys.toml` again, exactly as the launch did.
     ///
-    /// A button rather than a watcher, and that is the app's reasoning
-    /// unchanged: the config directory is written to several times a minute
-    /// while somebody is scrolling — `remember_position` alone — so a watch on
-    /// it would be answering its own writes. See `Store::keyboard`.
+    /// A button rather than a watcher: the config directory is written to
+    /// several times a minute while somebody is scrolling, so a watch on it
+    /// would be answering its own writes.
     pub fn reload_keys(&mut self) {
         let file = self.store.keyboard();
         let mut keymap = Keymap::build(crate::keymap::this_machine(), &file.bindings);
@@ -2132,12 +1946,11 @@ impl Viewer {
     /// Land at a place in the document, turning the page first if that is
     /// what landing means here.
     ///
-    /// **The one place the two scroll modes actually differ to a caller.** In
+    /// **The one place the two scroll modes differ to a caller.** In
     /// continuous mode a page is somewhere to scroll to; in paged mode it is
-    /// the only page laid out, so arriving at it is a relayout and the scroll
-    /// offset starts again from the top of it. Everything that moves the
-    /// reader goes through this — the history, a link, a heading, a match, a
-    /// typed page number — so none of them has to know which mode is on.
+    /// the only page laid out, so arriving is a relayout. Everything that
+    /// moves the reader goes through this, so nothing else has to know which
+    /// mode is on.
     pub fn go_to(&mut self, anchor: Anchor) {
         if self.layout.mode == Mode::Paged {
             let page = anchor.page.clamp(1, self.pages().max(1));
@@ -2191,14 +2004,13 @@ impl Viewer {
     }
 
     /// Move by a distance, and turn the page when there is nowhere left to
-    /// move.
+    /// move. One function where the app has two, because a key and a wheel ask
+    /// the same question.
     ///
-    /// `scrollByViewport` in `viewer.ts` does this for a screen and `onWheel`
-    /// for a gesture; here it is one function because a key and a wheel ask
-    /// the same question. In paged mode the strip holds exactly one page, so
-    /// a page that fits the window cannot be scrolled at all and a taller one
-    /// stops dead at its own bottom edge — either way the reader pushes and
-    /// nothing happens, which is the one gesture everybody tries first.
+    /// In paged mode the strip holds one page, so a page that fits cannot be
+    /// scrolled and a taller one stops at its own bottom edge — either way the
+    /// reader pushes and nothing happens, which is the gesture everybody tries
+    /// first.
     pub fn nudge(&mut self, delta: f64) {
         if self.layout.mode == Mode::Continuous || delta == 0.0 {
             let to = self.scroll_by(delta);
@@ -2271,15 +2083,11 @@ impl Viewer {
 
     /// Go somewhere the reader asked to go, remembering where they were.
     ///
-    /// `jumpTo` in `viewer.ts`, and the distinction it draws is the whole of
-    /// why there is a history at all: the citation on page 12 that lands on
-    /// page 190 is what this exists for, and the twenty keystrokes of
-    /// scrolling that got the reader to page 12 are not.
-    ///
-    /// A jump that lands where the reader already is is not a jump. Without
-    /// that test, pressing Home twice files the first page away as somewhere
-    /// worth returning to, and a page number typed twice fills the history
-    /// with copies of one place.
+    /// The citation on page 12 that lands on page 190 is what the history
+    /// exists for; the twenty keystrokes of scrolling that reached page 12 are
+    /// not. And a jump that lands where the reader already is is not a jump —
+    /// without that test, Home twice files the first page away as somewhere
+    /// worth returning to.
     pub fn jump_to(&mut self, page: usize, offset: f64) {
         let from = self.layout.anchor(self.scroll_top);
         let to = page.clamp(1, self.pages().max(1));
@@ -2386,10 +2194,10 @@ impl Viewer {
 
     /// What has been typed into the password field so far.
     ///
-    /// Kept here rather than in the field because the field does not hold it:
-    /// Blitz renders `type="password"` as plain text, so what is on screen is
-    /// a row of bullets and this is the string they stand for. See the field
-    /// in [`Reader`], which is where the two are kept in step.
+    /// Kept here because the field does not hold it: Blitz renders
+    /// `type="password"` in the clear, so what is on screen is a row of
+    /// bullets and this is the string they stand for. [`Reader`] keeps the two
+    /// in step.
     pub fn type_password(&mut self, typed: &str) {
         if let Some(locked) = self.locked.as_mut() {
             locked.typed = typed.to_string();
@@ -2397,12 +2205,11 @@ impl Viewer {
     }
 
     /// "Not now": the question is withdrawn and the reader is left with
-    /// whatever they had — which at launch is the start screen.
+    /// whatever they had — at launch, the start screen.
     ///
-    /// **Declining is not answering with an empty password**, which is the
-    /// app's own hard-won note about pdf.js: a reader who has decided not to
-    /// open this document must not be asked again on their way out of the
-    /// question.
+    /// **Declining is not answering with an empty password.** A reader who has
+    /// decided not to open this document must not be asked again on the way
+    /// out of the question.
     pub fn stop_unlocking(&mut self) -> bool {
         self.locked.take().is_some()
     }
@@ -2432,9 +2239,9 @@ impl Viewer {
     /// Begin a theme: a new one, or a copy of the one being worn.
     ///
     /// **The draft is installed as the live theme**, which is what makes the
-    /// window around it the preview — `edit.preview` in `settings.ts` does
-    /// the same. A built-in kept its own id here would be overwritten on
-    /// save, so a copy is given an empty id and `theme::save` mints one.
+    /// window around it the preview. A built-in keeping its own id would be
+    /// overwritten on save, so a copy gets an empty id and `theme::save` mints
+    /// one.
     pub fn begin_theme(&mut self, from: Option<crate::theme::Theme>) {
         let draft = match from {
             Some(theme) if theme.built_in => crate::theme::Theme {
@@ -2592,11 +2399,9 @@ impl Viewer {
     /// Follow a link, and say what the window has to do about it.
     ///
     /// A place in this document is a jump and is done here. An address is not
-    /// this struct's to open — there is no browser in a `Viewer` and there is
-    /// none in the harness either — so it is handed back, and whoever owns the
-    /// window decides what opening a link means. That is `onExternalLink` in
-    /// `main.ts`, which the app's own comment calls "the only thing allowed to
-    /// decide", one layer further out.
+    /// this struct's to open — there is no browser in a `Viewer` and none in
+    /// the harness — so it is handed back, and one place decides what opening
+    /// a link means.
     pub fn follow(&mut self, target: &Target) -> Option<String> {
         match target {
             Target::Place { page, offset } => {
@@ -2646,11 +2451,10 @@ impl Viewer {
     /// [`Viewer::sweep_from`].
     ///
     /// **A second press in the same place is a double click and takes the word
-    /// under it**, which is counted here rather than heard about: `dblclick`
-    /// is a default action of `pointerup`, and a default action never runs
-    /// over a custom widget — see the comment on `onmousedown` in `Page`. The
-    /// rule is Blitz's own, so that a page and a text field in the same window
-    /// answer a double click the same way.
+    /// under it**, counted here rather than heard about: `dblclick` is a
+    /// default action of `pointerup`, and a default action never runs over a
+    /// custom widget. The numbers are Blitz's own, so a page and a text field
+    /// in one window answer a double click alike.
     pub fn begin_sweep(&mut self, page: usize, on: (f64, f64), client: (f64, f64)) {
         let Some(index) = page.checked_sub(1) else {
             return;
@@ -2714,12 +2518,10 @@ impl Viewer {
         if self.selection.is_some_and(|sweep| sweep.is_empty()) {
             self.selection = None;
         }
-        // **A click on a mark is a question about that mark**, and it is
-        // asked here rather than on the press for one reason: a press is
-        // also where a sweep begins, and a passage that is already marked is
-        // exactly the passage a reader is most likely to want to select and
-        // copy. So the mark answers only when nothing was swept — which is
-        // what a click is. See [`Viewer::mark_open`].
+        // **A click on a mark is a question about that mark**, asked here
+        // rather than on the press because a press is also where a sweep
+        // begins — and an already-marked passage is exactly the one a reader
+        // wants to copy. So the mark answers only when nothing was swept.
         if self.selection.is_none() {
             if let Some((page, x, y)) = self.pressed_on {
                 self.mark_open = self.mark_under(page, x, y);
@@ -2730,11 +2532,9 @@ impl Viewer {
 
     /// The mark under a point on a page, if there is one, ready to be shown.
     ///
-    /// A mark's quads are in the page's own points from its top left, which
-    /// is the space `place_on` takes — the same trip `note_areas` and
-    /// `highlights` make. The rectangle handed back is the one that was hit,
-    /// so the popover opens under the line that was clicked rather than under
-    /// the first line of a mark that runs over three.
+    /// The rectangle handed back is the one that was hit, so the popover opens
+    /// under the line that was clicked rather than under the first line of a
+    /// mark that runs over three.
     fn mark_under(&self, page: usize, x: f64, y: f64) -> Option<(usize, Rect, MarkKey, String)> {
         let index = page.checked_sub(1)?;
         self.layout.box_of(index)?;
@@ -2813,10 +2613,8 @@ impl Viewer {
 
     /// Everything on the page the reader is on, which is ⌘A.
     ///
-    /// The *page* rather than the document, which is the app's own label for
-    /// this key — "Select the text of this page" — and its own reasoning: a
-    /// reader who means the whole document means a file, and what this gesture
-    /// is actually for is taking a page of a paper into something else.
+    /// The *page* rather than the document, which is the app's label for this
+    /// key: a reader who means the whole document means a file.
     pub fn select_page(&mut self) -> bool {
         let page = self.page();
         let text = self.text_on(page);
@@ -2900,14 +2698,11 @@ impl Viewer {
 
     /// The selected words with where they came from, which is ⌘⇧C.
     ///
-    /// The app's own format and the app's own reason: copying a sentence out
-    /// of a paper and then going back to find the page it was on is the small,
-    /// constant tax of reading for work. The page is the one the selection
-    /// *began* on rather than the one in the toolbar, because a selection that
-    /// runs across a page boundary began on the page it began on.
+    /// The app's format and its reason: going back to find the page a quote
+    /// was on is the constant tax of reading for work. The page is the one the
+    /// selection *began* on, not the one in the toolbar.
     ///
-    /// Returns the text to copy and the words for the notice line, or nothing
-    /// when there is no selection.
+    /// Returns the text to copy and the words for the notice line.
     pub fn quoted(&self) -> Option<(String, String)> {
         let sweep = self.selection?;
         let quoted = self.selected_text();
@@ -2931,12 +2726,10 @@ impl Viewer {
 
     /// Open the Sign window, or say why it cannot be.
     ///
-    /// The refusals are asked *here* rather than at the moment the signature
-    /// is placed, which is the opposite of what markup does and is right for
-    /// the opposite reason: a mark is one gesture, so it may as well try and
-    /// report; signing is a window, a drawing and a click, and finding out at
-    /// the end of all three that the file is read-only is the reader's time
-    /// spent on nothing.
+    /// The refusals are asked *here* rather than when the signature is placed,
+    /// which is the opposite of markup and right for the opposite reason: a
+    /// mark is one gesture and may as well try and report, where signing is a
+    /// window, a drawing and a click.
     pub fn open_signing(&mut self) -> bool {
         if self.empty() {
             return false;
@@ -2974,10 +2767,10 @@ impl Viewer {
 
     /// A press on the pad: begin a stroke, and note where the pad is.
     ///
-    /// `on` is where the press landed inside the pad and `client` is where it
-    /// landed in the window; the difference between them is the pad's top left
-    /// corner, which is the one thing a later move needs and cannot ask for.
-    /// `begin_sweep` records the same number for the same reason.
+    /// The difference between `on` (inside the pad) and `client` (in the
+    /// window) is the pad's top left corner, which a later move needs and
+    /// cannot ask for. `begin_sweep` records the same number for the same
+    /// reason.
     pub fn draw_from(&mut self, on: (f64, f64), client: (f64, f64), pad: (f64, f64)) {
         let Some(signing) = self.signing.as_mut() else {
             return;
@@ -3052,13 +2845,10 @@ impl Viewer {
     /// Keep what is on the pad, and answer whether it was kept.
     ///
     /// **The strokes go across as drawn**, in the pad's own pixels, and
-    /// `sign::save` normalises them. That is one division rather than two, and
-    /// the two were the bug: dividing x by the pad's width and y by its height
-    /// scales the axes differently, so a name written across a pad three times
-    /// wider than it is tall arrived a third as wide as it was drawn. A pad
-    /// pixel is square, so handing over pixels loses nothing — see
-    /// [`crate::sign::Signature::trimmed`], which is the one place a signature
-    /// is ever rescaled.
+    /// `sign::save` normalises them — one division rather than two. Two was
+    /// the bug: dividing x by the pad's width and y by its height scales the
+    /// axes differently, so a wide name arrived narrow. A pad pixel is square,
+    /// so handing over pixels loses nothing.
     pub fn keep_signature(&mut self) -> bool {
         let Some(signing) = self.signing.clone() else {
             return false;
@@ -3113,14 +2903,9 @@ impl Viewer {
 
     /// **Take a signature back out of the document.**
     ///
-    /// The assessment that led to this feature named exactly one caveat worth
-    /// deciding before shipping rather than after — *it cannot be removed
-    /// afterwards* — and that was written about the app, where
-    /// `Annotation.save()` is not overridden by any subtype and nothing
-    /// already in a file can come out through `saveDocument()` at all. Here it
-    /// is `FPDFPage_RemoveAnnot`, which is the same one call a highlight comes
-    /// out through, so the caveat does not apply and there is no reason to
-    /// ship the feature without it. A signature somebody put on the wrong page
+    /// The assessment's one caveat was *it cannot be removed afterwards*, and
+    /// that is true of the app alone: here it is `FPDFPage_RemoveAnnot`, the
+    /// same call a highlight comes out through. A signature on the wrong page
     /// is the ordinary case, not the corner.
     ///
     /// Answers the scan to restart, as everything that reopens the document
@@ -3181,14 +2966,13 @@ impl Viewer {
     /// rest of the way, through the crop and the rotation, into the page's own
     /// points.
     ///
-    /// The point is where the *middle of the left edge* of the signature goes,
-    /// not its top left, because what a reader is aiming at when they click on
-    /// a line is the line — so the signature sits on it rather than hanging
-    /// below it.
+    /// The point is the *middle of the left edge* of the signature, not its
+    /// top left: what a reader clicking on a line is aiming at is the line, so
+    /// the signature sits on it rather than hanging below it.
     ///
-    /// Answers the scan to restart, when the find bar was up, which is the
-    /// convention [`Viewer::document_changed`] sets for everything that
-    /// reopens the document underneath the reader.
+    /// Answers the scan to restart, which is
+    /// [`Viewer::document_changed`]'s convention for everything that reopens
+    /// the document.
     pub fn sign_at(&mut self, page: usize, on: (f64, f64)) -> Option<u64> {
         let placing = self.placing.take()?;
         let index = page.checked_sub(1)?;
@@ -3234,12 +3018,10 @@ impl Viewer {
         let restarted = self.reopen(&path);
         match written {
             Ok(()) => self.notice = format!("{done}{warning}"),
-            // Nothing is kept beside the document here, which is where this
-            // parts company with a mark. A highlight kept in the journal is
-            // still a passage the reader marked and can be shown to them; a
-            // signature that did not go into the file is not a signature at
-            // all, and a list of names this reader had failed to write would
-            // be a promise it cannot keep.
+            // Nothing is kept beside the document, where a mark would be. A
+            // highlight in the journal is still a passage the reader marked; a
+            // signature that did not reach the file is not a signature, and a
+            // list of them would be a promise this reader cannot keep.
             Err(refused) => self.notice = refused,
         }
         restarted
@@ -3263,25 +3045,20 @@ impl Viewer {
 
     /// The journal, rebuilt from what the file says.
     ///
-    /// **This is where a recompile is survived**, and it is the one job the
-    /// journal has that a document cannot do for itself. A paper rebuilt by
-    /// LaTeX is a new file: every annotation in the old one went with it, and
-    /// the words are usually still there. So each mark in the document is
-    /// written down here with the passage it covers, and a reload that finds
-    /// the annotations gone finds the quotes still written down — which is
-    /// what [`Viewer::restore_markup`] then looks up again.
+    /// **This is where a recompile is survived**, and the one job the journal
+    /// has that a document cannot do for itself: a paper rebuilt by LaTeX is a
+    /// new file and every annotation went with it, but the words are usually
+    /// still there. So each mark is written down with the passage it covers,
+    /// and [`Viewer::restore_markup`] looks the quotes up again.
     ///
-    /// The rule is the app's `syncMarkup`, said in this reader's terms:
-    /// **everything is thrown away and rebuilt from the file**, and what
-    /// survives is only what the file cannot carry — a mark beside a document
-    /// that could not be written, and a mark a rebuilt document lost.
+    /// The rule is **everything is thrown away and rebuilt from the file**,
+    /// and what survives is only what the file cannot carry: a mark beside a
+    /// document that could not be written, and a mark a rebuild lost.
     ///
-    /// A mark is the same mark as before when its colour and its words are
-    /// the same. Not its page and not its index: a rebuilt paper moves a
-    /// passage down the document, which is precisely the case this exists
-    /// for, and an index shifts every time an earlier annotation is added or
-    /// taken away. The folded quote is what `findQuote` matches on in the app
-    /// and it is what a reader would recognise.
+    /// A mark is the same mark when its colour and its words are the same —
+    /// not its page and not its index, because a rebuild moves a passage
+    /// (which is the case this exists for) and an index shifts whenever an
+    /// earlier annotation is added or taken away.
     fn sync_journal(&mut self) {
         let inside: Vec<(String, String, crate::markup::Mark)> = self
             .markup
@@ -3346,19 +3123,15 @@ impl Viewer {
             .count()
     }
 
-    /// Look the lost passages up again and write back the ones that are
-    /// still there.
+    /// Look the lost passages up again and write back the ones still there.
     ///
-    /// **A guess, and never a thing that happens on its own.** It is a button
-    /// in the panel because re-anchoring is a guess however good a one, and
-    /// this reader does not write to somebody's file without being asked —
-    /// which is the app's own sentence about the same button.
+    /// **A guess, and never a thing that happens on its own** — a button,
+    /// because this reader does not write to somebody's file without being
+    /// asked.
     ///
     /// The lookup starts on the page the passage used to be on and works
-    /// outwards, because a rebuilt paper usually moves a passage by a page
-    /// or two rather than to the other end of the book. What it does not
-    /// find is left in the journal and counted out loud: a passage that was
-    /// rewritten is not a passage that moved.
+    /// outwards. What it does not find is left in the journal and counted out
+    /// loud: a passage that was rewritten is not a passage that moved.
     pub fn restore_markup(&mut self) -> Option<u64> {
         let path = self.document.path().to_string();
         let wanted: Vec<crate::library::Highlight> = self
@@ -3426,11 +3199,9 @@ impl Viewer {
     /// Where a remembered passage is now, starting from the page it used to
     /// be on and working outwards.
     ///
-    /// Through [`crate::search::fold`], which is the one thing this borrows
-    /// from the search and is what makes it work at all: a passage that moved
-    /// has very often been re-typeset on the way, so the ligatures and the
-    /// soft hyphens are not the ones it had. The app's `findQuote` reaches
-    /// for the same function for the same reason.
+    /// Through [`crate::search::fold`], which is what makes it work at all: a
+    /// passage that moved has very often been re-typeset on the way, so its
+    /// ligatures and soft hyphens are not the ones it had.
     fn find_quote(&self, was_on: usize, quote: &str) -> Option<(usize, Vec<Rect>)> {
         let wanted = folded(quote);
         if wanted.is_empty() {
@@ -3445,14 +3216,11 @@ impl Viewer {
                 continue;
             }
             let folded = crate::search::fold(&text.chars, false);
-            // Whitespace is flattened on both sides before the comparison,
-            // because a passage that moved has very often been re-broken as
-            // well as re-set: the quote was written down with single spaces
-            // and the page it is now on may break it across a line. Each
-            // character of the flattened text remembers where in the folded
-            // text it came from, so the answer is still a range of the page's
-            // own characters — the same trick `fold` itself plays one level
-            // down.
+            // Whitespace is flattened on both sides, because a passage that
+            // moved has often been re-broken as well as re-set. Each character
+            // of the flattened text remembers where in the folded text it came
+            // from, so the answer is still a range of the page's own
+            // characters — the trick `fold` plays one level down.
             let mut flat = String::with_capacity(folded.text.len());
             let mut back = Vec::with_capacity(folded.text.len());
             for (at, &character) in folded.text.iter().enumerate() {
@@ -3489,13 +3257,10 @@ impl Viewer {
     }
 
     /// Every mark the panel lists: the document's own first, in reading
-    /// order, and then whatever the journal is holding.
+    /// order, then whatever the journal is holding.
     ///
-    /// The two are one list because to a reader they are one thing — a
-    /// passage they marked — and they are told apart by a word on the row
-    /// rather than by a section of their own. Which is the app's answer as
-    /// well: `showHighlights` marks the ones that are not in the document
-    /// rather than putting them elsewhere.
+    /// One list, because to a reader they are one thing. They are told apart
+    /// by a word on the row rather than by a section of their own.
     pub fn markup_rows(&self) -> Vec<MarkRow> {
         let mut rows: Vec<MarkRow> = self
             .markup
@@ -3566,11 +3331,9 @@ impl Viewer {
     /// The six colours the popover offers, in the order the swatches show
     /// them.
     ///
-    /// Six independent settings rather than a list, because that is what
-    /// `settings.rs` has — the table has no list type and a palette is not
-    /// worth adding one for. The file this crate mounts is the app's, so
-    /// these are the app's six keys and a reader who edits `markup_color_3`
-    /// changes the third swatch in both.
+    /// Six independent settings rather than a list, because `settings.rs` has
+    /// no list type and a palette is not worth adding one for. They are the
+    /// app's own keys, so `markup_color_3` changes the third swatch in both.
     pub fn markup_colors(&self) -> Vec<String> {
         (1..=6)
             .map(|at| self.store.text(&format!("markup_color_{at}")))
@@ -3580,17 +3343,14 @@ impl Viewer {
 
     /// Mark what is selected, in this colour.
     ///
-    /// The whole gesture, in the order it happens: the quads come off the
-    /// selection, the document is let go of, the write goes in, and the
-    /// document is reopened through the same path a recompile uses. There is
-    /// no pending layer and no markup revision in any cache key, for the
-    /// reason the app gives in `AGENTS.md`: saving immediately makes the
-    /// deferred machinery unnecessary rather than merely delayed, and a
-    /// reload rebuilds every cache there is.
+    /// The whole gesture in order: the quads come off the selection, the
+    /// document is let go of, the write goes in, and the document is reopened
+    /// through the path a recompile uses. There is no pending layer and no
+    /// markup revision in any cache key — saving immediately makes the
+    /// deferred machinery unnecessary rather than merely delayed, and a reload
+    /// rebuilds every cache there is.
     ///
-    /// Answers the scan to restart, when the find bar was up — see
-    /// [`Viewer::document_changed`], which is where that convention comes
-    /// from.
+    /// Answers the scan to restart; see [`Viewer::document_changed`].
     pub fn mark_selection(&mut self, color: &str) -> Option<u64> {
         self.markup_at = None;
         let Some(sweep) = self.selection.filter(|sweep| !sweep.is_empty()) else {
@@ -3632,12 +3392,11 @@ impl Viewer {
             ""
         };
         // **Let go of the file before writing it, and reopen whatever
-        // happens.** See [`crate::render::PageSource::release`]: pdfium keeps
-        // the document's file open for as long as the document lives, and on
-        // Windows nothing can rename over it or truncate it while it does.
-        // The reopen is unconditional because a released document draws
-        // nothing — so a write that fails must still leave the reader looking
-        // at their document.
+        // happens.** pdfium keeps the file open for the life of the document,
+        // and on Windows nothing can rename over it or truncate it while it
+        // does. The reopen is unconditional because a released document draws
+        // nothing, so a failed write must still leave the reader looking at
+        // their document. See [`crate::render::PageSource::release`].
         self.document.release();
         let written = crate::markup::add(&path, &runs, color, AUTHOR);
         self.selection = None;
@@ -3682,12 +3441,11 @@ impl Viewer {
         None
     }
 
-    /// A document with a passage marked in it has something to show in the
-    /// Contents panel after all, which is [`Viewer::mark_page`]'s own rule
-    /// and is as narrow here as it is there: only when the panel is already
-    /// open, and only when the tab it is on has nothing on it. Taking a
-    /// reader off the thumbnails they were looking at, for a list they can
-    /// see is there, is the panel arguing.
+    /// A document with a passage marked has something to show in the Contents
+    /// panel after all — [`Viewer::mark_page`]'s rule, and as narrow: only
+    /// when the panel is already open and the tab it is on has nothing on it.
+    /// Taking a reader off the thumbnails they were looking at is the panel
+    /// arguing.
     fn show_markup_panel(&mut self) {
         if self.sidebar_open && self.tab == Tab::Pages && self.headings.is_empty() {
             self.tab = Tab::Contents;
@@ -3696,10 +3454,9 @@ impl Viewer {
 
     /// Take one mark out, wherever it is being kept.
     ///
-    /// **A mark in the document comes out of the document**, which is the
-    /// sentence this whole item is about: `FPDFPage_RemoveAnnot`, a reopen,
-    /// and it is gone from the file for every reader of it. The app cannot
-    /// say that — see [`crate::markup`].
+    /// **A mark in the document comes out of the document**:
+    /// `FPDFPage_RemoveAnnot`, a reopen, and it is gone from the file for
+    /// every reader of it. The app cannot say that — see [`crate::markup`].
     pub fn remove_markup(&mut self, key: &MarkKey) -> Option<u64> {
         match key {
             MarkKey::Beside(id) => {
@@ -3712,9 +3469,7 @@ impl Viewer {
                 // **The journal has to be told first**, or the reload cannot
                 // tell "the reader took this off" from "a rebuild lost it" —
                 // the mark is gone from the file either way, and the second
-                // reading offers it straight back. The app hit exactly this
-                // and fixed it exactly here, ahead of the write rather than
-                // after it.
+                // reading offers it straight back.
                 let entry = self
                     .markup
                     .iter()
@@ -3806,10 +3561,10 @@ impl Viewer {
 
     /// The reader scrolled: put the pill up, if there is any reason to.
     ///
-    /// `onScroll` in `main.ts`, and its two conditions: **only while the
-    /// toolbar is away**, because with the bar up the same number is already
-    /// on screen, and only if the reader wants it. Returns the token of the
-    /// flash, which is what the thread that takes it down carries.
+    /// Two conditions: **only while the toolbar is away**, because with the
+    /// bar up the number is already on screen, and only if the reader wants
+    /// it. Returns the token of the flash, which the thread that takes it down
+    /// carries.
     pub fn flash_pill(&mut self) -> Option<u64> {
         if self.toolbar || self.presenting || self.empty() || !self.page_pill() {
             return None;
@@ -3857,11 +3612,9 @@ impl Viewer {
     /// The page a reader means by what they typed.
     ///
     /// A label first, because that is what is printed on the page and what an
-    /// index cites; the position in the file second, so that "page 7" still
-    /// finds something in a document whose seventh page is called "vii" — and
-    /// because there is otherwise no way at all to reach a page whose label is
-    /// blank. `pageForLabel` in `viewer.ts`, in that order and for that
-    /// reason.
+    /// index cites; the position second, so "page 7" still finds something in
+    /// a document whose seventh page is called "vii", and so a page with a
+    /// blank label is reachable at all.
     pub fn page_for_label(&self, text: &str) -> Option<usize> {
         let wanted = text.trim();
         if wanted.is_empty() {
@@ -3925,14 +3678,11 @@ impl Viewer {
             self.go_to_page(page);
             return;
         }
-        // **A number past the end is the last page, not a complaint.** This
-        // is ⌘9 in a browser with four tabs open: somebody who asks for page
-        // 900 of an 800-page book has asked to go as far as it goes, and the
-        // window they typed into is gone by the time the notice arrives, so
-        // the sentence is all they get for it. Only text that is neither a
-        // label nor a number is worth a word — "xii" in a document numbered
-        // 1, 2, 3 is a reader looking at the wrong book, and there is nowhere
-        // to clamp it to.
+        // **A number past the end is the last page, not a complaint** — ⌘9 in
+        // a browser with four tabs open. Only text that is neither a label nor
+        // a number is worth a word: "xii" in a document numbered 1, 2, 3 is a
+        // reader looking at the wrong book, and there is nowhere to clamp it
+        // to.
         if let Ok(number) = typed.trim().parse::<usize>() {
             let pages = self.pages();
             if pages > 0 {
@@ -3992,14 +3742,11 @@ impl Viewer {
 
     /// Put the find bar up. Nothing is searched for until something is typed.
     pub fn open_find(&mut self) {
-        // Nothing to search. **This is one line more than the app has**, and
-        // it is a deliberate difference rather than an oversight either way:
-        // `find` is not `needsDocument` in `keys.ts`, so ⌘F on the app's own
-        // start screen puts up a bar that will never find anything, with a
-        // placeholder reading "Search this document" over a window that has
-        // none. The flag is left agreeing with the app — `tests/keys.rs`
-        // checks every one of them — because that table is a port and this is
-        // a judgement about one key.
+        // Nothing to search. **One line more than the app has**, deliberately:
+        // `find` is not `needsDocument` in `keys.ts`, so ⌘F on the app's start
+        // screen puts up a bar that will never find anything. The flag is left
+        // agreeing with the app, because that table is a port and this is a
+        // judgement about one key.
         if self.empty() {
             return;
         }
@@ -4017,12 +3764,10 @@ impl Viewer {
 
     /// Show the list behind the count.
     ///
-    /// **The count in the find bar is the way through to the results**, which
-    /// is `el.findStatus`'s click handler in `main.ts` and the reasoning it
-    /// carries: "3 of 128" answers *is it in here* and not *which one did I
-    /// mean*, and the second question is the one somebody searching a long
-    /// document is usually asking. An empty count is not a way to anything, so
-    /// it does nothing and does not look pressable either.
+    /// **The count in the find bar is the way through to the results**: "3 of
+    /// 128" answers *is it in here* and not *which one did I mean*, and the
+    /// second is what somebody searching a long document is usually asking. An
+    /// empty count leads nowhere and does not look pressable.
     pub fn show_results(&mut self) {
         if self.search.state().total == 0 {
             return;
@@ -4036,11 +3781,10 @@ impl Viewer {
 
     /// Take the find bar down, and the index with it.
     ///
-    /// **The index goes when the bar does**, which is the app's policy and its
-    /// reasoning: every page ever scanned is kept, so a long book costs tens
-    /// of megabytes for as long as it is open — a fair trade while somebody is
-    /// searching and no trade at all once they have stopped. Reopening rescans
-    /// and that is under half a second. See [`Search::forget`].
+    /// **The index goes when the bar does**: every page scanned is kept, so a
+    /// long book costs tens of megabytes for as long as it is open — a fair
+    /// trade while somebody is searching and none once they have stopped.
+    /// Reopening rescans, in under half a second. See [`Search::forget`].
     pub fn close_find(&mut self) {
         self.find_open = false;
         self.find_query.clear();
@@ -4083,13 +3827,11 @@ impl Viewer {
 
     /// Read pages until the slice is up. Returns whether there is more to do.
     ///
-    /// The whole of the streaming, and it is here rather than in
-    /// [`crate::search`] because it is the only part that needs a clock and a
-    /// document. A slice is [`crate::search::SLICE_MS`] and the reason there
-    /// is one at all is a book, not a page: pdfium reads a page of the
-    /// 400-page fixture in 0.18ms and a page of a 376-page book of typeset
-    /// mathematics in 1.3ms, so the cost worth hiding is the 498ms the whole
-    /// of that book takes rather than anything a single page does.
+    /// The whole of the streaming, here rather than in [`crate::search`]
+    /// because it is the only part needing a clock and a document. The reason
+    /// there is a slice at all is a book and not a page: pdfium reads a page
+    /// in 0.18-1.3ms, so what is worth hiding is the 498ms a 376-page book of
+    /// typeset mathematics takes.
     pub fn scan_slice(&mut self, token: u64) -> bool {
         if token != self.scan {
             return false;
@@ -4116,18 +3858,13 @@ impl Viewer {
 
     /// **A search puts its results in the panel, as soon as there are any.**
     ///
-    /// The count in the bar answers *is it in here* and the list answers
-    /// *which one did I mean*, and the second question is the one somebody
-    /// searching a book is usually asking — so the list is not kept behind a
-    /// button here. It arrives with the first match rather than with the bar,
-    /// which is what keeps a search for something that is not in the document
-    /// from opening a panel to say so; [`Viewer::show_results`] is the same
-    /// door, opened by hand, for the reader who shut the panel and wants it
-    /// back.
+    /// With the first match rather than with the bar, so a search for
+    /// something that is not in the document does not open a panel to say so.
+    /// [`Viewer::show_results`] is the same door opened by hand.
     ///
-    /// The panel is *borrowed*: it goes back down with the bar that opened
-    /// it, and one the reader had open before any of this is one they keep.
-    /// See [`Viewer::close_find`].
+    /// The panel is *borrowed*: it goes down with the bar that opened it, and
+    /// one the reader had open before any of this is one they keep. See
+    /// [`Viewer::close_find`].
     fn show_the_matches(&mut self) {
         // Once per search, and that is what the flag is for rather than
         // tidiness: a scan is dozens of slices, and a panel reopened on every
@@ -4174,10 +3911,8 @@ impl Viewer {
     /// Bring the match the reader is on into view.
     ///
     /// A match is a range of characters and a character knows its box, so this
-    /// is arithmetic: the top of the page, plus where on the page the match
-    /// is, less a third of a screen so that there is something above it to
-    /// read into. The app measures a DOM range against a text layer to reach
-    /// the same number.
+    /// is arithmetic: the top of the page, plus where the match is on it, less
+    /// a third of a screen so there is something above it to read into.
     pub fn reveal_match(&mut self) {
         let Some(hit) = self.search.current() else {
             return;
@@ -4218,9 +3953,8 @@ impl Viewer {
     /// again with it.
     ///
     /// The extracted text stays: only the fold and the boundary test depend on
-    /// these, so a rescan after this asks the renderer for nothing — which is
-    /// what `changing_the_case_setting_does_not_go_back_to_the_renderer` in
-    /// `search.rs` holds it to.
+    /// these, so a rescan asks the renderer for nothing —
+    /// `changing_the_case_setting_does_not_go_back_to_the_renderer` says so.
     pub fn set_find_options(&mut self, options: Find) -> Option<u64> {
         self.search.set_options(options);
         self.store.set(vec![
@@ -4366,16 +4100,12 @@ impl Viewer {
 
     /// Take the margins off, or put them back.
     ///
-    /// The switch is remembered and the measurement is not: `trim_margins` is
-    /// a setting in the app's own `settings.rs`, which this crate mounts, and
-    /// the crop it produces is a fact about a document rather than about the
-    /// reader. So a run that opens a different document measures that one.
+    /// The switch is remembered and the measurement is not: the crop is a fact
+    /// about a document rather than about the reader, so a run that opens a
+    /// different document measures that one.
     ///
-    /// **Left on when there is nothing to trim.** A document with no margins
-    /// to speak of, or one this misread, keeps the switch and loses nothing —
-    /// [`Viewer::trimmed`] is how the interface says which of the two
-    /// happened, and it is the difference between "off" and "on, and there
-    /// was nothing there".
+    /// **Left on when there is nothing to trim.** [`Viewer::trimmed`] is how
+    /// the interface tells "off" from "on, and there was nothing there".
     pub fn set_trim(&mut self, on: bool) {
         self.trimming = on;
         self.store.set(vec![("trim_margins".into(), json!(on))]);
@@ -4403,11 +4133,10 @@ impl Viewer {
 
     /// Measure the document and lay it out again against what was found.
     ///
-    /// The crop is measured on the page as the *document* has it and then
-    /// turned to match the page as the reader has it, which is the same order
-    /// [`Layout::turn`] keeps: measuring after a rotation would ask pdfium to
-    /// draw eight pages sideways for an answer that is one transposition away
-    /// from the one already in hand.
+    /// Measured on the page as the *document* has it and then turned to match
+    /// the page as the reader has it, which is [`Layout::turn`]'s order:
+    /// measuring after a rotation would draw eight pages sideways for an
+    /// answer one transposition away from the one in hand.
     fn measure_crop(&mut self) {
         let mut crop = crate::crop::measure(&self.document);
         let mut turns = (self.layout.rotation / 90) % 4;
@@ -4421,15 +4150,12 @@ impl Viewer {
     /// Turn the document a quarter at a time.
     ///
     /// Nothing is written down: a rotation is a way of looking rather than a
-    /// property of the file, which is what `viewer.ts` says of it and what
-    /// Preview, Acrobat and Sumatra all do.
+    /// property of the file, as in Preview, Acrobat and Sumatra.
     ///
-    /// **And no cache is thrown away**, which is where this parts company
-    /// with the app. There `rotate()` clears the links, the notes and the
-    /// markup, because all three are held as fractions of a page that has
-    /// just changed shape. Here they are held in the page's own unturned
-    /// points and [`Layout::place_on`] does the turning where they are drawn,
-    /// so a rotation costs a relayout and the pages that were on screen.
+    /// **And no cache is thrown away**, where the app clears three: its links,
+    /// notes and markup are held as fractions of a page that has just changed
+    /// shape. Here they are in the page's own unturned points and
+    /// [`Layout::place_on`] does the turning where they are drawn.
     pub fn rotate(&mut self, quarter_turns: i32) {
         self.keeping_place(|layout| layout.turn(quarter_turns));
         self.notice = match self.layout.rotation {
@@ -4461,11 +4187,9 @@ impl Viewer {
         // recoloured by a compute pass over it rather than drawn again, which
         // is the whole difference from `keyFor()` carrying the theme.
         self.chosen.set(self.store.palette());
-        // Three things could be said and one line says one of them, so they
-        // are in the order of how much the reader needs to know: a colour the
-        // renderer cannot read is a theme that is not going to look like
-        // itself; having just been taken off following the machine is a
-        // switch that has moved without being touched; and otherwise the name
+        // Three things could be said and one line says one, in the order of
+        // how much the reader needs to know: a colour the renderer cannot
+        // read, then a switch that moved without being touched, then the name
         // of what is now being read in.
         self.notice = match (self.store.complaint.clone(), worn.stopped_following) {
             (Some(complaint), _) => complaint,
@@ -4477,12 +4201,10 @@ impl Viewer {
 
     /// ⌘D, and the switch on the Appearance page.
     ///
-    /// The theme moves to the other half of the pair the reader has already
-    /// chosen — see [`Store::other_half`] — and going through `set_theme`
-    /// rather than around it is what makes the keystroke stop the app
-    /// following the machine, which is right: pressing ⌘D at noon is a reader
-    /// saying they want the dark theme *now*, and following would take it
-    /// away again at the machine's next word.
+    /// The theme moves to the other half of the pair the reader chose — see
+    /// [`Store::other_half`]. Going through `set_theme` is what makes the
+    /// keystroke stop the app following the machine, which is right: ⌘D at
+    /// noon is a reader wanting the dark theme *now*.
     pub fn toggle_dark(&mut self) {
         self.set_dark(!self.store.dark_now());
     }
@@ -4503,11 +4225,10 @@ impl Viewer {
 
     /// The machine's light or dark, at startup and whenever it changes.
     ///
-    /// `followSystemTheme` in `main.ts`, and called at startup for the reason
-    /// that file gives: the machine can have changed its mind while the app
-    /// was shut. What is *not* the app's is `None` — a webview always answers
-    /// this question and a window does not, so a platform that will not say
-    /// leaves the reader wearing what they chose. See [`Store::outside`].
+    /// At startup because the machine can have changed its mind while the app
+    /// was shut. `None` is not the app's case — a webview always answers this
+    /// and a window does not, so a platform that will not say leaves the
+    /// reader wearing what they chose. See [`Store::outside`].
     pub fn follow_system(&mut self, dark: Option<bool>) {
         self.store.set_outside(dark);
         if let Some(index) = self.store.following() {
@@ -4533,24 +4254,17 @@ impl Viewer {
 
     /// A theme file was written — by hand, by an LLM, or by this app.
     ///
-    /// `themesChanged` in `main.ts`, and the whole of it: the set is replaced
-    /// and whatever is in use is put back on from the new files, so that
-    /// editing a theme in an editor beside the reader shows up in the reader.
-    /// Nothing is written down — nobody chose a theme here, and an editor
-    /// saving every few seconds must not be a rewrite of `settings.toml`
-    /// every few seconds.
+    /// The set is replaced and whatever is in use is put back on from the new
+    /// files, so editing a theme beside the reader shows up in it. Nothing is
+    /// written down: nobody chose a theme, and an editor saving every few
+    /// seconds must not rewrite `settings.toml` every few seconds.
     ///
-    /// A theme whose file has *gone* takes the reader somewhere else rather
-    /// than leaving the colours of something that no longer exists on screen,
-    /// and that one *is* remembered, because it is a choice being made on the
-    /// reader's behalf and the next run has to know what it was.
+    /// A theme whose file has *gone* takes the reader somewhere else, and that
+    /// one *is* remembered, because it is a choice made on their behalf.
     ///
-    /// The app has a third case here and this crate does not have it yet: a
-    /// theme being composed in the editor window is the live theme and has no
-    /// id, so every save in the themes directory reads as "the theme you are
-    /// reading in has been deleted". `isEditingTheme()` is the guard, the
-    /// settings window is item 1's other half, and this is a line to come
-    /// back to when it lands.
+    /// A theme being composed in the editor is the live theme and has no id,
+    /// so every save would otherwise read as "the theme you are reading in has
+    /// been deleted" — `isEditingTheme()` is the guard.
     pub fn themes_changed(&mut self, themes: Vec<crate::theme::Theme>) {
         let before = self.store.theme().clone();
         self.store.set_themes(themes);
@@ -4574,37 +4288,28 @@ impl Viewer {
 
     /// The open document was rewritten underneath the reader.
     ///
-    /// A paper being recompiled by LaTeX is the case this exists for, and the
-    /// reader is meant to stay exactly where they were reading. Where that is
-    /// comes off the layout rather than out of the library, for the reason
-    /// `main.ts` gives: the library has the last position *written down*, and
-    /// this is the one moment the two can differ by a whole scroll.
+    /// A paper recompiled by LaTeX is the case this exists for, and the reader
+    /// stays where they were. Where that is comes off the layout rather than
+    /// out of the library: the library has the last position *written down*,
+    /// and this is the one moment the two can differ by a whole scroll.
     ///
-    /// What has to go is everything read out of the old file — the outline,
-    /// the labels, the links, the search index, the crop — and everything
-    /// that points into it, which is the history. What stays is everything
-    /// that is the reader's: the fit, the zoom, the spread, the rotation, the
-    /// panel, the theme.
+    /// What goes is everything read out of the old file — outline, labels,
+    /// links, index, crop — and everything pointing into it, which is the
+    /// history. What stays is the reader's own: fit, zoom, spread, rotation,
+    /// panel, theme.
     ///
-    /// Answers the token of the scan it restarted, when the find bar was up:
-    /// the matches were positions in a document that no longer exists, and
-    /// looking again is what somebody with the bar open is asking for. `None`
-    /// when there is nothing to scan, which is [`Viewer::find`]'s convention
-    /// and the same reason for it — a task is the caller's to spawn.
+    /// Answers the token of the scan it restarted, or `None`; a task is the
+    /// caller's to spawn.
     pub fn document_changed(&mut self, path: &str) -> Option<u64> {
         if path != self.document.path() {
             return None;
         }
         let restarted = self.reopen(path);
-        // Still asked, because asking is what *renames* the document — the
-        // toolbar takes its title from what this writes. What is no longer
-        // done with the answer is announce it. A reader watching a paper
-        // recompile sees the page redraw and the title change, which is the
-        // whole of the news; a line saying "Reloaded — the document changed
-        // on disk" tells somebody who did not know what a reload is that
-        // something they did not do has happened to their file, which is a
-        // sentence that can only worry them. See `reopen`, which had already
-        // reached this conclusion for the other caller.
+        // Still asked, because asking is what *renames* the document. What is
+        // not done with the answer is announce it: a reader watching a paper
+        // recompile sees the page redraw and the title change, and "Reloaded —
+        // the document changed on disk" only worries somebody who did not know
+        // what a reload is.
         let _ = self.store.renamed(&self.document.title());
         restarted
     }
@@ -4612,11 +4317,9 @@ impl Viewer {
     /// The document on disk, read again, with the reader left where they
     /// were — and nothing said about it.
     ///
-    /// Split out of [`Viewer::document_changed`] because there are now two
-    /// reasons to do this and they have different things to say afterwards:
-    /// a compiler rewrote the paper, or this reader just marked a passage in
-    /// it. The work is identical, and the sentence is not — "Reloaded" is the
-    /// wrong answer to a reader who pressed a colour.
+    /// Split out of [`Viewer::document_changed`] because the work is identical
+    /// for two causes and the sentence is not: "Reloaded" is the wrong answer
+    /// to a reader who pressed a colour.
     fn reopen(&mut self, path: &str) -> Option<u64> {
         let at = self.layout.anchor(self.scroll_top);
         let reopened = match crate::render::open(path) {
@@ -4638,11 +4341,9 @@ impl Viewer {
         self.links.borrow_mut().clear();
         self.notes.borrow_mut().clear();
         // And the text with them, along with whatever was selected: both are
-        // indices into a document that no longer exists, and a selection kept
-        // across a recompile is a highlight over words nobody chose. The
-        // markup journal is where a passage *does* survive a rebuild, and it
-        // survives as a quote to be looked up again rather than as a range —
-        // see `findQuote` in the app, and item 11.
+        // indices into a document that no longer exists. The markup journal is
+        // where a passage *does* survive a rebuild, and it survives as a quote
+        // to be looked up again rather than as a range.
         self.texts.borrow_mut().clear();
         self.selection = None;
         self.sweep_from = None;
@@ -4673,32 +4374,21 @@ impl Viewer {
 
     /// A different document, in this window. ⌘O, and the menu item under it.
     ///
-    /// **The app's ⌘O replaces the document in the window it was pressed in**
-    /// — `openDialog` calls `this.open(path)` — and ⇧⌘O is the one that asks
-    /// for a window. That is the split kept here, and it is worth saying why
-    /// it survives the thing that changed everything else about windows in
-    /// this port: there is no start screen, so there is no empty window, so
-    /// [`crate::session::Session::another`] gives ⌘N a second window on the
-    /// document already in front. None of that bears on ⌘O, which was never
-    /// about empty windows — it is the reader saying *this one instead*.
+    /// **⌘O replaces the document in the window it was pressed in** and ⇧⌘O
+    /// asks for a window, which is the app's split: ⌘O is the reader saying
+    /// *this one instead*.
     ///
-    /// What has to go is everything read out of the old file and everything
-    /// pointing into it, which is [`Viewer::document_changed`]'s list, and
-    /// **what has to go with it here is the library entry**: a recompile is
-    /// the same document and this is a different one, so the marks, the
-    /// title and the remembered place all move. What stays is the reader's
-    /// own — the fit, the zoom, the spread, the rotation, the panel, the
-    /// theme — because those are settings and a setting is not a property of
-    /// a document.
+    /// Everything [`Viewer::document_changed`] clears is cleared, **and the
+    /// library entry with it**: a recompile is the same document and this is a
+    /// different one, so the marks, the title and the remembered place all
+    /// move. What stays is the reader's own — fit, zoom, spread, rotation,
+    /// panel, theme — because a setting is not a property of a document.
     ///
-    /// Answers whether it opened, because the caller has bookkeeping of its
-    /// own to do — see [`Ask::Showing`] — and a document that would not open
-    /// leaves this window showing the one it had.
-    ///
-    /// The find bar is closed rather than searched again, which is where this
-    /// parts company with `document_changed`: a query asked of a paper is not
-    /// a query asked of the next book, and the matches were positions in a
-    /// document nobody is looking at any more.
+    /// Answers whether it opened; a document that would not open leaves this
+    /// window showing the one it had. The find bar is closed rather than
+    /// searched again, which is where this parts company with
+    /// `document_changed`: a query asked of a paper is not a query asked of
+    /// the next book.
     pub fn open_here(&mut self, path: &str) -> bool {
         self.open_here_with(path, None)
     }
@@ -4706,15 +4396,13 @@ impl Viewer {
     /// The same, with the password for a document that wants one.
     ///
     /// **Locked is not an error here, it is a question**, and this is the one
-    /// place that turns it into one: a document that will not open without a
-    /// password puts [`Locked`] up and leaves this window showing whatever it
-    /// had, exactly as any other refusal does. The reader answers, the answer
-    /// comes back through [`Self::unlock`], and this runs again with it.
+    /// place that turns it into one: [`Locked`] goes up and the window keeps
+    /// what it had. The answer comes back through [`Self::unlock`].
     ///
-    /// Whether the sentence over the field says "it needs a password" or
-    /// "that one was not right" is decided here rather than by pdfium, which
-    /// reports both as `FPDF_ERR_PASSWORD`: the difference is whether this
-    /// call supplied one.
+    /// Whether the sentence says "it needs a password" or "that one was not
+    /// right" is decided here rather than by pdfium, which reports both as
+    /// `FPDF_ERR_PASSWORD`: the difference is whether this call supplied
+    /// one.
     fn open_here_with(&mut self, path: &str, password: Option<&str>) -> bool {
         if path == self.document.path() {
             self.notice = "That document is already open here.".into();
@@ -4751,20 +4439,16 @@ impl Viewer {
 
     /// The document is put down and this window is showing none.
     ///
-    /// **The gesture the app calls Close**, and it is not the same as closing
-    /// the window: the window stays, the toolbar keeps the things that are
-    /// not about a document, and what is in front of the reader is the start
-    /// screen. In the app it is also the one gesture that empties the restore
-    /// list, which is `AGENTS.md`'s own distinction — a window that goes
-    /// because the app is quitting was open at the end, and a document the
-    /// reader put down is one they have finished with. Here that is the
-    /// caller's to say, because the list belongs to the process (see
-    /// [`Ask::Showing`] with an empty path).
+    /// **The gesture the app calls Close**, which is not closing the window:
+    /// the window stays, the toolbar keeps what is not about a document, and
+    /// the start screen is what is in front of the reader. It is also the one
+    /// gesture that empties the restore list — a window that goes because the
+    /// app is quitting was open at the end, and a document the reader put down
+    /// is one they have finished with — and that is the caller's to say,
+    /// because the list belongs to the process.
     ///
-    /// Everything [`Viewer::open_here`] clears is cleared, for the same
-    /// reasons, and the document put in its place is [`crate::render::Nothing`]
-    /// — see there for why this is a document of no pages rather than no
-    /// document at all.
+    /// Everything [`Viewer::open_here`] clears is cleared, and what takes the
+    /// document's place is [`crate::render::Nothing`].
     pub fn close_document(&mut self) {
         if self.empty() {
             return;
@@ -4773,14 +4457,12 @@ impl Viewer {
         // it is about. Exactly as `open_here` does it, and for the same
         // reason: this is the last moment either half is true.
         self.store.remember(self.layout.anchor(self.scroll_top));
-        // **And written now rather than eventually**, which is the one place
-        // in this reader that waits for the scribe. Everywhere else the delay
-        // is the whole design — a place arrives on every wheel event and the
-        // last one wins — but the screen this is about to put up says, on its
-        // own first row, where the reader stopped in the document they are
-        // putting down. Reading that off the file before the file has caught
-        // up shows the page they were on the last time they *opened* it, and
-        // the number is stale exactly when it is most looked at.
+        // **Written now rather than eventually**, which is the one place in
+        // this reader that waits for the scribe: the screen about to go up
+        // says, on its first row, where the reader stopped in the document
+        // they are putting down. Read before the file has caught up, that is
+        // the page they were on when they last *opened* it — stale exactly
+        // when it is most looked at.
         crate::store::flush();
         self.document = crate::render::nothing();
         self.store.closed();
@@ -4791,22 +4473,18 @@ impl Viewer {
 
     /// Whether this window has a document in it.
     ///
-    /// One predicate, asked in the two places it decides something: what the
-    /// toolbar carries, and whether the body is the document or the start
-    /// screen. Everything else in this file goes on being written for a
-    /// document, because a document of no pages answers every question
-    /// already — see [`crate::render::Nothing`].
+    /// Asked in the two places it decides something: what the toolbar carries,
+    /// and whether the body is the document or the start screen. Everything
+    /// else goes on being written for a document, because a document of no
+    /// pages answers every question already — see [`crate::render::Nothing`].
     pub fn empty(&self) -> bool {
         self.document.pages() == 0
     }
 
     /// The last few documents read, for the start screen and the Open menu,
-    /// with the one already open left out.
-    ///
-    /// Left out because reopening it here would be a no-op, which is the app's
-    /// own reasoning about the same list: opening it in a *second* window is
-    /// what its own title menu is for. Six, which is the app's number for the
-    /// start screen; the menu takes what it wants of them.
+    /// with the one already open left out — reopening it here would be a
+    /// no-op, and opening it in a *second* window is what the title menu is
+    /// for. Six, which is the app's number; the menu takes what it wants.
     pub fn recents(&self) -> Vec<crate::store::Recent> {
         let open = self.document.path();
         self.store
@@ -4827,10 +4505,9 @@ impl Viewer {
     /// and everything it has to pick up again.
     ///
     /// Shared by [`Viewer::open_here`] and [`Viewer::close_document`] because
-    /// the list is identical and the list is the part that is easy to get
-    /// wrong — a cache left pointing into the document that was there a moment
-    /// ago is a rectangle drawn over the wrong page, and it took closing a
-    /// document to notice that the two paths had to agree.
+    /// the list is the part that is easy to get wrong: a cache left pointing
+    /// into the document that was there a moment ago is a rectangle drawn over
+    /// the wrong page.
     fn take_up(&mut self, place: Option<crate::layout::Anchor>) {
         self.headings = self.document.outline();
         self.labels = self.document.labels();
@@ -4879,11 +4556,9 @@ impl Viewer {
 
     /// The next theme in the list, which is what `t` is bound to.
     ///
-    /// Fourteen themes is too many to cycle through and this is not the app's
-    /// gesture — the Theme menu is, and it is built now (see [`Menu`]) — but
-    /// it is the one keystroke that proves the whole list is loaded and
-    /// wearable, which is what `the_whole_shipped_theme_set_is_wearable`
-    /// presses.
+    /// Not the app's gesture — the Theme menu is — but the one keystroke that
+    /// proves the whole list is loaded and wearable, which is what
+    /// `the_whole_shipped_theme_set_is_wearable` presses.
     pub fn next_theme(&mut self) {
         let next = (self.store.theme_index() + 1) % self.store.themes().len().max(1);
         self.set_theme(next);
@@ -4939,11 +4614,10 @@ impl Viewer {
 
     /// Note where the reader is, for the next run.
     ///
-    /// Called from the two places the reader actually moves — this one and a
+    /// Called from the two places the reader actually moves — this one, and a
     /// page turned in paged mode, which does not go past [`Viewer::scroll_to`]
-    /// when both sides of the turn sit at the top of their page. What it
-    /// costs here is a channel send: the disk is the scribe's, and it writes
-    /// once the scrolling has stopped. See [`Store::remember`].
+    /// when both sides of the turn sit at the top of their page. Costs a
+    /// channel send: the disk is the scribe's. See [`Store::remember`].
     fn remember_place(&self) {
         // Not while the last run's place is still waiting for a window to be
         // put back in: the relayouts on the way to the first frame would
@@ -4965,10 +4639,8 @@ impl Viewer {
 /// One mounted page as the `rsx!` block needs it: which page, where its box
 /// is, and the two overlays that go on top of it.
 ///
-/// A struct rather than a tuple since links joined the highlights and made it
-/// seven things. The tuple was already at clippy's limit and reading the
-/// fourth `f64` in a row off its position was the sort of thing that is
-/// correct until somebody inserts a field.
+/// A struct rather than a tuple at seven things: reading the fourth `f64` in a
+/// row off its position is correct until somebody inserts a field.
 struct Placed {
     index: usize,
     top: f64,
@@ -4997,44 +4669,33 @@ struct Placed {
 ///
 /// **A click takes the focus away from the reader, and the reader cannot take
 /// it back.** Blitz walks up from whatever was clicked looking for something
-/// it knows how to focus — a text input, a checkbox, a summary, a link — and
-/// a plain `<button>` is not on that list, so the focus ends up on `<html>`.
-/// A key with nothing focused goes to `<html>` too, which is above anything a
-/// component can put a handler on, so from the first click onwards every
-/// shortcut in this reader did nothing. It was invisible for two phases
-/// because no test had ever pressed a key *after* clicking something.
+/// it knows how to focus, and a plain `<button>` is not on that list, so the
+/// focus ends up on `<html>` — which is above anything a component can put a
+/// handler on. From the first click onwards every shortcut did nothing, and it
+/// was invisible for two phases because no test had pressed a key *after*
+/// clicking something.
 ///
-/// And it cannot be answered from inside the reader. The one way to ask for
-/// the focus is `MountedData::set_focus`, which takes `doc_mut()` the moment
-/// it is called — and every place a component could call it from is already
-/// inside a borrow of the document, including a task spawned from one, which
-/// is polled inside that borrow as well. It panics with "RefCell already
-/// borrowed" from a stack naming neither.
+/// It cannot be answered from inside the reader either: `MountedData::set_focus`
+/// takes `doc_mut()`, and every place a component could call it from is already
+/// inside a borrow of the document — a task spawned from one included.
 ///
-/// So the element that wants the keyboard says so, and whoever owns the
-/// window hands it back: `shell.rs` after a click in the real app, and the
-/// harness after a synthesised one. That is the same division the app makes —
-/// `reclaimKeyboard()` in `main.ts` is the window's answer to the same
-/// problem, because a full-screen change costs the page its keyboard there in
-/// exactly this way.
+/// So the element that wants the keyboard says so and whoever owns the window
+/// hands it back: `shell.rs` after a real click, the harness after a
+/// synthesised one. `reclaimKeyboard()` in `main.ts` is the same division.
 pub const KEYBOARD: &str = "[data-keyboard]";
 
 /// Give the keyboard back to the element that asked for it, unless something
 /// inside it has taken the focus.
 ///
-/// The condition is the whole of the policy: focus that lands *inside* the
-/// reader belongs to whatever took it — a field in the find bar, when there
-/// is one — and focus that lands anywhere else is focus nobody wanted, which
-/// is what a click on a button leaves behind.
+/// Focus that lands *inside* the reader belongs to whatever took it — a field
+/// in the find bar. Focus anywhere else is focus nobody wanted, which is what
+/// a click on a button leaves behind.
 pub fn give_keyboard_back(doc: &mut blitz_dom::BaseDocument) {
     // **The innermost element that asks for it wins**, which is why this is
-    // `query_selector_all` and takes the last. The reader's root always asks;
-    // the find bar's field asks as well while it is up, and it is a
-    // descendant, so it comes later in document order. Without that rule a
-    // click on "Match case" would hand the keyboard back to the root and the
-    // next thing typed would scroll the document instead of changing the
-    // query — which is the same complaint as the bug this whole function
-    // exists for, one level in.
+    // `query_selector_all` and takes the last: the root always asks, and the
+    // find bar's field is a descendant, so it comes later in document order.
+    // Otherwise a click on "Match case" hands the keyboard to the root and the
+    // next thing typed scrolls the document.
     let Ok(wants) = doc.query_selector_all(KEYBOARD) else {
         return;
     };
@@ -5063,21 +4724,16 @@ pub fn Reader(
     /// A document this window is to ask for the password to, if there is one.
     ///
     /// A prop rather than a message down the mailbox because it is true
-    /// *before* the first frame: a window made on a locked document has never
-    /// had anything else in it, and a question posted to a window that has not
-    /// rendered yet is a question about arrival order. See `Session::window_on`.
+    /// *before* the first frame, and a question posted to a window that has
+    /// not rendered yet is a question about arrival order.
     #[props(default)]
     asking: Option<String>,
 ) -> Element {
-    // The viewport, taken from the window rather than from the element.
-    //
-    // `get_client_rect` is the obvious way and it panics: a `MountedData` call
-    // borrows the document, and every place a component can call one from — a
-    // DOM event handler, a mounted handler — is already inside a borrow of it.
-    // The window is the one measurement that costs nothing to ask for, and the
-    // chrome above and below the document is a number this file knows. The
-    // scroll event carries the real client size, so the first scroll corrects
-    // whatever this got wrong.
+    // The viewport, taken from the window rather than from the element:
+    // `get_client_rect` panics inside the document borrow every handler
+    // already holds. The chrome above and below is a number this file knows,
+    // and the scroll event carries the real client size, so the first scroll
+    // corrects whatever this got wrong.
     let screen = use_hook(|| {
         dioxus_core::try_consume_context::<Screen>()
             // Nothing provided one, which is a shell that forgot rather than a
@@ -5091,16 +4747,12 @@ pub fn Reader(
         dioxus_core::try_consume_context::<Appearance>().unwrap_or_else(Appearance::unknown)
     });
     // **Whether the pointer is over the one button that puts something down.**
-    // `#close-doc:hover svg` in the app's `styles.css` reddens the cross and
-    // leaves the label the bar's own hover colour, so the warning is on the one
-    // glyph that means *close* rather than on the whole button. That is a
-    // stylesheet rule there and cannot be one here: an icon is drawn by usvg
-    // from the markup it is serialised as, so its `stroke` comes from the
-    // attribute this reader writes and never from the cascade — which is why
-    // every `Icon` in this file is handed a colour rather than inheriting one.
-    // So the hover is state, and this is it. One flag for both buttons because
-    // only one of them is ever in the bar: Close while a document is open,
-    // Close window while none is.
+    // The app reddens the cross with `#close-doc:hover svg` and leaves the
+    // label alone. That cannot be a stylesheet rule here: an icon is drawn by
+    // usvg from serialised markup, so its `stroke` comes from an attribute
+    // this reader writes and never from the cascade — which is why every
+    // `Icon` in this file is handed a colour. One flag for both buttons,
+    // because only one is ever in the bar.
     let mut close_hot = use_signal(|| false);
     let mut viewer = use_signal(|| {
         let mut store = Store::at(&config.dir);
@@ -5108,24 +4760,19 @@ pub fn Reader(
             store.wear_for_now(index);
         }
         let mut viewer = Viewer::new(document.0.clone(), chosen.clone(), store);
-        // **Before the first frame, like the viewport above it**, and for the
+        // **Before the first frame, like the viewport above it**, for the
         // reader's sake rather than the renderer's: a machine in dark mode
-        // must never see a white page on the way in, which is the sentence
-        // `followSystemTheme` in `main.ts` is written under. It costs one
-        // question of the window and, on the ordinary launch where nothing
-        // has changed, nothing else.
+        // must never see a white page on the way in. One question of the
+        // window, and nothing else on the ordinary launch.
         viewer.follow_system(appearance.get());
-        // **Sized before the first frame, not on mount.** It was laid out at
-        // the default viewport and corrected by `onmounted`, which meant every
-        // page in the window was drawn at one size, re-keyed, and drawn again
-        // — a full round of pdfium renders and texture uploads thrown away on
-        // every launch, and a frame in which *every* node in the document is
-        // replaced at once. That frame is the one this file's `PageWidget`
-        // comment is about: a texture registered while something else is being
-        // unregistered is a texture Vello cannot find at submit, and the
-        // `fresh` flag only moves the collision a frame along. Asking the
-        // window how big it is before laying anything out costs nothing and
-        // takes the collision away rather than dodging it.
+        // **Sized before the first frame, not on mount.** Laid out at a
+        // default viewport and corrected by `onmounted`, every page was drawn,
+        // re-keyed and drawn again — a round of pdfium renders thrown away on
+        // every launch, and a frame in which *every* node is replaced at once.
+        // That frame is the one that crashes: a texture registered while
+        // something else is unregistered is one Vello cannot find at submit,
+        // and the `fresh` flag only moves the collision a frame along. Asking
+        // the window its size first takes the collision away.
         let (width, height, _scale) = screen.get();
         viewer.fit_window(width, height);
         // And the question, if this window was made to ask one.
@@ -5194,16 +4841,9 @@ pub fn Reader(
     };
 
     // Every key the reader can press is an *action*, and a chord is only a
-    // way of asking for one. What was here before was a `match` on
-    // `event.key()` — which is the shape the app spent a rewrite getting out
-    // of, and it could not express ⌘0 at all: a modifier was something an arm
-    // had to remember to check, so the arms that did not check quietly
-    // answered chords nobody had pressed.
-    //
-    // Now the event is turned into a chord and the chord is looked up. The
-    // table is `keymap.rs` and the file over the top of it is `keys.toml`,
-    // both of them the app's own — see `crate::keymap`. What is left here is
-    // this: work out what was asked for, and do it.
+    // way of asking for one. The event is turned into a chord and the chord is
+    // looked up in `keymap.rs`, over `keys.toml`. What is left here is working
+    // out what was asked for and doing it.
     let on_key = {
         let frame = frame.clone();
         let clip = clip.clone();
@@ -5228,14 +4868,10 @@ pub fn Reader(
                 Press::Act(action) => {
                     viewer.write().pending.clear();
                     // **An action about a document does nothing when there is
-                    // none.** `keys.ts` has carried `needsDocument` since the
-                    // keyboard was ported and this reader has carried
-                    // `needs_document` beside it, unread, because there was no
-                    // window without a document in it to read it for. The
-                    // start screen is what makes it mean something: without
-                    // this, `j` on the start screen scrolls a layout of no
-                    // pages, ⌘F puts up a find bar over nothing, and ⌘⇧H
-                    // offers to highlight a selection that cannot exist.
+                    // none.** Without this, `j` on the start screen scrolls a
+                    // layout of no pages, ⌘F puts up a find bar over nothing,
+                    // and ⌘⇧H offers to highlight a selection that cannot
+                    // exist.
                     if crate::keymap::needs_document(action) && viewer.read().empty() {
                         return;
                     }
@@ -5260,17 +4896,13 @@ pub fn Reader(
     };
 
     // Two files the reader is looking at are not the reader's to change: the
-    // themes, and the document. Both are watched on the Rust side — by the
-    // app's own `watch.rs`, mounted here — and both arrive as news in a
-    // mailbox. See `crate::tauri`, which is how a file that says `use
-    // tauri::…` compiles in a crate that has no Tauri in it.
+    // themes, and the document. Both are watched by the app's own `watch.rs`,
+    // mounted here, and both arrive as news in a mailbox.
     //
-    // **The task is the whole of the wiring on this side.** It waits on the
-    // mailbox, which is a real wait: the watcher thread wakes it, the wake
-    // marks the task ready, and dioxus's own waker takes it from there to the
-    // window. Nothing polls, and in the harness the same wake makes the next
-    // `pump()` run it, which is what lets this be tested with no thread and
-    // no window at all.
+    // **The task is the whole of the wiring on this side**, and it is a real
+    // wait: the watcher thread wakes it, the wake marks the task ready, and
+    // dioxus's waker takes it to the window. Nothing polls, and in the harness
+    // the same wake makes the next `pump()` run it.
     let (watching, notifying) = use_hook(|| {
         // This window's mailbox, joined to the process's switchboard under
         // this window's name. Both come from whoever made the window; a
@@ -5281,12 +4913,10 @@ pub fn Reader(
             exchange.join(&config.window, post.clone());
         }
         // **One watcher for the process, not one per window.** It follows one
-        // themes directory and a document per window, which is exactly the
-        // shape `watch.rs` already has — `follow` counts what wants a
-        // directory rather than unwatching it along with the document that
-        // named it, because two papers being recompiled in the same folder is
-        // the ordinary case. A watcher per window would be that many watches
-        // on the same directory and that many copies of every theme reload.
+        // themes directory and a document per window, which is the shape
+        // `watch.rs` has: `follow` counts what wants a directory rather than
+        // unwatching it with the document that named it, because two papers
+        // recompiled in one folder is the ordinary case.
         let shared = dioxus_core::try_consume_context::<Arc<crate::watch::Watching>>();
         let held = match (shared, config.watch) {
             (Some(watching), _) => {
@@ -5378,12 +5008,11 @@ pub fn Reader(
                         held.notice = "That is not a PDF.".into();
                     }
                     // A document handed to this window by the process: a
-                    // second launch, "Open with", a double-click in the
-                    // Finder. It arrives here rather than at a new window
-                    // because this window is showing nothing — see
-                    // `Desk::hand_over` — and the bookkeeping afterwards is
-                    // ⌘O's own, because this is ⌘O with somebody else
-                    // choosing the file.
+                    // second launch, "Open with", a double-click. It arrives
+                    // here rather than at a new window because this one is
+                    // showing nothing — see `Desk::hand_over` — and the
+                    // bookkeeping afterwards is ⌘O's, because this is ⌘O with
+                    // somebody else choosing the file.
                     "open-document" => {
                         let path = news.payload.as_str().unwrap_or_default().to_string();
                         viewer.write().dragging = None;
@@ -5445,22 +5074,15 @@ pub fn Reader(
     // Read so that the handle is plainly alive rather than plainly unused.
     let _ = watching.is_some();
 
-    // **The notice puts itself away after four seconds**, which is what
-    // `ui.notice` in the app does with a `setTimeout` and what this line had
-    // no way of doing: it was a row of the window with the last thing said
-    // still on it, so a zoom percentage stayed along the bottom edge until
-    // something else was said.
+    // **The notice puts itself away after four seconds.**
     //
-    // A thread rather than a timer, because there is no runtime here to hold
-    // one — nothing in this reader is async except the mailbox. It sleeps and
-    // posts, which is the same door `watch.rs` uses to reach a window from a
-    // thread of its own, and the "notice-timeout" arm above throws the
-    // message away if what is on the line is no longer the message this timer
-    // was started for. So a second notice does not vanish with the first
-    // one's four seconds — and a message said twice in a row keeps the first
-    // timer rather than restarting it, which is the one case this is
-    // imprecise about and costs at most four seconds of a sentence that is
-    // still true.
+    // A thread rather than a timer, because nothing in this reader is async
+    // except the mailbox: it sleeps and posts through the same door `watch.rs`
+    // uses. The "notice-timeout" arm above throws the message away if the line
+    // is no longer showing the message this timer was started for, so a second
+    // notice does not vanish with the first one's four seconds. A message said
+    // twice keeps the first timer, which is the one case this is imprecise
+    // about.
     {
         let notifying = notifying.clone();
         let mut last = String::new();
@@ -5514,12 +5136,10 @@ pub fn Reader(
         });
     }
 
-    // **And a zoom gesture ends when the fingers stop**, which is the same
-    // shape again and for the same reason: a pinch is a stream of events with
-    // no end in it, so what ends it is the gap after the last one. Until then
-    // every page is stretched rather than redrawn — see
-    // [`crate::page::Chosen::holding`] — and this is what puts them back
-    // sharp.
+    // **And a zoom gesture ends when the fingers stop**: a pinch is a stream
+    // with no end in it, so what ends it is the gap after the last event.
+    // Until then every page is stretched rather than redrawn — see
+    // [`crate::page::Chosen::holding`] — and this puts them back sharp.
     {
         let notifying = notifying.clone();
         let mut last = 0u64;
@@ -5631,32 +5251,23 @@ pub fn Reader(
     // What the button the Document menu hangs off is called: the document's
     // name, or the app's own "Open…" when there is none.
     // The shelf, read once for this render. It is a file on the disk, so it is
-    // read when the Document menu is open and not otherwise — a menu that is
-    // shut costs nothing, which is the same bargain every other menu in this
-    // bar strikes.
+    // read when the Document menu is open and not otherwise.
     let recents = if held.menu == Some(Menu::Document) {
         held.recents()
     } else {
         Vec::new()
     };
     // The title button exists only where there is a document, so this is the
-    // document's name and nothing else. It used to double as the "Open…"
-    // button for a window with none — one button rather than two, on the
-    // reasoning that the menu behind it was one menu. It is two menus now, and
-    // Open… is a button of its own that is there whether or not anything is
-    // open, which is what the app does and is the plainer answer.
+    // document's name and nothing else. Open… is a button of its own, there
+    // whether or not anything is open, which is what the app does.
     let shelf_name = held.store.title().to_string();
-    // **Whether the name has run out of box**, which is what decides the fade
-    // over its last twenty-four pixels — see `.chip.title.clipped`. Blitz has
-    // no `text-overflow: ellipsis`, so the fade stands in for one, and a fade
-    // drawn unconditionally is a fade over every name that fits: `book.pdf`
-    // went pale over a third of its width. The box is `max-width: 276px` less
-    // sixteen of padding, and thirty-four characters is what fills it — the
-    // app's own `34ch`, which is the same number counted rather than measured.
-    // Erring long is the safe direction: a name a character or two past the
-    // cap is cut without a fade, which is what every reader has seen from a
-    // narrow column; a name inside the cap is never faded, which was the
-    // complaint.
+    // **Whether the name has run out of box**, which decides the fade over its
+    // last twenty-four pixels. Blitz has no `text-overflow: ellipsis`, so the
+    // fade stands in for one, and drawn unconditionally it faded every name
+    // that fits. Thirty-four characters is what the box holds — the app's own
+    // `34ch`, counted rather than measured. Erring long is the safe direction:
+    // a name just past the cap is cut without a fade, which everyone has seen
+    // from a narrow column.
     let name_clipped = shelf_name.chars().count() > 34;
     let find_query = held.find_query.clone();
     let find_count = held.find_count();
@@ -5718,18 +5329,14 @@ pub fn Reader(
     let recolor_images = held.recolor_images();
     let page_pill = held.page_pill();
     let page_field = held.page_field();
-    // How wide the page box is: the padding, the border, and the number in it,
-    // with a floor so that page 1 of a pamphlet is not a slot. See the comment on
-    // `.pill` below — Blitz cannot centre an input's text, so the box is made
-    // to fit rather than the text made to sit in the middle of it.
+    // How wide the page box is: padding, border and the number in it, with a
+    // floor so page 1 of a pamphlet is not a slot. Blitz cannot centre an
+    // input's text, so the box is made to fit rather than the text made to sit
+    // in the middle of it.
     //
-    // **The floor is the app's own width**, not the smallest box a digit will
-    // sit in. `.page-jump input` is `width: 44px` whatever is in it — four
-    // digits fit and one digit is centred in the same box — and a floor of
-    // twenty-eight made page 1 of any document a slot half that size beside a
-    // count that was not shrinking with it. Growing past 44 is still this
-    // reader's own answer to the centring it cannot do, and it only happens
-    // at four digits.
+    // **The floor is the app's own 44px**, not the smallest box a digit fits
+    // in: a narrower floor makes page 1 a slot half the size of the count
+    // beside it. Growing past 44 only happens at four digits.
     let page_box = (14.0 + 9.1 * page_field.chars().count() as f64).max(44.0);
     // What an icon is drawn in, and why it is a string rather than a class.
     // An inline `<svg>` here is handed to usvg with no cascade behind it — see
@@ -5803,17 +5410,15 @@ pub fn Reader(
         })
         .collect();
     // **What each page paints into itself rather than draws over.** A link's
-    // colour and a selected word's are the *page's*, baked into the bitmap
-    // exactly as `tintLinks` and `paintSelection` bake them in the app — see
-    // [`crate::page::Ramped`], which carries the reasoning. The rectangles are
-    // the box's own here and fractions of it by the time a widget reads them,
-    // because a texture is drawn at the box's size times the density, held
-    // under a ceiling and frozen mid-pinch, and a fraction is the one number
-    // that survives all three.
+    // colour and a selected word's are the *page's*, baked into the bitmap as
+    // `tintLinks` and `paintSelection` bake them in the app — see
+    // [`crate::page::Ramped`]. The rectangles are the box's own here and
+    // fractions of it by the time a widget reads them, because a texture is
+    // drawn at the box's size times the density, held under a ceiling and
+    // frozen mid-pinch, and a fraction survives all three.
     //
     // The whole map at once, so a page scrolled out of the mounting window
-    // takes its entry with it and this cannot grow by a page for every page
-    // ever read.
+    // takes its entry with it.
     chosen.place(
         boxes
             .iter()
@@ -5898,44 +5503,29 @@ pub fn Reader(
             "data-keyboard": "reader",
             // The sidebar's resize handle starts a drag but cannot track it:
             // dragging widens the panel, which moves the pointer out from
-            // under whatever element it started on. These sit on the root
-            // instead — DOM events bubble, and the root is the one ancestor
-            // that spans the whole window regardless of which side the
-            // pointer ends up over. `drag_sidebar` is a no-op with nothing to
-            // drag, so an ordinary mouse move elsewhere is one `read` and
-            // nothing more — `write` marks the signal dirty on every call
-            // whether or not anything changed, and every move in the window
-            // reaches here.
-            // A press anywhere a menu is not puts the menu away, which is
-            // `showPopover`'s rule in `ui.ts`. Three things stop propagation
-            // rather than being tested for here: the menu itself, and each of
-            // the three buttons a menu hangs off — a press that closed the
-            // menu on its way down would leave the button's own click to open
-            // it straight back up, and clicking the open menu's own button
-            // would be the one gesture that did nothing.
+            // under the element it started on. These sit on the root instead,
+            // which is the one ancestor spanning the whole window.
+            // `drag_sidebar` is a no-op with nothing to drag, so an ordinary
+            // move is one `read` — `write` marks the signal dirty whether or
+            // not anything changed, and every move reaches here.
+            // A press anywhere a menu is not puts the menu away. The menu and
+            // the buttons it hangs off stop propagation rather than being
+            // tested for here: a press that closed the menu on its way down
+            // would leave the button's own click to open it straight back up.
             // And a press anywhere the page field is not puts *that* away,
-            // which is the field's `blur` handler in `main.ts` — it abandons
-            // what was typed and puts the current page's label back. The
-            // field stops propagation itself, for the same reason the menu
-            // buttons do: a press that closed it on the way down would leave
-            // nothing to click.
-            // And a press past the find bar puts *that* away, which is
-            // `onFindOutside` in `main.ts`: "reaching past the bar puts it
-            // away, the way the Theme and Settings menus do. Anything below
-            // the toolbar is somewhere else — the document, the contents, a
-            // link — and going there is done with the search, whether or not
-            // it was said out loud."
+            // abandoning what was typed. The field stops propagation itself,
+            // for the reason the menu buttons do.
+            // And a press past the find bar puts *that* away: anything below
+            // the toolbar is somewhere else, and going there is done with the
+            // search.
             //
-            // The app spells its exceptions as a selector — `FIND_KEEPS_OPEN`,
-            // the bar itself, the top strip, the popovers, the windows and the
-            // list of results — and a handler here has no `closest` to ask
-            // with. So the top strip is asked for by *height*, which is the
-            // whole of what that half of the selector means, and the other
-            // four stop the press themselves the way the menus already do. The
-            // list of results is the one worth naming: it is this search seen
-            // larger, so picking a line out of it must not close the thing
-            // that found it — `sidebar.rs` stops the press over the Results
-            // panel and its tab.
+            // The app spells its exceptions as a selector (`FIND_KEEPS_OPEN`)
+            // and a handler here has no `closest` to ask with. So the top
+            // strip is asked for by *height*, which is what that half of the
+            // selector means, and the rest stop the press themselves. The
+            // results panel is the one worth naming: it is this search seen
+            // larger, so picking a line out of it must not close what found
+            // it — `sidebar.rs` stops the press over it and its tab.
             onmousedown: move |event| {
                 let (menu, typing, find, strip) = {
                     let held = viewer.read();
@@ -5970,12 +5560,10 @@ pub fn Reader(
                         held.signing.as_ref().is_some_and(|pad| pad.drawing),
                     )
                 };
-                // **A hand signing a name leaves the pad**, which is the whole
-                // reason this is here and not on the pad itself. The point is
-                // taken in the pad's own space, which means subtracting where
-                // the pad is — and a handler cannot ask an element where it
-                // is, so it is remembered at the press. See
-                // [`Viewer::draw_from`].
+                // **A hand signing a name leaves the pad**, which is why this
+                // is here and not on the pad. The point is taken in the pad's
+                // own space, and a handler cannot ask an element where it is,
+                // so it is remembered at the press. See [`Viewer::draw_from`].
                 if drawing {
                     let at = event.client_coordinates();
                     viewer.write().draw_on_pad((at.x, at.y));
@@ -5985,12 +5573,11 @@ pub fn Reader(
                     let x = event.client_coordinates().x;
                     viewer.write().drag_sidebar(x);
                 } else if sweeping {
-                    // The pointer has left the page it went down on, most of
-                    // the time: a sweep of two lines crosses into the gap
-                    // between pages and a sweep down the margin is never over
-                    // a page at all. So this works in the *content's* own
-                    // coordinates rather than in any element's, which is what
-                    // the origin recorded at the press is for.
+                    // The pointer has left the page it went down on most of
+                    // the time — a sweep of two lines crosses the gap between
+                    // pages, and one down the margin is never over a page at
+                    // all. So this works in the *content's* coordinates, which
+                    // is what the origin recorded at the press is for.
                     let at = event.client_coordinates();
                     viewer.write().sweep_to((at.x, at.y));
                 } else {
@@ -6015,36 +5602,26 @@ pub fn Reader(
                 if sweeping {
                     viewer.write().end_sweep();
                     // **A sweep that covered something offers to mark it.**
-                    // The app's own hard-won lesson, and the reason it is
-                    // worth repeating here: the colour popover was reachable
-                    // only by ⌘⇧H, so nothing on screen ever pointed at
+                    // Reachable only by ⌘⇧H, nothing on screen ever pointed at
                     // highlighting and nobody found the feature after it was
                     // built. Letting go of a selection is the moment the
-                    // reader is looking at the passage, which is what
-                    // `markup-assessment.md` describes the gesture as all
-                    // along.
+                    // reader is looking at the passage.
                     viewer.write().open_markup();
                 }
             },
             if toolbar_on {
             div { class: "toolbar",
                 // **Everything in this bar that is about a document is gone
-                // when there is none**, which is `#shell[data-empty="true"]`
-                // in the app's stylesheet doing the same thing by selector.
-                // What is left is the two things that are still true of a
-                // window with nothing in it: how to put something in it, and
-                // what it looks like.
+                // when there is none**, which the app does by selector. What is
+                // left is what is still true of an empty window: how to put
+                // something in it, and what it looks like.
                 //
-                // **Three groups, and the middle one is why.** This was one
-                // flat row with a spacer in it, so the page readout ended up
-                // wherever the row ran out of chips — which was the far right,
-                // beside the cog, and a page counter at the edge of the window
-                // is a page counter nobody looks at. The app puts navigation in
-                // the middle of the bar and this is that, group for group:
-                // `.bar-left` gives way because it holds a title and a title
-                // has somewhere to shrink to, `.bar-center` never gives way,
-                // and `.bar-right` grows against the left so the two sides
-                // share the slack and the middle stays near the middle.
+                // **Three groups, and the middle one is why.** A flat row with
+                // a spacer put the page readout wherever the row ran out of
+                // chips, which was the far right. `.bar-left` gives way because
+                // a title has somewhere to shrink to, `.bar-center` never gives
+                // way, and `.bar-right` grows against the left so the two sides
+                // share the slack.
                 div { class: "bar-group bar-left",
                     if !empty {
                     button {
@@ -6066,32 +5643,21 @@ pub fn Reader(
                     }
                     }
                     // **The way to another document, which is not the same
-                    // question as what can be done with this one.** Both used
-                    // to hang off the title, which is the shape the app had
-                    // before it split them and is a strange one once you say
-                    // it out loud: a menu opened by pressing the name of the
-                    // paper you are reading, four of whose items are about
-                    // papers you are not. The split is the app's own and its
-                    // reasoning is worth keeping — the picker, a second
-                    // window and the shelf all answer "open something"; a
-                    // mark, a highlight and a print belong to the document
-                    // already on screen.
+                    // question as what can be done with this one.** The picker,
+                    // a second window and the shelf all answer "open
+                    // something"; a mark, a highlight and a print belong to the
+                    // document already on screen. Both hanging off the title
+                    // meant a menu opened by pressing the name of the paper you
+                    // are reading, four of whose items are about papers you are
+                    // not.
                     //
-                    // **Every menu hangs inside an anchor of its own, and
-                    // that is the whole of where a menu appears.** They were
-                    // one layer pinned to the ends of the toolbar — the
-                    // Document menu to the left edge, the other two to the
-                    // right — on the reasoning that a measured offset would
-                    // need keeping in step by hand and there is no way to ask
-                    // an element where it is from here. Both halves of that
-                    // were true and the conclusion was wrong: an absolutely
+                    // **Every menu hangs inside an anchor of its own, and that
+                    // is the whole of where a menu appears.** An absolutely
                     // positioned child of a `position: relative` wrapper needs
-                    // no measurement at all, and it is *the browser* that
-                    // keeps it in step.
-                    //
-                    // Out of the flow, so the 46px row is still 46px whatever
-                    // is hanging off it — which is what the layer was for and
-                    // is not a reason to have one.
+                    // no measurement, and the engine keeps it in step — where a
+                    // single layer pinned to the toolbar's ends did not. Out of
+                    // the flow, so the 46px row stays 46px whatever hangs off
+                    // it.
                     div { class: "anchor",
                         button {
                             class: if menu == Some(Menu::Open) { "chip open on" } else { "chip open" },
@@ -6124,12 +5690,11 @@ pub fn Reader(
                                     span { class: "menu-label", "Open document…" }
                                     span { class: "menu-key", "{key_open}" }
                                 }
-                                // The two-documents-at-once route in one step,
-                                // which is the app's own wording and its own
-                                // reason: pick the second and it arrives beside
-                                // the first rather than on top of it. A menu
-                                // item and not a key, because it is not a key
-                                // in `keys.ts` either.
+                                // The two-documents-at-once route in one step:
+                                // pick the second and it arrives beside the
+                                // first rather than on top of it. A menu item
+                                // and not a key, because it is not a key in
+                                // `keys.ts` either.
                                 button {
                                     class: "menu-item",
                                     onclick: {
@@ -6157,14 +5722,11 @@ pub fn Reader(
                                     span { class: "menu-label", "New window" }
                                     span { class: "menu-key", "{key_new_window}" }
                                 }
-                                // And the shelf, which is the app's own last
-                                // section of this menu. It is the same list
-                                // the start screen shows and it is here for
-                                // the reader who has a document open: the
-                                // start screen is unreachable without first
-                                // putting that one down, and "the paper I was
-                                // reading yesterday" should not cost a trip
-                                // through the file picker to find again.
+                                // And the shelf, which is the same list the
+                                // start screen shows. It is here for the reader
+                                // who has a document open: the start screen is
+                                // unreachable without first putting that one
+                                // down.
                                 if !recents.is_empty() {
                                     div { class: "menu-rule" }
                                     div { class: "menu-section", "Recently read" }
@@ -6189,12 +5751,11 @@ pub fn Reader(
                                                     }
                                                 }
                                             },
-                                            // A drawing rather than the empty tick
-                                            // column every other item carries: the
-                                            // app's own `ui.menuItem({icon:
-                                            // "document"})`, and it is what makes
-                                            // this section read as a shelf rather
-                                            // than as four more commands.
+                                            // A drawing rather than the empty
+                                            // tick column every other item
+                                            // carries, so the section reads as
+                                            // a shelf rather than as four more
+                                            // commands.
                                             span { class: "menu-tick",
                                                 Icon { name: "document", stroke: crate::palette::hex(wearing.faint()) }
                                             }
@@ -6208,12 +5769,9 @@ pub fn Reader(
                         }
                     }
                     // The two window verbs, in the bar only while there is
-                    // nothing else in it. This is the app's own rule — see
-                    // `#shell:not([data-empty="true"]) #new-window` in
-                    // `styles.css` — and the reason is that a window with a
-                    // document in it has better things to spend the room on,
-                    // while a window with none has ⌘N and ⌘W and no way of
-                    // knowing it.
+                    // nothing else in it: a window with a document has better
+                    // things to spend the room on, and one with none has ⌘N
+                    // and ⌘W and no way of knowing it.
                     if empty {
                     button {
                         class: "chip new-window",
@@ -6242,10 +5800,9 @@ pub fn Reader(
                     if !empty {
                     // The gesture the app calls Close, and the one place a
                     // document can be put down without the window going with
-                    // it. A button rather than a menu item, which is where
-                    // the app keeps it: it was under the title here, and a
-                    // reader looking for how to put a document down does not
-                    // look inside a menu named after the document.
+                    // it. A button rather than a menu item: a reader looking
+                    // for how to put a document down does not look inside a
+                    // menu named after the document.
                     button {
                         class: "chip close-doc",
                         "data-item": "close-document",
@@ -6278,10 +5835,9 @@ pub fn Reader(
                         "Close"
                     }
                     // What the document is called — its own `/Title` where
-                    // that is worth having, and the file's name where it is
-                    // not, see `store::worth_calling` — and the button the
-                    // document's own menu hangs off, which is where the app
-                    // puts it too.
+                    // that is worth having and the file's name where it is not,
+                    // see `store::worth_calling` — and the button its menu
+                    // hangs off.
                     // The extra air the app puts in front of the name lives on
                     // the anchor rather than on the button, so that the menu
                     // still comes down flush with the button it belongs to.
@@ -6295,21 +5851,17 @@ pub fn Reader(
                             },
                             onmousedown: move |event| event.stop_propagation(),
                             onclick: move |_| viewer.write().show_menu(Menu::Document),
-                            // **No icon**, which is `#doc-title` in the app's
-                            // own `index.html`: this is the one thing in the
-                            // bar that is not a verb, and an icon in front of
-                            // a file name says nothing the name does not. It
-                            // also cost the name twenty-three pixels in a bar
-                            // that has none to spare — the name is the first
-                            // thing squeezed when the bar runs out of room,
-                            // so what the icon was taking came straight out
-                            // of what the reader can read.
+                            // **No icon.** This is the one thing in the bar
+                            // that is not a verb, and an icon in front of a
+                            // file name says nothing the name does not — while
+                            // costing it twenty-three pixels in a bar with none
+                            // to spare.
                             //
-                            // The colour is named here for the reason the
-                            // zoom readout's is: there is no icon on this
-                            // button any more, so nothing about it changes
-                            // when the theme does, and Blitz settles the
-                            // colour of a text run when it builds the run.
+                            // The colour is named here for the reason the zoom
+                            // readout's is: with no icon nothing about this
+                            // button changes when the theme does, and Blitz
+                            // settles a text run's colour when it builds the
+                            // run.
                             style: if menu == Some(Menu::Document) { "color: {ink_on}" } else { "color: {crate::palette::hex(wearing.faint())}" },
                             "{shelf_name}"
                         }
@@ -6340,13 +5892,11 @@ pub fn Reader(
                                     Icon { name: "folder", stroke: ink.clone() }
                                     span { class: "menu-label", "Show in {crate::app::file_manager_name()}" }
                                 }
-                                // The page marked, which used to be a chip in
-                                // the bar and is not one in the app's: a mark
-                                // is set once and read from the Contents
-                                // panel, so a permanent button for it is a
-                                // permanent button for something nobody
-                                // presses twice in an hour. It ticks, which
-                                // is what the chip's "on" state was saying.
+                                // The page marked. Not a chip in the bar: a
+                                // mark is set once and read from the Contents
+                                // panel, so a permanent button for it is one
+                                // nobody presses twice in an hour. It ticks,
+                                // which is what the chip's "on" state said.
                                 button {
                                     class: "menu-item",
                                     "data-item": "mark",
@@ -6360,16 +5910,11 @@ pub fn Reader(
                                     span { class: "menu-label", "Mark this page" }
                                     span { class: "menu-key", "{key_mark}" }
                                 }
-                                // **The one item in this menu the app has
-                                // no counterpart for.** Signing is not
-                                // parity — see [`crate::sign`], and
-                                // `signing-assessment.md` for the two things
-                                // the word means and which of them this is.
-                                // It sits beside Mark this page because the
-                                // two are the same kind of gesture: something
-                                // done *to* the document, as against the
-                                // three below, which are ways of taking it
-                                // somewhere else.
+                                // **The one item in this menu the app has no
+                                // counterpart for** — see [`crate::sign`]. It
+                                // sits beside Mark this page because both are
+                                // done *to* the document, as against the three
+                                // below, which take it somewhere else.
                                 button {
                                     class: "menu-item",
                                     "data-item": "sign",
@@ -6459,11 +6004,10 @@ pub fn Reader(
                     }
                 }
                 // The middle of the bar, and the only thing in it: where you
-                // are, with a step either side of it. The two buttons are the
-                // app's `#prev-page` and `#next-page` — a page is turned by a
-                // key or by scrolling far more often than by pressing an
-                // arrow, but the pair is what makes the number between them
-                // read as a control rather than as a readout.
+                // are, with a step either side. A page is turned by a key or
+                // by scrolling far more often than by pressing an arrow, but
+                // the pair is what makes the number between them read as a
+                // control rather than a readout.
                 div { class: "bar-group bar-center",
                     if !empty {
                     button {
@@ -6481,36 +6025,23 @@ pub fn Reader(
                     // front of them has a number to type. What it shows is the
                     // page's *label* — see [`Viewer::label`].
                     // **The box is the width of the number in it, and that is a
-                    // workaround wearing a design's clothes.** Blitz lays a text
-                    // input's own text out through parley and never gives parley
-                    // an alignment — `create_text_editor` in
-                    // `blitz-dom/src/layout/construct.rs` copies the font size,
-                    // the line height and the brush and stops, and it calls
-                    // `editor.set_width(None)`, so there is no box to align
-                    // within either. `text-align: center` on an input does
-                    // nothing at all, which is what left the page number pinned
-                    // against the left wall of a box wide enough for four digits.
-                    //
-                    // Centring it is therefore not available; making the box the
-                    // size of what is in it is, and it is the better answer
-                    // anyway — the field grows as digits are typed and the number
-                    // never sits in a puddle of empty box. The button and the
-                    // field take the same width so that opening the field moves
-                    // nothing.
+                    // workaround wearing a design's clothes.** `text-align:
+                    // center` on an input does nothing in Blitz:
+                    // `create_text_editor` never gives parley an alignment and
+                    // calls `editor.set_width(None)`, so there is no box to
+                    // align within. Making the box fit its contents is the
+                    // available answer and the better one — the field grows as
+                    // digits are typed. The button and the field take the same
+                    // width, so opening the field moves nothing.
                     div { class: "pill",
                         // **A readout that becomes a field, rather than a field
-                        // that is always one**, which is where this parts company
-                        // with the app — and it is Blitz's focus rule that decides
-                        // it, not taste. The keyboard is handed back to the
-                        // innermost element asking for it (see
-                        // [`give_keyboard_back`]), so a field that is always in
-                        // the toolbar either always asks — and then every
-                        // keystroke in the reader goes into it — or stops asking
-                        // while still holding the focus, which is the same dead
-                        // keyboard one level along. The find bar has neither
-                        // problem because its field *stops existing* when the bar
-                        // closes, and the focus goes with it. This is that
-                        // mechanism, borrowed.
+                        // that is always one** — Blitz's focus rule decides it,
+                        // not taste. The keyboard goes to the innermost element
+                        // asking for it, so a field always in the toolbar either
+                        // always asks (and every keystroke goes into it) or stops
+                        // asking while still holding the focus, which is the same
+                        // dead keyboard. The find bar's field *stops existing*
+                        // when the bar closes; this is that, borrowed.
                         if typing_page {
                         input {
                             class: if page_fresh { "page-field fresh" } else { "page-field" },
@@ -6518,14 +6049,11 @@ pub fn Reader(
                             r#type: "text",
                             value: "{page_field}",
                             // Not the root's business: see its `onmousedown`.
-                            // A press inside the field is somebody putting the
-                            // caret somewhere, not somebody leaving — and putting
-                            // the caret somewhere is also the end of the
-                            // "everything is selected" state, exactly as a click
-                            // into a selected field is anywhere else. `oninput`
-                            // above depends on that: it can only take the label
-                            // off the front while the caret is still at the
-                            // front.
+                            // A press inside the field is putting the caret
+                            // somewhere, which also ends the "everything is
+                            // selected" state — and `oninput` above depends on
+                            // that, being able to take the label off the front
+                            // only while the caret is still at the front.
                             onmousedown: move |event| {
                                 event.stop_propagation();
                                 if viewer.read().page_fresh {
@@ -6539,25 +6067,19 @@ pub fn Reader(
                                 let task = node.set_focus(true);
                                 spawn(async move { let _ = task.await; });
                             },
-                            // **This is the other half of the emulated
-                            // select-all, and it is here rather than in the
-                            // keydown because of where the caret ends up.**
-                            // Cancelling the keystroke and writing the character
-                            // into the value attribute works — Blitz's
-                            // `set_text` replaces the editor's string — but
-                            // `set_text` does not touch the *selection*, and a
-                            // field that has just been built has its caret at
-                            // offset 0. So the second digit landed in front of
-                            // the first and "50" was typed as "05", which parses
-                            // to page 5 and is the sort of fault that passes
-                            // every test written in one digit.
+                            // **The other half of the emulated select-all, and
+                            // it is here rather than in the keydown because of
+                            // where the caret ends up.** `set_text` replaces the
+                            // editor's string and does not touch the *selection*,
+                            // and a freshly built field has its caret at offset
+                            // 0 — so the second digit landed in front of the
+                            // first and "50" was typed as "05", which parses to
+                            // page 5 and passes every test written in one digit.
                             //
-                            // Letting the editor do its own insertion moves the
-                            // caret for us. Fresh means the caret was at the
-                            // front, so whatever arrived is at the front of the
-                            // value, and taking the old label off the end leaves
-                            // exactly what was typed — with the caret now behind
-                            // it, where the next digit wants it.
+                            // Letting the editor insert moves the caret for us:
+                            // fresh means it was at the front, so what arrived is
+                            // at the front and taking the old label off the end
+                            // leaves exactly what was typed.
                             oninput: move |event| {
                                 let typed = event.value();
                                 let held = viewer.read();
@@ -6586,15 +6108,12 @@ pub fn Reader(
                                         viewer.write().commit_page();
                                     }
                                     // **A menu is outermost and this field owns
-                                    // the keyboard, which is a contradiction only
-                                    // Blitz makes.** The app puts the ordering in
-                                    // one document-level capturing handler; here
-                                    // the keyboard belongs to the innermost
-                                    // element asking for it, so a field that has
-                                    // it has to defer to the menu itself. See
-                                    // `Action::Dismiss`, which is the same list in
-                                    // the same order for the case where no field
-                                    // has the keyboard at all.
+                                    // the keyboard.** The app puts the ordering
+                                    // in one capturing handler; here the keyboard
+                                    // belongs to the innermost element asking, so
+                                    // a field that has it must defer to the menu
+                                    // itself. `Action::Dismiss` is the same list
+                                    // for when no field has the keyboard.
                                     Key::Escape => {
                                         event.stop_propagation();
                                         if !viewer.write().close_menu() {
@@ -6602,11 +6121,10 @@ pub fn Reader(
                                         }
                                     }
                                     // Backspace on a field whose contents are
-                                    // all "selected" empties it, which is what
-                                    // Backspace on a real selection does. The
-                                    // editor's own would delete what is before
-                                    // the caret, and the caret is at the front,
-                                    // so without this it does nothing at all.
+                                    // all "selected" empties it. The editor's own
+                                    // deletes what is before the caret, and the
+                                    // caret is at the front, so it would do
+                                    // nothing.
                                     Key::Backspace | Key::Delete
                                         if plain && viewer.read().page_fresh =>
                                     {
@@ -6625,12 +6143,9 @@ pub fn Reader(
                         button {
                             class: "page-now",
                             // The colour is written out beside the width for
-                            // the reason the zoom readout's is: this is a
-                            // label that does not change when the theme does,
-                            // and Blitz was leaving it in the ink of the theme
-                            // before — which on a dark theme after a light one
-                            // is a page number nobody can see. See
-                            // `.chip.fit` above and `PROGRESS.md`.
+                            // the zoom readout's reason: Blitz left this label
+                            // in the previous theme's ink, which on a dark theme
+                            // after a light one is a page number nobody can see.
                             style: "width: {page_box}px; color: {crate::palette::hex(wearing.text)};",
                             "aria-label": "Go to page",
                             onclick: move |_| viewer.write().open_page_field(),
@@ -6661,10 +6176,8 @@ pub fn Reader(
                         Icon { name: "search", stroke: if find_open { ink_on.clone() } else { ink.clone() } }
                         "Search"
                     }
-                    // **Left and Right, in the bar.** `#rotate-left` and
-                    // `#rotate-right` in `index.html`, beside Search and
-                    // before the zoom — they were items in the View menu here,
-                    // which is a place to go looking for something you do
+                    // **Left and Right, in the bar** rather than in the View
+                    // menu, which is a place to go looking for something you do
                     // twice in a row while reading a scan that came in
                     // sideways.
                     button {
@@ -6684,15 +6197,14 @@ pub fn Reader(
                     }
                     if !empty {
                     // Two buttons that were a cycle and are now a list. The chip
-                    // still *says* what is in force — the harness reads the zoom
-                    // and the theme off these two and a reader reads them the same
-                    // way — and what changed is that clicking one shows the
-                    // choices instead of stepping to the next of them.
-                    // The three of them in one sunk group, minus on the left and
-                    // plus on the right, which is `.zoom-group` in the app. Three
+                    // still *says* what is in force, which is how the harness and
+                    // a reader both read it; what changed is that clicking shows
+                    // the choices instead of stepping to the next.
+                    //
+                    // Three in one sunk group, minus left and plus right. Three
                     // quiet words in a row of quiet words read as three more
-                    // labels; a stepper with the readout between its two ends
-                    // reads as one control, and it is the same three elements.
+                    // labels; a stepper with the readout between its ends reads as
+                    // one control, from the same three elements.
                     div { class: "zoom-group",
                         button {
                             class: "chip zoom-out",
@@ -6704,20 +6216,15 @@ pub fn Reader(
                             button {
                                 class: if menu == Some(Menu::View) { "chip fit on" } else { "chip fit" },
                                 // **The one label in the bar with no icon
-                                // beside it, and the only one that kept the
-                                // last theme's colour.** Blitz rebuilds an
-                                // element's inline layout — which is where the
-                                // colour of its text is settled — when
-                                // something about that element or its children
-                                // is mutated, and a change to a custom
-                                // property on the root is neither. Every other
-                                // chip has an `Icon` whose `stroke` is the
-                                // theme's, so every other chip is mutated and
-                                // comes out right; this one changed colour on
-                                // the next zoom step, which is when its text
-                                // changed. Naming the colour here is the same
-                                // answer the icons already carry rather than a
-                                // second one. See `PROGRESS.md`.
+                                // beside it, and the only one that kept the last
+                                // theme's colour.** Blitz settles a text run's
+                                // colour when it builds the run, and rebuilds
+                                // only when the element or its children are
+                                // mutated — a change to a custom property on the
+                                // root is neither. Every other chip has an `Icon`
+                                // whose `stroke` is the theme's, so every other
+                                // chip is mutated and comes out right. Naming the
+                                // colour here is the same answer the icons carry.
                                 style: if menu == Some(Menu::View) { "color: {ink_on}" } else { "color: {ink}" },
                                 onmousedown: move |event| event.stop_propagation(),
                                 onclick: move |_| viewer.write().show_menu(Menu::View),
@@ -6730,20 +6237,15 @@ pub fn Reader(
                                     // the press. This was on the layer these three used to share.
                                     onmousedown: move |event| event.stop_propagation(),
                                     // **`showZoomMenu` in `main.ts`, item for
-                                    // item.** It had grown spread and rotation
-                                    // here, which are not what a reader
-                                    // pressing the zoom is asking about —
-                                    // spread is in the settings menu next door
+                                    // item**: a number to type and the presets
+                                    // under it. Spread is in the settings menu
                                     // and rotation is two buttons in the bar,
-                                    // which is where the app keeps them. What
-                                    // it was missing is the half that makes
-                                    // this a zoom menu at all: a number to
-                                    // type and the presets under it.
+                                    // which is where the app keeps them and is
+                                    // not what a reader pressing the zoom is
+                                    // asking about.
                                     //
-                                    // Nothing in here puts the menu away: a
-                                    // zoom is something you try on, like a
-                                    // theme, so the ticks move and the list
-                                    // stays.
+                                    // Nothing in here puts the menu away: a zoom
+                                    // is something you try on, like a theme.
                                     button {
                                         class: if fit == Fit::Width { "menu-item on" } else { "menu-item" },
                                         onclick: move |_| viewer.write().set_fit(Fit::Width),
@@ -6767,13 +6269,12 @@ pub fn Reader(
                                         span { class: "menu-key", "{key_actual}" }
                                     }
                                     div { class: "menu-rule" }
-                                    // The rest of the ladder, for the sizes
-                                    // the presets below do not name. It starts
-                                    // from what is on the screen rather than
-                                    // from the remembered zoom, because in a
-                                    // fit mode those are different numbers and
-                                    // the one being looked at is the one to
-                                    // type over.
+                                    // The rest of the ladder, for the sizes the
+                                    // presets do not name. It starts from what is
+                                    // on the screen rather than the remembered
+                                    // zoom: in a fit mode those differ, and the
+                                    // one being looked at is the one to type
+                                    // over.
                                     div { class: "menu-row",
                                         label { class: "menu-row-label", "Zoom to" }
                                         crate::prefs::Stepper {
@@ -6816,14 +6317,10 @@ pub fn Reader(
                             class: if menu == Some(Menu::Theme) { "chip theme on" } else { "chip theme" },
                             onmousedown: move |event| event.stop_propagation(),
                             onclick: move |_| viewer.write().show_menu(Menu::Theme),
-                            // **"Theme", not the theme's name**, which is
-                            // `#theme` in the app's own `index.html` and is
-                            // the rule the bar beside it follows: a button
-                            // says what pressing it does. The name of the
-                            // theme in force is a tick in the menu, where the
-                            // fourteen it is one of are. The harness still
-                            // reads it — off `data-theme`, which is the
-                            // reader's own account of what it is wearing and
+                            // **"Theme", not the theme's name**: a button says
+                            // what pressing it does, and the theme in force is a
+                            // tick in the menu where the fourteen are. The
+                            // harness reads it off `data-theme` instead, which
                             // is not a label anybody has to look at.
                             "data-theme": "{theme_name}",
                             Icon { name: "theme", stroke: if menu == Some(Menu::Theme) { ink_on.clone() } else { ink.clone() } }
@@ -6835,13 +6332,11 @@ pub fn Reader(
                                 // puts the menu away, and the item's own click comes after
                                 // the press. This was on the layer these three used to share.
                                 onmousedown: move |event| event.stop_propagation(),
-                                // **The two switches above the list**, which is
-                                // `showThemeMenu` in `main.ts`: dark mode is a
-                                // move between the pair the reader has chosen
-                                // and following the machine is the thing that
-                                // does it for them, and both belong where the
-                                // themes are. They were on the Appearance page
-                                // alone here, which is a window away.
+                                // **The two switches above the list.** Dark mode
+                                // is a move between the pair the reader chose and
+                                // following the machine does it for them, so both
+                                // belong where the themes are rather than a
+                                // window away on the Appearance page.
                                 div { class: "menu-row",
                                     label { class: "menu-row-label", "Dark mode" }
                                     span { class: "menu-row-note", "{key_dark}" }
@@ -6874,12 +6369,11 @@ pub fn Reader(
                                                 onclick: move |_| viewer.write().set_theme(index),
                                                 span { class: "menu-tick", {if index == theme_index { "✓" } else { "" }} }
                                                 // Two letters of the theme, in
-                                                // the theme's own colours —
-                                                // `ui.swatch`, and read through
-                                                // `parseColor` for its reason:
-                                                // a swatch that hands a raw
-                                                // string to CSS shows a colour
-                                                // the renderer cannot read.
+                                                // its own colours, read through
+                                                // `parseColor`: a swatch that
+                                                // hands a raw string to CSS shows
+                                                // a colour the renderer cannot
+                                                // read.
                                                 span {
                                                     class: "swatch",
                                                     style: "background: {paper}; color: {ink};",
@@ -6891,12 +6385,11 @@ pub fn Reader(
                                         }
                                     }
                                 }
-                                // The three at the foot of `showThemeMenu`,
-                                // and they are the whole of the way in to the
-                                // theme editor from the bar. A built-in is
-                                // copied rather than edited, which is the
-                                // app's wording and its reason: a shipped
-                                // theme is written back on every run.
+                                // The three at the foot of `showThemeMenu`, and
+                                // the whole of the way in to the theme editor
+                                // from the bar. A built-in is copied rather than
+                                // edited, because a shipped theme is written back
+                                // on every run.
                                 div { class: "menu-rule" }
                                 button {
                                     class: "menu-item",
@@ -6959,14 +6452,10 @@ pub fn Reader(
                             }
                         }
                     }
-                    // **The cog opens a menu, not the window.**
-                    // `showSettingsMenu` in `main.ts`: the four or five
-                    // switches somebody reaches for while reading — the
-                    // toolbar, full screen, how the pages come, whether a
-                    // picture takes the theme — and "All settings…" at the
-                    // bottom for the rest. Going straight to the window meant
-                    // a window over the document for a switch that is one
-                    // press.
+                    // **The cog opens a menu, not the window**: the switches
+                    // somebody reaches for while reading, and "All settings…" at
+                    // the bottom for the rest. Going straight to the window meant
+                    // a window over the document for a switch that is one press.
                     div { class: "anchor",
                         button {
                             class: if menu == Some(Menu::Settings) { "chip settings on" } else { "chip settings" },
@@ -7083,23 +6572,18 @@ pub fn Reader(
                 }
             }
             }
-            // **The app's own card, under the toolbar at the right.** It was
-            // a row of the flex column, which is simpler and is not what a
-            // find bar is: it took forty pixels off the document for as long
-            // as it was up, so opening it moved the page being read. Two
-            // rows, `.find-row` and `.find-options`, exactly as `index.html`
-            // has them — and `top` in a style rather than the app's
-            // `#shell[data-toolbar="hidden"]`, because the bar comes up to
+            // **The app's own card, under the toolbar at the right.** As a row
+            // of the flex column it took forty pixels off the document for as
+            // long as it was up, so opening it moved the page being read. `top`
+            // is in a style rather than a selector, because the bar comes up to
             // meet the window's edge when the toolbar is away and there is no
-            // shell attribute here to hang a selector off.
+            // shell attribute here to hang one off.
             if find_open {
                 div { class: "find-bar", style: "top: {find_top}px;",
-                // `#find-bar` is the first name in `FIND_KEEPS_OPEN`, and the
-                // card sits *below* the toolbar — so without this the root's
-                // "a press past the bar puts it away" would fire on the bar's
-                // own switches, and Highlight all would close the search it
-                // was about to change. Said once here rather than on each of
-                // the eight controls inside it.
+                // The card sits *below* the toolbar, so without this the root's
+                // "a press past the bar puts it away" fires on the bar's own
+                // switches and Highlight all closes the search it was about to
+                // change. Said once here rather than on all eight controls.
                 onmousedown: move |event| event.stop_propagation(),
                 div { class: "find-row",
                     span { class: "find-icon", Icon { name: "search", stroke: faint.clone() } }
@@ -7109,16 +6593,14 @@ pub fn Reader(
                         value: "{find_query}",
                         placeholder: "Search this document",
                         // While the bar is up, this is the element that wants
-                        // the keyboard — and it is inside the one that
-                        // otherwise does, which is what makes the rule in
-                        // `give_keyboard_back` "the innermost one asking".
+                        // the keyboard, inside the one that otherwise does —
+                        // which is what makes `give_keyboard_back`'s rule "the
+                        // innermost one asking".
                         //
-                        // Unless the page field is up, which is the one case
-                        // where two of them would ask at once: they are
-                        // siblings rather than one inside the other, so
-                        // "innermost" cannot separate them and would settle it
-                        // by document order — which would hand ⌥⌘G's field to
-                        // the find bar. Two fields never both ask.
+                        // Unless the page field is up: the two are siblings, so
+                        // "innermost" cannot separate them and document order
+                        // would hand ⌥⌘G's field to the find bar. Two fields
+                        // never both ask.
                         "data-keyboard": if typing_page { None } else { Some("find") },
                         onmounted: move |event| {
                             let node = event.data();
@@ -7130,13 +6612,11 @@ pub fn Reader(
                             let token = viewer.write().find(&typed);
                             scan(token);
                         },
-                        // Every key typed here also bubbles to the root, and
-                        // the root turns keys into actions — so without this,
-                        // typing "just" into the field scrolls the document
-                        // four times on the way. What the field lets past is
-                        // a chord with a modifier on it: ⌘+ still zooms while
-                        // somebody is searching, exactly as it does in the
-                        // app.
+                        // Every key typed here also bubbles to the root, which
+                        // turns keys into actions — so without this, typing
+                        // "just" into the field scrolls the document four times.
+                        // What the field lets past is a chord with a modifier on
+                        // it, so ⌘+ still zooms while somebody is searching.
                         onkeydown: move |event| {
                             let key = event.key();
                             let modifiers = event.modifiers();
@@ -7158,15 +6638,11 @@ pub fn Reader(
                                     }
                                 }
                                 _ if plain => event.stop_propagation(),
-                                // A chord with a modifier on it is not
-                                // typing — and Blitz applies the keystroke to
-                                // a focused field whatever is held down, so
-                                // ⌘G stepped to the next match *and* put a
-                                // "g" in the query, which started a search
-                                // for something nobody typed. What the field
-                                // keeps is what a text field owns; everything
-                                // else is prevented here and answered on the
-                                // root, where the keymap is.
+                                // A chord with a modifier is not typing — and
+                                // Blitz applies the keystroke to a focused field
+                                // whatever is held down, so ⌘G stepped to the
+                                // next match *and* put a "g" in the query. What
+                                // the field keeps is what a text field owns.
                                 Key::Character(ref typed)
                                     if matches!(typed.as_str(), "a" | "c" | "v" | "x" | "z") => {}
                                 _ => event.prevent_default(),
@@ -7209,13 +6685,12 @@ pub fn Reader(
                         Icon { name: "close", stroke: ink.clone() }
                     }
                 }
-                // **The three switches, in the app's own order and under the
-                // field they belong to.** `#find-highlight`, `#find-case`,
-                // `#find-words` in `index.html`: two of them change what is
-                // found and the first changes only how much of it is painted,
-                // which is the one a reader reaches for most. Each wears a
-                // tick whether it is on or not, so turning one on does not
-                // shuffle the other two sideways under the pointer.
+                // **The three switches, in the app's order and under the field
+                // they belong to.** Two change what is found; the first changes
+                // only how much of it is painted, and is the one a reader
+                // reaches for most. Each wears a tick whether on or not, so
+                // turning one on does not shuffle the others sideways under the
+                // pointer.
                 div { class: "find-options",
                     button {
                         class: if highlight_all { "find-option find-all on" } else { "find-option find-all" },
@@ -7266,13 +6741,12 @@ pub fn Reader(
                 class: "viewer",
                 onmounted: move |_| resize_from_window(viewer),
                 onwheel: move |event| {
-                    // **⌃-wheel and ⌘-wheel are zoom, everywhere else and
-                    // here.** A mouse with no pinch to offer says it this way,
-                    // and so does a trackpad on the platforms where winit
-                    // reports a pinch as a modified wheel rather than as a
-                    // gesture of its own. The factor is exponential in the
-                    // distance so that a fast flick and a slow drag arrive at
-                    // the same place per pixel; 320 is the app's own constant.
+                    // **⌃-wheel and ⌘-wheel are zoom**, which is how a mouse
+                    // with no pinch says it and how winit reports a pinch on
+                    // the platforms that do not send a gesture. The factor is
+                    // exponential in the distance, so a fast flick and a slow
+                    // drag arrive at the same place per pixel; 320 is the app's
+                    // constant.
                     if crate::keymap::command(event.modifiers())
                         || event.modifiers().ctrl()
                     {
@@ -7288,12 +6762,9 @@ pub fn Reader(
                         return;
                     }
                     // A trackpad sends pixels and a mouse sends lines; both
-                    // arrive here, and a line is what the app calls a line.
-                    // The sign is the platform's, not the DOM's: winit hands
-                    // over a negative y for reading forwards and Blitz's own
-                    // scroller negates it, so this negates it too rather than
-                    // scrolling the opposite way from every other window on
-                    // the machine.
+                    // arrive here. The sign is the platform's, not the DOM's:
+                    // winit hands over a negative y for reading forwards and
+                    // Blitz's own scroller negates it, so this does too.
                     let (across, down) = match event.delta() {
                         WheelDelta::Pixels(delta) => (delta.x, delta.y),
                         WheelDelta::Lines(delta) => (delta.x * LINE, delta.y * LINE),
@@ -7378,12 +6849,10 @@ pub fn Reader(
             // why it outlives the toolbar. Presenting is the case where
             // nothing is on screen at all.
             if !presenting && !notice.is_empty() {
-                // Over the document and centred near its lower edge, which is
-                // the app's own `.notice`. Two elements rather than one
-                // because centring is done by the outer row: the app reaches
-                // the middle with `left: 50%` and a `translateX(-50%)`, and a
-                // transform is not something to lean on in Blitz when a flex
-                // row does it with no transform at all.
+                // Over the document and centred near its lower edge. Two
+                // elements rather than one because centring is the outer row's:
+                // a flex row does it with no transform, and a transform is not
+                // something to lean on in Blitz.
                 div { class: "notice-line",
                     div { class: "notice", "{notice}" }
                 }
@@ -7400,12 +6869,11 @@ pub fn Reader(
                     }
                 }
             }
-            // A note, opened. `showNote` in `main.ts` is a window for the
-            // reason this one is: a note can be a paragraph, and a tooltip's
-            // whole vocabulary is one line that goes away when the pointer
-            // does. The sentence at the foot of it is the app's own and is
-            // the honest half — this reader shows the notes a document
-            // carries and has no way to write one.
+            // A note, opened. A window rather than a tooltip because a note can
+            // be a paragraph, and a tooltip's whole vocabulary is one line that
+            // goes away when the pointer does. The sentence at its foot is the
+            // honest half: this reader shows the notes a document carries and
+            // has no way to write one.
             if let Some((_page, note)) = note_open {
                 div {
                     class: "window-scrim",
@@ -7466,12 +6934,10 @@ pub fn Reader(
                                 Icon { name: "close", stroke: ink.clone() }
                             }
                         }
-                        // `.window-pane`, not `.note-body`: this is a pane of
-                        // rows that can outrun the window — a document naming
-                        // all ten facts is eleven rows — and a note is a
-                        // paragraph that cannot. The padding and the scroll
-                        // come with the class, which is the app's `ui.field`
-                        // arrangement exactly.
+                        // `.window-pane`, not `.note-body`: this is rows that
+                        // can outrun the window, where a note is a paragraph
+                        // that cannot. The padding and the scroll come with the
+                        // class.
                         div { class: "window-pane details-body",
                             h2 { class: "pane-title details-name", "{shelf_name}" }
                             for (label, value) in details_rows {
@@ -7521,11 +6987,9 @@ pub fn Reader(
                                 "Ink on the page, the way a pen is. It is written into the document and any reader can see it — and it is not a digital signature: it proves nothing about who signed or whether the file has changed since."
                             }
                             // **What the document is already signed with, in
-                            // the other sense of the word**, and it comes
-                            // first because it is the thing the sentence above
-                            // has just said this is not. A reader who came
-                            // here wanting the green tick should meet the
-                            // document's own signatures before they meet the
+                            // the other sense of the word.** First, because a
+                            // reader who came here wanting the green tick should
+                            // meet the document's own signatures before the
                             // pad.
                             if !seals.is_empty() {
                                 h3 { class: "pane-group", "Digital signatures" }
@@ -7596,11 +7060,9 @@ pub fn Reader(
                                                     move |_| viewer.write().sign_with(entry.clone())
                                                 },
                                                 // The signature itself, drawn
-                                                // from the strokes on disk —
-                                                // which is the only honest
-                                                // preview there is, and it is
+                                                // from the strokes on disk, by
                                                 // the same arithmetic
-                                                // `sign::place` does onto a
+                                                // `sign::place` uses onto a
                                                 // page.
                                                 Scrawl { signature: entry.clone(), width: 132.0, height: 44.0 }
                                                 span { class: "sign-name", "{entry.name}" }
@@ -7622,21 +7084,17 @@ pub fn Reader(
                                 {if nothing_kept { "Draw one" } else { "Or draw another" }}
                             }
                             // **The pad.** A press begins a stroke; the moves
-                            // and the release are heard on the root, for the
-                            // reason a sweep down the document is — a hand
-                            // signing a name leaves the box it started in more
-                            // often than not, and the root is the one ancestor
-                            // that spans the window.
+                            // and the release are heard on the root, because a
+                            // hand signing a name leaves the box it started in
+                            // more often than not.
                             div {
                                 class: "sign-pad",
                                 // **The size is written here and nowhere
                                 // else.** The stylesheet is a `const &str` and
-                                // cannot interpolate, so a pad sized in CSS
-                                // and read in Rust would be two numbers that
-                                // have to agree — and the handler's arithmetic
-                                // is wrong by exactly their difference, which
-                                // shows up as a signature drawn slightly off
-                                // the hand. One source, on the element.
+                                // cannot interpolate, so a pad sized in CSS and
+                                // read in Rust would be two numbers that have to
+                                // agree — and the handler is wrong by exactly
+                                // their difference.
                                 style: "width: {PAD_WIDTH}px; height: {PAD_HEIGHT}px;",
                                 onmousedown: move |event| {
                                     event.stop_propagation();
@@ -7691,14 +7149,11 @@ pub fn Reader(
                                     "Keep this signature"
                                 }
                             }
-                            // **The other half of signing something**, which
-                            // is the line beside the name: a date, a place, a
-                            // printed version of what was just drawn. It is
-                            // here rather than in a window of its own because
-                            // it is the same errand — the reader about to sign
-                            // is the reader about to date it — and it is last
-                            // because the signature is the thing being asked
-                            // for and this is the note beside it.
+                            // **The other half of signing something**: a date,
+                            // a place, a printed version of what was just drawn.
+                            // Here rather than in a window of its own because it
+                            // is the same errand, and last because the signature
+                            // is the thing being asked for.
                             h3 { class: "pane-group", "Or a date, or a line of text" }
                             crate::prefs::Field { label: "Text",
                                 crate::prefs::TextField {
@@ -7772,44 +7227,34 @@ pub fn Reader(
                                     "It needs a password before it can be opened."
                                 }}
                             }
-                            // **What is on screen is bullets and what is in
-                            // the field is the password.** Blitz reads
-                            // `type="password"` — it builds a text editor for
-                            // it and gives it the right accessibility role —
-                            // and it does not *mask* it, so a field left to
-                            // itself would show somebody's password to the
-                            // room.
+                            // **What is on screen is bullets and what is in the
+                            // field is the password.** Blitz reads
+                            // `type="password"`, builds a text editor and gives
+                            // it the right accessibility role — and does not
+                            // *mask* it, so a field left to itself shows
+                            // somebody's password to the room.
                             //
-                            // So the ink is taken away and the bullets are
-                            // drawn over the top: `color: transparent` with a
-                            // `caret-color` of its own, and a span above it
-                            // holding one bullet a character. The attribute is
-                            // still `password`, because the accessibility role
-                            // is worth having and because the day Blitz masks
-                            // it this becomes a bullet under a bullet rather
+                            // So the ink is taken away (`color: transparent`
+                            // with its own `caret-color`) and a span above it
+                            // holds one bullet a character. The attribute stays
+                            // `password`, so the role is kept and the day Blitz
+                            // masks it this is a bullet under a bullet rather
                             // than a fault.
                             //
-                            // **The other way round was tried and is the one
-                            // to know about.** Putting the bullets in the
-                            // field's own `value` and keeping the password
-                            // beside it works until somebody presses a key
-                            // twice: `set_text` in `blitz-dom` only touches
-                            // the editor when the string it is given differs
-                            // from the one it holds, and setting it collapses
-                            // the selection to the front — so a masked field
-                            // has its caret thrown to offset 0 after every
-                            // keystroke and "hylo" is typed in as "olyh". The
-                            // page field beside it never sees this because
-                            // what it writes back is what was typed, so the
-                            // guard skips and the caret stays. And Backspace
-                            // could not be intercepted to work around it: on
-                            // macOS it is not a keystroke at all but a
-                            // `doCommandBySelector:` the editor answers
-                            // directly, which no handler here can decline.
+                            // **The other way round was tried and is the one to
+                            // know about.** Bullets in the field's own `value`
+                            // works until a key is pressed twice: `set_text`
+                            // touches the editor only when the string differs,
+                            // and setting it collapses the selection to the
+                            // front — so the caret is thrown to offset 0 after
+                            // every keystroke and "hylo" is typed in as "olyh".
+                            // Backspace cannot be intercepted to work around it
+                            // either: on macOS it is a `doCommandBySelector:`
+                            // the editor answers directly.
                             //
-                            // The cost is that the password is in the DOM, in
-                            // this window, while the question is up — which is
-                            // where a browser keeps it too.
+                            // The cost is that the password is in the DOM while
+                            // the question is up, which is where a browser keeps
+                            // it too.
                             span { class: "ask-field-wrap",
                                 input {
                                     class: "text-field ask-field",
@@ -7910,24 +7355,16 @@ pub fn Reader(
 /// The window with nothing in it: what a reader sees before there is a
 /// document, and after they have put one down.
 ///
-/// **The largest piece of interface this reader did not have**, and its
-/// absence had reached into three other places before it was built. ⌘N opened
-/// a second window on the document already in front of somebody, because
-/// there was nowhere else for a new window to land. A document handed over by
-/// the system could never fill an idle window, because no window was ever
-/// idle — `Handover::Fill` in `windows.rs` carried a comment saying it was
-/// unreachable *until there is a start screen*. And there was no way to close
-/// a document at all, only to close the window it was in. All three are
-/// answered by there being something to show.
+/// The app's own screen item for item — the name, one line under it, the
+/// button that opens a document, the last six read with the page each was left
+/// on, and the sentence saying a document can be dropped on the window. The
+/// one difference is that it *replaces* the document region rather than being
+/// laid over it, which is the same picture and one fewer thing on screen.
 ///
-/// It is the app's own screen, item for item: the name, one line under it,
-/// the button that opens a document, the last six read with the page each was
-/// left on, and the sentence saying a document can simply be dropped on the
-/// window. The one thing that is not the app's is where it sits — the app
-/// lays it over the document region and shows it with a `[data-empty]`
-/// selector, which is a webview arrangement for a webview reason (the viewer
-/// stays in the DOM and keeps its scroll). Here it *replaces* the document
-/// region, which is the same picture and one fewer thing on screen.
+/// Its absence had reached into three other places: ⌘N opened a second window
+/// on the document already in front of somebody, `Handover::Fill` was
+/// unreachable because no window was ever idle, and there was no way to close
+/// a document without closing its window.
 #[component]
 fn Start(viewer: Signal<Viewer>, pick: Pick, frame: Frame) -> Element {
     // Read once for the render, like everything else the toolbar reads: this
@@ -8001,20 +7438,14 @@ fn Start(viewer: Signal<Viewer>, pick: Pick, frame: Frame) -> Element {
     }
 }
 
-/// A signature, drawn.
+/// A signature, drawn: an SVG `polyline` per stroke, with round caps and joins
+/// so a name looks written rather than plotted.
 ///
-/// **The only thing in this reader that draws a document's own ink**, and it
-/// draws it the same way the page will: an SVG `polyline` per stroke, in the
-/// same ballpoint blue, with round caps and joins so that a name looks written
-/// rather than plotted.
-///
-/// `literal` is the difference between the pad and the list. A signature in the
-/// list is shown stretched to the box it is given, which is what it will look
-/// like on the page — `sign::place` scales it to the height it is dropped at
-/// and the strokes on disk are already trimmed to their own extent. The pad
-/// must not do that: stretching what is being drawn as it is drawn means the
-/// ink moves out from under the hand, and the second stroke of a name lands
-/// somewhere the first one has just been dragged away from.
+/// `literal` is the difference between the pad and the list. In the list a
+/// signature is stretched to its box, which is what it will look like on the
+/// page. The pad must not do that: stretching what is being drawn as it is
+/// drawn moves the ink out from under the hand, and the second stroke lands
+/// where the first has just been dragged away from.
 #[component]
 pub(crate) fn Scrawl(
     signature: crate::sign::Signature,
@@ -8081,11 +7512,10 @@ pub(crate) fn Scrawl(
 ///
 /// **The colour is an attribute rather than `currentColor`, and that is
 /// Blitz's shape rather than a choice.** An inline `<svg>` is not laid out as
-/// elements here: `construct.rs` takes the subtree's `outer_html` and hands it
-/// to usvg, which has no CSS cascade and no idea what `color` the button it
-/// sits in resolved to. So the theme's own shade goes in as `stroke`, and
-/// what a browser gets for free — an icon that follows its label through
-/// hover and `on` — has to be passed down.
+/// elements: `construct.rs` hands the subtree's `outer_html` to usvg, which has
+/// no CSS cascade and no idea what `color` its button resolved to. So the
+/// theme's shade goes in as `stroke`, and what a browser gives for free — an
+/// icon following its label through hover — has to be passed down.
 #[component]
 pub(crate) fn Icon(name: &'static str, #[props(default)] stroke: Option<String>) -> Element {
     // A name nothing draws is nothing drawn, rather than a panic: the table is
@@ -8130,15 +7560,12 @@ fn Page(
     /// Where the matches on this page are, in CSS pixels from its top left,
     /// and which of them the reader is on.
     ///
-    /// **These are nodes, not pixels, and that is the whole of the port.**
-    /// `paintSelection` and the highlight painting in `viewer.ts` copy the
-    /// page canvas, run the copy through a luminance ramp and lay it back
-    /// down, because a `::selection` colour puts pdf.js's text layer on
-    /// screen and a page's bold type comes back regular. There is no text
-    /// layer here and nothing to put on screen: a match is a rectangle in
-    /// PDF points, so it is a `div` over the page in the theme's own
-    /// selection colours, and the glyphs underneath it are the ones pdfium
-    /// drew.
+    /// **These are nodes, not pixels, and that is the whole of the port.** The
+    /// app copies the page canvas through a luminance ramp and lays it back
+    /// down, because a `::selection` colour puts pdf.js's text layer on screen
+    /// and a page's bold type comes back regular. There is no text layer here:
+    /// a match is a rectangle in PDF points, so it is a `div` over the page and
+    /// the glyphs underneath are the ones pdfium drew.
     hits: Vec<(Rect, bool)>,
     /// The notes on this page, in the same space as the links.
     notes: Vec<(Rect, crate::render::Note)>,
@@ -8150,23 +7577,18 @@ fn Page(
     links: Vec<(Rect, Target)>,
     /// What the reader has swept over, on this page.
     ///
-    /// Rectangles like the matches and for the same reason, and painted in
-    /// the theme's own selection colour — which is exactly what the theme
-    /// says it is for. What this cannot do is the app's other half: there,
-    /// `paintSelection` copies the pixels under each selected line off the
-    /// page canvas and runs them back through the luminance ramp, so selected
-    /// words come out as the theme's ink on the theme's selection ground. Here
-    /// a translucent rectangle lies over the printed words and they keep the
-    /// colour they were printed in. It is the honest version of the same
-    /// statement and it is one shader short of the app's.
+    /// Rectangles like the matches, painted in the theme's own selection
+    /// colour. What this cannot do is the app's other half: `paintSelection`
+    /// runs the pixels under each selected line back through the luminance
+    /// ramp, so selected words come out as the theme's ink. Here a translucent
+    /// rectangle lies over the printed words and they keep the colour they were
+    /// printed in — one shader short of the app's.
     selected: Vec<Rect>,
     /// Where the colour popover goes on this page, when it is on this page.
     ///
-    /// It hangs off the page rather than off the window because that is the
-    /// space it is positioned in — under the last line of the selection,
-    /// which is a rectangle in the page's own box. The app makes a throwaway
-    /// element over the same rectangle and hands it to `showPopover`, for
-    /// want of anywhere else to put one.
+    /// It hangs off the page rather than the window because that is the space
+    /// it is positioned in: under the last line of the selection, which is a
+    /// rectangle in the page's own box.
     swatches: Option<Rect>,
     /// The mark the reader clicked on, when it is on this page: the line they
     /// hit, how to take it out, and the colour it is drawn in. See
@@ -8211,39 +7633,33 @@ fn Page(
             "data-page": "{index + 1}",
             // The size the texture under this page is drawn at, which is the
             // box's own except while a zoom gesture is running — see
-            // [`Viewer::zoom_held_at`]. On the page for the reason
-            // `data-page` is: it is the one thing about a page that nothing
-            // else in the DOM says, and a test that could not read it would
-            // have to photograph the difference between sharp and stretched.
+            // [`Viewer::zoom_held_at`]. On the page because nothing else in the
+            // DOM says it, and a test without it would have to photograph the
+            // difference between sharp and stretched.
             "data-drawn": "{drawn.0}x{drawn.1}",
             style: "position: absolute; top: {top}px; left: {left}px; width: {width}px; height: {height}px;",
             // Where a sweep begins, and the whole of what a page hears from
             // the pointer.
             //
-            // **`onclick` and `ondoubleclick` would never fire here**, which
-            // is not obvious and cost an hour: a page is a custom widget, and
-            // `handle_dom_event` in `blitz-dom` forwards an event whose target
-            // is a widget straight to the widget and *returns* — so the
+            // **`onclick` and `ondoubleclick` would never fire here.** A page is
+            // a custom widget, and `handle_dom_event` forwards an event whose
+            // target is a widget straight to the widget and *returns* — so the
             // default action never runs, and `click` and `dblclick` are both
-            // default actions of `pointerup`. Handlers still run, because the
-            // handler phase is before the default action, which is why
-            // `onmousedown` and the root's `onmouseup` work at all. So the
-            // second click is counted here rather than heard about; see
-            // [`Viewer::begin_sweep`], which is Blitz's own rule — half a
-            // second and two pixels — restated where it can be reached.
+            // default actions of `pointerup`. Handlers still run, the handler
+            // phase being before the default action, which is why `onmousedown`
+            // works at all. So the second click is counted here; see
+            // [`Viewer::begin_sweep`].
             //
             // The rest of the sweep is on the root, because a pointer dragged
             // down a document leaves the page it started on within a line or
-            // two and the root is the one ancestor that spans the window.
+            // two.
             onmousedown: move |event| {
                 let on = event.element_coordinates();
                 let client = event.client_coordinates();
                 // **A signature waiting for somewhere to go takes this press
-                // instead of the sweep.** Signing is the one gesture in this
-                // reader that turns a click on a page into a write, so it has
-                // to be the first thing a press is asked about — a sweep
-                // begun here would put the selection down over the very page
-                // the reader is aiming at.
+                // instead of the sweep**, and is the first thing a press is
+                // asked about: a sweep begun here would put the selection down
+                // over the very page the reader is aiming at.
                 if viewer.read().placing.is_some() {
                     viewer.write().sign_at(index + 1, (on.x, on.y));
                     return;
@@ -8277,23 +7693,16 @@ fn Page(
             if let Some(area) = swatches {
                 div {
                     class: "markup-popover",
-                    // **A press on the swatches must not reach the page**, or
-                    // it begins a sweep of its own and puts down the very
-                    // selection it is there to mark. The app has the same
-                    // problem and answers it the other way round — it
-                    // captures the selection when the popover opens and hands
-                    // it to the swatches, because in a webview the browser
-                    // collapses the selection before any handler runs and
-                    // there is nothing to stop. Here the selection is the
-                    // reader's own, so stopping the press is enough, and it
-                    // is what the menus one layer up already do.
+                    // **A press on the swatches must not reach the page**, or it
+                    // begins a sweep of its own and puts down the very selection
+                    // it is there to mark. The app answers this the other way
+                    // round, capturing the selection when the popover opens,
+                    // because a webview collapses it before any handler runs.
+                    // Here the selection is the reader's own, so stopping the
+                    // press is enough.
                     onmousedown: move |event| event.stop_propagation(),
-                    // Under the line it is about, which is where the app puts
-                    // it — and it took a fix there to get it: the anchor
-                    // element had no height, so `getBoundingClientRect` put
-                    // the swatches straight over the words they were about.
-                    // Here the rectangle is the line's own, so the offset is
-                    // simply its height.
+                    // Under the line it is about. The rectangle is the line's
+                    // own, so the offset is simply its height.
                     style: "position: absolute; top: {area.top + area.height + 8.0}px; left: {area.left}px;",
                     for colour in colours.iter() {
                         button {
@@ -8313,14 +7722,11 @@ fn Page(
                     }
                 }
             }
-            // **A mark clicked on says how to take it off.** Removal has
-            // worked since the day markup landed — `FPDFPage_RemoveAnnot`,
-            // eleven lines, and gone from the file for every reader of it —
-            // and it was reachable only from a × the width of a full stop, on
-            // a row in a panel that does not open on the tab the row is on.
-            // A reader who marked a passage and wanted it gone had nothing to
-            // click. See [`Viewer::mark_open`], and `end_sweep`, which is
-            // what decides that a press was a click rather than a sweep.
+            // **A mark clicked on says how to take it off.** Removal has worked
+            // since markup landed and was reachable only from a × the width of a
+            // full stop, on a row in a panel that does not open on that tab. See
+            // [`Viewer::mark_open`], and `end_sweep`, which decides that a press
+            // was a click rather than a sweep.
             if let Some((area, key, colour)) = mark {
                 div {
                     class: "mark-popover",
@@ -8343,11 +7749,10 @@ fn Page(
                 }
             }
             // **The notes a document already carries, made readable.** pdfium
-            // paints an annotation's own appearance into the page, so a sticky
-            // note arrives as the little icon it was drawn as — and the words
-            // behind it live in the annotation, which nothing was reading. So
-            // the icon sat there looking like a button and was not one, which
-            // is the app's own sentence about the same fault.
+            // paints an annotation's appearance into the page, so a sticky note
+            // arrives as the icon it was drawn as — and the words behind it live
+            // in the annotation, which nothing was reading. The icon sat there
+            // looking like a button and was not one.
             for (at, (area, note)) in notes.iter().enumerate() {
                 {
                     let opening = note.clone();
@@ -8382,22 +7787,16 @@ fn Page(
                 div {
                     key: "l{at}",
                     class: "link",
-                    // Deliberately not an `<a href>`, which is the app's own
-                    // decision made again for a different reason. There it is
-                    // that an anchor carrying the address navigates on a
-                    // middle click, which never reaches the click handler, so
-                    // the webview left the app and took the document with it.
-                    // Here it is that an `href` would go through `nav.rs`,
-                    // which is the chrome's door and knows nothing about
-                    // pages: an internal link would find no scheme it allows
-                    // and do nothing at all.
+                    // Deliberately not an `<a href>`, the app's decision made
+                    // again for a different reason: an `href` would go through
+                    // `nav.rs`, the chrome's door, which knows only http, https
+                    // and mailto — so an internal link would find no scheme it
+                    // allows and do nothing at all.
                     role: "link",
-                    // A name, because the element has no text of its own: it
-                    // is a bare rectangle over printed words, and there is no
-                    // text layer here for it to reach them through. Without
-                    // one a page of cross-references reads as "link, link,
-                    // link" — the app's own finding, and the fix is cheaper
-                    // here because the destination is already resolved.
+                    // A name, because the element has no text of its own: it is
+                    // a bare rectangle over printed words with no text layer to
+                    // reach them through, and a page of cross-references would
+                    // otherwise read as "link, link, link".
                     "aria-label": match target {
                         Target::Away(url) => url.clone(),
                         Target::Place { page, .. } => format!("Page {page} of this document"),
@@ -8443,11 +7842,9 @@ fn said_of(many: usize, one: &str, more: &str) -> String {
 
 /// Drive a scan that something restarted, from anywhere in the component.
 ///
-/// The mailbox has a closure of exactly this shape and cannot lend it out —
-/// it is spawned inside the task that owns the news — so this is that closure
-/// said once more, for the two gestures that reload the document without any
-/// news arriving: marking a passage and taking a mark off. See
-/// [`Viewer::reopen`], which is what hands back the token.
+/// The mailbox has a closure of this shape and cannot lend it out, being
+/// spawned inside the task that owns the news — so this is it said once more,
+/// for the gestures that reload the document without any news arriving.
 pub(crate) fn rescan(mut viewer: Signal<Viewer>, token: Option<u64>) {
     let Some(token) = token else { return };
     spawn(async move {
@@ -8457,19 +7854,13 @@ pub(crate) fn rescan(mut viewer: Signal<Viewer>, token: Option<u64>) {
     });
 }
 
-/// One handler per action, and a dispatch of about thirty lines — which is
-/// what `main.ts` has, and for the same reason: the table decides *which*
-/// action, so nothing here has to know anything about keys.
+/// One handler per action, and a dispatch of about thirty lines: the table
+/// decides *which* action, so nothing here knows anything about keys.
 ///
-/// **There are no arms missing, and that is new.** Every action in the app's
-/// table is carried across whether or not this reader can do it, and for most
-/// of Phase 3 the ones it could not do fell through to a catch-all saying so
-/// — which turned the keyboard into a live list of what was left. The list is
-/// empty: all forty-three of the app's actions answer here, and the three
-/// that took longest than the rest were dark mode, help and print, which are
-/// the three that are about something outside the document. The catch-all is
-/// gone with them, so an action added to [`crate::keymap`] and not handled
-/// here is now a compile error rather than a sentence in the notice line.
+/// **There are no arms missing.** All forty-three of the app's actions answer
+/// here, and the catch-all that used to say "not built yet" is gone — so an
+/// action added to [`crate::keymap`] and not handled here is a compile error
+/// rather than a sentence in the notice line.
 fn perform(
     mut viewer: Signal<Viewer>,
     action: Action,
@@ -8563,18 +7954,13 @@ fn perform(
         // there is nothing to leave — a key that answers with a complaint
         // about what it did not do is worse than one that does nothing.
         Action::Dismiss => {
-            // Outward, in the order the reader arrived at them. The page
-            // field first, because it is the thing they are most recently
-            // inside: pressing Escape while typing a number means "not that
+            // Outward, in the order the reader arrived at them. A menu is
+            // outermost of all — over everything and the thing the pointer is
+            // inside — so it goes first, ahead of a field opened underneath it.
+            // Then the page field: Escape while typing a number means "not that
             // after all", not "close the find bar I opened a minute ago".
-            // Escape typed *into* the field never reaches here — the field
-            // stops it — so this is the case where the field is open and the
-            // pointer took the focus elsewhere.
-            // A menu is the outermost thing of all — it is over everything
-            // else and it is the thing the pointer is inside — so it goes
-            // first, ahead of the field somebody may have opened underneath
-            // it. The app says the same: its document-level handler stands
-            // down for `dismiss` alone while a menu is up.
+            // Escape typed *into* the field never reaches here, so this is the
+            // case where the pointer took the focus elsewhere.
             if viewer.write().close_menu() {
                 return;
             }
@@ -8610,12 +7996,11 @@ fn perform(
             if viewer.write().close_details() {
                 return;
             }
-            // The Sign window, and then a signature that is looking for
-            // somewhere to go. Two arms rather than one, and in this order,
-            // because they are two states and the reader is in one of them:
-            // the window is over the page, so Escape means the window; and a
-            // signature waiting to be placed has no window at all, so Escape
-            // there is the only way to put it down without signing something.
+            // The Sign window, then a signature looking for somewhere to go.
+            // Two states and the reader is in one of them: the window is over
+            // the page, so Escape means the window; and a signature waiting to
+            // be placed has no window, so Escape is the only way to put it down
+            // without signing something.
             if viewer.write().close_signing() {
                 return;
             }
@@ -8623,11 +8008,9 @@ fn perform(
                 return;
             }
             // And the password window. Below the rest because a reader inside
-            // it is inside a field, so this arm is only reached when the
-            // pointer has taken the keyboard somewhere else — the field's own
-            // Escape is what usually answers. Withdrawing the question is not
-            // answering it with an empty password: see
-            // [`Viewer::stop_unlocking`].
+            // it is inside a field, so this is only reached when the pointer has
+            // taken the keyboard elsewhere. Withdrawing the question is not
+            // answering it with an empty password.
             if viewer.write().stop_unlocking() {
                 return;
             }
@@ -8646,12 +8029,10 @@ fn perform(
             } else if finding {
                 viewer.write().close_find();
             } else if selected {
-                // Between the find bar and presenting, which is where a
-                // selection sits in the same "outward, in the order the reader
-                // arrived" order: it is a thing on the page, and full screen
-                // and presenting are things the window is doing. A reader who
-                // is presenting and has swept a sentence to point at means to
-                // put the sentence down first.
+                // Between the find bar and presenting: a selection is a thing
+                // on the page, where full screen and presenting are things the
+                // window is doing. A reader presenting who has swept a sentence
+                // to point at means to put the sentence down first.
                 viewer.write().clear_selection();
             } else if presenting {
                 let full = viewer.write().present(false);
@@ -8693,12 +8074,10 @@ fn perform(
         // The window's own three, which the page can only ask for. See
         // [`Frame`]: what answers is the shell in the app and a list in the
         // harness, and the reader's side is the same either way.
-        // The picker, through `Pick` rather than through the shell directly,
-        // because a modal window belonging to the operating system is the one
-        // door in this crate a test must not be able to open. The other thing
-        // a chosen document can mean — a window of its own — is a menu item
-        // and not a key, which is the app's own arrangement: there is no
-        // `open-new-window` in `keys.ts` either.
+        // The picker, through `Pick` rather than the shell directly, because a
+        // modal window belonging to the operating system is the one door a test
+        // must not be able to open. A window of its own is a menu item and not
+        // a key, there being no `open-new-window` in `keys.ts` either.
         Action::Open => pick.ask(Opening::Here),
         Action::NewWindow => frame.ask(Ask::NewWindow),
         Action::CloseWindow => frame.ask(Ask::Close),
@@ -8742,16 +8121,11 @@ fn perform(
     }
 }
 
-/// One turn of the event loop, awaited.
-///
-/// `breathe()` in `search.ts` is `setTimeout(resolve, 0)` and this is the same
-/// thing said in Rust: wake the task immediately and return `Pending`, so the
-/// scheduler puts it back in the queue and whoever is driving the document —
-/// the shell in the real app, `pump()` in the harness — gets a turn first.
-///
-/// It is a macrotask there and a wake here for the same reason: awaiting a
-/// promise alone would keep the browser out of the loop, and returning
-/// `Ready` alone would keep the window out of it.
+/// One turn of the event loop, awaited: wake the task immediately and return
+/// `Pending`, so the scheduler requeues it and whoever is driving the document
+/// — the shell, or `pump()` in the harness — gets a turn first. Returning
+/// `Ready` would keep the window out of the loop, which is `breathe()` in
+/// `search.ts` avoiding the same thing with `setTimeout(resolve, 0)`.
 struct Breathe(bool);
 
 impl Breathe {

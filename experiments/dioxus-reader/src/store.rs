@@ -50,25 +50,19 @@ const SETTLE: Duration = Duration::from_millis(700);
 /// The one thread that writes down where the reader is.
 ///
 /// **The only write in this crate that needed moving, and the reason is the
-/// rate.** A theme is chosen a few times a session and a zoom a few dozen; the
-/// scroll offset changes on every wheel event, and every change is a
-/// read-modify-write of the whole of `library.toml`. Done on the thread that
-/// draws the window, that is the app's own bug — `AGENTS.md` describes a
-/// whole-file rewrite landing in the middle of the one gesture this app exists
-/// to make smooth — and this crate would have had it the moment the position
-/// was remembered at all.
+/// rate.** A theme is chosen a few times a session; the scroll offset changes
+/// on every wheel event, and every change is a read-modify-write of the whole
+/// of `library.toml`.
 ///
-/// Two things it does, and they are separable but not usefully so. It moves
-/// the write off the thread that is scrolling, and it *coalesces*: a place
-/// arriving while another is pending replaces it, and nothing is written until
-/// [`SETTLE`] has passed with nothing new. So a reader scrolling through a
-/// chapter costs one write at the end of it rather than four hundred.
+/// Two things it does: moves the write off the thread that is scrolling, and
+/// *coalesces* — a place arriving while another is pending replaces it, and
+/// nothing is written until [`SETTLE`] has passed with nothing new. So a reader
+/// scrolling through a chapter costs one write rather than four hundred.
 ///
-/// **Pending places are keyed by document**, which matters for one reason
-/// only: `cargo test` runs its tests in parallel and this thread is the
-/// process's. A single pending slot would have one test's position quietly
-/// replacing another's, intermittently and by timing, which is the worst
-/// shape a test failure comes in.
+/// **Pending places are keyed by document**, for one reason: `cargo test` runs
+/// its tests in parallel and this thread is the process's. A single slot would
+/// have one test's position replacing another's, intermittently and by
+/// timing.
 struct Scribe {
     jobs: Sender<Job>,
 }
@@ -291,15 +285,13 @@ pub struct Recent {
 /// the reader wants it back.
 ///
 /// Read before there is a window, which is why it is a function rather than a
-/// method: `main.rs` has to know what to open before it can make the thing
-/// that would hold a [`Store`].
+/// method: `main.rs` has to know what to open before it can make a [`Store`].
 ///
-/// `prune` is the app's own and is what keeps this honest — a document that
-/// has been moved or deleted would otherwise be reopened, and fail, on every
-/// launch for ever. `reopen_last_document` is the app's own setting too, and
-/// is asked here rather than left to the caller for the reason `bootstrap`
-/// gives in `lib.rs`: two sides that each assume the other checked it are two
-/// sides that disagree about whether the window has anything in it.
+/// `prune` keeps it honest — a document that has been moved or deleted would
+/// otherwise be reopened and fail on every launch for ever. And
+/// `reopen_last_document` is asked *here* rather than left to the caller,
+/// because two sides that each assume the other checked it are two sides that
+/// disagree about whether the window has anything in it.
 pub fn reopening(dir: &Path) -> Option<String> {
     reopening_all(dir).into_iter().next()
 }

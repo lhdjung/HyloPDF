@@ -298,14 +298,12 @@ pub struct Shell {
     /// bring up; one made after has to be brought up here, because nothing
     /// else will.
     ///
-    /// Resuming a window *twice* is not harmless and cost an afternoon:
-    /// `View::resume` builds a fresh renderer, and every resource a widget
-    /// registered with the old one is orphaned — the next frame that hands
-    /// back a cached texture dies with "Tried to draw an invalid empty image
-    /// ... maybe it was registered to a different renderer". Blitz's own
-    /// `Widget` trait now has the honest answer to this on the widget's side:
-    /// `destroy_surfaces` is where a cached texture is dropped, and
-    /// `can_create_surfaces` is where it comes back.
+    /// Resuming a window *twice* is not harmless: `View::resume` builds a fresh
+    /// renderer and orphans every resource a widget registered with the old
+    /// one, so the next frame handing back a cached texture dies with "Tried to
+    /// draw an invalid empty image … maybe it was registered to a different
+    /// renderer". The widget's side of that is `destroy_surfaces` and
+    /// `can_create_surfaces`.
     started: bool,
     /// Reported once per window, so that "where did it actually land" is
     /// answerable from the terminal rather than from a ruler on the screen.
@@ -365,21 +363,16 @@ impl Shell {
 
     /// Say what happens when a window changes size.
     ///
-    /// **Blitz answers a resize itself and tells nobody**, which is the whole
-    /// of a fault a reader sees as two: `WindowEvent::SurfaceResized` sets the
-    /// document's own viewport and asks for a redraw, so the *chrome* follows
-    /// the window and the *document* does not — `Viewer::layout` keeps the
-    /// viewport it was given when the window was mounted. A window opened at
-    /// 1100 and then dragged wider leaves the pages laid out for 1100 inside a
-    /// `.viewer` that is now 1600: the page sits left of centre because it is
-    /// centred in a `.pages` box narrower than the window, and Fit width fits
-    /// a width the window no longer has.
+    /// **Blitz answers a resize itself and tells nobody**, which a reader sees
+    /// as two faults: `SurfaceResized` sets the document's viewport and asks
+    /// for a redraw, so the *chrome* follows the window and the *document* does
+    /// not. A window opened at 1100 and dragged wider leaves the pages laid out
+    /// for 1100, so the page sits left of centre and Fit width fits a width the
+    /// window no longer has.
     ///
-    /// There is no `ResizeObserver` here and `get_client_rect` cannot be
-    /// called from inside an event — see `Reader`'s first comment — so the
-    /// news comes the way every other piece of news does, through the window's
-    /// mailbox. This is only the half winit can see; `main.rs` is where it is
-    /// turned into an emit.
+    /// There is no `ResizeObserver` and `get_client_rect` cannot be called from
+    /// inside an event, so the news comes through the window's mailbox like
+    /// everything else. `main.rs` turns this into an emit.
     pub fn on_resized(&mut self, resized: impl FnMut(&str, f64, f64, bool) + 'static) {
         self.resized = Some(Box::new(resized));
     }
@@ -392,33 +385,25 @@ impl Shell {
     /// **Backspace is a question the window has to have asked to be told the
     /// answer to**, and nothing in this app had asked it.
     ///
-    /// See [`ApplicationHandlerExtMacOS`] below for the first half: AppKit
-    /// delivers the editing keys as `doCommandBySelector:` rather than as
-    /// keystrokes, and that reaches a winit application through
-    /// `standard_key_binding`, which this shell forwards. What forwarding it
-    /// did not fix is that **winit only reads a keystroke against the
-    /// standard key bindings when IME is enabled on the window** — `key_down`
-    /// calls `interpretKeyEvents` inside `if ime_capabilities.is_some()`, and
-    /// `interpretKeyEvents` is the only thing that ever calls
-    /// `doCommandBySelector:`. With IME off, Backspace is a keystroke that
-    /// blitz-dom deliberately ignores on this platform and nothing else at
-    /// all.
+    /// See [`ApplicationHandlerExtMacOS`] below for the first half. What
+    /// forwarding the callback did not fix is that **winit only reads a
+    /// keystroke against the standard key bindings when IME is enabled on the
+    /// window**: `key_down` calls `interpretKeyEvents` inside `if
+    /// ime_capabilities.is_some()`, and that is the only thing that ever calls
+    /// `doCommandBySelector:`.
     ///
-    /// `blitz-dom` does mean to enable it: `Node::focus` asks the shell for
-    /// IME when the node being focused is a text input. **It is asked one
-    /// moment too early.** A text input's editor is built by
-    /// `create_text_editor` during *layout construction*, and this app focuses
-    /// its fields from `onmounted`, which runs before the first layout — so
-    /// `text_input_data()` is still `None`, the request is not made, and the
-    /// focus never moves away and back to make it again. The find bar, the
-    /// go-to-page field and every field in the Settings window could be typed
-    /// into and nothing could be taken back out.
+    /// `blitz-dom` means to enable it — `Node::focus` asks the shell for IME
+    /// when the focused node is a text input — but **it asks one moment too
+    /// early**: a text input's editor is built by `create_text_editor` during
+    /// *layout construction*, and this app focuses its fields from `onmounted`,
+    /// which runs before the first layout. So `text_input_data()` is still
+    /// `None`, the request is never made, and the focus never moves away and
+    /// back to make it again.
     ///
-    /// So the window is asked here instead, whenever the focus has moved and
-    /// has landed on something being typed into. Nothing turns it off again:
-    /// winit's `set_ime_allowed` returns early when IME is already on, so
-    /// `ImeRequest::Disable` does nothing — which is upstream's, not ours, and
-    /// means "enabled once" is the only state this can reach anyway.
+    /// So the window is asked here instead, whenever the focus has landed on
+    /// something being typed into. Nothing turns it off again: winit's
+    /// `set_ime_allowed` returns early when IME is on, so `ImeRequest::Disable`
+    /// does nothing and "enabled once" is the only reachable state.
     fn keep_ime_in_step(&mut self, window_id: WindowId) {
         use winit::window::{ImeCapabilities, ImeEnableRequest, ImeRequest, ImeRequestData};
         let Some(view) = self.inner.windows.get(&window_id) else {
@@ -443,38 +428,29 @@ impl Shell {
 
     /// Say what happens when the machine goes light or dark.
     ///
-    /// The app gets this from `matchMedia`, which is a browser answering a
-    /// question about the operating system. Here it is winit's
-    /// `WindowEvent::ThemeChanged`, and it arrives per window rather than per
-    /// process — every window is told, so every window's reader follows,
-    /// which is the right shape anyway: the theme is a setting, and a setting
-    /// changed in one window is not seen by another until it is opened again
-    /// (`AGENTS.md` says so of the app, and this crate inherits it).
+    /// winit's `WindowEvent::ThemeChanged`, which arrives per window rather
+    /// than per process — so every window's reader follows, which is the right
+    /// shape: a setting changed in one window is not seen by another until it
+    /// opens again.
     ///
-    /// Like a resize, the event carries no answer that is worth carrying: it
-    /// says there is a new one, and the reader asks the window through
-    /// [`crate::app::Appearance`]. That keeps one place answering the
-    /// question — the startup path asks the same way, and a harness answers
-    /// both from the same cell.
+    /// Like a resize, the event carries no answer worth carrying: it says there
+    /// is a new one and the reader asks the window through
+    /// [`crate::app::Appearance`], so one place answers the question and a
+    /// harness answers it from one cell.
     pub fn on_theme(&mut self, themed: impl FnMut(&str) + 'static) {
         self.themed = Some(Box::new(themed));
     }
 
     /// Say what happens when a document is dragged onto a window.
     ///
-    /// **The one gesture the start screen advertises and nothing answered.**
-    /// "Or drop a PDF anywhere in this window" is the app's own last line of
-    /// that screen, and it is a promise; in the app the webview makes it good
-    /// through `dragover`/`drop`, and here there is no webview and no DOM
-    /// event — winit reports it on the window, which is exactly the right
-    /// place for it, because what is being dropped is a *file* and files are
-    /// the Rust side's business in both applications.
+    /// "Or drop a PDF anywhere in this window" is the start screen's last line
+    /// and it is a promise. There is no webview and no DOM event here; winit
+    /// reports it on the window, which is the right place, because what is
+    /// dropped is a *file*.
     ///
-    /// Three states rather than one, because the hint is half the gesture: a
-    /// window that says nothing while a file is over it gives the reader no
-    /// way to know it will be caught. [`Drag::Over`] carries what would be
-    /// opened, so a folder or a `.txt` can be turned away before it is let
-    /// go rather than after.
+    /// Three states rather than one, because the hint is half the gesture:
+    /// [`Drag::Over`] carries what would be opened, so a folder or a `.txt` is
+    /// turned away before it is let go rather than after.
     pub fn on_drop(&mut self, dropped: impl FnMut(&str, Drag) + 'static) {
         self.dropped = Some(Box::new(dropped));
     }
@@ -681,23 +657,17 @@ impl Shell {
 
 /// **Backspace is not a key on a Mac.**
 ///
-/// AppKit does not deliver the editing keys as keystrokes at all. It reads
-/// them against the standard key bindings and calls `doCommandBySelector:`
-/// with a name — `deleteBackward:`, `deleteWordBackward:`, `moveToBeginningOfLine:`
-/// — and winit surfaces that as [`ApplicationHandlerExtMacOS::standard_key_binding`],
-/// which is a *separate* callback from `window_event`. `blitz-dom` knows this
-/// and says so: the `Key::Backspace` arm in `node/text.rs` is
-/// `#[cfg(not(target_os = "macos"))]`, because on a Mac the command is the
-/// only thing that ever arrives.
+/// AppKit does not deliver the editing keys as keystrokes. It reads them
+/// against the standard key bindings and calls `doCommandBySelector:` with a
+/// name — `deleteBackward:`, `moveToBeginningOfLine:` — which winit surfaces as
+/// [`ApplicationHandlerExtMacOS::standard_key_binding`], a *separate* callback
+/// from `window_event`. `blitz-dom` knows this: its `Key::Backspace` arm is
+/// `#[cfg(not(target_os = "macos"))]`.
 ///
 /// `BlitzApplication` implements the callback and returns itself from
-/// `macos_handler`. This shell wraps it and implements `ApplicationHandler`
-/// itself, so until now it answered `None` — winit's default — and every one
-/// of those commands was dropped on the floor. What that looked like: a
-/// reader could type into the find bar and could not take anything back out
-/// of it, and the same in the go-to-page field and every field in the
-/// settings window. Nothing else in the app was affected, because nothing
-/// else in the app edits text.
+/// `macos_handler`; a shell that wraps it and implements `ApplicationHandler`
+/// itself answers `None` by default and drops every one of those commands. What
+/// that looked like: every text field in the app was write-only.
 #[cfg(target_os = "macos")]
 impl winit::platform::macos::ApplicationHandlerExtMacOS for Shell {
     fn standard_key_binding(
@@ -795,18 +765,14 @@ impl ApplicationHandler for Shell {
                 tell(label);
             }
         }
-        // A click clears the focus off the page, and from that moment every
-        // keyboard shortcut goes to `<html>`, which is above anything a
-        // component can put a handler on. Giving it back belongs to whoever
-        // owns the window because a component cannot do it — the one call
-        // that asks for the focus panics from inside an event handler. See
-        // `app::KEYBOARD`, which is the whole account, and `harness.rs`,
-        // which does this same one line for a window that does not exist.
-        // A key as well as a click, because a key can take the focused node
-        // away with it: Escape closes the find bar, the field it was typed
-        // into stops existing, and the focus goes with it — after which every
-        // shortcut in the reader is dead again, which is the same failure one
-        // level along.
+        // A click clears the focus off the page, after which every shortcut
+        // goes to `<html>`. Giving it back belongs to whoever owns the window,
+        // because the one call that asks for the focus panics from inside an
+        // event handler — see `app::KEYBOARD`.
+        //
+        // A key as well as a click, because a key can take the focused node away
+        // with it: Escape closes the find bar, the field stops existing, and the
+        // focus goes with it.
         let moved_focus = matches!(
             event,
             WindowEvent::PointerButton {

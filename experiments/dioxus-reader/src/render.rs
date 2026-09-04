@@ -17,21 +17,16 @@ use crate::layout::{Size, View};
 
 /// One page's pixels, as pdfium hands them over: BGRA, top row first.
 ///
-/// BGRA rather than RGBA on purpose. The swizzle used to be a pass over every
-/// pixel on the CPU — 1.6ms a page at 3.3 megapixels and 5.1ms at 10.1 — and
-/// it is free on the GPU, because the texture is uploaded as `Bgra8Unorm` and
-/// the recolouring shader that reads every pixel anyway sees it already in
-/// order. So the bytes travel exactly as pdfium wrote them.
+/// BGRA rather than RGBA on purpose: the swizzle is free on the GPU, the
+/// texture being uploaded as `Bgra8Unorm` and read by the recolouring shader
+/// anyway. On the CPU it was 1.6ms a page at 3.3 megapixels and 5.1ms at 10.1.
 ///
-/// **Borrowed, not owned, and that is the whole point.** A page at the size
-/// this app draws them is 24MB, and the first version of this trait returned a
-/// `Vec` — which meant pdfium's own buffer, the `Vec` `as_raw_bytes()` copies
-/// it into, and the `to_vec()` on top of that: three copies of every page,
-/// alive at once, allocated and freed for every page drawn. macOS's allocator
-/// does not hand large freed blocks straight back, so they showed up in the
-/// process's physical footprint as `MALLOC_LARGE (empty)` — 120MB of it, on a
-/// reader holding 46MB of actual page. The renderer draws into a buffer it
-/// keeps and lends the bytes out for exactly as long as the upload takes.
+/// **Borrowed, not owned, and that is the whole point.** A page is 24MB, and
+/// returning a `Vec` meant three copies alive at once — pdfium's own buffer,
+/// the `Vec` `as_raw_bytes()` copies it into, and the `to_vec()` on top —
+/// allocated and freed per page. macOS's allocator does not hand large freed
+/// blocks back, so they showed as 120MB of `MALLOC_LARGE (empty)` on a reader
+/// holding 46MB of actual page.
 pub struct Bitmap<'a> {
     pub width: u32,
     pub height: u32,
@@ -61,28 +56,21 @@ pub struct Heading {
 /// A rectangle on a page, in the space everything above the renderer works in.
 ///
 /// **One rectangle type, three things that are rectangles**: a character's
-/// cell, a match's quad, and the area a link is clicked in. It was `CharBox`
-/// while characters were the only ones, and the name outlived the fact — a
-/// link's hit area is not a character box by any reading, and two rectangle
-/// types would have been the worse answer to that.
+/// cell, a match's quad, and the area a link is clicked in.
 ///
-/// It is in **PDF points with the origin at the top left**, which is
-/// [`crate::layout`]'s space rather than the PDF's own: multiply by a
+/// In **PDF points with the origin at the top left**, which is
+/// [`crate::layout`]'s space rather than the PDF's own — multiply by a
 /// [`crate::layout::PageBox`]'s `scale` and it is where the thing goes on
 /// screen. pdfium counts from the bottom, and the conversion belongs on the
 /// side that knows the page height rather than in every caller.
 ///
-/// **The per-character half of this is the thing pdf.js could not give, and
-/// the reason the search here is half the size of the app's.** pdf.js hands
-/// over *runs* — a string and a transform — so `search.ts` has to fold the
-/// runs into one string, keep a `starts[]` saying where each run began,
-/// binary-search that to turn an offset back into a run and an offset inside
-/// it, and then hand the pair to the DOM to be measured against a text layer
-/// whose spans exist only to be selected. Every one of those steps is a place
-/// to be wrong, and the app has a comment at each of them saying which way.
-/// pdfium answers per character (`FPDFText_GetLooseCharBox`), so a match is a
-/// range of characters and a range of characters is already a list of
-/// rectangles. `starts`, `items`, `position()` and the text layer all go.
+/// **The per-character half is what pdf.js could not give, and why the search
+/// here is half the size of the app's.** pdf.js hands over *runs*, so
+/// `search.ts` folds them into one string, keeps a `starts[]`, binary-searches
+/// it back to a run and an offset, and hands the pair to the DOM to be measured
+/// against a text layer. pdfium answers per character
+/// (`FPDFText_GetLooseCharBox`), so a match is a range of characters and that is
+/// already a list of rectangles.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
     pub left: f64,
@@ -126,12 +114,10 @@ pub struct Link {
 /// A note somebody left in the document: an area on the page, and what it
 /// says.
 ///
-/// **The notes a document already carries, made readable** — `notesIn` in
-/// `viewer.ts`, and the same rule for what counts: any annotation with words
-/// in it, whatever its subtype, because a comment on a highlight and a sticky
-/// note are the same thing to a reader. Links are the exception, their text
-/// being where they go, and a Popup is the box another annotation's words are
-/// shown in rather than an annotation with words of its own.
+/// Any annotation with words in it, whatever its subtype, because a comment on
+/// a highlight and a sticky note are the same thing to a reader. Links are the
+/// exception, their text being where they go, and a Popup is the box another
+/// annotation's words are shown in.
 ///
 /// The area is in the page's own points, like a [`Link`]'s and for its
 /// reason. `icon` is the app's own judgement: a note that is small in both

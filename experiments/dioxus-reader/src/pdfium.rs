@@ -18,17 +18,15 @@ use crate::render::{Bitmap, Heading, Link, PageSource, PageText, Rect, Target};
 /// The lock every call into pdfium is taken behind.
 ///
 /// **`pdfium-render`'s `thread_safe` feature does not make pdfium thread
-/// safe.** All it does is `unsafe impl Send for Pdfium` and `Sync` beside it,
-/// plus a `Send + Sync` bound on the bindings accessor; nothing in the crate
-/// serialises a call. pdfium itself has process-wide state and no locking, and
-/// two threads inside it abort the process — `SIGABRT`, no panic, no message,
-/// no stack, which is a C++ `CHECK` failing the way `PROGRESS.md` describes.
+/// safe.** It is two `unsafe impl`s and a bound on the bindings accessor;
+/// nothing in the crate serialises a call. pdfium has process-wide state and no
+/// locking, and two threads inside it abort the process — `SIGABRT`, no panic,
+/// no message, no stack.
 ///
-/// It was invisible while there was one document on one thread. It arrived
-/// with the harness: `cargo test` runs its tests in parallel, four of them
-/// opened four documents, and the whole binary vanished with exit code 134 and
-/// nothing on stderr. So the lock is the library's, not the document's — a
-/// per-document lock is exactly what was there and exactly what does not help.
+/// Invisible with one document on one thread; it arrived with the harness,
+/// because `cargo test` runs its tests in parallel. The lock is the
+/// **library's**, not the document's — a per-document lock is exactly what was
+/// there and exactly what does not help.
 static LIBRARY: Mutex<()> = Mutex::new(());
 
 pub(crate) fn library() -> std::sync::MutexGuard<'static, ()> {
@@ -105,15 +103,14 @@ struct Open {
     document: Option<PdfDocument<'static>>,
     /// The one buffer every page is drawn into.
     ///
-    /// pdfium will make its own if asked (`render_with_config`), and then
-    /// `as_raw_bytes()` copies it into a `Vec` — two allocations of 24MB per
-    /// page at the sizes this app draws at, freed immediately and *not* handed
-    /// back by the allocator. `PdfBitmap::from_bytes` renders into a buffer we
-    /// own instead, so a document scrolled from end to end allocates once.
+    /// pdfium will make its own if asked, and `as_raw_bytes()` then copies it
+    /// into a `Vec` — two 24MB allocations a page, freed immediately and *not*
+    /// handed back by macOS's allocator. `PdfBitmap::from_bytes` renders into a
+    /// buffer we own, so a document scrolled end to end allocates once.
     ///
-    /// It lives behind the same lock as the document because pdfium is not
-    /// thread safe and every render is already serialised through it — so
-    /// "one buffer" and "one page drawn at a time" are the same statement.
+    /// Behind the same lock as the document, because every render is already
+    /// serialised through it: "one buffer" and "one page at a time" are the
+    /// same statement.
     scratch: Vec<u8>,
 }
 
@@ -125,29 +122,21 @@ unsafe impl Send for Open {}
 /// one call in this file not taken behind the lock.**
 ///
 /// Nothing here calls `FPDF_CloseDocument`: `PdfDocument`'s own `Drop` does,
-/// whenever the last `Arc<dyn PageSource>` goes — and a `Drop` that runs
-/// wherever the value happens to die is a call into pdfium from a thread that
-/// took no lock at all. What it corrupts is not this document. pdfium keeps a
+/// whenever the last `Arc<dyn PageSource>` goes, on whatever thread that
+/// happens to be. What it corrupts is not this document — pdfium keeps a
 /// **process-wide** map of stock fonts keyed by `CPDF_Document*`, and
-/// `~CPDF_Document` erases its own entry from it; erase a node from a
-/// red-black tree while another thread is inserting one and the tree is
-/// broken, after which any thread walking it dies.
+/// `~CPDF_Document` erases its own entry from it. Erase a node from a red-black
+/// tree while another thread inserts one and any thread that later walks it
+/// dies, which is why the crash landed in a test that was *opening* a document.
 ///
-/// That is the `SIGSEGV` `PROGRESS.md` had recorded as seen once and not
-/// understood, and it is understood now because the crash report names it:
-/// `__tree_remove` under `CPDF_Document::~CPDF_Document` under
-/// `FPDF_CloseDocument` under `Reader`'s own drop, on a thread `cargo test`
-/// was tearing down while another test was opening a document. It reproduced
-/// twice in six runs of the suite before this and not at all in the fifty
-/// after.
+/// So the close is brought inside the lock, and the `Open` that drops
+/// afterwards has nothing left to close. The rule to watch: a `Document` must
+/// never be dropped by a thread already holding [`library()`], because `Mutex`
+/// is not reentrant.
 ///
-/// So the close is brought inside the lock, which is `release()`'s one line
-/// again — and the `Open` that drops afterwards has nothing left to close.
-/// The one thing to watch: a `Document` must never be dropped by a thread
-/// already holding [`library()`], because `Mutex` is not reentrant. Nothing
-/// does — every drop of one is the last `Arc` going, in a viewer or a test —
-/// and the alternative shape, a `Drop` on `Open`, would put the same rule
-/// somewhere it is harder to see.
+/// The general form is worth carrying to anything wrapping a C library behind a
+/// lock: **a `Drop` is a call site, and it is the one call site that does not
+/// appear at the place it happens.**
 impl Drop for Document {
     fn drop(&mut self) {
         let _library = library();
@@ -268,27 +257,20 @@ impl PageSource for Document {
         self.details.clone()
     }
 
-    /// The links on one page.
+    /// The links on one page. Three things about pdfium's answer:
     ///
-    /// Three things about pdfium's answer are worth knowing.
+    /// *A link's area comes from the annotation, not the action.*
+    /// `FPDFLink_GetAnnotRect` is the `/Rect` of the `/Link`, counting from the
+    /// bottom — the same flip [`PageSource::text_of`] does.
     ///
-    /// *A link's area comes from the annotation and not from the action.*
-    /// `FPDFLink_GetAnnotRect` is the `/Rect` of the `/Link` annotation, in
-    /// the page's own points counting from the bottom — so the flip is the
-    /// same one [`PageSource::text_of`] does, in the same place, for the same
-    /// reason.
+    /// *A destination arrives two ways and a document uses either*: a `/Dest`
+    /// on the annotation, or one under `/A` in a `/GoTo` action. The bookmark
+    /// walk below has the same shape for the same reason.
     ///
-    /// *A destination arrives two ways and a document uses either.* Most
-    /// links carry a `/Dest`, which `destination()` answers; one written as a
-    /// `/GoTo` action carries it under `/A` instead, which is
-    /// `as_local_destination_action`. The bookmark walk below has exactly this
-    /// shape and for exactly this reason.
-    ///
-    /// *And a link with neither is dropped rather than kept as a dead
-    /// rectangle.* A `/Launch` action naming a program, a `/JavaScript`
-    /// action, a `/Dest` that resolves to no page: each of them is a hit area
-    /// over printed words that would do nothing when it was clicked, which
-    /// reads as the app being broken rather than as the document being odd.
+    /// *And a link with neither is dropped* rather than kept as a dead
+    /// rectangle: a `/Launch`, a `/JavaScript`, a `/Dest` resolving to no page
+    /// is a hit area over printed words that does nothing, which reads as the
+    /// app being broken.
     fn links_of(&self, index: usize) -> Vec<Link> {
         let _library = library();
         let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -394,27 +376,20 @@ impl PageSource for Document {
         notes
     }
 
-    /// Every highlight in the document, in reading order.
-    ///
-    /// Three things pdfium decides here.
+    /// Every highlight in the document, in reading order. Three things pdfium
+    /// decides here:
     ///
     /// *A highlight is `/Subtype /Highlight` and nothing else.* Underline,
-    /// strike-out and squiggly are three more markup subtypes and pdfium can
-    /// write all of them; they are not read here because they are not
-    /// written here, and a list that showed a mark this reader has no way to
-    /// make or unmake would be a list with a dead row in it. The app arrived
-    /// at the same place from the other side: `saveNewAnnotations` in
-    /// `pdf.worker.mjs` has a case for `HIGHLIGHT` and none for the other
-    /// three.
+    /// strike-out and squiggly are not read because they are not written, and a
+    /// list showing a mark this reader cannot unmake would have a dead row in
+    /// it.
     ///
     /// *The colour is `/C`, which pdfium calls the stroke colour.* See
-    /// [`crate::markup::add`], where the same name costs an hour if it is
-    /// taken at face value.
+    /// [`crate::markup::add`], where taking that name at face value costs an
+    /// hour.
     ///
-    /// *And a highlight with no attachment points is dropped.* `/QuadPoints`
-    /// is what says which words are marked; an annotation without them is a
-    /// rectangle somebody's software left behind, and a row in the panel that
-    /// scrolls to a page and points at nothing is worse than no row.
+    /// *And a highlight with no `/QuadPoints` is dropped*: a row that scrolls
+    /// to a page and points at nothing is worse than no row.
     fn markup(&self) -> Vec<crate::markup::Mark> {
         let _library = library();
         let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -521,28 +496,21 @@ impl PageSource for Document {
         self.opened_in
     }
 
-    /// One page's characters and where each of them sits.
-    ///
-    /// Three things about this are pdfium's and are worth knowing before
-    /// changing it.
+    /// One page's characters and where each of them sits. Three things about
+    /// pdfium's answer:
     ///
     /// *`loose_bounds`, not `tight_bounds`.* The tight box is the glyph's own
-    /// outline, so a highlight drawn from it clips the ascenders and descenders
-    /// of the very words it is meant to mark, and a lower-case run comes out
-    /// half the height of the line it is on. The loose box is the character's
-    /// cell — the line's height, the advance's width — which is what a reader
-    /// means by "highlight this".
+    /// outline, so a highlight drawn from it clips ascenders and descenders and
+    /// a lower-case run comes out half the height of its line. The loose box is
+    /// the character's cell, which is what a reader means by "highlight this".
     ///
     /// *A character can have no box at all.* pdfium generates spaces and line
-    /// breaks that the printer never drew, and asking one for its bounds fails
-    /// rather than returning nothing. Those characters are in the text — they
-    /// are what makes two words two words — so they are kept, with a box of no
-    /// size, and [`PageText::quads`] is what skips them.
+    /// breaks the printer never drew, and asking one for its bounds fails. They
+    /// are kept — they are what makes two words two words — with a box of no
+    /// size, and [`PageText::quads`] skips them.
     ///
-    /// *And this is one FFI call per character.* At a couple of thousand
-    /// characters a page it is the cost of the whole feature; see
-    /// `search.rs` for what that measures at and what the reader does about
-    /// it.
+    /// *And this is one FFI call per character*, which at a couple of thousand
+    /// a page is the cost of the whole feature.
     fn text_of(&self, index: usize) -> PageText {
         let _library = library();
         let held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -633,36 +601,26 @@ impl PageSource for Document {
         .map_err(|e| format!("page {index}: {e}"))?;
 
         // **The crop is a window onto a page drawn whole, not a page drawn
-        // small.** pdfium's `start_x`/`start_y` are where the page's top-left
-        // corner goes in the bitmap, and everything outside the bitmap is
-        // simply not drawn — so a page is asked for at the size it *would* be
-        // uncropped and slid up and left until the part worth keeping is the
-        // part inside. That is `offsetX`/`offsetY` in `viewer.ts` exactly, and
-        // it is why a trimmed document costs *less* to draw than an untrimmed
-        // one rather than more: nothing is rendered that will be clipped.
+        // small.** `start_x`/`start_y` are where the page's top-left corner goes
+        // in the bitmap and everything outside it is not drawn — so a page is
+        // asked for at the size it *would* be uncropped and slid up and left.
+        // That is why a trimmed document costs *less* to draw than an untrimmed
+        // one: nothing is rendered that will be clipped.
         //
-        // The rotation is pdfium's own, added to the page's: `rotate` here is
-        // a quarter turn on top of whatever `/Rotate` the file asks for, which
-        // is what `page.rotate + this.rotation` says in the app.
+        // The rotation is a quarter turn on top of whatever `/Rotate` the file
+        // asks for.
         // **`set_reverse_byte_order(false)`, and it is not a nicety.**
-        // `PdfRenderConfig::new()` turns `FPDF_REVERSE_BYTE_ORDER` *on* — the
-        // crate says why in its own source, and the reason is `image`'s
-        // `DynamicImage` rather than anything about PDF — so a bitmap asked
-        // for as BGRA comes back with its red and blue channels the other way
-        // round. Both paths above this one take pdfium at its word: the GPU
-        // uploads the buffer as `Bgra8Unorm` and lets the sampler do the
-        // swizzle, and `ensure_software` swaps the two channels by hand. With
-        // the flag on, both of them were swapping an order that had already
-        // been swapped.
+        // `PdfRenderConfig::new()` turns `FPDF_REVERSE_BYTE_ORDER` *on* for
+        // `image`'s `DynamicImage`, so a bitmap asked for as BGRA is not BGRA.
+        // Both paths above take pdfium at its word — the GPU uploads as
+        // `Bgra8Unorm` and lets the sampler swizzle, and `ensure_software` swaps
+        // by hand — so with the flag on, both were swapping an order that had
+        // already been swapped.
         //
-        // It is invisible on almost everything this reader draws. A page of
-        // black type on white paper is the same picture either way, and so is
-        // every scan; a recolouring theme reads a pixel's luma, where red and
-        // blue carry different weights (0.2126 against 0.0722) but a grey
-        // page has neither. What shows it is a page with a *known* colour on
-        // it, and the first thing in this reader to put one there is markup:
-        // a passage marked in `#ff0000` came back on screen in `#0000ff`.
-        // See `tests/markup.rs`, which is where it was found.
+        // Invisible on almost everything: a page of black type is the same
+        // picture either way, and so is every scan. What shows it is a *known*
+        // colour, and the first thing to put one on a page is markup — a
+        // passage marked `#ff0000` came back `#0000ff`.
         let mut config = PdfRenderConfig::new()
             .set_reverse_byte_order(false)
             .set_target_size(width as i32, height as i32);
@@ -707,15 +665,13 @@ impl PageSource for Document {
 /// How far down its page a destination sits, as a fraction of the page's
 /// height.
 ///
-/// `offsetWithin` in `viewer.ts`, said in pdfium's own terms: `/XYZ` and the
-/// `Fit*` forms that name a top edge are the ones that say where on the page
-/// they mean, and everything else means the top of it. pdfium answers all of
-/// them through one call, so the six view settings collapse to "is there a y,
-/// and is a y what this form means".
+/// `/XYZ` and the `Fit*` forms that name a top edge say where on the page they
+/// mean; everything else means the top. pdfium answers all of them through one
+/// call, so the six view settings collapse to "is there a y, and is a y what
+/// this form means".
 ///
-/// Clamped at 0.95 for the app's reason: a destination at the very bottom of a
-/// page scrolls that page out of the window entirely, and the reader lands
-/// looking at the next one with nothing to say why.
+/// Clamped at 0.95: a destination at the very bottom of a page scrolls that
+/// page out of the window, and the reader lands looking at the next one.
 fn offset_within(destination: &PdfDestination, height: f64) -> f64 {
     use PdfDestinationViewSettings as View;
     let top = match destination.view_settings() {
@@ -752,19 +708,14 @@ fn own_numbering(labels: Vec<String>) -> Vec<String> {
 
 /// The bookmark tree, flattened into the rows the sidebar draws.
 ///
-/// Walked by hand rather than through `iter_all_descendants`, because the one
-/// thing a row needs beyond its title and its page is how far to indent it,
-/// and an iterator that flattens the tree has already thrown the depth away.
+/// Walked by hand rather than through `iter_all_descendants`, because a row
+/// needs its depth and an iterator that flattens the tree has thrown it away.
 ///
-/// Three things it refuses. A bookmark with no title is skipped, because a
-/// row with nothing written on it is a row nobody can aim at — `sidebar.ts`
-/// writes "Untitled" instead, which is a worse answer to the same question
-/// and one this reader does not have to repeat. A destination that does not
-/// resolve leaves `page` at `None` rather than dropping the row, because the
-/// heading is still the document's own account of itself. And the walk stops
-/// at `LIMIT` entries and `DEPTH` levels: a malformed document can point a
-/// bookmark's child or its next sibling at its own ancestor, and a table of
-/// contents is not the place to find that out by running out of memory.
+/// Three refusals: a bookmark with no title is skipped, being a row nobody can
+/// aim at; a destination that does not resolve leaves `page` at `None` rather
+/// than dropping the row, the heading still being the document's own account of
+/// itself; and the walk stops at `LIMIT` entries and `DEPTH` levels, because a
+/// malformed document can point a bookmark at its own ancestor.
 /// What the Information window lists, in the app's own order and under the
 /// app's own labels — `showDocumentDetails` in `main.ts`. A field the document
 /// does not name is left out rather than shown empty.
@@ -819,25 +770,18 @@ fn read_details(
 
 /// `/ModDate`, read out of the file, because pdfium will never be asked for it.
 ///
-/// **`pdfium-render` asks pdfium for the wrong key.** `FPDF_GetMetaText`'s tag
-/// is the name of an entry in the document's `/Info` dictionary, and the PDF
-/// specification names eight of them: `Title`, `Author`, `Subject`, `Keywords`,
-/// `Creator`, `Producer`, `CreationDate` and **`ModDate`**. `PdfMetadata::get`
-/// spells the last one `"ModificationDate"` (`pdfium-render 0.9.3`,
-/// `src/pdf/document/metadata.rs`), which is not a key any document has, so the
-/// call returns a length of zero and the tag reads as absent. Every other tag
-/// is spelled correctly, which is what makes it so quiet: the Information
-/// window showed nine facts and simply never showed the tenth, on every
-/// document ever opened. `PdfDocument::handle()` is `pub(crate)`, so the raw
-/// call cannot be made from out here either.
+/// **`pdfium-render` asks pdfium for the wrong key.** `PdfMetadata::get` spells
+/// it `"ModificationDate"` (0.9.3, `src/pdf/document/metadata.rs`) where the
+/// specification's `/Info` key is `ModDate`, so the call returns a length of
+/// zero and the tag reads as absent. Every other tag is spelled correctly,
+/// which is what makes it quiet. `PdfDocument::handle()` is `pub(crate)`, so
+/// the raw call cannot be made from out here either.
 ///
 /// So the bytes are read. **Bounded, and from the end first**: an `/Info`
-/// dictionary sits near the trailer in the great majority of documents, and in
-/// one this reader has itself appended to it is necessarily in the last update.
-/// The front is tried after it because a linearised document puts its
-/// first-page objects — Info among them, often — at the head. A document that
-/// keeps it somewhere in a hundred megabytes of middle gets no row, which is
-/// exactly what it gets today.
+/// dictionary sits near the trailer in most documents, and necessarily in the
+/// last update of one this reader has appended to. The front is tried after,
+/// because a linearised document puts its first-page objects at the head. One
+/// that keeps it in the middle gets no row, which is what it gets today.
 fn mod_date(path: &str) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
 

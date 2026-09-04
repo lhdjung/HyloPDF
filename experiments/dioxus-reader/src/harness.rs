@@ -75,27 +75,23 @@ pub struct Options {
     /// Settings written into the config directory before the reader opens,
     /// as key against value.
     ///
-    /// The twin of `openApp({ settings })` in the app's own harness, and it
-    /// exists for the same reason: some of what this reader does is not
-    /// reachable by pressing anything. `scroll_mode` is the case in point —
-    /// the brief says continuous scrolling may only ever change if the reader
-    /// explicitly opts into it, so there is deliberately no key and no chip,
-    /// and a line in `settings.toml` is the whole of the interface for it.
+    /// The twin of `openApp({ settings })`, for the same reason: some of what
+    /// this reader does is not reachable by pressing anything. `scroll_mode` is
+    /// the case in point — the brief says continuous scrolling may only change
+    /// if the reader opts in, so a line in `settings.toml` is the whole of the
+    /// interface for it.
     ///
-    /// Written through the app's own [`crate::settings::set_many`], so what a
-    /// test exercises is the real loader reading a real file.
+    /// Written through the app's own [`crate::settings::set_many`], so a test
+    /// exercises the real loader reading a real file.
     pub settings: Vec<(String, serde_json::Value)>,
     /// Whether the real watcher runs behind this reader — the app's own
     /// `watch.rs`, on a thread, over the themes directory and the document.
     ///
     /// **Off by default, and a test should think before turning it on.** The
-    /// watcher thread cannot be stopped (see [`crate::app::Config::watch`]),
-    /// so every reader that starts one leaves one behind for the rest of the
-    /// run, and what it then reports arrives at the speed of the file system
-    /// rather than of the test. The deterministic way to test what the reader
-    /// *does* about news is [`Reader::deliver`], which posts the same news
-    /// the watcher would; this is for the one test that has to prove the
-    /// watcher is really wired to it.
+    /// thread cannot be stopped, so every reader that starts one leaves one
+    /// behind for the rest of the run, reporting at the speed of the file
+    /// system. [`Reader::deliver`] posts the same news deterministically; this
+    /// is for the one test that has to prove the wire.
     pub watch: bool,
     /// A document this window is to ask the password for, if there is one —
     /// the prop `Session::window_on` hands a window it made on a locked file.
@@ -277,14 +273,11 @@ impl Reader {
     /// Tell this reader that something on the disk changed, exactly as the
     /// watcher would.
     ///
-    /// The news is the news `watch.rs` emits, in the shape it emits it —
-    /// `themes-changed` with the whole set, `document-changed` with a path —
-    /// so what is being tested is the reader's half of a real wire and not a
-    /// method called directly. What it skips is the file system: a test that
-    /// wants the *watcher* tested asks for `watch: true` and writes a file.
+    /// The news `watch.rs` emits, in the shape it emits it, so what is tested
+    /// is the reader's half of a real wire rather than a method called
+    /// directly. What it skips is the file system.
     ///
-    /// Pumps afterwards, because the task is woken rather than run: the wake
-    /// marks it ready and the next turn of the loop is what runs it.
+    /// Pumps afterwards, because the task is woken rather than run.
     pub fn deliver(&mut self, news: crate::emit::News) {
         self.post.send(news);
         self.settle();
@@ -402,17 +395,14 @@ impl Reader {
         });
     }
 
-    /// Turn the loop until `ready` says so, or until it plainly is not going
-    /// to — with a real clock, because the thing being waited for is a real
-    /// file system.
+    /// Turn the loop until `ready` says so — with a real clock, because the
+    /// thing being waited for is a real file system.
     ///
-    /// The only test that needs this is the one with the real watcher behind
-    /// it: `notify` reports when the platform tells it to, and the app's own
-    /// `SETTLE` and `STEADY` are a quarter of a second between them. Every
-    /// other test in this suite waits for a turn of the loop and no longer.
+    /// Only the test with the real watcher behind it needs this; every other
+    /// test in the suite waits for a turn of the loop and no longer.
     ///
-    /// Answers whether it happened, so that a test that gives up says what
-    /// the reader was stuck on rather than that a timer went off.
+    /// Answers whether it happened, so a test that gives up says what the
+    /// reader was stuck on rather than that a timer went off.
     pub fn wait_until(&mut self, seconds: f64, ready: impl Fn(&mut Reader) -> bool) -> bool {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds);
         loop {
@@ -704,22 +694,16 @@ impl Reader {
     /// What AppKit sends *instead of* an editing key, on a Mac.
     ///
     /// **Backspace is not a key there.** AppKit reads the editing keys against
-    /// the standard key bindings and calls `doCommandBySelector:` with a name
-    /// — `deleteBackward:` — which winit surfaces through a callback of its
-    /// own and `blitz-shell` turns into `UiEvent::AppleStandardKeybinding`.
-    /// `blitz-dom` knows this and says so: its `Key::Backspace` arm is
-    /// `#[cfg(not(target_os = "macos"))]`, so on a Mac the keystroke alone
-    /// deletes nothing at all.
+    /// the standard key bindings and calls `doCommandBySelector:` with a name,
+    /// which winit surfaces through a callback of its own. `blitz-dom` knows
+    /// this — its `Key::Backspace` arm is `#[cfg(not(target_os = "macos"))]` —
+    /// so on a Mac the keystroke alone deletes nothing.
     ///
-    /// A harness has no AppKit, so it has to send the second half itself, and
-    /// it must — the app's whole editing story is macOS-only otherwise, and
-    /// the fault this exists to cover was exactly that: `Shell` did not
-    /// forward the callback, so nothing anybody typed could be taken back
-    /// out. See `ApplicationHandlerExtMacOS for Shell` in `shell.rs`.
-    ///
-    /// Only the two a reader of this app presses. Everything else in a text
-    /// field here is a letter, an arrow or Escape, and those arrive as
-    /// keystrokes on every platform.
+    /// A harness has no AppKit and has to send the second half itself, or the
+    /// editing story is untested on the one platform where it can break. See
+    /// `ApplicationHandlerExtMacOS for Shell` in `shell.rs`. Only the two keys
+    /// a reader of this app presses; everything else arrives as a keystroke on
+    /// every platform.
     #[cfg(target_os = "macos")]
     fn apple_binding(&mut self, key: &Key, modifiers: Modifiers) {
         use blitz_traits::events::UiEvent;
@@ -786,22 +770,13 @@ impl Reader {
     /// Compose a word the way an input method does: a run of preedits, then
     /// the text itself.
     ///
-    /// **This is what a reader writing Japanese, Chinese or Korean actually
-    /// does**, and until this method existed nothing in either of this
-    /// experiment's documents could say whether the find bar answered it.
-    /// Both listed IME as the one item that needed a decision rather than a
-    /// workaround, on the strength of there being no composition events. There
-    /// are: `packages/blitz-dom/src/events/ime.rs` takes the focused node's
-    /// editor and applies the event through Parley, and `blitz-shell` routes
-    /// winit's four `WindowEvent::Ime` variants into it.
-    ///
-    /// `stages` is what the candidate window shows on the way — "に",
-    /// "にほん", "にほんご" — and `text` is what is chosen. Every stage is a
-    /// `Preedit`; the choice is an **empty preedit and then a `Commit`**,
-    /// because that is winit's own contract: "right before this event winit
-    /// will send empty [`Preedit`]". A test that leaves the empty one out
-    /// composes on top of its own composing region and gets にほん日本語,
-    /// which reads exactly like a Blitz fault and is not one.
+    /// `stages` is what the candidate window shows on the way — "に", "にほん",
+    /// "にほんご" — and `text` is what is chosen. Every stage is a `Preedit`;
+    /// the choice is an **empty preedit and then a `Commit`**, which is winit's
+    /// own contract: "right before this event winit will send empty
+    /// [`Preedit`]". Leaving the empty one out composes on top of the composing
+    /// region and gets にほん日本語, which reads like a Blitz fault and is not
+    /// one.
     pub fn compose(&mut self, stages: &[&str], text: &str) {
         for stage in stages {
             self.preedit(stage);
@@ -964,13 +939,11 @@ impl Reader {
     /// Sweep the pointer from one point in the window to another, which is
     /// what selecting text is.
     ///
-    /// The same three events a pointer sends, because the selection is read
-    /// off all three: the press decides where the content is (see
-    /// `Viewer::sweep_from`), the moves extend it, and the release is what
-    /// turns a sweep that covered nothing into no selection at all. The
-    /// intermediate move is not decoration either — a sweep of one jump is a
-    /// sweep no reader makes, and a bug that only appears on the second move
-    /// would never be seen.
+    /// All three events a pointer sends, because the selection is read off all
+    /// three: the press decides where the content is, the moves extend it, and
+    /// the release turns a sweep that covered nothing into no selection. The
+    /// intermediate move is not decoration — a bug that only appears on the
+    /// second move would never be seen.
     pub fn sweep(&mut self, from: (f32, f32), to: (f32, f32)) {
         self.harness.mouse_down_at(from.0, from.1);
         let middle = ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0);
@@ -1270,13 +1243,11 @@ impl Reader {
     /// How wide the first node matching `selector` is laid out, in CSS
     /// pixels, or `None` if there is no such node.
     ///
-    /// Public for the reason [`Reader::text_all`] is: a test outside this
-    /// crate cannot walk the DOM, and `tests/parity.rs` needs this one to ask
-    /// the question that sees the *type*. A chip's width is its padding plus
-    /// its icon plus its word, and the first two are numbers the app and this
-    /// reader already agree on — so the width is the only thing in the
-    /// interface that says whether the font is the same font, laid out the
-    /// same way.
+    /// Public for the reason [`Reader::text_all`] is: a test outside this crate
+    /// cannot walk the DOM, and `tests/parity.rs` needs this to ask the question
+    /// that sees the *type*. A chip's width is padding plus icon plus word, and
+    /// the first two already agree — so the width is the only thing in the
+    /// interface that says whether the font is the same font.
     /// Where the first node matching `selector` is laid out and how big it is,
     /// in CSS pixels — which is what a gesture over something needs and
     /// `width_of` beside it answers a quarter of.
@@ -1399,10 +1370,9 @@ impl Shot {
     /// The first column of a band that has anything drawn on it, as an x in
     /// device pixels — and `None` for a band that is all one colour.
     ///
-    /// What "anything" means is: unlike the band's own top-left pixel, which
-    /// is the ground it is drawn on. That is how a reader tells an indent
-    /// from a flush row, and it is the only way to measure one here: the rows
-    /// are the width of the panel whatever their depth, so the indent is
+    /// "Anything" means: unlike the band's own top-left pixel, which is the
+    /// ground it is drawn on. That is the only way to measure an indent here —
+    /// the rows are the panel's width whatever their depth, so the indent is
     /// padding and the box does not move.
     pub fn leftmost_ink(&self, rect: (u32, u32, u32, u32)) -> Option<u32> {
         let (x0, y0, x1, y1) = rect;

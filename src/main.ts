@@ -1467,11 +1467,10 @@ class App {
    * write back rather than assuming what it wrote landed the way it meant
    * it to.
    *
-   * Saved immediately, on every mark, rather than batched or debounced —
-   * `markup-assessment.md` calls out a debounce as the right answer for a
-   * very large document. `MARKUP_IN_FILE_LIMIT` is the other half of that
-   * answer and the one that arrived: past a certain size the round trip is
-   * not something to make quicker, it is something not to make.
+   * Saved immediately, on every mark, rather than batched or debounced. A
+   * debounce is the obvious answer for a very large document and
+   * `MARKUP_IN_FILE_LIMIT` is the better one: past a certain size the round
+   * trip is not something to make quicker, it is something not to make.
    *
    * Everything else here is step 7. Three ways this does not end in a write:
    *

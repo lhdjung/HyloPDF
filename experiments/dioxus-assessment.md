@@ -49,7 +49,7 @@ And three things that keep expectations honest:
    against 373MB on the same document.
 3. **The entire test apparatus goes.** Seventeen test files, the Playwright
    WebKit harness, and the browser twin in `api.ts` that makes them possible.
-   The replacement is good and is built (`PROGRESS.md`, Phase 2), but it is a
+   The replacement is good and is built (`PROGRESS.md`, "The harness"), but it is a
    rewrite, and pretending otherwise is how a rewrite loses its safety net.
 
 ---
@@ -286,7 +286,7 @@ arrives is a DOM `CompositionEvent` — and that turns out to be the right shape
 rather than a shortfall, because a composition event is a *notification* that
 composing is under way and what a find bar wants is the result. `tests/ime.rs`
 types 日本語 into the field and finds a composed word in a document; nothing in
-the reader had to change. See `PROGRESS.md`, "The platform work".
+the reader had to change. See `PROGRESS.md`'s upstream list.
 
 **`ResizeObserver`, `IntersectionObserver` and the `resize` event do not
 exist.** Replace with the window size from winit and element geometry from
@@ -327,7 +327,7 @@ The app's whole "Two documents at once" architecture depends on this. It works
 — three windows, one asked for from another thread, closing the last ends the
 app — and it takes about three hundred lines of shell of our own, because
 `DioxusNativeApplication::add_window` does not do what its name suggests. The
-mechanics are in `PROGRESS.md`, Phase 0.
+mechanics are in `PROGRESS.md`.
 
 **It remains the highest-risk item on the list**, and Phase 3 item 9 has now
 built the whole of the app's window story on it — two documents at once, the
@@ -463,7 +463,7 @@ step was chosen to be testable:
    left of this item and of the whole list. The theme **menu** is built and
    is not the same thing: choosing among the fourteen is not editing one.
    Dark mode and following the machine's own light and dark landed after
-   Phase 3 — see `PROGRESS.md`, "After Phase 3": `follow_system_theme` was
+   Phase 3 — see `PROGRESS.md`: `follow_system_theme` was
    listed here as needing a signal this reader does not get, and the signal
    is `WindowEvent::ThemeChanged`*
 2. the keyboard: the action table, chords, `keys.toml`, the Keyboard page —
@@ -545,7 +545,7 @@ through fourteen themes one keystroke at a time and there was no ⌘O at all,
 and both of those read as "unfinished" rather than as "not on the plan".
 Done, 2026-09-01: three toolbar menus, ⌘O and "Open in a new window…", each
 menu item's chord read off the keymap, and the thumbnail column following a
-sidebar drag. See `PROGRESS.md`, "The menus, and opening a document", and the
+sidebar drag. See `PROGRESS.md`, and the
 section at the top of that file about why this was missing. **The settings
 window and the Keyboard page are the same category and are what is left of
 it**, along with markup.
@@ -558,7 +558,7 @@ finishing markup on macOS and *then* finding out the shell does not hold on
 Windows is the worst available order. Done: Blitz is a pinned git revision
 rather than a path into a clone, so a fresh checkout builds; `experiment.yml`
 runs the whole suite on three runners; IME is struck; and the memory bound now
-binds on Linux as well as on a Mac. See `PROGRESS.md`, "The platform work".
+binds on Linux as well as on a Mac. See `PROGRESS.md`'s upstream list.
 
 **And after Phase 3, the three keys that still answered "not built yet".**
 Dark mode, help and print — the three actions that are about something

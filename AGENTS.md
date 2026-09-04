@@ -1484,246 +1484,50 @@ writes `src-tauri/app-icon.svg` beside the PNG and renders it through WebKit at
 more in PNG than it does in fidelity. `npm run tauri icon` expands the result
 into the thirty-odd files the three platforms want; nothing under
 `src-tauri/icons/` is edited by hand.
-
 ## What a critical read turned up
 
 A pass over the whole tree looking for what was wrong rather than for what was
-there, and then the fixes. Everything below is done; it is kept because the
-reasoning is the part worth having, and because several of these are shapes
-that will come back.
+there. All of it is fixed and the fixes are in the code; what is kept here is
+the part that would not be caught again by the same means, because four of the
+answers were new *gates* rather than new code.
 
-The ground it started from: `npm run check` clean, `cargo clippy --all-targets`
-clean, 66 frontend tests passing, 11 Rust tests passing. None of what follows
-was going to be caught by any of that — which is most of the point, and is why
-four of the fixes are new gates rather than new code.
+**The gates, which were not gates.** `cargo test` was not in CI, so eleven Rust
+tests covering the settings write race and the half-written-document gate ran
+nowhere. `tsconfig.json` named `vite.config.js` and `scripts/**/*.mjs` in
+`include` with no `allowJs`, so `tsc` silently took neither and the harness read
+as though it had been checked since it was written — splitting it into
+`tsconfig.node.json` found twenty-one real errors. And `sidebar.ts` and
+`settings.ts` had no tests at all, by source or through the harness; they were
+also where the two worst bugs were.
 
-### The gates, which were not gates
+**Four shapes that will come back.**
 
-**`cargo test` was not in CI.** The Rust job ran fmt and clippy and stopped.
-Eleven tests, covering the settings write race and the gate that stands between
-a reader and a compiler's half-written output — the two things in this codebase
-that break quietly and reproduce badly. Now run on every push.
+*A second place that holds pages.* `Sidebar.draw` called `doc.getPage` directly
+and dropped the proxy on the floor, so scrolling the Pages tab down a scanned
+book parsed every page and kept the lot — through a door the viewer's own
+accounting cannot see. `cleanup()` after every thumbnail, `THUMB_CACHE`, and a
+`RenderTask` per page so a theme change calls off what it is replacing.
 
-**`tsconfig.json` named files it did not check.** `include` listed
-`vite.config.js` and `scripts/**/*.mjs` with no `allowJs`, so `tsc` took
-neither and the config read as though the harness had been checked since it was
-written. Splitting it is what made checking them possible: the app runs in a
-webview and must not see `process` or `Buffer`, the harness cannot be checked
-without them. `tsconfig.json` keeps `src/**` and `types: []`;
-**`tsconfig.node.json`** takes the Node side with `checkJs` and Node's globals.
-`npm run check` runs both. Twenty-one real errors fell out of the two scripts —
-a possibly-null bounding box, a property descriptor used unchecked, implicit
-`any` throughout.
+*A cheap answer that admits no failure.* `parseInt("12345g", 16)` stops at the
+character it cannot read and returns what it had, so `#12345g` came back as a
+plausible colour from a string that is not one — the worst of the three possible
+behaviours, because nobody notices. Every length is checked against the alphabet
+now, and `unreadableColors` is how a hand-written theme finds out.
 
-**`sidebar.ts` and `settings.ts` had no tests at all**, by source or through the
-harness. They were also where the two worst bugs were. Both now have files of
-their own; see the testing section above.
+*A probe that checks some of what it stands for.* `canBlend` tested three of the
+five blend modes `recolor` uses, so an engine dropping either of the other two
+would have passed the probe, taken the fast path, and produced a page inverted
+rather than recoloured.
 
-### The sidebar was undoing the viewer's memory work
+*A per-pixel question asked per pixel.* `within(regions, x, y)` scanned the whole
+rectangle list for every pixel in the bounding box — free for a whole-page
+recolour with no regions, and 3965ms against 18ms for a bibliography's two
+hundred links, whose bounding box is the whole page. `maskFor` fills each
+rectangle once, so it costs the sum of their areas rather than the box around
+them, and the overlap problem falls out.
 
-`viewer.ts` has an LRU, two caps, a `pictorial` set and a `trimPages()` whose
-whole job is that a scanned page's decoded image does not survive being
-scrolled past. `Sidebar.draw` called `doc.getPage` directly and dropped the
-proxy on the floor — so scrolling the Pages tab down a scanned book parsed
-every page of it and kept the lot, through a door the viewer's accounting
-cannot see. **The memory table above was measured with that panel closed.**
-
-Three things, and they need each other:
-
-*`cleanup()` after every thumbnail*, which is what gives the operator list
-back. `search.ts` has always done this.
-
-*`THUMB_CACHE`*, forty drawn thumbnails, released rather than dropped. A
-canvas at the widths this panel can be dragged to is about a megabyte, and
-there was no cap and no release: a nine hundred page book scrolled end to end
-was nine hundred of them, held for as long as the document was open. Released
-back to the placeholder size rather than to nothing, because the column takes
-its shape from the canvas's own proportions and a 0×0 one collapses the row.
-
-*A `RenderTask` per page*, so a theme change calls off the render it is about
-to replace. Without it `redrawVisible` started a second render into a canvas
-that already had one — which pdf.js refuses outright, the `catch` swallowed,
-and the thumbnail was stranded in the old theme.
-
-### The theme watcher could run over a theme being written
-
-The draft is installed as the live theme — that is how the app around you
-becomes the preview — and a new one has `id: ""`. So while somebody was
-composing a theme, any write anywhere in the themes directory sent
-`themesChanged` looking for `""` in the new list, finding nothing, and
-concluding the theme in use had been deleted: preview thrown away, replacement
-chosen, choice written to `settings.toml` through `useTheme`'s default
-`remember`, and a notice saying "X is gone" about something that had not
-happened. Editing a theme file beside the app is the entire reason the watcher
-exists, so this was not a corner.
-
-`isEditingTheme()` in `settings.ts` is the answer, kept in one place beside the
-closure it describes. The theme list still updates and the window still
-redraws; only the colours on screen are left alone.
-
-### Colour reading admitted no failure
-
-`parseInt("12345g", 16)` stops at the character it cannot read and returns what
-it had, so `#12345g` came back as `[1, 35, 69]` — a plausible colour from a
-string that is not one, which is the worst of the three possible behaviours
-because it is the one nobody notices. Every length is checked against the
-alphabet now, and `#abcd`/`#aabbccdd` are accepted with the alpha dropped.
-
-Anything not hex — `steelblue`, `rgb(30, 42, 59)` — fell through to a fallback
-that is black for the ink and white for the paper, silently. The whole argument
-for keeping themes as TOML is that somebody, or something asked on their
-behalf, can write one, and the notation is exactly what they will get wrong.
-`unreadableColors` names the fields at fault and the app says so once per
-theme, again if the file breaks again after being put right.
-
-And the theme menu's swatch and the theme card's preview handed their raw
-strings to CSS, so the browser understood things the renderer does not:
-`steelblue` showed as steel blue in the picker and rendered as black on the
-page. **The one place meant to show you what you are about to get was the one
-place that lied about it.** Both go through `parseColor` now.
-
-### Two things about `recolor` that were nearly right
-
-*The blend probe checked three of five.* `canBlend` tested `saturation`,
-`multiply` and `color-dodge`; `recolor` also uses `difference` and `lighter` on
-the inverted path, which is most of the shipped themes. An engine dropping
-either would have passed the probe, taken the fast path, and produced a page
-inverted rather than recoloured — the silent-wrong-picture failure the probe
-exists to prevent. `BLEND_MODES` is the whole list now.
-
-*`recolorByPixel` asked its region question per pixel.* `within(regions, x, y)`
-scanned the whole rectangle list for every pixel in the bounding box. Free for
-a whole-page recolour, which has no regions; not free for tinting links, and
-the shape that bites is ordinary — a bibliography's links run top to bottom, so
-their bounding box is the whole page, and there are a couple of hundred of
-them. Measured at 3000×4000 with 200 rectangles: **3965ms scanning, 18ms
-against a mask filled once**, per repaint, on the path an engine without blend
-modes takes for every step of a zoom. `maskFor` builds one byte a pixel by
-filling each rectangle, so it costs the sum of their areas rather than the box
-around them — and the overlap problem falls out, because a pixel is in the mask
-or it is not.
-
-### The one door had a side entrance
-
-`main.ts` imported `invoke` from `@tauri-apps/api/core` directly, for forwarding
-the console into the terminal. Small, dev-only, and it made a claim this file
-states twice simply false — a claim that is half of why the pdfium prototype
-needed no change to either side. `log` lives in `api.ts` now with a browser
-twin.
-
-**`tests/seams.test.mjs` is what keeps it true**: it checks the Rust door,
-checks that `viewer.ts` is the only file reaching for pdf.js rather than its
-types, and checks that everything `src/` imports is a real dependency rather
-than one that happened to be installed. It earned its place on its first run,
-failing because the thumbnail fix had just imported `RenderingCancelledException`
-into `sidebar.ts` — that question goes through `isRenderCancelled` in
-`viewer.ts` now.
-
-Also: `@tauri-apps/plugin-dialog` was a dependency imported nowhere, and
-`@tauri-apps/api` was a dev dependency imported by shipping code.
-
-### Settings meant slightly different things on each side
-
-`load` validated nothing. `set_many` refuses an unknown key or a wrong-shaped
-value; `load` then layered whatever the file said straight over the defaults
-and handed it to the frontend. The file's own header invites hand-editing, so
-`zoom = "big"` is a thing a person can write, and it arrived in
-`viewer.setFit` typed as a number. Both directions go through `same_shape` now,
-and a wrong-shaped value is dropped so the default stands. Unknown keys are
-still carried through — those belong to a version that is not this one, and
-dropping them is how a downgrade eats your settings.
-
-`same_shape` also treated every number alike, so `sidebar_width = 12.5` was a
-valid width in pixels. A setting whose default is a whole number now wants one;
-`zoom`, whose default is a float, still takes either.
-
-The window minimums disagreed — 480×360 in `restore_window`, 520×400 in
-`tauri.conf.json`. The window manager enforces its own, so the smaller pair was
-dead code describing an intention the app did not have. `MIN_WIDTH` and
-`MIN_HEIGHT` now say where the other copy lives.
-
-And `api.ts` restates the whole table for the browser path, which is the drift
-it already warns about for themes. It cannot be read from a file the way the
-themes are — TOML has no null and `window_x` defaults to one — so
-**`tests/settings.test.mjs`** checks the three copies against each other: the
-Rust table, the browser fallback, and the `Settings` type.
-
-### The smaller ones
-
-**A cancelled Open never resolved.** `change` does not fire when the picker is
-dismissed, so `browsePdf` returned a promise that never settled and the `await`
-in `openDialog` behind it. `cancel`, with window focus as the fallback for
-engines that do not send it. `browserFiles` also grew for the life of the page;
-eight, as an LRU.
-
-**`setTheme` asked one question and used it for everything.** The selection
-colours are not baked into a bitmap — `paintSelection` redraws from the page
-and caches by colour — so they were not on the repaint list at all, and
-changing one with a sentence selected left the sentence as it was until the
-reader moved it. Two questions now.
-
-**`Search.step` claimed no scan was running**, so ⌘G during the indexing of a
-long document dropped the "…" and showed the count as final at the moment it
-was most obviously climbing. And the cap was reported on `>=`, so exactly two
-thousand matches showed "2000+" — a floor on an exact count.
-
-**The plain-key switch took modified keys.** Anything the `meta &&` branches
-had not claimed fell through with its modifiers intact, so ⌘↓ and ⌘← — "end of
-document" and "start of line" everywhere else on a Mac — turned pages, and ⌥j
-scrolled. j and k also did not `preventDefault` while every other movement key
-did.
-
-**`fold` walked UTF-16 code units**, so everything above the basic plane
-arrived as two lone surrogates and `normalize` had nothing to work with: 𝐀
-(U+1D400, NFKD "A") went through untouched, and a document set in mathematical
-bold could not be searched with the letters on the keyboard. Matching such a
-character against itself always worked, which is why nothing had noticed.
-`source` still counts in code units, because `starts` and the text layer are
-indexed by those.
-
-**`install_built_ins` used `fs::write`**, which truncates and then fills, on
-every shipped file in a watched directory at every launch.
-
-**`whole()` marked a document by length and time alone.** On a file system
-keeping whole seconds, a recompile of the same length inside one tick produced
-an identical mark and the reload never fired. A PDF's trailer carries byte
-offsets into everything above it, so two drafts agreeing there does not happen
-— and `whole` had already read those bytes looking for `%%EOF`.
-
-**`paintHighlights` read `boxes[slot.index].top` unguarded**, in a file that
-spends several comments explaining that paged mode leaves that array full of
-holes.
-
-**`set` and `setSoon` shared a timer** as well as a queue, though not an
-urgency: a pinch calls `setSoon` every frame and pushed the deadline out each
-time, so a theme chosen mid-gesture waited for the fingers to stop. Soonest
-wins now.
-
-And the doc comment for `tintLinks` had been left above `joinRuns`, so the
-function with the explanation had none and the one without had two.
-
-### Accessibility, which nothing had addressed
-
-`#notice` was not a live region, so every message the app makes was inaudible —
-including "Toolbar hidden, ⌘T brings it back", whose entire job is to name the
-only way back to a toolbar that is now invisible. `notice()` unhides before
-filling, because a hidden live region is out of the accessibility tree and a
-message written first is one nothing announces.
-
-Document links carry `role="link"` and no text — bare rectangles over printed
-words, and the words are in the text layer where the link cannot reach them —
-so every cross-reference was an unlabelled tab stop and a page of them read as
-"link, link, link". External links say where they go; internal ones say they
-stay inside the document, because resolving a destination is a trip into the
-worker each and a page of mathematics has hundreds.
-
-The tab list, both panels and the document region had no names, and the page
-had no language: `index.html` has no `<html>` element for one to go on, so
-`start()` sets it.
-
-### One thing that was right
-
-The paged-mode sparse `boxes` array is a genuine trap — two binary searches,
-`trackCurrentPage`, `pointAt` and `mount` all have to know about it — and every
-one of them did, each with a comment saying why. That is the correct amount of
-defence for the shape. Read that block before touching `relayout`.
+**And the one thing that was right.** The paged-mode sparse `boxes` array is a
+genuine trap — two binary searches, `trackCurrentPage`, `pointAt` and `mount`
+all have to know about it — and every one of them did, each with a comment
+saying why. That is the correct amount of defence for the shape. Read that block
+before touching `relayout`.

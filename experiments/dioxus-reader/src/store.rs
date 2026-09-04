@@ -2,29 +2,24 @@
 //! it is choosing from.
 //!
 //! [`crate::settings`] and [`crate::theme`] are the app's own modules, mounted
-//! into this crate unchanged, and they are deliberately about the disk and
-//! nothing else — a settings table is a map of scalars, a theme is a file.
-//! This is the layer above them that the reader talks to: which theme is in
-//! use, what it resolves to, and a way to change a setting that writes it down
-//! without the caller thinking about it.
+//! unchanged, and they are about the disk and nothing else. This is the layer
+//! above them the reader talks to: which theme is in use, what it resolves to,
+//! and a way to change a setting that writes it down.
 //!
-//! **There is no bridge here, and that is the whole of what this replaces.**
-//! In the app the same work is `api.ts` (898 lines, deleted by this design),
-//! thirty-three `#[tauri::command]`s, a browser twin of every one of them, and
+//! **There is no bridge here**, which is what this replaces: `api.ts` (898
+//! lines), thirty-three commands, a browser twin of each, and
 //! `settings.test.mjs` existing solely because the table is written out three
-//! times. Here a component calls a method. The settings table is stated once,
-//! in the file the app states it in, and there is no second copy to drift.
+//! times. The table is stated once, in the file the app states it in.
 //!
 //! *One write is off the main thread, and only one needs to be.* `set_many`
-//! is a read-modify-write of a small TOML file and happens on whichever
-//! thread asked, which is fine for a theme or a zoom — a reader changes those
-//! a handful of times a session. Where the reader *is* moves sixty times a
-//! second, and the app moved that one to an `async` command for exactly that
-//! reason: a whole-file rewrite of `library.toml` was landing in the middle of
-//! the one gesture this app exists to make smooth. `Scribe` is that here —
-//! one thread, one pending place per document, written when the scrolling
-//! stops. The lock inside `library.rs` is what makes it safe, and it was
-//! already there.
+//! is a read-modify-write of a small TOML file on whichever thread asked,
+//! which is fine for a theme or a zoom. Where the reader *is* moves sixty
+//! times a second, and a whole-file rewrite of `library.toml` landing in the
+//! middle of a scroll is the one gesture this app exists to make smooth.
+//! `Scribe` is one thread with one pending place per document, written when
+//! the scrolling stops. Per document because `cargo test` runs tests in
+//! parallel and a single slot would have one test's position replacing
+//! another's, intermittently.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

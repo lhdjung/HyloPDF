@@ -1,39 +1,33 @@
 //! A window shell for Dioxus Native, because `launch()` only makes one window.
 //!
-//! `dioxus_native::launch` builds a `DioxusNativeApplication` around a single
-//! `WindowConfig` and hands it to winit. `DioxusNativeApplication::add_window`
-//! exists and is public, but it pushes onto `BlitzApplication::pending_windows`,
-//! which is drained in `can_create_surfaces()` and nowhere else — and the
-//! Dioxus half of the setup (the renderer and window contexts, and
-//! `initial_build()`) happens only for the *one* window `launch` created. A
-//! second window added that way comes up empty and stays empty.
+//! `DioxusNativeApplication::add_window` is public and does not do what its
+//! name says: it pushes onto `BlitzApplication::pending_windows`, drained in
+//! `can_create_surfaces()` and nowhere else, and the Dioxus half of the setup
+//! (the contexts, `initial_build()`) happens only for the one window `launch`
+//! created. A second window added that way comes up empty and stays empty.
 //!
 //! So the shell is ours. It owns `BlitzApplication` directly — its fields are
-//! public — and does the per-window Dioxus setup itself. Everything a window
-//! needs that `dioxus-native` keeps private (the net provider for `dioxus://`
-//! assets, the navigation provider that opens a link in a browser) is small
-//! enough to restate; see `nav.rs`.
+//! public — and does the per-window Dioxus setup itself. What `dioxus-native`
+//! keeps private (the net provider for `dioxus://` assets, the navigation
+//! provider) is small enough to restate; see `nav.rs`.
 //!
 //! A window can only be created from inside a winit callback, because
-//! `event_loop.create_window` wants the `&dyn ActiveEventLoop` that only a
-//! callback has. So asking for a window is two things: a `WindowSpec` pushed
-//! onto a queue, and a wake-up sent through the shell proxy. The spec carries
-//! a `VirtualDom`, which is `!Send`, and the event carries nothing.
+//! `event_loop.create_window` wants the `&dyn ActiveEventLoop` only a callback
+//! has. So asking for a window is a `WindowSpec` on a queue plus a wake-up
+//! through the shell proxy.
 //!
 //! **Everything a window is asked to do arrives as one of those events, even
-//! the things that could be done on the spot.** Closing a window and putting
-//! it in full screen are both reached from a Dioxus event handler, which runs
-//! inside `View::handle_winit_event` — inside a borrow of the document and
-//! inside the shell's own borrow of the window map. Taking the window out of
-//! that map from in there cannot be written at all, so the ask is posted and
-//! answered on the next turn, where nothing is borrowed. It costs a frame
-//! nobody can see and it makes every window verb one shape.
+//! what could be done on the spot.** Closing a window and putting it in full
+//! screen are reached from a Dioxus event handler, which runs inside a borrow
+//! of the document *and* the shell's borrow of the window map — taking the
+//! window out of that map from in there cannot be written. So the ask is
+//! posted and answered on the next turn. It costs a frame nobody can see and
+//! makes every window verb one shape.
 //!
-//! What this file deliberately does *not* know is what a window is *for*.
-//! There is no document in it, no library and no settings: a window is a
-//! virtual DOM, a label and a place, and what has to happen when one goes is
-//! a closure somebody else set — see [`Shell::on_close`]. The bookkeeping is
-//! `windows.rs` and the wiring is `main.rs`.
+//! What this file deliberately does not know is what a window is *for*: no
+//! document, no library, no settings. A window is a virtual DOM, a label and a
+//! place, and what happens when one goes is a closure somebody else set — see
+//! [`Shell::on_close`]. The bookkeeping is `windows.rs`, the wiring `main.rs`.
 
 use std::cell::RefCell;
 use std::rc::Rc;

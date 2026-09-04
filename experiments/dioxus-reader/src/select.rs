@@ -1,31 +1,25 @@
 //! Selecting words on a page: where a caret lands, what is between two of
 //! them, and what that reads as.
 //!
-//! **This is the file the app does not have**, and the reason it does not is
-//! that a webview comes with one. `viewer.ts` puts pdf.js's text layer over
-//! every page — spans that exist to be selected rather than seen — and then
-//! spends `paintSelection` undoing the damage: the spans carry no weight, no
-//! style and a generic family, each stretched to the width the printer used,
-//! so a page's bold type comes back regular and its mathematics comes back as
-//! boxes. The app's answer is to let the browser own the selection and repaint
-//! the *pixels* underneath it off the page canvas, which is a hundred lines of
-//! careful work whose whole job is to hide a text layer it did not want.
+//! **This is the file the app does not have**, because a webview comes with
+//! one. There, pdf.js's text layer sits over every page and `paintSelection`
+//! spends a hundred lines undoing the damage it does — spans with no weight,
+//! no style and a generic family, stretched to the printer's width, so bold
+//! type comes back regular and mathematics comes back as boxes.
 //!
 //! There is no text layer here, so there is nothing to hide. pdfium answers
 //! per character — [`crate::render::PageText`] is characters and their boxes,
 //! indexed together — so a selection is two indices, what it covers is a range
-//! of characters, and what it looks like is [`crate::render::PageText::quads`],
-//! which the search has been drawing since Phase 3 item 4. The glyphs stay the
-//! ones pdfium drew because nothing is ever drawn over them but a translucent
-//! rectangle in the theme's own selection colour.
+//! of characters, and what it looks like is
+//! [`crate::render::PageText::quads`]. The glyphs stay the ones pdfium drew,
+//! under a translucent rectangle in the theme's own selection colour.
 //!
-//! What that costs is what a text layer buys: this reader cannot select with
-//! the keyboard, does not know what a word is until [`words_around`] guesses,
-//! and has no idea about right-to-left or vertical text — a selection is a
-//! range of *indices in the document's own order*, which is the order pdfium
-//! reports and usually but not always the order a reader would sweep. The app
-//! inherits the browser's answers to all three. This is the first place in the
-//! port where the webview was doing something worth having.
+//! What that costs is what a text layer buys: no keyboard selection, no idea
+//! what a word is until [`words_around`] guesses, and nothing about
+//! right-to-left or vertical text — a selection is a range of *indices in the
+//! document's own order*, which is what pdfium reports and usually but not
+//! always the order a reader would sweep. This is the first place in the port
+//! where the webview was doing something worth having.
 
 use crate::render::{PageText, Rect};
 

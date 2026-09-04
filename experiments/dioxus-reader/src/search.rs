@@ -1,59 +1,38 @@
 //! Full-document search: the fold, the index, and stepping through what it
 //! found.
 //!
-//! `search.ts` is 540 lines and this is rather fewer, for one reason that has
-//! nothing to do with Rust: **pdfium answers per character.** pdf.js hands
-//! over *runs* — a string and a transform — and a run is not where a word is,
-//! so the app has to join the runs into one string, keep a `starts[]` saying
-//! where each began, binary-search that to turn a match back into a run and an
-//! offset inside it, hand the pair to the DOM as a `Range`, and measure the
-//! range against a text layer of spans that exist only to be selected. Here a
-//! match is a range of characters and a character already knows its box, so
-//! `items`, `starts`, `position()` and the text layer all go, and what is left
-//! is folding and looking things up. See [`crate::render::Rect`].
+//! This is much shorter than `search.ts` for one reason that has nothing to do
+//! with Rust: **pdfium answers per character.** pdf.js hands over *runs* — a
+//! string and a transform — so the app has to join them, keep a `starts[]`,
+//! binary-search it to turn a match back into a run and an offset, and measure
+//! the result against a text layer. Here a match is a range of characters and
+//! a character already knows its box. See [`crate::render::Rect`].
 //!
 //! What is ported exactly, because it is right and hard-won:
 //!
 //! * **`fold`.** Ligatures, accents and soft hyphens stand between a typed
 //!   word and the same word in a PDF, and all three are invisible to the
-//!   person typing. It is the app's most heavily tested function and this is a
-//!   line-for-line translation of it — with one thing *removed*, which is the
-//!   whole of the comment about UTF-16: `search.ts` has to iterate the string
-//!   by code point deliberately, because indexing it walks code units and
-//!   `normalize` on half a character does nothing, so a document set in
-//!   mathematical bold could not be searched with the letters on the keyboard.
-//!   A `Vec<char>` cannot be half a character and the bug cannot be written.
+//!   person typing. A line-for-line translation — minus the app's UTF-16
+//!   care, because a `Vec<char>` cannot be half a character and the bug
+//!   cannot be written.
 //! * **Whole words tested against the *folded* text**, so a word hyphenated
-//!   across a line — whose soft hyphen the fold has already dropped — is one
-//!   whole word by the time the test sees it, as it is to a reader.
-//! * **Starting at the page being read and going outwards**, so the first
-//!   result is the one under the reader's eyes rather than the one at the
-//!   front of the book.
-//! * **A cap on matches rather than on pages.** `MATCH_LIMIT` is the app's own
-//!   number and its own reasoning: at two thousand, a common word in a long
-//!   book reached it in the first chapter and the rest of the document was not
-//!   capped but *unsearched*, with a "+" in the corner the only thing saying
-//!   so.
+//!   across a line is one whole word by the time the test sees it.
+//! * **Starting at the page being read and going outwards.**
+//! * **A cap on matches rather than on pages.** `MATCH_LIMIT` is the app's
+//!   number: a page cap meant a common word in a long book reached it in the
+//!   first chapter and the rest of the document was not capped but
+//!   *unsearched*.
 //!
-//! **The scan is sliced, and the slice is smaller than the app's for a
-//! reason.** pdf.js spends most of a search extracting text; pdfium spends
-//! 0.18ms on a page of the 400-page fixture and 1.3ms on a page of a 376-page
-//! book of typeset mathematics — 71ms and 498ms for the whole document. That
-//! is fast enough that the whole of the app's streaming apparatus nearly
-//! justifies deleting, and not quite: half a second is half a second, and a
-//! window that stops answering for it while somebody is typing is exactly what
-//! the brief's "no lags" is about. So the scan still works in slices and hands
-//! its results over a few times a second — but it does it because a long book
-//! is half a second of work, not because a page is expensive.
+//! **The scan is still sliced**, though pdfium makes a whole 376-page book of
+//! typeset mathematics 498ms rather than the seconds pdf.js spends. Half a
+//! second is still a window that stops answering while somebody is typing.
 //!
-//! **What the index costs is about thirty-six bytes a character**, and three
-//! quarters of that is the boxes: the 376-page book above is 563,000
-//! characters and about 20MB. That is the app's own trade — "a fair trade
-//! while the find bar is up and no trade at all once it is closed" — and it is
-//! settled the same way, by [`Search::forget`] when the bar goes. If it ever
-//! needed to be smaller, the boxes of a page with no match on it are the three
-//! quarters to drop; the characters have to stay, because they are what makes
-//! changing "Match case" a refold rather than a rescan.
+//! **The index costs about thirty-six bytes a character**, three quarters of
+//! it boxes — 20MB for that book — and is given back by [`Search::forget`]
+//! when the bar closes. If it ever has to be smaller, the boxes of a page with
+//! no match are the three quarters to drop; the characters have to stay,
+//! because they are what makes changing "Match case" a refold rather than a
+//! rescan.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;

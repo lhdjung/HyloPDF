@@ -1,57 +1,42 @@
 //! The reader, as components and one piece of state.
 //!
-//! `main.ts` holds an `App` object with the whole interface hanging off it and
-//! about thirty methods that change it; the shape here is the same and the
-//! wiring is not. A signal holding one `Viewer` is what the `App` object was,
-//! and the DOM that used to be built by hand with `document.createElement` is
-//! an `rsx!` block that is rebuilt from the state whenever the state moves.
+//! A signal holding one `Viewer` is what `main.ts`'s `App` object was, and the
+//! DOM that used to be built with `document.createElement` is an `rsx!` block
+//! rebuilt from the state whenever the state moves.
 //!
-//! Three things about it are Blitz's doing rather than choices:
+//! Four things about it are Blitz's doing rather than choices:
 //!
 //! *Nothing is `position: fixed`*, because Blitz has no such thing. The root
 //! is a flex column — toolbar, viewer, notice — so nothing is over a scrolling
-//! body and nothing needs to be. The assessment expected this to be a
-//! workaround and it is an improvement.
+//! body and nothing needs to be. The assessment expected a workaround and it
+//! is an improvement.
 //!
-//! *The keyboard is one handler on the root, and that is enough.* Blitz sends
-//! a key to the focused node and falls back to the root element when there is
-//! none, and DOM events bubble — so a `keydown` on the root is the app-level
-//! handler `main.ts` has, including for a page, which cannot be focused. What
-//! it does with the key is not this file's: an event becomes a chord and a
-//! chord is looked up in [`crate::keymap`], which is `keys.ts` ported, over
-//! `keys.toml`, which is the app's own `keys.rs` mounted. What is left here is
-//! `perform` at the bottom — one arm per action, and the arms that are missing
-//! are the list of what Phase 3 has left to build. The
-//! winit route would be `use_window_event`, and it is closed to us: it takes
-//! its `WindowEventHandlers` out of a context that only `dioxus_native`'s own
-//! application provides, and the type is private, so a shell of our own cannot
-//! provide one. That is a third thing on the list `PROGRESS.md` keeps of what
-//! owning the window costs.
+//! *The keyboard is one handler on the root.* Blitz sends a key to the focused
+//! node and falls back to the root when there is none, and events bubble — so
+//! a `keydown` on the root is the app-level handler `main.ts` has, including
+//! for a page, which cannot be focused. An event becomes a chord and the chord
+//! is looked up in [`crate::keymap`]; `perform` at the bottom is one arm per
+//! action, and a missing arm is a compile error. The winit route,
+//! `use_window_event`, is closed to us: it takes its `WindowEventHandlers` out
+//! of a context only `dioxus_native`'s own application provides, and the type
+//! is private.
 //!
 //! *A page is a `<div>` with an `<object>` in it*, absolutely positioned
-//! against the viewer itself at where-it-is minus where-the-reader-is. Blitz
-//! has no `position: static`, so an absolutely positioned node is placed
-//! against its immediate parent — which is what this layout wants anyway.
+//! against the viewer at where-it-is minus where-the-reader-is. Blitz has no
+//! `position: static`, so an absolutely positioned node is placed against its
+//! immediate parent — which is what this layout wants anyway.
 //!
-//! *And the scrolling is ours, not the engine's.* The obvious shape is
-//! `overflow: scroll` on the viewer and Blitz's own scroller underneath it,
-//! and it does not survive contact with the second half of scrolling, which is
-//! the app moving the document itself — a page jump, Home, a zoom that has to
-//! keep the reader's place. Every one of those goes through `MountedData`, and
-//! **every `MountedData` call borrows the document while the document is
-//! already borrowed**: a DOM event handler runs inside `EventDriver`'s borrow,
-//! and a mounted handler inside `flush_queued_mounted_events`'s, so `scroll`
-//! and `get_client_rect` both panic with "RefCell already borrowed" rather
-//! than failing. (`NodeHandle::try_doc` exists and says as much in its own doc
-//! comment; the safe methods are not the ones a reader needs.)
-//!
-//! So the scroll offset is a number in this file, the wheel moves it, and the
-//! pages are placed against it. That is what `viewer.ts` does in all but the
-//! last step anyway — it computes every position itself and lets the browser
-//! hold one number. What is lost is the scrollbar and the platform's own
-//! fling, which is a real loss and is written down in `PROGRESS.md` rather
-//! than papered over: a scrollbar we would have to draw, and momentum arrives
-//! from the trackpad in the event stream regardless.
+//! *And the scrolling is ours.* `overflow: scroll` does not survive the second
+//! half of scrolling, which is the app moving the document itself — a page
+//! jump, Home, a zoom that keeps the reader's place. Every one of those goes
+//! through `MountedData`, and **every `MountedData` call borrows the document
+//! while it is already borrowed**: an event handler runs inside `EventDriver`'s
+//! borrow, a mounted handler inside `flush_queued_mounted_events`'s, so
+//! `scroll` and `get_client_rect` panic with "RefCell already borrowed" rather
+//! than failing. So the scroll offset is a number in this file, the wheel
+//! moves it, and the pages are placed against it — which is what `viewer.ts`
+//! does in all but the last step. What is lost is the scrollbar and the
+//! platform's fling.
 
 use std::cell::RefCell;
 use std::collections::HashMap;

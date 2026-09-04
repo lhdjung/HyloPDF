@@ -1,43 +1,31 @@
 //! The renderer, with one thing put right on the way through.
 //!
 //! **A frame that fails to reach the screen is not thrown away, and the next
-//! one is drawn on top of it.** `render` in `anyrender_vello_hybrid` builds
-//! the scene, asks the surface for a texture to draw into, and only resets the
-//! scene at the very end — after the present has succeeded. There are two
-//! early returns before that point, one for a surface texture that cannot be
-//! had and one for a present that fails, and neither of them resets. So a
-//! window whose surface has gone away keeps accumulating: every redraw appends
-//! another whole frame to the same scene, the alpha buffer behind it grows
-//! without bound, and eventually `vello_common` asserts —
+//! one is drawn on top of it.** `render` in `anyrender_vello_hybrid` resets
+//! the scene only after a successful present, and there are two early returns
+//! before that — a surface texture that cannot be had, and a present that
+//! fails. So a window whose surface has gone away accumulates one whole frame
+//! per redraw in a single scene until `vello_common` asserts:
 //!
 //! ```text
 //! thread 'main' panicked at vello_common-0.1.0/src/strip.rs:205:
 //! `alpha_idx` too large
 //! ```
 //!
-//! — which is a `u32` running into the bit that `Strip` packs its fill flag
-//! into, at about two billion. It takes a while to get there, which is why the
-//! way to see it is to leave the reader open and let the machine's display go
-//! to sleep. The app dies while nobody is looking at it and the next thing the
-//! reader sees is that it is gone.
+//! — a `u32` running into the bit `Strip` packs its fill flag into, at about
+//! two billion. The way to see it is to leave the reader open and let the
+//! display sleep; the app dies while nobody is looking at it. Blitz declines
+//! to paint an *occluded* window, which is the case macOS reports; this is the
+//! case it does not, and a `Timeout` from `get_current_texture` during any
+//! hiccup poisons the scene the same way and never recovers.
 //!
-//! Blitz already declines to paint an *occluded* window, which is the case
-//! macOS reports; this is the case it does not, and it is not specific to
-//! sleep — a `Timeout` from `get_current_texture` during any surface hiccup
-//! poisons the scene in exactly the same way and never recovers.
+//! The fix upstream is to reset on those two paths. From outside the crate the
+//! one hook is that the draw closure is handed the scene, so this wrapper
+//! resets at the *start* of every frame. The base colour is filled back in
+//! because the reset takes the inner renderer's own fill with it.
 //!
-//! The fix upstream is to reset on those two paths. From outside the crate
-//! there is still one hook: the draw closure is handed the scene, and
-//! `PaintScene` has `reset` on it. So this wrapper resets at the *start* of
-//! every frame, which discards whatever a failed frame left behind and costs
-//! nothing when there was none. The base colour is filled back in because the
-//! reset takes the inner renderer's own fill with it — that fill is the first
-//! thing in the scene and `Color::WHITE` is what it uses when nothing has
-//! asked for another.
-//!
-//! Everything else here is delegation, and it is only written out because
-//! `WindowRenderer` is a trait with eight methods rather than something with a
-//! blanket impl.
+//! Everything else here is delegation, written out only because
+//! `WindowRenderer` has eight methods and no blanket impl.
 
 use std::any::Any;
 use std::cell::Cell;

@@ -2,36 +2,23 @@
 //! reader has pinned, a column of thumbnails, and — while the find bar is up —
 //! the search results.
 //!
-//! `sidebar.ts` is 699 lines and about half of them are memory management:
-//! `THUMB_CACHE`, `drawn`, `tasks`, `flights`, `trim()`, `forget(release)`,
-//! `isVisible()` and an `IntersectionObserver` to drive them. That half is not
-//! here, and its absence is the finding rather than an omission.
+//! **The thumbnail cache is the mounting window**, which is why the half of
+//! `sidebar.ts` that is `THUMB_CACHE`, `drawn`, `tasks`, `flights`, `trim()`
+//! and an `IntersectionObserver` is not here. A thumbnail in the app is a
+//! `<canvas>` living as long as the column does, so drawing one is a
+//! commitment and the cap bounds it. Here it is a [`crate::page::PageWidget`]
+//! on a node, so it lives as long as the node, and the node exists only while
+//! its row is in view. Scrolling away gives the texture back through `Drop`.
 //!
-//! **The thumbnail cache is the mounting window.** A thumbnail in the app is a
-//! `<canvas>` that lives for as long as the column does, so drawing one is a
-//! commitment and the cap exists to bound it. Here a thumbnail is a
-//! [`crate::page::PageWidget`] on a node, so it lives exactly as long as the
-//! node does, and the node exists only while the row is in view — the same
-//! rule `mount()` and `OVERSCAN` apply to the document itself, applied to the
-//! column. Scrolling away gives the texture back through `Drop`, and there is
-//! nothing to trim because nothing accumulates.
+//! It is not a saving so much as the only design available: every widget in
+//! the document is painted every frame whether it is on screen or not, so an
+//! unmounted row is the difference between a column that costs nothing and one
+//! that costs four hundred pdfium renders. Caching would buy little anyway —
+//! a thumbnail is a fiftieth of a page's pixels.
 //!
-//! What the app buys with `THUMB_CACHE` is that scrolling back a little does
-//! not redraw. The measurement says that is not worth a cache here: a page at
-//! the size the document is read at is 3.2ms, and a thumbnail is a fiftieth of
-//! the pixels. The one number that made the app's cache necessary — a canvas
-//! at a megabyte apiece, nine hundred of them held for the life of the
-//! document — cannot arise from a design where the picture belongs to the row.
-//!
-//! Two things follow from that and are worth stating, because both were
-//! surprises in Phase 0. Every widget in the document is painted every frame
-//! whether it is on screen or not, so an unmounted row is not merely tidy, it
-//! is the difference between a column that costs nothing and one that costs
-//! four hundred pdfium renders. And a thumbnail wears the theme for free: it
-//! is the same widget reading the same [`crate::page::Chosen`], so the column
-//! and the page cannot disagree about what theme is on — which is a bug the
-//! app had (`redrawVisible` starting a second render into a canvas that
-//! already had one) and this cannot have.
+//! A thumbnail wears the theme for free: it is the same widget reading the
+//! same [`crate::page::Chosen`], so the column and the page cannot disagree
+//! about what theme is on.
 
 use dioxus::html::geometry::WheelDelta;
 use dioxus::prelude::*;

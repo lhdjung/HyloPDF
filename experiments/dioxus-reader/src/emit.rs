@@ -3,39 +3,22 @@
 //! **This module exists so that the app's `watch.rs` compiles here with no
 //! change at all.** That file opens with `use tauri::{AppHandle, Emitter};`,
 //! and the first segment of a `use` path is looked up in the extern prelude —
-//! so making it resolve means putting something called `tauri` in there.
-//! `extern crate self as tauri;` in `lib.rs` is that, in one line: this crate
-//! answers to its own name and to `tauri`, [`AppHandle`] and [`Emitter`] are
-//! re-exported at its root, and the app's file finds what it asked for. One
-//! file, two meanings of `tauri`, and nothing in between them.
+//! so `extern crate self as tauri;` in `lib.rs` makes this crate answer to
+//! that name too, and [`AppHandle`] and [`Emitter`] are re-exported at its
+//! root.
 //!
-//! (The obvious version of this is a module named `tauri`, and it does not
-//! work: a `use` path anchored on a bare identifier does not see the crate
-//! root's modules, only crates. The compiler says as much and suggests
-//! `crate::tauri`, which is the one thing that cannot be written here,
-//! because what is being avoided is editing the file.)
-//!
-//! It is worth being plain about what that does and does not prove. The
-//! assessment predicted this file would need one change — "`emit_to(window,
-//! …)` becomes an `EventLoopProxy::send_event`" — and it was nearly right:
-//! the change is real, and it is *here* rather than there. What is proved is
-//! the useful half. Everything `watch.rs` knows — that a change is a burst,
-//! that a theme reload is decided by comparing themes rather than by a file
-//! having moved, that a document is not believed until it ends the way a PDF
-//! ends, that the watch goes on the directory because a compiler renames over
-//! the file — is about the disk, and none of it is about Tauri. The Tauri in
-//! it is two names and two method calls.
+//! (A module named `tauri` does not work: a `use` path on a bare identifier
+//! does not see the crate root's modules, only crates. The compiler suggests
+//! `crate::tauri`, which is the one thing that cannot be written here, because
+//! what is being avoided is editing the file.)
 //!
 //! The signatures are Tauri's, not ours, because that is the constraint: a
-//! shim that took a nicer argument would be a shim the app's file does not
-//! compile against, which is the whole of what is being tested. The one cost
-//! that comes with them is [`Emitter::emit`]'s `S: Serialize` bound — a
-//! payload arrives here as a `serde_json::Value` rather than as the
-//! `Vec<Theme>` it started as, which is the bridge's serialisation surviving
-//! in a build that has no bridge. It fires when somebody saves a theme file,
-//! and it is fourteen themes of five colours. A `watch.rs` genuinely rewritten
-//! for this crate would hand the vector over; this one is not rewritten, and
-//! that is the point.
+//! shim taking a nicer argument is a shim the app's file does not compile
+//! against, which is the whole of what is being tested. The cost is
+//! [`Emitter::emit`]'s `S: Serialize` bound — a payload arrives as a
+//! `serde_json::Value` rather than the `Vec<Theme>` it started as, which is
+//! the bridge's serialisation surviving in a build with no bridge. It fires
+//! when somebody saves a theme file.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};

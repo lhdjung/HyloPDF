@@ -1,30 +1,26 @@
-//! The stylesheet, and the theme as fifteen variables written onto the root.
+//! The stylesheet, and the theme as a set of variables written onto the root.
 //!
-//! In the app this is a 2,129-line `styles.css` and a set of CSS custom
-//! properties that `applyTheme` writes onto the root. Blitz reads CSS through
-//! Stylo, so the file could very nearly be carried over whole; what is here is
-//! the part Phase 1 puts on the screen.
+//! In the app this is a 2,129-line `styles.css` and the custom properties
+//! `applyTheme` writes onto the root. Blitz reads CSS through Stylo, so most
+//! of it carries over.
 //!
-//! **The theme was interpolated into the sheet and is now a set of variables,
-//! and the reason is a crash rather than a preference.** A `<style>` element
-//! whose text changes is a stylesheet mutation, and Stylo answers one by
-//! walking the tree with `StylesheetInvalidationSet` — which calls
-//! `each_class` on any element *snapshot* it finds on the way. Blitz takes a
-//! cheap, state-only snapshot when something is hovered or pressed
-//! (`snapshot_node_state_only`), and that snapshot has no attributes in it, and
-//! `ServoElementSnapshot::each_class` unwraps them. So *clicking* the button
-//! that changes the theme panicked in `stylo`, from a stack with nothing of
-//! this app in it, while pressing `t` for the same action was fine — the
-//! difference being only that a click leaves the pointer on a button.
-//! `tests/reader.rs` found it on its first run. See `PROGRESS.md`; it is an
-//! upstream fault and this is not merely a way around it, because a theme
-//! change now re-resolves the variables instead of re-parsing the sheet.
+//! **The theme is variables rather than text interpolated into the sheet, and
+//! the reason is a crash.** A `<style>` whose text changes is a stylesheet
+//! mutation, and Stylo answers one by walking the tree with
+//! `StylesheetInvalidationSet`, which calls `each_class` on any element
+//! *snapshot* it finds — and Blitz's cheap state-only snapshot
+//! (`snapshot_node_state_only`) has no attributes, which
+//! `ServoElementSnapshot::each_class` unwraps. So *clicking* the button that
+//! changes the theme panicked inside Stylo while pressing `t` for the same
+//! action was fine. An attribute change is a snapshot that does carry
+//! attributes, so the crash cannot happen — and a theme change now re-resolves
+//! variables instead of re-parsing the sheet.
 //!
 //! Three properties the app uses are missing in Blitz and are handled here
-//! rather than discovered later: `position: fixed` (the root is a flex column
-//! instead, so nothing needs to leave the flow), `overflow: auto` (`scroll`,
-//! with `scrollbar-width: thin`), and `text-overflow: ellipsis` (a `mask-image`
-//! fade, which is arguably better and was checked in Phase 0).
+//! rather than discovered later: `position: fixed` (the root is a flex column,
+//! so nothing needs to leave the flow), `overflow: auto` (`scroll`, with
+//! `scrollbar-width: thin`), and `text-overflow: ellipsis` (a `mask-image`
+//! fade).
 
 use crate::palette::Palette;
 

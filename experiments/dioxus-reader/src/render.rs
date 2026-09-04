@@ -1,20 +1,15 @@
 //! The renderer, behind the one door it will always be behind.
 //!
-//! The assessment's rule for this tree: one trait — draw a page, ask how big
-//! it is, and later ask for its text, its outline and its links — so that
-//! pdfium is a decision that can be remade rather than a dependency spread
-//! through the viewer. It is the same rule `viewer.ts` obeys today by being
-//! the only file that imports pdf.js, and it is what would make `hayro` a
-//! swap rather than a rewrite when it grows text extraction.
+//! One trait — draw a page, ask how big it is, and later its text, its
+//! outline, its links, its labels and its title — so that pdfium is a decision
+//! that can be remade rather than a dependency spread through the viewer. It
+//! is the rule `viewer.ts` obeys by being the only file that imports pdf.js,
+//! and it is what would make `hayro` a swap rather than a rewrite.
 //!
-//! Phase 1 needed two of those questions, Phase 3's sidebar added the third
-//! and its search the fourth — a page's text, and where every character of it
-//! sits — its links and labels the fifth and sixth, and its library the
-//! seventh: what the document calls itself. Every one of them was added when
-//! something asked, because a trait method with no caller is a guess about
-//! what the caller will want, and every one but the first two has a default
-//! that answers "nothing", because a renderer that cannot say is not a
-//! renderer this reader refuses to run over.
+//! Each question was added when something asked, because a trait method with
+//! no caller is a guess about what the caller will want, and every one but the
+//! first two has a default answering "nothing" — a renderer that cannot say is
+//! not a renderer this reader refuses to run over.
 
 use std::sync::Arc;
 

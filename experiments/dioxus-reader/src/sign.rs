@@ -1,59 +1,35 @@
 //! Signing a document, in the sense almost everybody means by the word.
 //!
-//! A reader draws their name once, keeps it, and drops it onto a page. What
-//! goes into the PDF is a `/Subtype /Ink` annotation — the specification's own
-//! annotation for something drawn by hand, with the strokes in `/InkList` —
-//! and it is in the file the next time it is opened, by this reader or by
-//! Preview or by Acrobat.
+//! A reader draws their name once, keeps it, and drops it onto a page as a
+//! `/Subtype /Ink` annotation — the specification's own annotation for
+//! something drawn by hand, with the strokes in `/InkList`.
 //!
-//! **It is ink, and it proves nothing.** `signing-assessment.md` in the
-//! repository root is the long form: "signing" is two unrelated features
-//! wearing one word, and this is the first of them. A *cryptographic*
-//! signature is a `/Sig` dictionary holding a detached CMS blob over a byte
-//! range of a specific file, and it says who signed and that nothing has
-//! changed since. Neither renderer in this repository can write one — pdfium's
-//! entire signature surface is eight read-only getters, and pdf.js's
-//! `saveNewAnnotations` has no `/Sig` case — and the hard half of building one
-//! is not the writing but the trust: a signature nobody's software trusts is
-//! not a signature. So this is the other column, and the words the app uses
-//! for it say so rather than implying the green tick.
+//! **It is ink, and it proves nothing.** `signing-assessment.md` is the long
+//! form: "signing" is two unrelated features wearing one word, and a
+//! *cryptographic* signature — a `/Sig` holding a detached CMS blob over a
+//! byte range — is the other one. Neither renderer in this repository can
+//! write one, and the hard half is not the writing but the trust. The words
+//! the window uses say so rather than implying the green tick.
 //!
-//! What that honesty costs, and where it is paid, is [`Standing::rewrites`]:
-//! a document that already carries a cryptographic signature can still be
-//! signed with ink here, and doing so breaks the signature it had — because
-//! the save is a full rewrite. The reader is told, once, before it happens.
+//! What that costs is [`Standing::rewrites`]: a document already carrying a
+//! cryptographic signature can still be signed with ink, and doing so breaks
+//! the signature — the save is a full rewrite. The reader is told once, before
+//! it happens.
 //!
-//! # Why ink rather than a stamp
-//!
-//! The assessment reached for `create_stamp_annotation` and
-//! `PdfPageImageObject`, which is what Preview writes: a picture of a name,
-//! placed on a page. Ink is the better answer here for three reasons, and
-//! the third is the one that decided it.
-//!
-//! *It is vector.* A signature dropped on a page and then read at 400% is
-//! drawn from the strokes rather than resampled from a bitmap, which is the
-//! whole argument this reader makes about pages and it would be odd to make it
-//! about pages and not about this.
-//!
-//! *It needs no rasteriser.* A stamp holding an image means turning the
-//! strokes into pixels somewhere, and the only rasteriser in this crate is
-//! `vello_cpu`, which is behind the `harness` feature and deliberately not in
-//! the binary. Ink is `move_to` and `line_to`.
-//!
-//! *And it is the annotation that means this.* `/Ink` is what the
-//! specification has for a mark made by hand; a `/Stamp` is a rubber stamp.
-//! Every other reader shows an ink annotation as what it is, and — the part
-//! that matters — offers to delete it, which is a thing a reader should be
-//! able to do to their own signature.
-//!
-//! # The store
+//! **Ink rather than a stamp**, which is what the assessment reached for and
+//! what Preview writes. Three reasons, and the third decided it: it is vector,
+//! so a signature read at 400% is drawn from its strokes; it needs no
+//! rasteriser, and the only one in this crate is behind the `harness` feature
+//! and deliberately not in the binary; and `/Ink` is *the annotation that
+//! means this*, so every other reader shows one as what it is and offers to
+//! delete it.
 //!
 //! A signature is kept in the config directory as one TOML file, the way a
-//! theme is and for the same reason: it is a small thing somebody may want to
-//! copy to another machine, and a text file is the format that survives that.
-//! The strokes are in a unit box — x and y both from 0 to 1 — so the same
-//! signature can be dropped at any size onto any page, and so the file says
-//! nothing about the screen it was drawn on.
+//! theme is: a small thing somebody may want to copy to another machine.
+//! The strokes are normalised **by height** — y runs 0 to 1 and x runs to
+//! however wide the hand made it — so `aspect` is a real number and one
+//! multiplication does both axes. Normalising each axis into a unit box reads
+//! correctly and throws the shape away: every signature came back square.
 
 use pdfium_render::prelude::{
     PdfColor, PdfDocument, PdfPageAnnotationCommon, PdfPageObjectCommon, PdfPageObjectsCommon,

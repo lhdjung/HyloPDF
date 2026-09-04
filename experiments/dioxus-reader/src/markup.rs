@@ -2,43 +2,26 @@
 //!
 //! The reader sweeps a sentence, chooses a colour, and a `/Subtype /Highlight`
 //! with `/QuadPoints` and `/C` goes into the PDF itself — the specification's
-//! own annotation, the one Preview, Acrobat and Zotero all read. It is in the
-//! file the next time it is opened, by this reader or by anything else.
-//! `markup-assessment.md` in the repository root is the long form of what a
-//! highlight is and why it is the only markup worth writing.
+//! own annotation, the one Preview, Acrobat and Zotero all read.
+//! `markup-assessment.md` is the long form of what a highlight is and why it
+//! is the only markup worth writing.
 //!
-//! **This is the item where the port stops being a port**, and it is the one
-//! where the renderer underneath answers a question pdf.js cannot:
+//! **This is where the port stops being a port.** An annotation already in the
+//! file can be *deleted* here: [`remove`] is eleven lines over
+//! `FPDFPage_RemoveAnnot`. pdf.js cannot — `Annotation.save()` is not
+//! overridden by any markup subtype — so the app works around the missing call
+//! with several hundred lines that replay every highlight but one into a
+//! pristine backup.
 //!
-//! *An annotation already in the file can be deleted.* `FPDFPage_RemoveAnnot`
-//! is one call, and `pdfium-render` wraps it as `delete_annotation`. In the
-//! app there is no such thing: `saveDocument()` writes an incremental update
-//! and `Annotation.save()` is not overridden by any markup subtype, so an
-//! annotation already in the document cannot be edited or removed through it
-//! at all. What the app does instead is keep a pristine copy of every
-//! document it has ever written to (`.hylopdf-original`), load it detached,
-//! replay every highlight but the one being removed into it, decide which of
-//! them are the app's to replay and which are baked into the backup already,
-//! and write the result back — several hundred lines whose whole purpose is
-//! to work around one missing call, plus a one-level byte-truncation undo for
-//! the case that machinery cannot reach. Here it is [`remove`], which is
-//! eleven lines.
+//! What pdfium charges for it, and it is a real charge:
 //!
-//! What pdfium charges for that, and it is a real charge:
-//!
-//! *The save is a full rewrite, not an incremental update.* `save_to_bytes`
-//! is `FPDF_SaveAsCopy` with `flags = 0`, and `pdfium-render` does not expose
-//! the flags — `FPDF_INCREMENTAL` is in its own bindings and there is a `TODO`
-//! above the hard-coded zero. So where the app appends new objects and leaves
-//! every original byte untouched, this re-serialises the document: pdfium's
-//! idea of it, written out fresh. For an ordinary paper that is nothing at
-//! all. For a signed document it is the end of the signature, and for one
-//! whose structure pdfium repairs on the way through it is a file that is
-//! subtly not the one that arrived. That is why [`standing`] asks its
-//! questions and why [`backup`] keeps the original beside the document the
-//! first time this reader ever writes into one — the app's own
-//! `.hylopdf-original`, kept here for a different reason and under the same
-//! name.
+//! *The save is a full rewrite.* `save_to_bytes` is `FPDF_SaveAsCopy` with
+//! `flags = 0`, and `pdfium-render` does not expose the flags. So where the
+//! app appends objects and leaves every original byte untouched, this
+//! re-serialises the document. Nothing for an ordinary paper; the end of the
+//! signature for a signed one. That is why [`standing`] asks its questions and
+//! why [`backup`] leaves `.hylopdf-original` beside the document the first
+//! time this reader writes into one.
 //!
 //! *And the file has to be let go of before it can be written.* See
 //! [`crate::render::PageSource::release`].

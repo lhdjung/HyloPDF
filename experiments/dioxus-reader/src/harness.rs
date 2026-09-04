@@ -1,34 +1,27 @@
 //! Phase 2: the reader, driven with no window and no screen.
 //!
-//! `scripts/ui-harness.mjs` in the app opens the interface in Playwright's
-//! WebKit and offers `press`, `wheel`, `click`, `state()` and `screenshot()`
-//! against it. It needs a dev server, a browser engine and a machine willing
-//! to run one, and the two things it cannot do are the two the assessment
-//! cares most about: it cannot test the rendering, and it cannot run where the
-//! app actually runs.
+//! This replaces `scripts/ui-harness.mjs`, which needs a dev server, a browser
+//! engine and a machine willing to run one, and cannot test the rendering or
+//! run where the app actually runs.
 //!
-//! This is the replacement, and it is smaller than the thing it replaces
-//! because most of it is upstream's. `blitz_test_harness::Harness` builds a
+//! Most of it is upstream's. `blitz_test_harness::Harness` builds a
 //! `DioxusDocument`, resolves style and layout against a stated viewport, and
 //! synthesises pointer, wheel and key events through the *real* event
-//! pipeline — no window, no GPU, no compositor. What this file adds is the
-//! three things that are the reader's rather than Blitz's:
+//! pipeline. What this file adds is three things:
 //!
-//! *A reader to drive.* The document, the theme, the viewport and the
+//! *A reader to drive* — the document, the theme, the viewport and the
 //! contexts the components expect, in one call.
 //!
 //! *`state()`*, which reads the interface the way somebody looking at it
-//! would: the page number off the pill, the zoom off its chip, the theme off
-//! the button that changes it. Two things are read from attributes instead,
-//! because they have no pixels of their own — where the reader is scrolled to,
-//! and which pages the mounting window is holding.
+//! would: the page off the pill, the zoom off its chip, the theme off the
+//! button that changes it. Deliberately not out of the `Viewer`, because it
+//! was the *wiring* that was broken both times something was. Two things come
+//! from attributes instead, having no pixels of their own — where the reader
+//! is scrolled to, and which pages the mounting window holds.
 //!
-//! *`screenshot()`*, which is the half the JS harness never had. Blitz paints
-//! into an `anyrender::PaintScene`, and `vello_cpu` is a `PaintScene` that
-//! rasterises on the CPU, deterministically, on any machine. Pages come out of
-//! it too: `PageWidget` draws through `peniko::ImageData` when there is no
-//! wgpu device behind the scene — see `Software` in `page.rs`, which is the
-//! one piece of production code this file needed.
+//! *`screenshot()`*, which the JS harness never had. `vello_cpu` is a
+//! `PaintScene` that rasterises deterministically on any machine, and pages
+//! come out of it through `Software` in `page.rs`.
 //!
 //! ```no_run
 //! use dioxus_reader::harness::Reader;

@@ -2,45 +2,31 @@
 //! in Rust.
 //!
 //! Everything the reader listens for is an **action** with a name, and a chord
-//! is only ever a way of asking for one. That is what makes the keys
-//! remappable — `keys.toml` says `action = ["chord"]` and nothing else has to
-//! know — but it is worth having for its own sake: what decided which shortcut
-//! had been pressed in the app before this existed was twenty-five `if`
-//! branches whose *order* was load-bearing, and what decided it in this
-//! experiment was one `match` on `event.key()` that could not express ⌘0 at
-//! all. An event is turned into a chord and a chord is looked up, so two
-//! actions cannot both answer to ⌘F: that is one key in one map, and saying so
-//! is a collision the reader is told about rather than a bug that depends on
-//! which arm came first.
+//! is only ever a way of asking for one. An event is turned into a chord and
+//! the chord is looked up, so two actions cannot both answer to ⌘F: that is
+//! one key in one map, and a collision the reader is told about rather than a
+//! bug that depends on which arm ran first.
 //!
-//! # The split, which is the app's and is not moved
+//! # The split
 //!
-//! [`crate::keys`] is `src-tauri/src/keys.rs`, mounted by path like
-//! [`crate::theme`] and [`crate::settings`] beside it: it owns the *file* —
-//! reading `keys.toml`, and saying which of its lines are not a table entry of
-//! the right shape — and deliberately not the meaning of a line. This module
-//! is the other half, `keys.ts`, and it owns the action list and the grammar
-//! of a chord, because it is the side that has to turn a keystroke into one.
-//!
-//! In the app those two halves are in two languages with a bridge between
-//! them, and the split had to be argued for. Here they are two Rust modules
-//! and the argument is gone: the split survives because it is the right one,
-//! not because a `#[tauri::command]` sat between them. **Nothing about it
-//! changed on the way across**, which is one more piece of the assessment's
-//! central claim about the Rust side, and the first time the claim has been
-//! tested on a file whose partner is TypeScript.
+//! [`crate::keys`] is `src-tauri/src/keys.rs`, mounted by path: it owns the
+//! *file* — reading `keys.toml` and saying which lines are not a table entry
+//! of the right shape — and deliberately not the meaning of a line. This
+//! module owns the action list and the grammar of a chord, because it is the
+//! side that turns a keystroke into one. Validating in both would be the same
+//! parser written twice.
 //!
 //! # A chord
 //!
-//! Written `mod+shift+f`. The modifiers, in the order a canonical chord always
-//! spells them:
+//! Written `mod+shift+f`. Modifiers in the order a canonical chord spells
+//! them:
 //!
 //! * `mod` — ⌘ on a Mac, Ctrl everywhere else. The only one that changes
 //!   meaning between platforms.
 //! * `ctrl` — the Control key itself. On Windows and Linux that *is* `mod`,
 //!   so it is normalised to it: `ctrl+d` and `mod+d` are one chord there and
 //!   two on a Mac.
-//! * `alt`   — ⌥ / Alt.
+//! * `alt` — ⌥ / Alt.
 //! * `shift`
 //!
 //! Chords separated by a space are pressed one after the other, which is how
@@ -48,14 +34,10 @@
 //!
 //! # `mac` is a parameter, not a `cfg!`
 //!
-//! Every function here that could ask the platform is handed the answer
-//! instead. `mod` is the one thing in a chord that means something different
-//! on each machine, and a `cfg!(target_os = "macos")` would make the half of
-//! this file that Windows and Linux actually run the half that never runs
-//! under `cargo test` here. The app has the same problem and answers it the
-//! same way — `HYLOPDF_PLATFORM=other` and `load("src/keys.ts", …, "const
-//! isMac = false")` — and a parameter is the cheaper version of that trick.
-//! [`this_machine`] is what the binary passes.
+//! `mod` is the one thing in a chord that means something different on each
+//! machine, and a `cfg!(target_os = "macos")` would make the half of this file
+//! that Windows and Linux run the half that never runs under `cargo test`
+//! here. [`this_machine`] is what the binary passes.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 

@@ -2,30 +2,27 @@
 //! going means.
 //!
 //! This is `OpenDocuments`, `Placements`, `Exiting`, `placement()` and the
-//! decision half of `hand_over()` out of the app's `lib.rs`, with every
-//! mention of a webview taken out. What is left is bookkeeping and three
-//! rules, and none of it knows what a window is — which is the point, because
-//! **in the app none of this can be tested at all**. `AGENTS.md` says so in as
-//! many words: "None of this can be tested in the harness, which has no Rust
-//! behind it and no windows", and what stands in for a test there is a list of
-//! things that were checked by hand in a running app. Here the rules are a
+//! decision half of `hand_over()` out of the app's `lib.rs`, **with every
+//! mention of a webview taken out** — which is the point, because in the app
+//! none of it can be tested: it is written against `AppHandle`, `State` and
+//! `WebviewWindow`, so asking "what would happen if a second file arrived
+//! now" means having an application running to ask. Here the rules are a
 //! module with no window in it and the tests are at the bottom of the file.
+//! `session.rs` is the half that actually makes windows.
 //!
 //! The three rules, in the order they were learned:
 //!
 //! *Nothing is ever displaced.* A document handed over by the system goes to
 //! a window with nothing in it, or to a window made for it — never over the
-//! top of what somebody is reading. That was the single worst thing the app
-//! did to anybody before there was more than one window.
+//! top of what somebody is reading.
 //!
 //! *A document already open is brought to the front rather than opened
-//! again.* A second copy of a paper beside the first is the one thing
-//! double-clicking a file cannot mean.
+//! again.*
 //!
 //! *A window going means two things, and only [`Desk::leaving`] tells them
 //! apart.* Closed by the reader it is a document they have finished with;
 //! closed because the app is going it means only that it was open at the end,
-//! which is the whole of what the next launch puts back.
+//! which is what the next launch puts back.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

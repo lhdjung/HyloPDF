@@ -258,21 +258,17 @@ impl Desk {
 /// Where to put a new window: one step down and across from the window in
 /// front of it, and on again while that spot is taken.
 ///
-/// Off the *front* window rather than off the remembered position, which is
-/// the app's own hard-won correction: restoring three windows makes them in
-/// one burst, so all three cascaded off the same number and landed within a
-/// few pixels of each other — a stack that looks exactly like one window,
-/// which is the failure this whole feature exists to avoid.
+/// Off the *front* window rather than the remembered position: restoring three
+/// windows makes them in one burst, so all three would cascade off the same
+/// number and land within a few pixels of each other.
 ///
 /// `None` means there is nothing to cascade from, and the window is centred.
 ///
-/// **What the app needs here and this does not is `Placements`.** There, a
-/// window is built, then *shown*, and showing it on macOS moves it onto the
-/// launch window's frame — so the spot has to be remembered and applied again
-/// after the show, and a window made a moment ago has not been put in its
-/// place yet, which is why the pending spots are counted as taken. Here a
-/// window is made and positioned in one function with nothing on screen in
-/// between, so the windows that exist are the whole of what is taken.
+/// **What the app needs here and this does not is `Placements`**, because
+/// showing a window on macOS moves it onto the launch window's frame — so the
+/// spot has to be applied again afterwards, and windows still coming up have to
+/// be counted as taken. Here a window is made and positioned in one function
+/// with nothing on screen in between.
 pub fn cascade(
     front: Option<(f64, f64)>,
     taken: &[(f64, f64)],

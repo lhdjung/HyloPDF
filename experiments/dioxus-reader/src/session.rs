@@ -176,24 +176,18 @@ impl Session {
     /// A window is showing a different document now, because the reader
     /// pressed ⌘O in it.
     ///
-    /// The three things that belong to the process rather than to the window,
-    /// in the order `Session::window` does them for a new one: who is showing
-    /// what, what the next launch comes back to, and which file this window's
-    /// watch is following. The window title is the fourth, and it is the
-    /// window's own — there is nothing here that can reach it, and it is set
-    /// where every other window attribute is.
+    /// The three things that belong to the process rather than the window, in
+    /// the order `Session::window` does them for a new one: who is showing what,
+    /// what the next launch comes back to, and which file this window's watch is
+    /// following. The title is the window's own and is set elsewhere.
     ///
-    /// The document's own name is not asked for again here. It was read when
-    /// the reader opened it and it is on the toolbar already; asking pdfium a
-    /// second time would mean opening the file a second time to do it.
-    /// An empty path is a window showing *nothing*, which is the reader having
-    /// put a document down — see [`crate::app::Viewer::close_document`]. All
-    /// three of the things below take it in their stride and one of them
-    /// depends on it: the restore list is read off the desk, so a document
-    /// closed by hand is a document the next launch does not put back, which
-    /// is exactly the distinction `AGENTS.md` draws between a window closed
-    /// and an app quit. The watch is dropped along with it, because there is
-    /// no longer a file this window cares about being rewritten.
+    /// The document's name is not asked for again — it was read when the reader
+    /// opened it, and asking pdfium again means opening the file again.
+    /// An empty path is a window showing *nothing*, the reader having put a
+    /// document down. One of the three below depends on it: the restore list is
+    /// read off the desk, so a document closed by hand is one the next launch
+    /// does not put back — the distinction between a window closed and an app
+    /// quit. The watch is dropped with it.
     pub fn showing(&self, label: &str, path: &str) {
         let showing = (!path.is_empty()).then_some(path);
         self.desk.set(label, showing);
@@ -214,18 +208,14 @@ impl Session {
                 None
             }
             // **The arm that was unreachable until there was a start screen.**
-            // A window sitting on the shelf is exactly the window a
-            // double-clicked document should land in, and making a second one
-            // beside it is the "nothing is ever displaced" rule taken one step
-            // too far: nothing is displaced by filling a window that is
+            // A window on the shelf is exactly the window a double-clicked
+            // document should land in: nothing is displaced by filling a window
             // showing nothing.
             //
             // The document goes down the mailbox rather than into the window,
-            // because a window is a component and news is the only way to
-            // reach one — the same door a recompile and a resize come through.
-            // The window then does its own `Ask::Showing`, so the desk, the
-            // restore list, the watch and the window's title are all set by
-            // the one path that sets them for ⌘O.
+            // because a window is a component and news is the only way to reach
+            // one. The window then does its own `Ask::Showing`, so everything is
+            // set by the one path that sets it for ⌘O.
             Handover::Fill(label) => {
                 self.exchange.post(crate::emit::News {
                     event: "open-document".into(),

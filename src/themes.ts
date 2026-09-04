@@ -24,22 +24,19 @@ const RED_LIGHT: Rgb = [0xd9, 0x63, 0x6b];
  * Where paper begins, on the 0–255 grey the recolouring reads the page as.
  *
  * A straight ramp is fair to ink and unfair to the absence of it. A hairline
- * that was printed at 90% white is nearly invisible on paper, because two
- * bright greys are hard to tell apart; carried across to a dark theme by the
- * same fraction, it arrives as a light rule on a dark ground, which is the
- * easiest thing in the world to see. The hyperref boxes around cross-references
- * are the usual sighting — grey enough to ignore on the printed page, a cage
- * around every citation once the page turns dark.
+ * printed at 90% white is nearly invisible on paper; carried across by the same
+ * fraction it arrives as a light rule on a dark ground, which is the easiest
+ * thing in the world to see. The hyperref boxes around cross-references are the
+ * usual sighting — ignorable in print, a cage around every citation once the
+ * page turns dark.
  *
- * So the top of the ramp is compressed: anything this light is paper, and the
- * greys just below it are pulled most of the way there. It costs the faintest
- * eighth of the range, which is the part a reader was never meant to notice,
- * and it also flattens the off-white of a scan into the theme's own background
- * instead of leaving every scanned page a shade paler than the app around it.
+ * So the top of the ramp is compressed: anything this light is paper. It costs
+ * the faintest eighth of the range, which a reader was never meant to notice,
+ * and it flattens the off-white of a scan into the theme's own background
+ * instead of leaving every scanned page a shade paler than the app.
  *
- * Kept as a level rather than a fraction because the blend path can only reach
- * it as a fill colour, and both paths have to walk the same curve to the same
- * rounding — `recolor.test.mjs` holds them to a level of each other.
+ * A level rather than a fraction, because the blend path can only reach it as a
+ * fill colour and both paths have to walk the same curve to the same rounding.
  */
 const WHITE_POINT = 235;
 
@@ -47,14 +44,13 @@ const WHITE_POINT = 235;
  * How much colour a pixel needs before the theme lets it keep any, and how
  * much before it keeps all of it — chroma, on the same 0–255 scale.
  *
- * The floor is what tells a colour apart from a cast. Scanned paper is never
- * quite grey, a JPEG's flat areas carry a couple of levels of chroma noise,
- * and neither is a colour anybody chose: below the floor a pixel is neutral
- * and takes the theme's own ink and paper, which is what keeps a scanned page
- * exactly the background of the app around it rather than a shade of its own.
- * Above the ceiling a pixel is plainly coloured — a curve on a plot, a
- * photograph — and keeps its hue outright. Between them it fades, so an
- * antialiased edge does not show as a rim of colour around a themed letter.
+ * The floor tells a colour apart from a cast: scanned paper is never quite
+ * grey and a JPEG's flat areas carry a couple of levels of chroma noise, and
+ * neither is a colour anybody chose. Below it a pixel is neutral and takes the
+ * theme's ink and paper, which keeps a scanned page exactly the background of
+ * the app. Above the ceiling it is plainly coloured and keeps its hue outright.
+ * Between them it fades, so an antialiased edge is not a rim of colour around a
+ * themed letter.
  */
 const COLOUR_FLOOR = 12;
 const COLOUR_FULL = 32;
@@ -62,23 +58,18 @@ const COLOUR_FULL = 32;
 /**
  * Where the colour is: the question the two paths hang off.
  *
- * A strip of page with nothing but type on it comes out the same whichever
- * path draws it, and the blend chain is twenty times quicker, so the pixels
- * are only walked where there is a colour to keep. The answer comes off a
- * downscale of the page — cells of about `PROBE_CELL` pixels each way, which
- * the engine averages on the GPU — so asking costs one `drawImage` and a few
- * thousand comparisons rather than a read of ten million pixels. It is asked
- * by the row, because a row is a rectangle and a rectangle is what both paths
- * take: a paper with one figure on it turns out to have colour on a quarter of
- * its rows, and pays for a quarter of a page.
+ * A strip of page with nothing but type on it comes out the same whichever path
+ * draws it and the blend chain is twenty times quicker, so the pixels are only
+ * walked where there is a colour to keep. The answer comes off a downscale — 
+ * cells of about `PROBE_CELL` pixels, averaged by the engine — so asking costs
+ * one `drawImage` rather than a read of ten million pixels. Asked by the row,
+ * because a row is a rectangle and a rectangle is what both paths take.
  *
- * Averaging dilutes: a blue curve a few pixels wide, crossing a cell of white,
- * arrives as a few levels of chroma rather than a hundred. That is why the
- * floor here is far below `COLOUR_FLOOR` and nothing is decided by it — a row
- * over the floor only means that row is worth reading properly. Guessing wrong
- * the other way costs a figure its colours, so the doubt is spent that way
- * round: the rows either side of a hit are taken too, and rows close enough
- * together are joined rather than left as slivers.
+ * Averaging dilutes: a blue curve a few pixels wide crossing a cell of white
+ * arrives as a few levels of chroma. That is why the floor here is far below
+ * `COLOUR_FLOOR` and nothing is decided by it — a row over it is only a row
+ * worth reading properly. Guessing wrong the other way costs a figure its
+ * colours, so the rows either side of a hit are taken too and near rows joined.
  */
 const PROBE_CELL = 12;
 const PROBE_CELLS_MAX = 256;
@@ -89,16 +80,14 @@ const PROBE_JOIN = 2;
  * Read a colour out of a theme file.
  *
  * Hex, in the four lengths anyone writes: `#abc`, `#abcd`, `#aabbcc`,
- * `#aabbccdd`. The two with an alpha channel are accepted and the alpha
- * dropped — a theme's colours are opaque, and a file that names one with an
- * alpha means the colour rather than the transparency. `readColor` below is
- * the same function for anyone who needs to know whether it worked.
+ * `#aabbccdd`. The two with an alpha are accepted and the alpha dropped.
+ * `readColor` below is the same function saying `null` instead of guessing.
  *
- * Every length is checked against the alphabet before it is read.
+ * Every length is checked against the alphabet before it is read:
  * `parseInt("12345g", 16)` stops at the character it cannot read and returns
- * what it had, so the six-digit path used to answer `#12345g` with a
- * plausible-looking colour rather than with the fallback — which is the worst
- * of the three possible behaviours, because it is the one nobody notices.
+ * what it had, so `#12345g` came back as a plausible colour from a string that
+ * is not one — the worst of the three possible behaviours, because nobody
+ * notices it.
  */
 export function parseColor(value: string, fallback: Rgb = BLACK): Rgb {
   return readColor(value) ?? fallback;
@@ -123,15 +112,12 @@ export function readColor(value: string): Rgb | null {
 /**
  * Which of a theme's colours could not be read.
  *
- * A theme file is meant to be written by hand, or by something asked to write
- * one, and the thing it will get wrong is the notation: `steelblue`,
- * `rgb(30, 42, 59)`, a stray character in a hex string. Every one of those
- * fell through to a fallback — black for the ink, white for the paper — with
- * nothing said anywhere, so the file was wrong and the screen looked like a
- * bug in the app.
+ * A theme file is meant to be written by hand, and the notation is what will be
+ * got wrong: `steelblue`, `rgb(30, 42, 59)`, a stray character in a hex string.
+ * Each fell through to a fallback — black ink, white paper — with nothing said,
+ * so the file was wrong and the screen looked like a bug in the app.
  *
- * Returns the names of the fields at fault, in the order they appear in a
- * file, so the reader can be told which line to look at.
+ * Returns the fields at fault, in the order they appear in a file.
  */
 export function unreadableColors(theme: Theme): string[] {
   const named: [string, string | null][] = [
@@ -189,12 +175,10 @@ export function accentOf(theme: Theme): Rgb {
 /**
  * What sits behind selected text.
  *
- * A theme may name it outright; most do not, and this derivation is why they
- * do not have to. It has one job — to be visible behind the theme's own ink
- * without becoming the loudest thing on the page — so it is the accent pulled
- * most of the way back towards the paper, which keeps it in the palette and
- * out of the way. A theme with a very saturated accent will want to say so
- * itself.
+ * A theme may name it outright; most do not. It has one job — to be visible
+ * behind the theme's own ink without becoming the loudest thing on the page —
+ * so it is the accent pulled most of the way back towards the paper. A theme
+ * with a very saturated accent will want to say so itself.
  */
 export function selectionArea(theme: Theme): Rgb {
   const pulled = mix(accentOf(theme), parseColor(theme.background, WHITE), isDarkTheme(theme) ? 0.62 : 0.72);
@@ -205,16 +189,11 @@ export function selectionArea(theme: Theme): Rgb {
  * The colour selected text itself is drawn in.
  *
  * The default is the inverse of the area behind it, channel by channel, which
- * is the one colour guaranteed to belong to the same choice the reader already
- * made: change the area and the ink on it follows. It is also the reason a
- * selection is legible at all now — before this, the wash went over the page
- * and the words under it kept whatever the printer gave them, which on a dark
- * theme meant reading grey through slate.
+ * is the one colour guaranteed to follow the choice the reader already made.
  *
- * The one thing an inverse cannot do is separate itself from a middle grey,
- * which inverts to another middle grey. So a derived colour that does not
- * clear 3:1 against its own background gives up and takes black or white,
- * whichever reads. A theme that wants something else says so.
+ * What an inverse cannot do is separate itself from a middle grey, which
+ * inverts to another middle grey — so a derived colour that does not clear 3:1
+ * against its own background takes black or white, whichever reads.
  */
 export function selectionInk(theme: Theme): Rgb {
   const area = selectionArea(theme);
@@ -230,15 +209,13 @@ export function selectionInk(theme: Theme): Rgb {
 /**
  * What a saved highlight's wash looks like on a recolouring theme.
  *
- * The colour written to `/C` is the reader's own choice and is never changed
- * — that is what makes a highlight "the red one" on every theme and red again
- * in Preview. What this answers is a narrower question: a highlighter wash is
- * translucent paint, and `opacity` (`/CA`) is exactly the alpha it was meant
- * to be laid down at, so mixing the raw colour with the theme's own paper by
- * that same fraction is not a guess about how to adapt it — it is the same
- * paint, on this theme's page instead of white. See `markup-assessment.md`,
- * "the trap", for why this cannot be left to the ordinary luminance ramp: a
- * conventional wash lands past `WHITE_POINT` and the ramp calls it paper.
+ * The colour written to `/C` is never changed — that is what makes a highlight
+ * "the red one" on every theme and red again in Preview. This is narrower: a
+ * wash is translucent paint and `/CA` is the alpha it was laid down at, so
+ * mixing the raw colour with the theme's paper by that fraction is the same
+ * paint on this theme's page rather than a guess. It cannot be left to the
+ * luminance ramp — a conventional wash lands past `WHITE_POINT` and the ramp
+ * calls it paper. See `markup-assessment.md`, "the trap".
  */
 export function markupWashColor(theme: Theme, color: string, opacity: number): string {
   const bg = parseColor(theme.background, WHITE);
@@ -305,16 +282,11 @@ export function applyTheme(theme: Theme): void {
   const paper = theme.recolor ? bg : WHITE;
   set("--page-paper", toHex(paper));
 
-  // The chips on the toolbar.
-  //
-  // The bar takes the paper's colour rather than the surface's, because it
-  // belongs to the document instead of floating over it — and until now the
-  // things inside it did not follow: a hover, a held-down button, the zoom
-  // group and the page field were all derived from `--surface`, which comes
-  // off the backdrop. On a warm theme that is a cold chip on warm paper, and
-  // on a theme whose paper is not its background it is a chip from another
-  // theme entirely. So the bar gets a family of its own, mixed from the paper
-  // it sits on towards the ink the reader is already looking at.
+  // The chips on the toolbar, which are a family of their own because the bar
+  // takes the *paper's* colour rather than the surface's — it belongs to the
+  // document instead of floating over it. Derived from `--surface` they were a
+  // cold chip on warm paper, and on a theme whose paper is not its background,
+  // a chip from another theme entirely.
   const paperDark = luminance(paper) < 0.35;
   // Which ink that is: the theme's own, almost always, because that is what
   // carries the tint. A theme may name a text colour its paper cannot support
@@ -340,22 +312,17 @@ export function applyTheme(theme: Theme): void {
 /**
  * Map a rendered page onto the theme, keeping the colours the page has.
  *
- * The page comes out of pdf.js as ink on paper, and a theme is two colours to
+ * The page comes out of pdf.js as ink on paper and a theme is two colours to
  * put in their place. For everything printed in grey that is the whole story:
- * flatten to luminance and stretch that single channel between the theme's
- * text and background colour, so black ink lands on the text colour, white
- * paper on the background, and a grey rule stays a grey rule instead of
- * vanishing. `WHITE_POINT` is the one departure from it — the palest greys are
- * paper, not ink.
+ * flatten to luminance and stretch that channel between the theme's text and
+ * background, so a grey rule stays a grey rule instead of vanishing.
+ * `WHITE_POINT` is the one departure — the palest greys are paper, not ink.
  *
- * A figure is not printed in grey, and flattening one is throwing away what it
- * is for: four curves that were blue, orange, green and red arrive as four
- * curves of the same colour, told apart by nothing. So a pixel that has a
- * colour of its own keeps it. What the theme moves is the *lightness*: the
- * ramp says where a pixel of that weight belongs on this theme's page, and the
- * pixel is put there with its hue and its saturation intact. On a dark theme
- * that turns a dark blue curve into a light blue one, the same way it turns
- * black type white, and the plot goes on reading as a plot.
+ * A figure is not printed in grey, and flattening one throws away what it is
+ * for: four curves that were blue, orange, green and red arrive told apart by
+ * nothing. So a pixel with a colour of its own keeps it, and what the theme
+ * moves is its *lightness* — on a dark theme a dark blue curve becomes a light
+ * blue one, the same way black type becomes white.
  *
  * The two are one mapping, not two: colour is kept in proportion to how much
  * of it there is, so ink with none of it lands exactly where it always did and

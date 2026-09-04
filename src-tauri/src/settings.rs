@@ -10,12 +10,10 @@
 //! through untouched instead of being dropped.
 //!
 //! A read-modify-write is only atomic if nothing else is doing one at the same
-//! time. These commands run off the main thread, and the interface writes
-//! settings in pairs — a theme and the light or dark theme it stands for, a
-//! zoom and the fit mode that goes with it — so two writes landing together is
-//! the normal case rather than the unlucky one. `LOCK` serialises them, and
-//! the temp file each write goes through is named for the writer, so two of
-//! them can never be the same file.
+//! time. These commands run off the main thread and the interface writes
+//! settings in pairs, so two writes landing together is the normal case rather
+//! than the unlucky one. `LOCK` serialises them, and each write's temp file is
+//! named for its writer.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -122,19 +120,15 @@ fn path(dir: &Path) -> PathBuf {
 
 /// A setting's value, as JSON. `None` for anything that is not a scalar.
 ///
-/// This used to stringify an array, a table or a datetime — and a string
-/// passes `same_shape` for every setting whose default is a string, so the
-/// shape check below was defeated by the conversion in front of it before it
-/// ever ran. `theme = ["dracula"]` reached the frontend as the *text*
-/// `["dracula"]`, and `scroll_mode = 1979-05-27` reached it as
-/// `{ "$__toml_private_datetime" = "1979-05-27" }` — a `scroll_mode` that is
-/// neither of the two words its type says it can be.
+/// Stringifying an array, a table or a datetime defeats the shape check below
+/// before it runs, because a string passes `same_shape` for every setting whose
+/// default is a string: `theme = ["dracula"]` reached the frontend as the *text*
+/// `["dracula"]`.
 ///
-/// Nothing here reads a datetime or a list, so refusing them costs nothing
-/// this version wants. What is not lost with them is the key: `write` leaves
-/// alone anything on disk that this table does not know about, so a setting
-/// belonging to a version that is not this one survives being written by it —
-/// which is what the promise about downgrades in `load` is worth.
+/// Nothing here reads a datetime or a list, so refusing them costs nothing. The
+/// key is not lost with the value: `write` leaves alone anything on disk this
+/// table does not know about, which is what the downgrade promise in `load` is
+/// worth.
 fn from_toml(value: toml::Value) -> Option<Value> {
     match value {
         toml::Value::String(s) => Some(json!(s)),
@@ -163,23 +157,15 @@ fn to_toml(value: &Value) -> Option<toml::Value> {
 /// Stored values layered over the defaults, so a half-written or partial file
 /// still yields a complete, usable set.
 ///
-/// Every value is checked on the way in, against the same `same_shape` a write
-/// is checked against. It was not, and that was the one hole in a module whose
-/// whole subject is that a setting is a known key holding a known kind of
-/// thing: `set_many` refused anything else, and then `load` layered whatever
-/// the file happened to say straight over the defaults and handed it to the
-/// frontend. This file's own header invites hand-editing, so `zoom = "big"`
-/// is a thing a person can write — and it arrived in `viewer.setFit` typed as
-/// a number, `scroll_mode = "sideways"` arrived at a switch with no arm for
-/// it, and nothing anywhere had said no.
+/// Every value is checked on the way in against the same `same_shape` a write is
+/// checked against. Without it, `set_many` refuses a wrong-shaped value and
+/// `load` layers whatever the file says straight over the defaults — and this
+/// file's header invites hand-editing, so `zoom = "big"` is a thing a person can
+/// write and it arrived in `viewer.setFit` typed as a number.
 ///
-/// A value of the wrong shape is dropped rather than repaired, so the default
-/// stands and the app is usable. Unknown keys are still carried through —
-/// those belong to a version that is not this one, and dropping them is how a
-/// downgrade eats your settings. An unknown key holding something that is not
-/// a scalar cannot come through *here*, because everything this hands over is
-/// a setting the frontend's types describe; it survives on disk instead, which
-/// `write` is where.
+/// A wrong-shaped value is dropped rather than repaired, so the default stands.
+/// Unknown keys are carried through: they belong to a version that is not this
+/// one, and dropping them is how a downgrade eats your settings.
 pub fn load(dir: &Path) -> Settings {
     let known = defaults();
     let mut settings = known.clone();
@@ -235,17 +221,13 @@ fn write(dir: &Path, settings: &Settings) -> Result<(), String> {
 /// Whether a value is the kind of thing a setting holds, judged against that
 /// setting's default.
 ///
-/// The window's position is the one setting with no sensible default, so it
-/// defaults to null and its real shape cannot be read off that. Null is legal
-/// there and nowhere else: it is how "the window has never been placed" is
-/// written down, and anything else offered for it still has to be a number.
+/// The window's position is the one setting with no sensible default, so null is
+/// legal there and nowhere else — it is how "never been placed" is written down,
+/// and anything else offered for it still has to be a number.
 ///
-/// A whole number is its own shape. `page_gap` and `sidebar_width` are
-/// distances in pixels and are integers everywhere they are used; letting 16.5
-/// through because "a number is a number" is the sort of thing that surfaces
-/// later as a layout that is half a pixel out and nobody knowing why. A
-/// setting whose default is a float — `zoom` — takes either, because a whole
-/// number is a perfectly good zoom.
+/// A whole number is its own shape: `page_gap` and `sidebar_width` are integers
+/// everywhere they are used, and letting 16.5 through surfaces later as a layout
+/// half a pixel out. A setting whose default is a float takes either.
 fn same_shape(default: &Value, value: &Value) -> bool {
     match (default, value) {
         (Value::Null, Value::Null) => true,

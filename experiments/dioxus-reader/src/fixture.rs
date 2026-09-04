@@ -195,17 +195,15 @@ pub fn contents_pdf() -> String {
 
 /// A document of `pages` pages, written where you say, right now.
 ///
-/// **The opposite of everything else in this file**, and deliberately: those
-/// are cached in the temp directory and shared, because two tests wanting the
-/// same fixture want the same bytes. This one is what a recompile looks like
-/// — a named file that has to be *rewritten* while a reader is holding it
-/// open — so it takes a path, writes every time, and each draft is a
-/// different length so that a test can tell one from the other.
+/// **The opposite of everything else in this file**, which is cached and shared
+/// because two tests wanting the same fixture want the same bytes. This is what
+/// a recompile looks like — a named file *rewritten* while a reader holds it
+/// open — so it takes a path, writes every time, and each draft is a different
+/// length so a test can tell them apart.
 ///
-/// Written through the app's own [`crate::atomic_write`], which is what
-/// `watch.rs` expects to see: a compiler replaces a document by writing
-/// another one beside it and renaming it over the top, which is why the watch
-/// is on the directory and not on the file.
+/// Through the app's own [`crate::atomic_write`], which is what `watch.rs`
+/// expects to see: a compiler replaces a document by renaming another over it,
+/// which is why the watch is on the directory.
 pub fn draft(path: &std::path::Path, pages: usize) {
     crate::atomic_write(path, &build(pages)).expect("write the draft");
 }
@@ -284,9 +282,8 @@ fn build_titled(title: &str) -> Vec<u8> {
 /// Six pages of prose, written to exercise the *fold* through the renderer
 /// rather than in isolation.
 ///
-/// `search.rs` tests `fold` directly and that is the right place for it, but
-/// it proves nothing about what pdfium actually reports — and building this
-/// found that two of the three answers are not what the app sees:
+/// `search.rs` tests `fold` directly, which proves nothing about what pdfium
+/// actually reports — and two of the three answers are not what the app sees:
 ///
 /// * **A ligature comes back already split.** pdfium hands over "f" and "i",
 ///   with a box each, whatever the font says. See the `/Differences` font
@@ -300,15 +297,11 @@ fn build_titled(title: &str) -> Vec<u8> {
 ///   encoding says code 0255 is, which took a probe to notice and is the
 ///   reason there is a third font here.
 ///
-/// Two things about the file. Everything above ASCII is written as a PDF octal
-/// escape — `\351` for é, `\255` for the soft hyphen — because the bytes in a
-/// PDF string are the font's codes rather than UTF-8, and writing the
-/// character in the Rust source would put two bytes where the document wants
-/// one. And the ligature has a font of its own: `/fi` is not in
-/// WinAnsiEncoding, so it takes an `/Encoding` with a `/Differences` array to
-/// name the glyph and a `/ToUnicode` map to say what it means — which is the
-/// same pair of objects a real typesetter emits, and is the reason a
-/// professionally set document does not contain "fi".
+/// Two things about the file. Everything above ASCII is a PDF octal escape —
+/// `\351` for é — because the bytes in a PDF string are the font's codes rather
+/// than UTF-8. And the ligature has a font of its own: `/fi` is not in
+/// WinAnsiEncoding, so it takes an `/Encoding` with `/Differences` and a
+/// `/ToUnicode` map, which is the pair a real typesetter emits.
 pub fn prose_pdf() -> String {
     written("hylopdf-fixture-prose.pdf", build_prose)
 }
@@ -342,15 +335,11 @@ fn build_prose() -> Vec<u8> {
     // byte in the content stream.
     //
     // **And pdfium hands it back as two characters, "f" and "i", with a box
-    // each** — with a `/ToUnicode` saying U+FB01 and without one alike, which
-    // was worth finding out rather than assuming. So on this renderer the
-    // ligature half of `fold` has nothing to do, where on pdf.js it is the
-    // difference between finding "find" in a typeset book and not. The fold
-    // keeps it: it is the app's own tested behaviour, hayro will not do
-    // pdfium's normalising for us, and a document can carry U+FB01 by other
-    // routes. What this page tests is the claim a reader would make — that
-    // searching for "find" finds a word set with a ligature — which is true
-    // here for a different reason than it is true in the app.
+    // each** — with a `/ToUnicode` saying U+FB01 and without one alike. So the
+    // ligature half of `fold` has nothing to do on this renderer, where on
+    // pdf.js it decides whether "find" is found in a typeset book. The fold
+    // keeps it: hayro will not do pdfium's normalising, and a document can
+    // carry U+FB01 by other routes.
     let ligature = pdf.add(
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
          /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding \
@@ -785,18 +774,14 @@ pub const LOCKED_PASSWORD: &str = "hylo";
 
 /// Two pages, and a signature field that has actually been signed.
 ///
-/// **The app's own `tests/fixtures/signed.pdf` is not this**, and the
-/// difference is the whole reason this exists: that one is a `/FT /Sig`
-/// widget with `/SigFlags 3` and **no `/V`** — a signature *field*, which is a
-/// blank line at the foot of a contract and not a signature. This one has a
-/// `/V` holding a real `/Sig` dictionary, with the four entries pdfium can
-/// read out of one: the reason, the time, the DocMDP level and the PKCS#7
-/// blob itself.
+/// **The app's own `tests/fixtures/signed.pdf` is not this.** That one is a
+/// `/FT /Sig` widget with `/SigFlags 3` and **no `/V`** — a signature *field*,
+/// which is a blank line at the foot of a contract. This has a `/V` holding a
+/// real `/Sig` dictionary with the four entries pdfium can read.
 ///
-/// The blob is not a real signature over these bytes and could not be —
-/// nothing in this repository can make one, which is the whole of what
-/// `signing-assessment.md` is about. It is a well-formed DER prologue, which
-/// is enough to be *present*, and being present is the fact this reader
+/// The blob is not a real signature over these bytes and could not be, nothing
+/// here being able to make one. It is a well-formed DER prologue, which is
+/// enough to be *present* — and being present is the fact this reader
 /// reports.
 pub fn signed_pdf() -> String {
     written("hylopdf-fixture-signed.pdf", || build_signed(true))
@@ -873,21 +858,16 @@ fn build_signed(filled: bool) -> Vec<u8> {
 /// Three pages behind a password: the PDF standard security handler, revision
 /// 2, RC4 at 40 bits.
 ///
-/// **The oldest and weakest thing the spec describes, chosen for exactly that
-/// reason.** What is being tested is that the reader notices a locked
-/// document, asks, and opens it with the answer — none of which is about the
-/// cipher. Revision 2 is the one variant whose key derivation is a single MD5
-/// with no iteration, so the whole handler below is forty lines rather than a
-/// dependency, and every reader that reads PDFs at all reads it.
+/// **The oldest and weakest thing the spec describes, chosen for that reason:**
+/// what is tested is that the reader notices a locked document, asks, and opens
+/// it with the answer. Revision 2's key derivation is a single MD5 with no
+/// iteration, so the handler below is forty lines rather than a dependency.
 ///
-/// What a locked document actually looks like is worth knowing, because it is
-/// what makes the prompt possible: **the structure is in the clear and only
-/// the contents are not.** The catalogue, the page tree, the page dictionaries
-/// and the `xref` are all readable without the password; the streams and the
-/// strings are not. So a reader can tell a locked document from a corrupt one
-/// before it has anything to unlock it with — which is what pdfium's
-/// `FPDF_ERR_PASSWORD` is saying, and it is a different answer from
-/// `FPDF_ERR_FORMAT`.
+/// What makes the prompt possible: **the structure is in the clear and only the
+/// contents are not.** The catalogue, page tree and `xref` are readable without
+/// the password; the streams and strings are not. So a locked document can be
+/// told from a corrupt one before there is anything to unlock it with, which is
+/// what `FPDF_ERR_PASSWORD` says and `FPDF_ERR_FORMAT` does not.
 pub fn locked_pdf() -> String {
     written("hylopdf-locked.pdf", build_locked)
 }

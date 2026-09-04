@@ -23,19 +23,17 @@ use dioxus::prelude::*;
 /// change alone — `snapshot_node_state_only`, which is what a hover or a press
 /// produces — and that snapshot has `attrs: None`.
 ///
-/// So: hover a button, change a stylesheet, and the process panics from a
-/// stack with nothing of the application in it. It is a plain click on a
-/// button that changes the theme, which is how this was found: the reader's
-/// own `t` shortcut was fine and the *button beside it* was not.
+/// So: hover a button, change a stylesheet, and the process panics from a stack
+/// with nothing of the application in it — which is a plain click on the button
+/// that changes the theme, where the `t` shortcut for the same action is fine.
 ///
-/// Either side could fix it. Stylo's own element-wrapper path guards with
-/// `has_attrs()` before reaching for them and this path does not; equally,
-/// Blitz could fill the attributes in when it upgrades a state-only snapshot.
-/// Reported against `stylo 0.20.0` and `blitz-dom 0.3.0-beta.2`.
+/// Either side could fix it: Stylo's element-wrapper path guards with
+/// `has_attrs()` and this one does not, and equally Blitz could fill the
+/// attributes in. Against `stylo 0.20.0`, `blitz-dom 0.3.0-beta.2`.
 ///
-/// The reader works around it by never rewriting its stylesheet: the theme is
-/// a set of custom properties on the root, and an attribute change is a
-/// snapshot that *does* carry attributes. See `styles.rs`.
+/// The reader works around it by never rewriting its stylesheet — the theme is
+/// custom properties on the root, and an attribute change is a snapshot that
+/// *does* carry attributes. See `styles.rs`.
 #[test]
 fn a_stylesheet_that_changes_under_a_hovered_node() {
     #[component]

@@ -58,22 +58,16 @@ pub const INK: &str = "#1c3f94";
 
 /// One signature, as it is kept on disk and as it is drawn.
 ///
-/// The strokes are **normalised by height**: y runs 0 to 1 downwards, and x
-/// runs 0 to however wide the signature is against its own height. So a name
-/// twice as wide as it is tall has x running 0 to 2, and [`Signature::aspect`]
-/// answers 2.
+/// The strokes are **normalised by height**: y runs 0 to 1 downwards and x runs
+/// 0 to however wide the signature is against its own height, so a name twice as
+/// wide as it is tall has x running 0 to 2 and [`Signature::aspect`] answers 2.
 ///
-/// **A unit box in both axes was the first shape and it was wrong**, and the
-/// fault it has is the kind that reads as a bug in the drawing rather than in
-/// the model: stretching each axis to 0-1 separately throws the *shape* away,
-/// so every signature ever saved came back square — a name written across a
-/// pad arrived on the page as a tall narrow scribble. One scale for both axes
-/// is what keeps a signature the shape it was written.
+/// **A unit box in both axes was the first shape and it was wrong**: stretching
+/// each axis to 0-1 separately throws the *shape* away, so every signature came
+/// back square. One scale for both axes keeps it the shape it was written.
 ///
-/// Which axis carries the 1 is not arbitrary either. Height is the thing a
-/// reader means when they say how big a signature should be — see
-/// [`crate::app::HAND_HEIGHT`] — so the height is the unit and the width is
-/// whatever the hand made it.
+/// Height carries the 1 because height is what a reader means by how big a
+/// signature should be — see [`crate::app::HAND_HEIGHT`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Signature {
     /// What the reader calls it. Several are allowed — a full name and a set
@@ -185,17 +179,14 @@ impl Signature {
 
 /// One signature already in a document, as it is read back out of it.
 ///
-/// The neighbour of [`crate::markup::Mark`] and identified the same way — the
-/// page it is on and where it sits among that page's annotations, good for
-/// exactly as long as the document is the one it was read from. Every write
-/// here is followed by a reopen, so an index never crosses one.
+/// The neighbour of [`crate::markup::Mark`], identified the same way: the page
+/// and where it sits among that page's annotations, good for as long as the
+/// document is the one it was read from. Every write is followed by a reopen, so
+/// an index never crosses one.
 ///
-/// **The strokes are not read back.** What the interface needs is that there
-/// is a signature, where it is, and who it says made it; the drawing is the
-/// document's own business once it is in the document, and reading it would be
-/// asking pdfium to hand back path segments this reader would then have to
-/// keep in step with the page. Nothing draws these — the renderer draws them,
-/// because they are in the file.
+/// **The strokes are not read back.** What the interface needs is that there is
+/// a signature, where it is, and who it says made it. Nothing draws these — the
+/// renderer draws them, because they are in the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Written {
     /// Ink: a name drawn by a hand, in an `/Ink` annotation.
@@ -355,15 +346,13 @@ pub struct Standing {
 /// One cryptographic signature the document already carries, as pdfium reads
 /// it.
 ///
-/// **This is the other column of `signing-assessment.md`, read rather than
-/// written.** Nothing in this repository can make one of these; pdfium's whole
-/// signature surface is read-only, and that is a good reason to read them
-/// rather than a reason to say nothing. A reader about to put ink into a
-/// document deserves to know what is already on it and what the ink will cost.
+/// **The other column of `signing-assessment.md`, read rather than written.**
+/// Nothing here can make one; pdfium's whole signature surface is read-only,
+/// which is a reason to read them rather than a reason to say nothing.
 ///
-/// **The assessment said the eight getters are enough to say "signed by X, and
-/// the bytes still match the range that was signed". They are not**, and this
-/// is what they are actually enough for:
+/// **The assessment said the eight getters are enough for "signed by X, and the
+/// bytes still match the range that was signed". They are not**, and this is
+/// what they are enough for:
 ///
 /// * *There is no name getter.* The signer's name lives in the certificate
 ///   inside the PKCS#7 blob, and reading it means parsing DER and deciding

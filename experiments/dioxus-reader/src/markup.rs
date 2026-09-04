@@ -34,20 +34,17 @@ use crate::render::{PageText, Rect};
 
 /// One passage marked in a colour, as this reader deals with it.
 ///
-/// **No quote and no id of its own**, which is where this parts company with
-/// the app's `Highlight` in `library.rs`. The quote is not written into the
-/// file: a `/Contents` on a highlight is a *note* attached to it, which is a
-/// thing a reader asks for rather than something to invent on their behalf,
-/// and Preview would show every mark this reader made as a comment. So the
-/// words are read back off the page instead — [`quote_under`] — which has the
-/// property that matters: it is right for markup this reader did not make.
+/// **No quote and no id of its own.** The quote is not written into the file: a
+/// `/Contents` on a highlight is a *note*, which a reader asks for rather than
+/// has invented on their behalf, and Preview would show every mark as a
+/// comment. So the words are read back off the page — [`quote_under`] — which
+/// has the property that matters: it is right for markup this reader did not
+/// make.
 ///
-/// The identity is `page` and `index`, which is where the annotation sits
-/// among that page's annotations, and it is good for exactly as long as the
-/// document is the one it was read from. Every write here is followed by a
-/// reopen and a re-read, so an index is never carried across one. The app
-/// needs a durable id because its journal is written before the file is; this
-/// list is read *from* the file and is thrown away with it.
+/// The identity is `page` and `index`, good for as long as the document is the
+/// one it was read from. Every write is followed by a reopen and a re-read, so
+/// an index never crosses one. The app needs a durable id because its journal is
+/// written before the file is; this list is read *from* the file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mark {
     /// One-based, as every page number in this crate is.
@@ -407,21 +404,17 @@ pub fn surrounding(quads: &[Rect]) -> Rect {
 /// round trip cannot catch.
 ///
 /// The specification (12.5.6.10) numbers the corners upper-left, upper-right,
-/// lower-left, lower-right, and pdfium reads them back that way:
-/// `RectFromQuadPointsArray` takes its left and bottom from the *third* point
-/// and its right and top from the second. `PdfQuadPoints::from_rect` in
-/// `pdfium-render` instead walks the rectangle — bottom-left, bottom-right,
-/// top-right, top-left — so a mark written with it comes back through
-/// pdfium's own reader as a rectangle of no width, the appearance stream
-/// pdfium generates from it has a `/BBox` whose left and right are the same
-/// number, and **nothing draws it**. The annotation is in the file, it is the
-/// right colour, and it is invisible.
+/// lower-left, lower-right, and `RectFromQuadPointsArray` reads them back that
+/// way. `PdfQuadPoints::from_rect` instead *walks* the rectangle —
+/// bottom-left, bottom-right, top-right, top-left — so a mark written with it
+/// gets an appearance stream whose `/BBox` has no width and **nothing draws
+/// it**: in the file, the right colour, invisible.
 ///
-/// It cannot be seen from inside this crate, either: `to_rect` takes the
-/// minimum and maximum of the four points, so it undoes `from_rect` exactly.
-/// The mark is written wrong, read back right, and only something else
-/// opening the document ever finds out. That is why the test beside it
-/// renders the page rather than re-reading the annotation.
+/// And it cannot be seen from inside this crate, because `to_rect` takes the
+/// min and max of the four points and undoes `from_rect` exactly. Written
+/// wrong, read back right, and only something else opening the document ever
+/// finds out — which is why the test beside it renders the page rather than
+/// re-reading the annotation.
 fn corners(quad: &Rect, height: f64) -> PdfQuadPoints {
     let rect = up(quad, height);
     PdfQuadPoints::new(

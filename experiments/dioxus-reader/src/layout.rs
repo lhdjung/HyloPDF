@@ -710,22 +710,17 @@ impl Layout {
     /// from the top left of a page's box, said in the page's own unturned
     /// points.
     ///
-    /// This exists because the pointer is the one thing that arrives in the
-    /// wrong space. Everything else in this reader starts life in the page's
-    /// own points — a link's area, a match's quad, a character's cell — and
-    /// goes *out* through `place_on` once, on its way to the screen. A click
-    /// starts on the screen and has to come the other way, through the same
-    /// crop and the same rotation, or a page turned on its side selects the
-    /// words that were under the pointer before it was turned.
+    /// The pointer is the one thing that arrives in the wrong space. Everything
+    /// else starts in the page's own points and goes *out* through `place_on`
+    /// once; a click starts on the screen and has to come back through the same
+    /// crop and rotation, or a page turned on its side selects the words that
+    /// were under the pointer before it was turned.
     ///
-    /// Written as the inverse rather than by searching for the rectangle that
-    /// contains the point, which was the other way to do it: a character's box
-    /// is 8 points wide and there are two thousand of them on a page, so a
-    /// point that falls between two of them — in the gap between words, or in
-    /// the leading between lines — has no answer at all. Inverting the
-    /// transform gives every point in the box an answer, and choosing *which
-    /// character* is then [`crate::select::caret_at`]'s to make with the whole
-    /// page in hand.
+    /// The inverse rather than a search for the rectangle containing the point:
+    /// a character's box is eight points wide, so a point in the gap between
+    /// words or the leading between lines is in none of them. Inverting gives
+    /// every point an answer and leaves *which character* to
+    /// [`crate::select::caret_at`], which has the whole page in hand.
     pub fn unplace_on(&self, index: usize, x: f64, y: f64) -> (f64, f64) {
         let Some(page) = self.box_of(index) else {
             return (x, y);

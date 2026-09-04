@@ -36,16 +36,14 @@ const THUMB_MAX = 400;
 /**
  * How many drawn thumbnails to keep.
  *
- * A thumbnail is a canvas, and at the widths this panel can be dragged to —
- * 400 CSS pixels, twice that on a retina screen — one is about a megabyte. A
- * nine hundred page book scrolled end to end in this column was nine hundred
- * of them, held for as long as the document was open, because nothing here
- * ever handed one back. The viewer has said for a long time that dropping a
- * canvas reference is not the same as freeing it; this column was the one
- * place that had not heard.
+ * A thumbnail is a canvas, and at the widths this panel drags to it is about a
+ * megabyte. Nine hundred of them were held for as long as the document was
+ * open, because nothing here handed one back — dropping a canvas reference is
+ * not the same as freeing it, which this column was the one place not to have
+ * heard.
  *
- * Forty is several screens' worth, so scrolling back a little never redraws,
- * and it is bounded, which is the point.
+ * Forty is several screens' worth, so scrolling back never redraws, and it is
+ * bounded, which is the point.
  */
 const THUMB_CACHE = 40;
 
@@ -124,15 +122,12 @@ export class Sidebar {
    * The results of a search, as a list to read rather than a count to step
    * through.
    *
-   * "3 of 128" is the answer to "is it in here" and no answer at all to "which
-   * one did I mean" — which is what somebody searching a long document is
-   * usually asking. Every other reader shows the hits with a line of context;
-   * this one showed a number.
+   * "3 of 128" answers "is it in here" and not "which one did I mean", which is
+   * what somebody searching a long document is usually asking.
    *
-   * The tab appears with the first result and goes when the search does. It
-   * does not steal the panel from the contents unless the reader was not
-   * looking at anything else — a search is a thing you run while reading, and
-   * having the chapter list vanish under you is not what was asked for.
+   * The tab appears with the first result and goes when the search does. It does
+   * not steal the panel from the contents unless the reader was not looking at
+   * anything else: a search is a thing you run while reading.
    */
   showResults(
     results: { at: number; page: number; before: string; hit: string; after: string }[],
@@ -360,19 +355,15 @@ export class Sidebar {
    * The document's own coloured markup, below the marks — see
    * `markup-assessment.md`, step 6.
    *
-   * There is no way to remove a highlight from here, this app's own or
-   * somebody else's: `saveDocument()` in this version of pdf.js cannot edit
-   * or delete an annotation already in the file — see the corrections above
-   * step 6 in `markup-assessment.md` — so a "remove" button here could only
-   * ever take the entry out of the journal, which the next open would put
-   * straight back the moment `syncMarkup` reads the file again. Offering a
-   * button that undoes itself on the next launch is worse than offering
-   * none.
+   * There is no way to remove a highlight from here: `saveDocument()` cannot
+   * edit or delete an annotation already in the file, so a "remove" button could
+   * only take the entry out of the journal — which the next `syncMarkup` would
+   * put straight back. A button that undoes itself on the next launch is worse
+   * than no button.
    *
-   * The one button here that does change something is "Put N back", and it
-   * is the mirror image of that: it *writes*, which is the direction
-   * `saveDocument()` can go, and what it writes back is markup the journal
-   * still has and the file has lost — see `App.restoreMarkup`.
+   * "Put N back" is the mirror image: it *writes*, which is the direction
+   * `saveDocument()` can go, and what it writes is markup the journal still has
+   * and the file has lost. See `App.restoreMarkup`.
    */
   showHighlights(
     highlights: Highlight[],

@@ -56,17 +56,14 @@ struct Run {
 /// A page on the GPU: one texture, wearing the theme.
 ///
 /// The obvious design keeps two — what pdfium drew and what the theme made of
-/// it — so that changing theme is a compute pass rather than a re-render. It
-/// was built that way and measured that way, and the source copy costs 25MB a
-/// page at the size a page is actually drawn: 100MB of texture for the three
-/// pages a window holds, against 50MB without it. Re-rendering a page instead
-/// costs 7ms, and a theme is changed by hand a few times a day. So the source
-/// is uploaded, read once by the compute pass, and dropped inside `upload`.
+/// it — so a theme change is a compute pass rather than a re-render. Measured,
+/// the source copy costs 25MB a page: 100MB for the three pages a window holds
+/// against 50MB without it, to save 7ms on something changed a few times a day.
+/// So the source is uploaded, read once by the pass, and dropped in `upload`.
 ///
-/// That is the same answer `keyFor()` gives in the app — a theme change
-/// repaints every mounted page — reached for the opposite reason: there, the
-/// theme is in the key because a canvas has nowhere to keep the original;
-/// here, it is because the original is the more expensive half.
+/// Which is the answer `keyFor()` gives in the app for the opposite reason:
+/// there the theme is in the key because a canvas has nowhere to keep the
+/// original, here because the original is the more expensive half.
 pub struct PageTexture {
     painted: wgpu::Texture,
     id: ResourceId,
@@ -357,20 +354,18 @@ impl Recolorer {
     /// The theme's selection ramp over what the reader has swept, and off again
     /// when they sweep somewhere else.
     ///
-    /// The colours arrive the right way round for the page — see `regions.wgsl`
-    /// — and the runs in fractions of it. Nothing happens when neither has
-    /// moved, which is most frames of a drag: a pointer crossing a line of type
-    /// sends a dozen events and changes the last run once.
+    /// The colours arrive the right way round for the page and the runs in
+    /// fractions of it. Nothing happens when neither has moved, which is most
+    /// frames of a drag.
     ///
     /// **Where a link is tinted from the page as drawn, a selection is ramped
-    /// from the page as *shown*.** That is `paintSelection` in `viewer.ts`,
-    /// which copies off the page canvas rather than off the pristine copy, and
-    /// the reason is in `selectionPaint`: a recoloured dark page is already
-    /// light ink on dark paper, so which way round the ramp goes is a question
-    /// about the pixels rather than about the theme. Here it means the pass has
-    /// nowhere untouched to read from, because the source was dropped when the
-    /// page was uploaded — so what is under the runs is copied out first, and
-    /// copying it back is how a selection is taken up.
+    /// from the page as *shown*** — which is `paintSelection` copying off the
+    /// page canvas rather than the pristine copy, because a recoloured dark page
+    /// is already light ink on dark paper and which way the ramp goes is a
+    /// question about the pixels. Here the pass has nowhere untouched to read
+    /// from, the source having been dropped at upload, so what is under the runs
+    /// is copied out first — and copying it back is how a selection is taken
+    /// up.
     pub fn select(&self, page: &mut PageTexture, runs: &[[f32; 4]], ink: Rgb, paper: Rgb) {
         let mut wanted = pack(runs, page.width, page.height);
         for run in &mut wanted {
@@ -620,17 +615,13 @@ fn grid(runs: &[Run]) -> (u32, u32) {
 ///
 /// **Two invocations of a compute shader that write the same texel have no
 /// order between them**, and the dispatch grid is the runs stacked — so a pixel
-/// covered by two runs is reached from two grid cells, and which of them lands
-/// last is whatever the hardware felt like. The rule is that the later run
-/// wins, which is `viewer.ts`'s own order and what `duotone_cpu` does by
-/// reading the untouched page: a link over a marked passage is the link. Making
-/// that true on the GPU means the runs cannot overlap at all, so the earlier
-/// one is clipped against the later.
+/// under two runs is reached from two grid cells and which lands last is up to
+/// the hardware. The rule is that the later run wins, so making that true on the
+/// GPU means the runs cannot overlap: the earlier is clipped against the later.
 ///
-/// It is nearly always free. Links on a page are laid out by a typesetter and
-/// do not sit on top of each other, and the lines of a selection are lines; the
-/// two never meet, because they go on in separate passes. This is here so that
-/// the day they do meet, the answer is a decision rather than a race.
+/// Nearly always free — links are laid out by a typesetter and do not overlap,
+/// and the two passes never meet. It is here so that the day they do, the answer
+/// is a decision rather than a race.
 fn disjoint(runs: Vec<Run>) -> Vec<Run> {
     let mut kept: Vec<Run> = Vec::with_capacity(runs.len());
     for run in runs.into_iter().rev() {

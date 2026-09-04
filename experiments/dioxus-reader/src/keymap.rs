@@ -174,19 +174,15 @@ macro_rules! spec {
 use Action as A;
 use Group::{Documents as D, LookingAtIt as L, MovingAround as M};
 
-/// **The app's own table, carried across entry for entry** — because the
-/// point of the port is that `keys.toml` means the same thing on both sides,
-/// and a table missing half its rows would make a reader's file report the
-/// other half as things HyloPDF cannot do. It was carried across including
-/// the actions this reader could not yet perform, which for most of Phase 3
-/// meant several of them answered a sentence saying so; every one answers
-/// properly now. See `tests/keys.rs`, which asserts that the two tables agree
-/// with the shipped `keys.toml` exactly as `tests/keys.test.mjs` does.
+/// **The app's own table, carried across entry for entry**, because the point
+/// of the port is that `keys.toml` means the same thing on both sides: a table
+/// missing rows would report the other half as things HyloPDF cannot do.
+/// `tests/keys.rs` holds the two tables against the shipped `keys.toml`.
 ///
 /// The comments explaining *why* a key is what it is live in `src/keys.ts`
-/// beside the same rows and are not restated here — one copy of a reason is
-/// the whole argument for mounting the app's modules rather than copying them,
-/// and this is the nearest thing to that a file with no `#[path]` can manage.
+/// beside the same rows and are not restated — one copy of a reason is the
+/// argument for mounting the app's modules rather than copying them, and this
+/// is the nearest a file with no `#[path]` can get.
 pub const ACTIONS: &[Spec] = &[
     spec!(A::Open, "Open a document", D, ["mod+o"]),
     spec!(A::NewWindow, "New window", D, ["mod+n"]),
@@ -236,24 +232,18 @@ pub const ACTIONS: &[Spec] = &[
 /// of their own so that [`ACTIONS`] stays exactly the app's and the test which
 /// says so stays exact.
 ///
-/// The first two were built because this reader had no menus, and they have
-/// outlived that: fourteen themes and three spread modes are in the Theme and
-/// View menus now (see [`crate::app::Menu`]), which is where the app reaches
-/// them and is the thing this experiment was missing. They are kept because
-/// a key that steps to the next of something is a different gesture from a
-/// list — `t` is how the theme test walks all fourteen — and they cost one
-/// row each. If the experiment is ever merged they go away rather than
-/// joining the table: the app has no key for either and would gain nothing
-/// from one.
+/// The first two were built because this reader had no menus and have outlived
+/// that — the themes and spread modes are in the Theme and View menus now. They
+/// are kept because stepping to the next of something is a different gesture
+/// from a list, and they cost a row each. On a merge they go away rather than
+/// joining the table.
 ///
 /// **`copy` is the other kind of extra, and it would have to join it.** ⌘C is
-/// not in the app's table because it is not the app's key: the webview owns
-/// the selection, so it owns copying it, and `main.ts` reaches for the
-/// clipboard only for ⌘⇧C — a quote with its page number attached, which is
-/// the one thing a browser will not do for itself. Here the selection is the
-/// reader's own (see [`crate::select`]), so plain copying has to be an action
-/// like everything else. It is the clearest thing found so far that leaving
-/// the webview costs: a key nobody ever had to write down.
+/// not the app's key because the webview owns the selection and so owns copying
+/// it; `main.ts` reaches for the clipboard only for ⌘⇧C. Here the selection is
+/// the reader's own (see [`crate::select`]), so plain copying is an action like
+/// everything else — the clearest thing found so far that leaving the webview
+/// costs: a key nobody ever had to write down.
 pub const EXTRA: &[Spec] = &[
     spec!(A::NextTheme, "The next theme in the list", L, ["t"], doc),
     spec!(A::Spread, "One page or two side by side", L, ["s"], doc),

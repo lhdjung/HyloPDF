@@ -46,16 +46,13 @@ pub struct News {
 ///
 /// **A mailbox with a waker in it, and the waker is the load-bearing half.**
 /// The watcher is a thread and the reader is a Dioxus task, so what is needed
-/// between them is not a channel but a way for the thread to say "poll me" to
-/// a task it cannot see. That is exactly what a `Waker` is for, and the chain
-/// it starts is already built: waking a task marks it ready, which wakes the
-/// virtual DOM, which — through the waker `View::poll` built out of the shell
-/// proxy — puts an event on the winit loop, which polls the document. So a
-/// theme saved in an editor reaches the screen without anything anywhere
-/// polling a clock.
+/// between them is not a channel but a way for the thread to say "poll me" to a
+/// task it cannot see. The chain is already built: waking the task marks it
+/// ready, which wakes the virtual DOM, which puts an event on the winit loop,
+/// which polls the document. Nothing anywhere polls a clock.
 ///
-/// In the harness the same wake marks the task ready and the next `pump()`
-/// runs it, which is why a test can drive this with no window and no thread.
+/// In the harness the same wake makes the next `pump()` run it, which is why a
+/// test can drive this with no window and no thread.
 #[derive(Clone, Default)]
 pub struct Post(Arc<Mutex<Mailbox>>);
 
@@ -123,11 +120,11 @@ impl std::future::Future for Next {
 /// Every window's mailbox, by the name the window is known to `watch.rs` by.
 ///
 /// One process watches one themes directory and any number of documents, so
-/// there is one watcher and one [`AppHandle`] — and the handle has to be able
-/// to reach a particular window, because `watch.rs` reports a rewritten
-/// document with `emit_to(label, …)` and reports the themes with `emit`. That
-/// is the whole difference between one window and several here: a mailbox
-/// became a switchboard, and nothing in the app's file noticed.
+/// there is one watcher and one [`AppHandle`] — and it has to reach a particular
+/// window, because `watch.rs` reports a rewritten document with `emit_to(label,
+/// …)` and the themes with `emit`. That is the whole difference between one
+/// window and several: a mailbox became a switchboard, and nothing in the app's
+/// file noticed.
 ///
 /// A window joins when it is made and leaves when it is destroyed. Leaving
 /// matters: news for a window that has gone would otherwise pile up in a

@@ -38,20 +38,16 @@ use crate::palette::Palette;
 
 /// What a page has painted *into* it rather than drawn over it.
 ///
-/// **Two things in this reader are the colour of the page and not a rectangle
-/// on top of it**, and the app says why for both. A link is `tintLinks`: the
-/// obvious way is a tinted box blended into the ink below, and where a
-/// compositor drops the blend the reader gets a solid band across the line
-/// instead of a coloured word. A selected passage is `paintSelection`: a
-/// translucent rectangle over the words leaves them the colour they were
-/// printed in, so it says *something is selected here* rather than *these words
-/// are selected*.
+/// **Two things here are the colour of the page rather than a rectangle on top
+/// of it.** A link, because a tinted box blended into the ink below is at the
+/// mercy of the compositor and a dropped blend is a solid band across the line.
+/// A selected passage, because a translucent rectangle leaves the words the
+/// colour they were printed in — it says *something is selected here* rather
+/// than *these words are selected*.
 ///
-/// **In fractions of the page's box**, which is the one space both ends already
-/// agree about. `layout.place_on` answers in CSS pixels of the box and a
-/// texture is drawn at the box's size times the density, held under a ceiling,
-/// and frozen mid-pinch — so a fraction is the only number that survives all
-/// three without either side knowing about the other.
+/// **In fractions of the page's box**, the one space both ends agree about: a
+/// texture is drawn at the box's size times the density, held under a ceiling
+/// and frozen mid-pinch, and a fraction survives all three.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ramped {
     /// Left, top, right, bottom. The document's own links.
@@ -121,20 +117,16 @@ impl Chosen {
 
     /// **A pinch is not a hundred zoom steps to be drawn one at a time.**
     ///
-    /// A trackpad sends a magnification event a frame, and each of them
-    /// changes the size every page is laid out at. Redrawing on each is two
-    /// things going wrong at once: pdfium is asked for a page sixty times a
-    /// second, and — because a texture registered on one frame must not be
-    /// drawn until the next, see `fresh` — every one of those frames paints
-    /// nothing, so the document goes blank for as long as the fingers are
-    /// moving and comes back when they stop.
+    /// A trackpad sends a magnification event a frame, each changing the size
+    /// every page is laid out at. Redrawing on each asks pdfium for a page sixty
+    /// times a second — and because a texture registered on one frame must not
+    /// be drawn until the next (see `fresh`), every one of those frames paints
+    /// nothing, so the document goes blank until the fingers stop.
     ///
-    /// While this is on, a page that already has a texture keeps it and is
-    /// stretched to the box the layout is asking for, which is what a browser
-    /// does under a pinch and what the reader expects to see: the words grow
-    /// under their fingers, a little soft, and come back sharp when the
-    /// gesture settles. The frozen size is in the component key too — see
-    /// `Reader` — so nothing is re-keyed on the way either.
+    /// While this is on, a page keeps the texture it has and is stretched to the
+    /// box the layout asks for: the words grow under the fingers, a little soft,
+    /// and come back sharp when the gesture settles. The frozen size is in the
+    /// component key too, so nothing is re-keyed on the way.
     pub fn holding(&self) -> bool {
         self.holding.get()
     }
@@ -146,24 +138,20 @@ impl Chosen {
 
 /// A page's texture belongs to the node, not to the widget.
 ///
-/// The obvious design gives the widget one texture and replaces it whenever
-/// the page has to be drawn again — a new size, a new theme — unregistering
-/// the old one on the way. **Unregistering a resource from inside `paint`
-/// panics Vello**: "tried to draw an invalid empty image", from the atlas
-/// upload at the start of the frame, and no amount of deferring it by a frame
-/// helped. Leaving it registered instead is the other obvious answer and it
-/// leaks a whole page of texture for every zoom step.
+/// The obvious design gives the widget one texture and replaces it whenever the
+/// page is drawn again, unregistering the old one. **Unregistering a resource
+/// from inside `paint` panics Vello** — "tried to draw an invalid empty image",
+/// from the atlas upload — and leaving it registered leaks a whole page of
+/// texture for every zoom step.
 ///
 /// So the widget draws exactly once and the *component key* carries what
-/// `keyFor()` carries: the page, the size it is drawn at, and the theme. A
-/// change to any of them is a different node — a new widget, a new texture,
-/// and the old node's resources released by Blitz through
-/// `remove_custom_widget`, which runs between frames where it is safe.
+/// `keyFor()` carries: the page, its size, the theme. A change to any of them is
+/// a different node — a new widget, a new texture, and the old node's resources
+/// released by Blitz between frames, where it is safe.
 ///
-/// The one thing that is not in the key is the screen's density, because
-/// nothing tells the component when the window moves to a screen of a
-/// different one. A page redrawn for that reason does leak its old texture
-/// until it is unmounted, which is the next time the reader scrolls.
+/// Not in the key: the screen's density, because nothing tells the component
+/// when the window moves to a screen of a different one. A page redrawn for that
+/// reason leaks its old texture until it is unmounted.
 pub struct PageWidget {
     document: Arc<dyn PageSource>,
     index: usize,
@@ -188,27 +176,21 @@ pub struct PageWidget {
     /// Whether the texture was registered during the frame being painted.
     ///
     /// Registering a texture and drawing it in the same frame works until
-    /// something else is unregistered in that frame as well — which is exactly
-    /// what happens when the window's real size arrives and every page is
-    /// replaced at once. The new texture's override is then missing at submit
-    /// and Vello panics with "tried to draw an invalid empty image", from a
-    /// stack that says nothing about either of the two events that caused it.
-    /// It reproduces on the third frame of every run.
+    /// something else is unregistered in that frame too — which is what happens
+    /// when every page is replaced at once. The new texture's override is
+    /// missing at submit and Vello panics with "tried to draw an invalid empty
+    /// image", from a stack naming neither cause.
     ///
     /// So a page is registered on one frame and drawn from the next.
-    /// `requires_redraw` asks for that next frame and then stops asking, which
-    /// is the one legitimate use of the flag that Phase 0 spent its time
-    /// establishing must otherwise stay false: a page is not an animation, but
-    /// a page that has just arrived is one frame's worth of one.
+    /// `requires_redraw` asks for that frame and then stops: a page is not an
+    /// animation, but a page that has just arrived is one frame's worth of one.
     ///
-    /// **And that only moves the collision a frame along**, which item 9 found
-    /// the hard way: a window whose frames landed differently hit it again as
-    /// `MissingTextureBinding`, two runs in three. The frame where every page
-    /// is replaced at once is the whole of the problem, and it was happening
-    /// on every launch because the viewer was laid out at a default viewport
-    /// and corrected on mount. `Reader` sizes it from the window before the
-    /// first frame now, so there is no such frame — see `app.rs`. Anything
-    /// that re-keys every page at once brings this back.
+    /// **And that only moves the collision a frame along.** The frame where
+    /// every page is replaced at once is the whole of the problem, and it used
+    /// to happen on every launch because the viewer was laid out at a default
+    /// viewport and corrected on mount. `Reader` sizes it from the window before
+    /// the first frame now. **Anything that re-keys every page at once brings
+    /// this back.**
     fresh: bool,
     /// The same page, for a renderer that is not wgpu. See [`Software`].
     software: Option<Software>,
@@ -216,22 +198,16 @@ pub struct PageWidget {
 
 /// A page drawn for a renderer with no GPU behind it.
 ///
-/// Two things want this. The harness is the loud one: `paint_scene` runs a
-/// widget's `paint` with whatever `RenderContext` the scene is being built
-/// for, and a headless test builds it for `vello_cpu`, where
-/// `renderer_specific_context()` has no `DeviceHandle` in it and every page
-/// would otherwise come out blank — a screenshot test that passes because it
-/// photographed nothing. The quiet one is the risk row in the assessment:
-/// `vello_cpu` is the fallback for hardware Vello's compute path will not run
-/// on, and a reader whose pages are the one thing it cannot draw is not a
-/// fallback.
+/// Two things want this. The harness builds its scene for `vello_cpu`, where
+/// `renderer_specific_context()` has no `DeviceHandle` and every page would
+/// otherwise come out blank — a screenshot test passing because it photographed
+/// nothing. And `vello_cpu` is the fallback for hardware Vello's compute path
+/// will not run on, where a reader whose pages are the one thing it cannot draw
+/// is not a fallback.
 ///
-/// It costs a copy the GPU path does not pay. pdfium writes BGRA into a buffer
-/// it reuses; a `peniko::ImageData` owns its bytes through a `Blob`, and the
-/// recolouring reference works in RGBA — so the page is swizzled and
-/// recoloured into a buffer of its own, one per mounted page. That is the
-/// price of not having a device to hand the bytes to, and it is why this is
-/// the path not taken when there is one.
+/// It costs a copy the GPU path does not pay: a `peniko::ImageData` owns its
+/// bytes and the recolouring reference works in RGBA, so the page is swizzled
+/// and recoloured into a buffer of its own, one per mounted page.
 struct Software {
     image: ImageData,
     width: u32,
@@ -650,22 +626,18 @@ impl Widget for PageWidget {
         // ceiling, or frozen for the length of a zoom gesture — is scaled to
         // fill it. Everything else lands at 1:1.
         //
-        // **The scale goes in the scene transform, not in the brush
-        // transform**, and that is not a preference. `fill` in
-        // `anyrender_vello_hybrid` has two arms, and the one for a
+        // **The scale goes in the scene transform, not the brush transform.**
+        // `fill` in `anyrender_vello_hybrid` has two arms and the one for a
         // `PaintRef::Resource` ignores `brush_transform` completely: it takes
         // the shape's *origin*, draws the texture there at its own size, and
-        // stops. Only the other arm — an image the renderer owns — reads it,
-        // which is why the software path below is written the ordinary way
-        // and passes its tests. So the destination rectangle is the
-        // *texture's*, and the scene transform is what stretches it:
-        // `draw_texture_rects` composes it, `effective_path_transform() *
-        // rect.transform`, and that is the one hook there is.
+        // stops. Only the other arm reads it, which is why the software path
+        // below is written the ordinary way and passes. So the destination
+        // rectangle is the *texture's* and the scene transform stretches it,
+        // which `draw_texture_rects` composes.
         //
-        // Getting this wrong is invisible until a page's texture is not the
-        // size of its box, which before the zoom hold only happened above
-        // `MAX_PIXELS`. The reader saw it as a page whose border grew under
-        // their fingers while the print inside stayed exactly where it was.
+        // Invisible until a page's texture is not the size of its box, and then
+        // it is a page whose border grows under the reader's fingers while the
+        // print inside stays where it was.
         let stretch = Affine::scale_non_uniform(
             width as f64 / texture.width as f64,
             height as f64 / texture.height as f64,

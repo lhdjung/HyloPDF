@@ -416,6 +416,19 @@ body { margin: 0;
   flex: 0 1 auto; min-width: 0; max-width: 276px;
   padding: 0 8px; font-size: 13px; font-weight: 400; color: var(--faint);
   white-space: nowrap; overflow: hidden;
+  /* **A name too long for the box has to lose its end, not its beginning.**
+     Blitz's user-agent sheet gives every `button` `text-align: center` and
+     `justify-content: center`, which is right for a chip holding an icon and
+     a verb and wrong for the one chip whose content is longer than its box:
+     centring negative free space takes the same number of pixels off *both*
+     ends, so a paper called "Why It Is (Probably) Not Your Fault…" came up
+     reading ")robably) Not Your Fault if Your Studies Do No". The reader
+     could not tell which document was open without dragging the window
+     wider. Both properties are named because either alone leaves the other
+     doing it: `justify-content` places the anonymous flex item, `text-align`
+     places the run inside it. With the start pinned, `.clipped`'s fade lands
+     where the name actually runs out, which is what it was drawn for. */
+  justify-content: flex-start; text-align: left;
 }
 /* **The fade is what an ellipsis would be, and it belongs only to a name that
    has actually run out of box.** It was on `.chip.title` itself, so every
@@ -561,13 +574,23 @@ body { margin: 0;
 .hit { background: var(--found); opacity: 0.38; border-radius: 2px; }
 .hit.current { background: var(--found-now); opacity: 0.45; }
 
-/* What the reader has swept over. The same rectangle as a match and the same
-   colour, because in this app's themes they are the same colour: `--found` is
-   the theme's `selection_area`, and a found word and a selected word are the
-   same statement about the page. A little stronger than a match, because a
-   selection is the thing the reader is doing right now and a match is a thing
-   the document was asked about a minute ago. */
-.selected { background: var(--found); opacity: 0.45; border-radius: 2px; }
+/* What the reader has swept over. **Nothing is drawn any more**, for the
+   reason `.link` below draws nothing: the colour of a selected word is the
+   *page's* business now and is baked into the bitmap, which is what
+   `paintSelection` does in the app and what `regions.wgsl` does here.
+
+   It was `background: var(--found); opacity: 0.45`, a translucent band over
+   the printed words, and the note beside it in `app.rs` called it "the honest
+   version of the same statement and one shader short of the app's". The
+   shader exists, and the difference is the one the reader photographed: a
+   band leaves the letters under it the colour they were printed in, so on a
+   dark theme a selected sentence came out as pink type on maroon, where the
+   app gives the theme's own `selection_text` on its `selection_area`.
+
+   The node stays, because it is still where the selection *is*: the harness
+   reads its rectangle, and a `div` with no paint on it is the cheapest way to
+   say so. */
+.selected { border-radius: 2px; }
 
 /* A link, as the area the document says it is. Nothing is drawn: the colour
    of a link is the *page's* business and is baked into the bitmap, exactly as
@@ -1090,8 +1113,17 @@ body { margin: 0;
    wash of the app's own ground leaves every theme recognisably itself, which
    is the point of having themes. `--scrim` is that colour with its alpha
    already in it, mixed in `palette.rs` where the rest of the shades are.
-   (The app also blurs what is behind it; `backdrop-filter` is not something
-   this renderer has, and a scrim without it is still a scrim.) */
+   (The app also blurs what is behind it, and this cannot yet. `backdrop-filter`
+   is parsed by Stylo and carried the whole way: `blitz-paint` converts it
+   beside `filter` and hands both to `PaintScene::push_layer`. Every anyrender
+   backend then names the parameter `_backdrop_filter` and drops it —
+   `anyrender_vello_hybrid 0.10.0`, `anyrender_vello 0.14.0` — so the
+   declaration is accepted and nothing happens, which is the same silent shape
+   as `font-variation-settings` in `PROGRESS.md`. Blurring the *document*
+   instead, with an ordinary `filter` on the content behind the scrim, is a
+   filter over the whole window every frame a window is up, and it makes a
+   stacking context of the reader — which is the one thing Blitz's hit testing
+   is known to get wrong. A scrim without a blur is still a scrim.) */
 .window-scrim {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 20;
   display: flex; align-items: center; justify-content: center;
@@ -1222,12 +1254,44 @@ body { margin: 0;
 .root.placing .page { cursor: crosshair; }
 
 /* The Information window: what the document says about itself, a row a fact.
-   `showDocumentDetails` in `main.ts` and `ui.field` under it. */
-.details-window { min-width: 420px; max-width: 560px; }
-.details-name { margin: 0 0 10px 0; font-size: 15px; font-weight: 600; }
-.details-row { display: flex; gap: 12px; padding: 4px 0; }
-.details-label { flex: 0 0 34%; color: var(--faint); font-size: 13px; }
-.details-value { flex: 1 1 0; min-width: 0; color: var(--text); font-size: 13px; }
+   `showDocumentDetails` in `main.ts` and `ui.field` under it.
+
+   **It was a window of its own invention and is now the app's.** Four things
+   were different and all four were visible side by side. It was 560px at its
+   widest, where `.window[data-size="tall"]` is `min(860px, 100%)` — the app's
+   own reasoning being that a document with many fields should get more room
+   than the 460px a fitted window gives before it has to wrap, and "Adobe PDF
+   Library 9.9; modified using iText 4.2.0 by 1T3XT" wrapped onto three lines
+   here and one there. It kept `.window`'s fixed 600px height, so a paper with
+   eight facts came up in a frame with a hand's breadth of nothing under the
+   last of them. Its rows were a two-column grid with the label in a third of
+   the width and the value ranged left after it, where `ui.field` is a label
+   at the left and its value ranged *right*, with a rule between rows — the
+   difference being that a column of right-ranged values has an edge to read
+   down and a column of left-ranged ones does not. And both halves were 13px
+   and the label was `--faint`: the app writes the label in the ink at 500 and
+   only the value in the quiet shade, which is what makes a row read as a
+   question and an answer rather than as two greys. */
+.details-window { height: auto; }
+/* `.pane-title` carries the size and the weight; only the air under it is the
+   app's own `0 0 2px`, which is closer than the 4px a pane heading gets
+   because the first rule follows immediately. */
+.details-name { margin: 0 0 2px 0; }
+.details-row {
+  display: flex; align-items: center; gap: 18px;
+  padding: 13px 0; border-bottom: 1px solid var(--line);
+}
+.details-row:last-child { border-bottom: 0; }
+.details-label { flex: 1 1 auto; min-width: 0; color: var(--text); font-weight: 500; }
+/* `max-width` is the app's 440px and it is what keeps a file path from
+   pushing its label off the left of the window. `overflow-wrap` beside
+   `word-break` because a path is one word: without it the box is 440px wide
+   and the word is wider. */
+.details-value {
+  flex: 0 1 auto; max-width: 440px; text-align: right;
+  color: var(--note); font-size: 14px;
+  word-break: break-word; overflow-wrap: anywhere;
+}
 /* The nav column is the *sunk* shade, not the surface — `.window-nav` in the
    app — which is what tells the column from the page beside it now that the
    window itself is the surface. Its width and padding are the app's too. */

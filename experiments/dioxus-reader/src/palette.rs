@@ -169,16 +169,26 @@ impl Palette {
     /// little towards the theme's own ink so it belongs to the palette.
     pub fn positive(&self) -> Rgb {
         let green = if self.dark() {
-            [0x6a, 0xd3, 0x8c]
+            [0x6c, 0xc0, 0x8b]
         } else {
             [0x3d, 0x8f, 0x5b]
         };
         mix(green, self.text, 0.14)
     }
 
+    /// The red a destructive thing is written in, and the one the cross on
+    /// Close turns under the pointer.
+    ///
+    /// **Both halves are `themes.ts`'s own `RED_DARK` and `RED_LIGHT`**, and
+    /// the one a dark theme wears was not: `#f17a84` against the app's
+    /// `#d9636b`, a shade brighter and pinker. That is exactly the near-miss
+    /// the note at the head of this block is about — close enough that the two
+    /// apps look almost the same and nobody can say what is different. The
+    /// green above had drifted the same way, `#6ad38c` against `GREEN_LIGHT`'s
+    /// `#6cc08b`.
     pub fn negative(&self) -> Rgb {
         if self.dark() {
-            [0xf1, 0x7a, 0x84]
+            [0xd9, 0x63, 0x6b]
         } else {
             [0xb0, 0x2a, 0x37]
         }

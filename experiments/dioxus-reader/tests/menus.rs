@@ -305,3 +305,47 @@ fn escape_closes_the_information_window() {
         "and Escape puts it away, like every other window over the reader",
     );
 }
+
+/// **The Information window fits what is in it, and its values are ranged
+/// right.**
+///
+/// Both are `ui.field` under `.window[data-size="tall"]` in the app, and this
+/// window had neither: it kept `.window`'s fixed 600px height, so a paper with
+/// four facts came up in a frame with a hand's breadth of nothing under the
+/// last of them, and its rows were a two-column grid with the value ranged left
+/// after a label in a third of the width. A column of right-ranged values has
+/// an edge to read down; a column of left-ranged ones does not.
+#[test]
+fn the_information_window_fits_its_rows_and_ranges_them_right() {
+    let mut reader = reader();
+    reader.click(".chip.title");
+    reader.click("[data-item='information']");
+
+    let window = reader.harness.layout_rect(".details-window");
+    let rows = reader.harness.query_all(".details-row").len();
+    assert!(rows >= 3, "the fixture names a few facts: {rows}");
+    assert!(
+        window.height < 500.0,
+        "a window of {rows} rows was {}px tall — it is wearing the fixed \
+         frame Settings needs rather than fitting what is in it",
+        window.height,
+    );
+
+    // The last row's value ends where its row ends, give or take the pane's own
+    // padding. The label starts where the row starts.
+    let row = reader.harness.layout_rect(".details-row");
+    let label = reader.harness.layout_rect(".details-label");
+    let value = reader.harness.layout_rect(".details-value");
+    assert!(
+        (label.x - row.x).abs() < 2.0,
+        "the label is at the left of its row: {} against {}",
+        label.x,
+        row.x,
+    );
+    assert!(
+        ((row.x + row.width) - (value.x + value.width)).abs() < 2.0,
+        "the value is at the right of its row: {} against {}",
+        value.x + value.width,
+        row.x + row.width,
+    );
+}

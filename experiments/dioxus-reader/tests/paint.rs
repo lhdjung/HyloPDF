@@ -14,6 +14,7 @@
 
 use dioxus_reader::harness::{Options, Reader};
 use dioxus_reader::palette;
+use dioxus_reader::recolor;
 use dioxus_reader::theme;
 
 /// Hylo Dark, as the app's own theme file defines it. The list is fourteen
@@ -240,5 +241,79 @@ fn and_when_the_fingers_stop_the_page_is_drawn_at_the_size_it_reached() {
     assert!(
         (width - grown as f64).abs() <= 1.0,
         "drawn at {width} for a box of {grown}",
+    );
+}
+
+/// **A selected passage is the theme's own two colours, not a wash over the
+/// printed ones.**
+///
+/// This is `paintSelection` in `viewer.ts` and the reason it exists: the
+/// obvious way to colour selected text is a translucent rectangle over the
+/// words, and it leaves the letters the colour they were printed in — so on a
+/// dark theme a selected sentence came out as the page's near-white type
+/// showing pink through a maroon wash. The pixels under each line are run
+/// through the luminance ramp instead, ink to `selection_text` and paper to
+/// `selection_area`, so the band is the theme's ground and the words on it are
+/// the theme's ink.
+///
+/// Hylo Dark on purpose: a recoloured dark page is already light ink on dark
+/// paper, so the darkest pixel in a run is its *paper* and the ramp has to go
+/// the other way round. That is the branch `selection_ramp` exists for, and the
+/// one a light theme would not exercise.
+#[test]
+fn a_selected_line_is_painted_in_the_theme_s_selection_colours() {
+    let (index, theme) = hylo_dark();
+    let mut reader = Reader::open_with(
+        &dioxus_reader::fixture::prose_pdf(),
+        Options {
+            theme: Some(index),
+            ..Options::default()
+        },
+    );
+    // The one line of a `prose_pdf` page: 18pt type with its baseline at 700 on
+    // a 792-point page, so about a tenth of the way down.
+    reader.sweep_page(1, (0.10, 0.108), (0.55, 0.108));
+    let band = reader.harness.layout_rect(".selected");
+    assert!(band.width > 10.0 && band.height > 4.0, "{band:?}");
+
+    // **What the ground under the words should be, worked out rather than
+    // guessed.** The ramp's ends are luma 0 and the white point, and the paper
+    // of a page Hylo Dark has already recoloured is neither: it is the theme's
+    // background, luma about 40, which lands a sixth of the way along rather
+    // than at the end. So the expected colour is the ramp entry for that level
+    // — the same table `duotone_cpu` builds, asked for one row.
+    let luma = |colour: palette::Rgb| {
+        ((colour[0] as u32 * 77 + colour[1] as u32 * 151 + colour[2] as u32 * 28 + 128) >> 8)
+            as usize
+    };
+    // Hylo Dark recolours and its ink is lighter than its paper, so the ramp
+    // runs the other way round: the darkest pixel in the run is the page's
+    // *paper*. See `PageWidget::selection_ramp`.
+    let ramp = recolor::Tables::new(theme.selection_area, theme.selection_text, false).ramp;
+    let ground = ramp[luma(theme.background)];
+    let printed = ramp[luma(theme.text)];
+    assert_ne!(ground, printed, "the two ends of the band are not the same");
+
+    let shot = reader.screenshot();
+    let near = |a: [u8; 4], b: [u8; 3]| {
+        (0..3).all(|channel| (a[channel] as i32 - b[channel] as i32).abs() <= 3)
+    };
+    // The ground between the letters is most of the band. Sampled across it
+    // rather than at one point, because one point can land on a stem.
+    let mut on_ground = 0;
+    let mut sampled = 0;
+    for step in 1..20 {
+        let x = (band.x + band.width * step as f32 / 20.0) as u32;
+        let y = (band.y + band.height * 0.25) as u32;
+        sampled += 1;
+        if near(shot.at(x, y), ground) {
+            on_ground += 1;
+        }
+    }
+    assert!(
+        on_ground * 2 > sampled,
+        "only {on_ground} of {sampled} samples across the band were the \
+         theme's selection ground {ground:?} — the words are still wearing a \
+         wash rather than the ramp",
     );
 }

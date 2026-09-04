@@ -25,9 +25,33 @@ use std::rc::Rc;
 use anyrender::{RenderContext, ResourceId};
 use dioxus_native::DeviceHandle;
 
-use crate::recolor::SHADER;
+use crate::recolor::{Region, Rgb, REGIONS, SHADER};
 use crate::render::Bitmap;
 use crate::palette::Palette;
+
+/// One rectangle of a page painted through a ramp of its own: a link, or a line
+/// the reader has swept over.
+///
+/// Three places in one struct, and they are not the same place. `span` is where
+/// the run sits in the *dispatch grid*, which is the runs stacked one above
+/// another so that a pass costs their area rather than the page's. `on` is
+/// where it goes on the page. `from` is where the untouched pixels are: the
+/// same point as `on` for a link, whose source is still on the GPU while the
+/// page is being uploaded, and its place in the backup for a selection, which
+/// is ramped from the page as shown and therefore has to keep what was under
+/// it. See `regions.wgsl` and [`Recolorer::select`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Run {
+    /// Left, top, width, height in the dispatch grid.
+    span: [u32; 4],
+    /// Left and top on the page.
+    on: [u32; 2],
+    /// Left and top in whatever is being read.
+    from: [u32; 2],
+    /// What the darkest pixel in it becomes, and what the lightest becomes.
+    ink: Rgb,
+    paper: Rgb,
+}
 
 /// A page on the GPU: one texture, wearing the theme.
 ///
@@ -50,6 +74,13 @@ pub struct PageTexture {
     themed: Option<Palette>,
     pub width: u32,
     pub height: u32,
+    /// The selection currently painted into `painted`, colours and all. Empty
+    /// when there is none.
+    selected: Vec<Run>,
+    /// What was under it, so that it can be taken up again. As big as the runs
+    /// and no bigger: a line of type is a hundredth of a page, which is the
+    /// whole reason this is not a second copy of the page.
+    kept: Option<wgpu::Texture>,
 }
 
 impl PageTexture {
@@ -58,6 +89,14 @@ impl PageTexture {
     }
 
     /// Bytes resident on the GPU for this page.
+    ///
+    /// **The selection's backup is deliberately not in this**, and the reason
+    /// is the accounting rather than the memory. `stats::RESIDENT` is added to
+    /// when a page is uploaded and taken from when it goes, and a number that
+    /// had grown in between would take away more than it put in — on an
+    /// unsigned counter, which is not a small error but a wrapped one. The
+    /// backup is a few lines of type and is gone the moment the reader lets go;
+    /// the page is 25MB and is what this is for.
     pub fn bytes(&self) -> u64 {
         self.width as u64 * self.height as u64 * 4
     }
@@ -75,6 +114,9 @@ impl PageTexture {
 pub struct Recolorer {
     device: DeviceHandle,
     pipeline: wgpu::ComputePipeline,
+    /// The second pass: the parts of a page painted through a ramp of their
+    /// own. See `regions.wgsl`.
+    regions: wgpu::ComputePipeline,
 }
 
 thread_local! {
@@ -121,7 +163,27 @@ impl Recolorer {
                     compilation_options: Default::default(),
                     cache: None,
                 });
-        Recolorer { device, pipeline }
+        let over = device
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("regions"),
+                source: wgpu::ShaderSource::Wgsl(REGIONS.into()),
+            });
+        let regions = device
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("regions"),
+                layout: None,
+                module: &over,
+                entry_point: Some("ramp_runs"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+        Recolorer {
+            device,
+            pipeline,
+            regions,
+        }
     }
 
     /// Put a freshly drawn page on the GPU and paint the theme onto it.
@@ -130,6 +192,7 @@ impl Recolorer {
         ctx: &mut dyn RenderContext,
         bitmap: &Bitmap,
         theme: &Palette,
+        regions: &[Region],
     ) -> Option<PageTexture> {
         let extent = wgpu::Extent3d {
             width: bitmap.width,
@@ -171,9 +234,13 @@ impl Recolorer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
+            // `COPY_DST` as well as `COPY_SRC`, which the selection needs both
+            // halves of: what is under a run is copied out before the ramp goes
+            // on, and copied back when the reader lets go.
             usage: wgpu::TextureUsages::STORAGE_BINDING
                 | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
 
@@ -186,8 +253,26 @@ impl Recolorer {
             themed: None,
             width: bitmap.width,
             height: bitmap.height,
+            selected: Vec::new(),
+            kept: None,
         };
         self.paint(&mut page, &source, theme);
+        // **The links, before the source goes.** They are tinted under every
+        // theme, including the ones that leave the document alone — a link that
+        // reads exactly like the sentence around it is a link nobody can see —
+        // and they are the one thing here that can be ramped from the page as
+        // pdfium drew it, because for these few frames it is still on the GPU.
+        // `tintLinks` in `viewer.ts` takes a whole copy of the canvas to do the
+        // same; this reads the copy that is already there.
+        let over = runs_over(regions, bitmap.width, bitmap.height);
+        if !over.is_empty() {
+            let mut encoder = self
+                .device
+                .device
+                .create_command_encoder(&Default::default());
+            self.ramp_runs(&mut encoder, &source, &page.painted, &over);
+            self.device.queue.submit([encoder.finish()]);
+        }
         // The source has been read; the GPU keeps only what is shown.
         //
         // Keeping it and reusing it for the next page was tried, on the theory
@@ -263,7 +348,421 @@ impl Recolorer {
         }
         self.device.queue.submit([encoder.finish()]);
         page.themed = Some(*theme);
+        // A page redrawn is a page with nothing selected on it: whatever was
+        // kept belonged to the pixels that have just been replaced.
+        page.selected.clear();
+        page.kept = None;
     }
+
+    /// The theme's selection ramp over what the reader has swept, and off again
+    /// when they sweep somewhere else.
+    ///
+    /// The colours arrive the right way round for the page — see `regions.wgsl`
+    /// — and the runs in fractions of it. Nothing happens when neither has
+    /// moved, which is most frames of a drag: a pointer crossing a line of type
+    /// sends a dozen events and changes the last run once.
+    ///
+    /// **Where a link is tinted from the page as drawn, a selection is ramped
+    /// from the page as *shown*.** That is `paintSelection` in `viewer.ts`,
+    /// which copies off the page canvas rather than off the pristine copy, and
+    /// the reason is in `selectionPaint`: a recoloured dark page is already
+    /// light ink on dark paper, so which way round the ramp goes is a question
+    /// about the pixels rather than about the theme. Here it means the pass has
+    /// nowhere untouched to read from, because the source was dropped when the
+    /// page was uploaded — so what is under the runs is copied out first, and
+    /// copying it back is how a selection is taken up.
+    pub fn select(&self, page: &mut PageTexture, runs: &[[f32; 4]], ink: Rgb, paper: Rgb) {
+        let mut wanted = pack(runs, page.width, page.height);
+        for run in &mut wanted {
+            run.ink = ink;
+            run.paper = paper;
+        }
+        if wanted == page.selected {
+            return;
+        }
+
+        let mut encoder = self
+            .device
+            .device
+            .create_command_encoder(&Default::default());
+
+        // Up first. The backup holds the page as it was before the last
+        // selection went on, so putting it back is the only way to a clean page
+        // — and it has to happen before the new runs are copied out, or the new
+        // backup would keep the old selection's colours.
+        if let Some(kept) = page.kept.as_ref() {
+            for run in &page.selected {
+                copy(
+                    &mut encoder,
+                    kept,
+                    run.from,
+                    &page.painted,
+                    run.on,
+                    [run.span[2], run.span[3]],
+                );
+            }
+        }
+        page.selected.clear();
+        page.kept = None;
+        if wanted.is_empty() {
+            self.device.queue.submit([encoder.finish()]);
+            return;
+        }
+
+        // The runs stacked one above another: as wide as the widest and as tall
+        // as all of them, which for a paragraph of type is about a hundredth of
+        // the page.
+        let (across, down) = grid(&wanted);
+        let kept = self.device.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("page: under the selection"),
+            size: wgpu::Extent3d {
+                width: across,
+                height: down,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        for run in &wanted {
+            copy(
+                &mut encoder,
+                &page.painted,
+                run.on,
+                &kept,
+                run.from,
+                [run.span[2], run.span[3]],
+            );
+        }
+        self.ramp_runs(&mut encoder, &kept, &page.painted, &wanted);
+        self.device.queue.submit([encoder.finish()]);
+
+        page.selected = wanted;
+        page.kept = Some(kept);
+    }
+
+    /// One dispatch over the runs, reading `untouched` and writing `painted`.
+    ///
+    /// **Over the runs and not over the page**, which is the whole reason this
+    /// is a pass of its own rather than a branch in the recolouring one. A
+    /// bibliography page carries a couple of hundred links; asking every one of
+    /// ten million pixels whether it is inside any of two hundred rectangles is
+    /// two billion tests for work that touches a fiftieth of the page. The grid
+    /// is the runs stacked instead, so it costs their area and nothing else —
+    /// which is what the app gets from a clip, arrived at the only way a
+    /// compute pass can.
+    fn ramp_runs(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        untouched: &wgpu::Texture,
+        painted: &wgpu::Texture,
+        runs: &[Run],
+    ) {
+        if runs.is_empty() {
+            return;
+        }
+        let count = [runs.len() as f32, 0.0, 0.0, 0.0];
+        let how_many = self.device.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("how many runs"),
+            size: std::mem::size_of_val(&count) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.device.queue.write_buffer(&how_many, 0, as_bytes(&count));
+
+        let table = table_of(runs);
+        let places = self.device.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runs"),
+            size: (table.len() * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.device.queue.write_buffer(&places, 0, as_bytes(&table));
+
+        let bind_group = self
+            .device
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("regions"),
+                layout: &self.regions.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &untouched.create_view(&Default::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(
+                            &painted.create_view(&Default::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: how_many.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: places.as_entire_binding(),
+                    },
+                ],
+            });
+
+        let (across, down) = grid(runs);
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&self.regions);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(across.div_ceil(8), down.div_ceil(8), 1);
+    }
+}
+
+/// The runs as the shader reads them: four vec4s each — where it lands in the
+/// grid, where it goes and where it comes from, and the two colours it is
+/// ramped between.
+fn table_of(runs: &[Run]) -> Vec<f32> {
+    let mut table: Vec<f32> = Vec::with_capacity(runs.len() * 16);
+    for run in runs {
+        table.extend_from_slice(&[
+            run.span[0] as f32,
+            run.span[1] as f32,
+            run.span[2] as f32,
+            run.span[3] as f32,
+            run.on[0] as f32,
+            run.on[1] as f32,
+            run.from[0] as f32,
+            run.from[1] as f32,
+        ]);
+        for channel in run.ink {
+            table.push(channel as f32 / 255.0);
+        }
+        table.push(0.0);
+        for channel in run.paper {
+            table.push(channel as f32 / 255.0);
+        }
+        table.push(0.0);
+    }
+    table
+}
+
+/// The whole of what the regions pass is handed for a page's links: the run
+/// table, how many runs it holds, and how big the dispatch grid is.
+///
+/// Public so that `tests/recolor.rs` can run the pass against `duotone_cpu`
+/// through the same packing the reader uses — the rounding, the clipping and
+/// the splitting of overlaps included, which is where the answers can differ
+/// without either the ramp or the shader being wrong.
+pub fn tint_runs(regions: &[Region], width: u32, height: u32) -> (Vec<f32>, u32, (u32, u32)) {
+    let runs = runs_over(regions, width, height);
+    (table_of(&runs), runs.len() as u32, grid(&runs))
+}
+
+/// One rectangle of one texture into another, at whole pixels.
+fn copy(
+    encoder: &mut wgpu::CommandEncoder,
+    from: &wgpu::Texture,
+    from_at: [u32; 2],
+    to: &wgpu::Texture,
+    to_at: [u32; 2],
+    size: [u32; 2],
+) {
+    if size[0] == 0 || size[1] == 0 {
+        return;
+    }
+    encoder.copy_texture_to_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: from,
+            mip_level: 0,
+            origin: wgpu::Origin3d {
+                x: from_at[0],
+                y: from_at[1],
+                z: 0,
+            },
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyTextureInfo {
+            texture: to,
+            mip_level: 0,
+            origin: wgpu::Origin3d {
+                x: to_at[0],
+                y: to_at[1],
+                z: 0,
+            },
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::Extent3d {
+            width: size[0],
+            height: size[1],
+            depth_or_array_layers: 1,
+        },
+    );
+}
+
+/// How big the dispatch grid is: as wide as the widest run and as tall as all
+/// of them, because that is how [`stack`] lays them out.
+fn grid(runs: &[Run]) -> (u32, u32) {
+    let across = runs.iter().map(|run| run.span[2]).max().unwrap_or(1).max(1);
+    let down = runs
+        .iter()
+        .map(|run| run.span[1] + run.span[3])
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    (across, down)
+}
+
+/// Cut every run back to the part of it no later run covers.
+///
+/// **Two invocations of a compute shader that write the same texel have no
+/// order between them**, and the dispatch grid is the runs stacked — so a pixel
+/// covered by two runs is reached from two grid cells, and which of them lands
+/// last is whatever the hardware felt like. The rule is that the later run
+/// wins, which is `viewer.ts`'s own order and what `duotone_cpu` does by
+/// reading the untouched page: a link over a marked passage is the link. Making
+/// that true on the GPU means the runs cannot overlap at all, so the earlier
+/// one is clipped against the later.
+///
+/// It is nearly always free. Links on a page are laid out by a typesetter and
+/// do not sit on top of each other, and the lines of a selection are lines; the
+/// two never meet, because they go on in separate passes. This is here so that
+/// the day they do meet, the answer is a decision rather than a race.
+fn disjoint(runs: Vec<Run>) -> Vec<Run> {
+    let mut kept: Vec<Run> = Vec::with_capacity(runs.len());
+    for run in runs.into_iter().rev() {
+        let mut pieces = vec![run];
+        for over in &kept {
+            pieces = pieces
+                .into_iter()
+                .flat_map(|piece| minus(piece, over))
+                .collect();
+        }
+        kept.extend(pieces);
+    }
+    kept.reverse();
+    kept
+}
+
+/// One rectangle less another, as up to four rectangles: the strip above, the
+/// strip below, and what is left either side between them.
+fn minus(run: Run, over: &Run) -> Vec<Run> {
+    let (left, top) = (run.on[0], run.on[1]);
+    let (right, bottom) = (left + run.span[2], top + run.span[3]);
+    let (over_left, over_top) = (over.on[0], over.on[1]);
+    let (over_right, over_bottom) = (over_left + over.span[2], over_top + over.span[3]);
+    if over_right <= left || over_left >= right || over_bottom <= top || over_top >= bottom {
+        return vec![run];
+    }
+    let piece = |x: u32, y: u32, width: u32, height: u32| Run {
+        span: [0, 0, width, height],
+        // Where it reads from moves with it, because `from` is the *page* for a
+        // link and is set again from the grid for a selection.
+        on: [x, y],
+        from: [
+            run.from[0] + (x - left),
+            run.from[1] + (y - top),
+        ],
+        ink: run.ink,
+        paper: run.paper,
+    };
+    let mut out = Vec::new();
+    let middle_top = over_top.max(top);
+    let middle_bottom = over_bottom.min(bottom);
+    if middle_top > top {
+        out.push(piece(left, top, right - left, middle_top - top));
+    }
+    if over_left > left {
+        out.push(piece(left, middle_top, over_left - left, middle_bottom - middle_top));
+    }
+    if over_right < right {
+        out.push(piece(
+            over_right,
+            middle_top,
+            right - over_right,
+            middle_bottom - middle_top,
+        ));
+    }
+    if middle_bottom < bottom {
+        out.push(piece(left, middle_bottom, right - left, bottom - middle_bottom));
+    }
+    out.retain(|run| run.span[2] > 0 && run.span[3] > 0);
+    out
+}
+
+/// Give each run its place in the grid: one above another, in order.
+fn stack(runs: &mut [Run]) {
+    let mut next = 0u32;
+    for run in runs.iter_mut() {
+        run.span[0] = 0;
+        run.span[1] = next;
+        next += run.span[3];
+    }
+}
+
+/// The links on a page, as runs that read from the page itself.
+///
+/// The source is still on the GPU while the page is being uploaded, so a link
+/// reads the pixels pdfium drew straight from it: `from` and `on` are the same
+/// point, and there is no copy at all. That is `tintLinks`'s pristine copy,
+/// without the copy.
+fn runs_over(regions: &[Region], width: u32, height: u32) -> Vec<Run> {
+    let runs: Vec<Run> = regions
+        .iter()
+        .filter_map(|region| {
+            let left = (region.area[0].floor().max(0.0) as u32).min(width);
+            let top = (region.area[1].floor().max(0.0) as u32).min(height);
+            let right = (region.area[2].ceil().max(0.0) as u32).min(width);
+            let bottom = (region.area[3].ceil().max(0.0) as u32).min(height);
+            (right > left && bottom > top).then_some(Run {
+                span: [0, 0, right - left, bottom - top],
+                on: [left, top],
+                from: [left, top],
+                ink: region.ink,
+                paper: region.paper,
+            })
+        })
+        .collect();
+    let mut runs = disjoint(runs);
+    stack(&mut runs);
+    runs
+}
+
+/// Selection rectangles in fractions of the page, as whole pixels of it with a
+/// place in the backup.
+///
+/// Rounded outwards, which is `roundedRuns` in `viewer.ts` and its reason: two
+/// rectangles that meet — the end of one run of type and the start of the next
+/// — meet at a fraction, and a copy that stopped short of it left a hairline of
+/// unselected page between them.
+fn pack(runs: &[[f32; 4]], width: u32, height: u32) -> Vec<Run> {
+    let packed: Vec<Run> = runs
+        .iter()
+        .filter_map(|run| {
+            let left = (run[0] * width as f32).floor().clamp(0.0, width as f32) as u32;
+            let top = (run[1] * height as f32).floor().clamp(0.0, height as f32) as u32;
+            let right = (run[2] * width as f32).ceil().clamp(0.0, width as f32) as u32;
+            let bottom = (run[3] * height as f32).ceil().clamp(0.0, height as f32) as u32;
+            (right > left && bottom > top).then_some(Run {
+                span: [0, 0, right - left, bottom - top],
+                on: [left, top],
+                from: [0, 0],
+                ink: [0, 0, 0],
+                paper: [0, 0, 0],
+            })
+        })
+        .collect();
+    let mut packed = disjoint(packed);
+    stack(&mut packed);
+    // A selection reads from the backup, so where it came from is where it was
+    // put — which is its own place in the grid.
+    for run in &mut packed {
+        run.from = [run.span[0], run.span[1]];
+    }
+    packed
 }
 
 /// Safe: `f32` has no padding and no invalid bit patterns, and the slice is

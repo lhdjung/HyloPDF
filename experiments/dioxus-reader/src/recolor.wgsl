@@ -57,10 +57,21 @@ fn room_at(lightness: f32) -> f32 {
     return 255.0 - abs(2.0 * lightness - 255.0);
 }
 
+// Where a pixel of this luma lands between two colours.
+fn ramp_between(level: f32, ink: vec3<f32>, paper: vec3<f32>) -> vec3<f32> {
+    let t = min(round(level * 255.0 / WHITE_POINT), 255.0) / 255.0;
+    return to_u8v(ink * 255.0 + (paper - ink) * 255.0 * t);
+}
+
 // Where a pixel of this luma lands between the theme's ink and its paper.
 fn ramp_at(level: f32) -> vec3<f32> {
-    let t = min(round(level * 255.0 / WHITE_POINT), 255.0) / 255.0;
-    return to_u8v(theme.text.rgb * 255.0 + (theme.bg.rgb - theme.text.rgb) * 255.0 * t);
+    return ramp_between(level, theme.text.rgb, theme.bg.rgb);
+}
+
+// Rec. 601 in integers, rounded rather than floored: the white point
+// multiplies any disagreement between the paths by 255/235.
+fn luma_of(rgb: vec3<f32>) -> f32 {
+    return floor((rgb.r * 77.0 + rgb.g * 151.0 + rgb.b * 28.0 + 128.0) / 256.0);
 }
 
 fn share_of(chroma: f32) -> f32 {
@@ -84,9 +95,7 @@ fn recolor(@builtin(global_invocation_id) id: vec3<u32>) {
     // Eight-bit levels, because every threshold in the original is one.
     let rgb = floor(pixel.rgb * 255.0 + 0.5);
 
-    // Rec. 601 in integers, rounded rather than floored: the white point
-    // multiplies any disagreement between the paths by 255/235.
-    let level = floor((rgb.r * 77.0 + rgb.g * 151.0 + rgb.b * 28.0 + 128.0) / 256.0);
+    let level = luma_of(rgb);
     let ramp = ramp_at(level);
 
     let high = max(rgb.r, max(rgb.g, rgb.b));

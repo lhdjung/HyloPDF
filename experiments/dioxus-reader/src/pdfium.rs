@@ -221,7 +221,7 @@ impl Document {
             .get(PdfDocumentMetadataTagType::Title)
             .map(|tag| tag.value().trim().to_string())
             .unwrap_or_default();
-        let details = read_details(&document, sizes.first());
+        let details = read_details(&document, sizes.first(), path);
         Ok(Document {
             path: path.to_string(),
             labels: own_numbering(labels),
@@ -775,6 +775,7 @@ fn own_numbering(labels: Vec<String>) -> Vec<String> {
 fn read_details(
     document: &PdfDocument<'_>,
     first: Option<&Size>,
+    path: &str,
 ) -> Vec<(String, String)> {
     let metadata = document.metadata();
     let tag = |which: PdfDocumentMetadataTagType| {
@@ -809,16 +810,121 @@ fn read_details(
     );
     put(
         "Changed",
-        tag(PdfDocumentMetadataTagType::ModificationDate).map(|raw| readable_date(&raw)),
+        tag(PdfDocumentMetadataTagType::ModificationDate)
+            .or_else(|| mod_date(path))
+            .map(|raw| readable_date(&raw)),
     );
     out
 }
 
-/// A page's size in millimetres, which is what the app shows: PDF points are
-/// 1/72 inch, and nobody thinks in points.
+/// `/ModDate`, read out of the file, because pdfium will never be asked for it.
+///
+/// **`pdfium-render` asks pdfium for the wrong key.** `FPDF_GetMetaText`'s tag
+/// is the name of an entry in the document's `/Info` dictionary, and the PDF
+/// specification names eight of them: `Title`, `Author`, `Subject`, `Keywords`,
+/// `Creator`, `Producer`, `CreationDate` and **`ModDate`**. `PdfMetadata::get`
+/// spells the last one `"ModificationDate"` (`pdfium-render 0.9.3`,
+/// `src/pdf/document/metadata.rs`), which is not a key any document has, so the
+/// call returns a length of zero and the tag reads as absent. Every other tag
+/// is spelled correctly, which is what makes it so quiet: the Information
+/// window showed nine facts and simply never showed the tenth, on every
+/// document ever opened. `PdfDocument::handle()` is `pub(crate)`, so the raw
+/// call cannot be made from out here either.
+///
+/// So the bytes are read. **Bounded, and from the end first**: an `/Info`
+/// dictionary sits near the trailer in the great majority of documents, and in
+/// one this reader has itself appended to it is necessarily in the last update.
+/// The front is tried after it because a linearised document puts its
+/// first-page objects — Info among them, often — at the head. A document that
+/// keeps it somewhere in a hundred megabytes of middle gets no row, which is
+/// exactly what it gets today.
+fn mod_date(path: &str) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    /// As much of either end as is worth reading. An `/Info` dictionary is a
+    /// few hundred bytes and sits beside the trailer.
+    const WINDOW: u64 = 128 * 1024;
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let mut read_at = |from: u64| -> Option<Vec<u8>> {
+        file.seek(SeekFrom::Start(from)).ok()?;
+        let mut bytes = vec![0u8; WINDOW.min(size - from) as usize];
+        file.read_exact(&mut bytes).ok()?;
+        Some(bytes)
+    };
+
+    let tail = read_at(size.saturating_sub(WINDOW))?;
+    if let Some(found) = last_mod_date(&tail) {
+        return Some(found);
+    }
+    if size <= WINDOW {
+        return None;
+    }
+    last_mod_date(&read_at(0)?)
+}
+
+/// The last `/ModDate (…)` in a run of bytes, as it was written.
+///
+/// The *last*, because a document that has been appended to carries every
+/// version of its `/Info` and only the newest one counts. A date written as a
+/// hex string — `/ModDate <44 3a ...>`, which the format allows and no producer
+/// uses — is left alone rather than guessed at; [`readable_date`] hands
+/// anything it cannot read straight back, and this does the same by finding
+/// nothing.
+fn last_mod_date(bytes: &[u8]) -> Option<String> {
+    const KEY: &[u8] = b"/ModDate";
+    let mut found = None;
+    let mut at = 0usize;
+    while let Some(offset) = bytes[at..]
+        .windows(KEY.len())
+        .position(|window| window == KEY)
+    {
+        let after = at + offset + KEY.len();
+        at = after;
+        // Whitespace, then a literal string. Anything else is a key that merely
+        // begins the same way, or a shape this does not read — and it is
+        // skipped rather than given up on, because giving up would throw away a
+        // date already found earlier in the window.
+        let Some(open) = bytes[after..]
+            .iter()
+            .position(|byte| !byte.is_ascii_whitespace())
+            .map(|at| at + after)
+        else {
+            break;
+        };
+        if bytes.get(open) != Some(&b'(') {
+            continue;
+        }
+        let Some(close) = bytes[open + 1..].iter().position(|byte| *byte == b')') else {
+            break;
+        };
+        let value = &bytes[open + 1..open + 1 + close];
+        if let Ok(text) = std::str::from_utf8(value) {
+            found = Some(text.to_string());
+        }
+    }
+    found
+}
+
+/// A page's size, which is what the app shows: PDF points are 1/72 inch, and
+/// nobody thinks in points.
+///
+/// **In both, because a reader knows their paper in one or the other** — the
+/// sentence `Viewer.details` in `viewer.ts` is written under, and the half this
+/// was missing. A4 is 210 × 297 mm to one reader and Letter is 8.5 × 11 in to
+/// another, and a window that answers in millimetres alone makes the second of
+/// them do arithmetic.
 fn page_size(size: &Size) -> String {
     let mm = |points: f64| points * 25.4 / 72.0;
-    format!("{:.0} × {:.0} mm", mm(size.width), mm(size.height))
+    let inches = |points: f64| points / 72.0;
+    format!(
+        "{:.0} × {:.0} mm ({:.2} × {:.2} in)",
+        mm(size.width),
+        mm(size.height),
+        inches(size.width),
+        inches(size.height)
+    )
 }
 
 /// `D:20240131120000+01'00'` → `31 January 2024`. Anything that is not a PDF
@@ -836,10 +942,28 @@ fn readable_date(raw: &str) -> String {
     let year = &digits[0..4];
     let month: usize = digits[4..6].parse().unwrap_or(0);
     let day: usize = digits[6..8].parse().unwrap_or(0);
-    match (MONTHS.get(month.wrapping_sub(1)), day) {
-        (Some(name), 1..=31) => format!("{day} {name} {year}"),
-        _ => raw.to_string(),
+    let Some(name) = MONTHS.get(month.wrapping_sub(1)) else {
+        return raw.to_string();
+    };
+    if !(1..=31).contains(&day) {
+        return raw.to_string();
     }
+    // **And the time, where the document wrote one.** `readableDate` in
+    // `main.ts` asks for `dateStyle: "long"` with `timeStyle: "short"` beside
+    // it whenever the hour is there, and the difference is not cosmetic: two
+    // drafts of a paper compiled the same afternoon are one row and the same
+    // row without it. What is deliberately *not* copied is the locale — that is
+    // `Intl` doing the work, and there is no `Intl` here — so the month is
+    // named in English, as every other date in this crate already is, and the
+    // clock is 24-hour.
+    let clock = if digits.len() >= 12 && digits[8..12].bytes().all(|b| b.is_ascii_digit()) {
+        let hour: usize = digits[8..10].parse().unwrap_or(24);
+        let minute: usize = digits[10..12].parse().unwrap_or(60);
+        (hour < 24 && minute < 60).then(|| format!(", {hour:02}:{minute:02}"))
+    } else {
+        None
+    };
+    format!("{day} {name} {year}{}", clock.unwrap_or_default())
 }
 
 fn read_outline(document: &PdfDocument<'static>) -> Vec<Heading> {

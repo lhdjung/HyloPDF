@@ -5105,6 +5105,18 @@ pub fn Reader(
     let appearance = use_hook(|| {
         dioxus_core::try_consume_context::<Appearance>().unwrap_or_else(Appearance::unknown)
     });
+    // **Whether the pointer is over the one button that puts something down.**
+    // `#close-doc:hover svg` in the app's `styles.css` reddens the cross and
+    // leaves the label the bar's own hover colour, so the warning is on the one
+    // glyph that means *close* rather than on the whole button. That is a
+    // stylesheet rule there and cannot be one here: an icon is drawn by usvg
+    // from the markup it is serialised as, so its `stroke` comes from the
+    // attribute this reader writes and never from the cascade — which is why
+    // every `Icon` in this file is handed a colour rather than inheriting one.
+    // So the hover is state, and this is it. One flag for both buttons because
+    // only one of them is ever in the bar: Close while a document is open,
+    // Close window while none is.
+    let mut close_hot = use_signal(|| false);
     let mut viewer = use_signal(|| {
         let mut store = Store::at(&config.dir);
         if let Some(index) = config.theme {
@@ -5746,6 +5758,9 @@ pub fn Reader(
     // `opacity: 0.28` in the app, which is the same thing said in the one way
     // an icon with no cascade behind it can be told.
     let faint = crate::palette::hex(wearing.faint());
+    // And the fourth: the cross on Close, while the pointer is over it. See
+    // `close_hot` above for why this is a colour rather than a `:hover` rule.
+    let danger = crate::palette::hex(wearing.negative());
     let typing_page = held.typing_page;
     // Whether the field is still showing all of its contents as selected. See
     // `.page-field.fresh` in `styles.rs`, which is what makes that visible.
@@ -5802,6 +5817,45 @@ pub fn Reader(
             })
         })
         .collect();
+    // **What each page paints into itself rather than draws over.** A link's
+    // colour and a selected word's are the *page's*, baked into the bitmap
+    // exactly as `tintLinks` and `paintSelection` bake them in the app — see
+    // [`crate::page::Ramped`], which carries the reasoning. The rectangles are
+    // the box's own here and fractions of it by the time a widget reads them,
+    // because a texture is drawn at the box's size times the density, held
+    // under a ceiling and frozen mid-pinch, and a fraction is the one number
+    // that survives all three.
+    //
+    // The whole map at once, so a page scrolled out of the mounting window
+    // takes its entry with it and this cannot grow by a page for every page
+    // ever read.
+    chosen.place(
+        boxes
+            .iter()
+            .map(|placed| {
+                let (across, down) = (placed.width.max(1.0), placed.height.max(1.0));
+                let fractions = |rect: &Rect| {
+                    [
+                        (rect.left / across) as f32,
+                        (rect.top / down) as f32,
+                        ((rect.left + rect.width) / across) as f32,
+                        ((rect.top + rect.height) / down) as f32,
+                    ]
+                };
+                (
+                    placed.index,
+                    crate::page::Ramped {
+                        links: placed
+                            .links
+                            .iter()
+                            .map(|(rect, _)| fractions(rect))
+                            .collect(),
+                        selection: placed.selected.iter().map(fractions).collect(),
+                    },
+                )
+            })
+            .collect(),
+    );
     let document = held.document.clone();
     // How every page is drawn, and the string that says so in a key. A turn
     // of 180° leaves a page exactly the shape it was, so the box's size
@@ -6187,11 +6241,16 @@ pub fn Reader(
                     }
                     button {
                         class: "chip close-window",
+                        onmouseenter: move |_| close_hot.set(true),
+                        onmouseleave: move |_| close_hot.set(false),
                         onclick: {
                             let frame = frame.clone();
                             move |_| frame.ask(Ask::Close)
                         },
-                        Icon { name: "close", stroke: ink.clone() }
+                        Icon {
+                            name: "close",
+                            stroke: if close_hot() { danger.clone() } else { ink.clone() },
+                        }
                         "Close window"
                     }
                     }
@@ -6205,9 +6264,16 @@ pub fn Reader(
                     button {
                         class: "chip close-doc",
                         "data-item": "close-document",
+                        onmouseenter: move |_| close_hot.set(true),
+                        onmouseleave: move |_| close_hot.set(false),
                         onclick: {
                             let frame = frame.clone();
                             move |_| {
+                                // The bar is about to be a different bar —
+                                // Close goes and Close window takes its place —
+                                // and nothing will send this button a
+                                // `mouseleave` on its way out. See `close_hot`.
+                                close_hot.set(false);
                                 viewer.write().close_menu();
                                 viewer.write().close_document();
                                 // The desk, the restore list and the document
@@ -6220,7 +6286,10 @@ pub fn Reader(
                                 });
                             }
                         },
-                        Icon { name: "close", stroke: ink.clone() }
+                        Icon {
+                            name: "close",
+                            stroke: if close_hot() { danger.clone() } else { ink.clone() },
+                        }
                         "Close"
                     }
                     // What the document is called — its own `/Title` where
@@ -7412,8 +7481,14 @@ pub fn Reader(
                                 Icon { name: "close", stroke: ink.clone() }
                             }
                         }
-                        div { class: "note-body",
-                            p { class: "details-name", "{shelf_name}" }
+                        // `.window-pane`, not `.note-body`: this is a pane of
+                        // rows that can outrun the window — a document naming
+                        // all ten facts is eleven rows — and a note is a
+                        // paragraph that cannot. The padding and the scroll
+                        // come with the class, which is the app's `ui.field`
+                        // arrangement exactly.
+                        div { class: "window-pane details-body",
+                            h2 { class: "pane-title details-name", "{shelf_name}" }
                             for (label, value) in details_rows {
                                 div { class: "details-row", key: "{label}",
                                     span { class: "details-label", "{label}" }

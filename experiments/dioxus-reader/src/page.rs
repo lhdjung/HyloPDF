@@ -13,7 +13,8 @@
 //! pass over the copy already on the GPU. Under Tauri both were the same
 //! question and both cost a full render.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -29,20 +30,53 @@ use peniko::{Blob, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Ima
 use blitz_traits::shell::ShellProvider;
 
 use crate::gpu::{PageTexture, Recolorer};
+use crate::recolor::Region;
 use crate::layout::{View, MAX_PIXELS};
 use crate::render::PageSource;
 use crate::stats;
 use crate::palette::Palette;
 
-/// What every page needs to know and none of them owns: which theme is on.
+/// What a page has painted *into* it rather than drawn over it.
 ///
-/// A widget is handed to Blitz once, by a write-once attribute, so it cannot
-/// be given new props the way a component can. This is the shared cell the app
+/// **Two things in this reader are the colour of the page and not a rectangle
+/// on top of it**, and the app says why for both. A link is `tintLinks`: the
+/// obvious way is a tinted box blended into the ink below, and where a
+/// compositor drops the blend the reader gets a solid band across the line
+/// instead of a coloured word. A selected passage is `paintSelection`: a
+/// translucent rectangle over the words leaves them the colour they were
+/// printed in, so it says *something is selected here* rather than *these words
+/// are selected*.
+///
+/// **In fractions of the page's box**, which is the one space both ends already
+/// agree about. `layout.place_on` answers in CSS pixels of the box and a
+/// texture is drawn at the box's size times the density, held under a ceiling,
+/// and frozen mid-pinch — so a fraction is the only number that survives all
+/// three without either side knowing about the other.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Ramped {
+    /// Left, top, right, bottom. The document's own links.
+    pub links: Vec<[f32; 4]>,
+    /// The same, for what the reader has swept over.
+    pub selection: Vec<[f32; 4]>,
+}
+
+/// What every page needs to know and none of them owns: which theme is on, and
+/// what it has to paint into itself.
+///
+/// A widget is handed to Blitz once, by a write-once attribute, so it cannot be
+/// given new props the way a component can. This is the shared cell the app
 /// writes and every mounted page reads on its next paint — which is the frame
 /// the theme change causes anyway.
 #[derive(Clone)]
 pub struct Chosen {
     theme: Rc<Cell<Palette>>,
+    /// What each mounted page has to paint into itself, by page index.
+    ///
+    /// A shared cell for the reason the theme is one: a widget is handed to
+    /// Blitz once and cannot be given new props, and a selection changes on
+    /// every frame of a drag — putting it in the component's key would redraw
+    /// the page from pdfium for every pixel the pointer moves.
+    ramped: Rc<RefCell<HashMap<usize, Ramped>>>,
     /// Whether a zoom gesture is under way, in which case a page keeps the
     /// texture it has and is stretched to whatever size the layout is asking
     /// for this frame. See [`Chosen::holding`].
@@ -59,8 +93,22 @@ impl Chosen {
     pub fn new(theme: Palette) -> Self {
         Chosen {
             theme: Rc::new(Cell::new(theme)),
+            ramped: Rc::new(RefCell::new(HashMap::new())),
             holding: Rc::new(Cell::new(false)),
         }
+    }
+
+    /// What every mounted page has to paint into itself, all of it at once.
+    ///
+    /// The whole map rather than an entry, because the caller has the whole
+    /// answer — it is building the pages — and because replacing it is what
+    /// keeps this from growing by a page for every page ever scrolled past.
+    pub fn place(&self, ramped: HashMap<usize, Ramped>) {
+        *self.ramped.borrow_mut() = ramped;
+    }
+
+    pub fn ramped(&self, index: usize) -> Ramped {
+        self.ramped.borrow().get(&index).cloned().unwrap_or_default()
     }
 
     pub fn get(&self) -> Palette {
@@ -190,6 +238,17 @@ struct Software {
     height: u32,
     /// What `PageTexture::wears` answers on the other path.
     theme: Palette,
+    /// The page with its links tinted and nothing selected on it, kept so that
+    /// a selection can be taken up again without going back to pdfium.
+    ///
+    /// **The same allocation as `image` until something is selected**, which is
+    /// what an `Arc` is for: while there is no selection the two point at one
+    /// buffer and this costs a word, and a selection makes the second copy that
+    /// the ramp is written into. The GPU path keeps only what is under the
+    /// runs, because there a copy of the page is 25MB of texture.
+    plain: Arc<Vec<u8>>,
+    /// What is painted through the selection ramp on top of it.
+    selected: Vec<[f32; 4]>,
 }
 
 impl PageWidget {
@@ -233,6 +292,53 @@ impl PageWidget {
 
 
 
+    /// The links on this page, as regions of the drawn page.
+    ///
+    /// **Links are tinted under every theme**, including the ones that leave
+    /// the document alone — `renderPage` in `viewer.ts` calls `tintLinks`
+    /// outside the `theme.recolor` branch, and the sentence beside it is the
+    /// reason: a link that reads exactly like the sentence around it is a link
+    /// nobody can see, and whether the page has been recoloured is beside that
+    /// point. What changes with the theme is only what the link's *paper* maps
+    /// to: the theme's background on a recoloured page, so the rectangle does
+    /// not show as a patch, and the white pdf.js and pdfium both draw on where
+    /// the page was left as it was printed.
+    fn links(&self, theme: &Palette, width: u32, height: u32) -> Vec<Region> {
+        let paper = if theme.recolor {
+            theme.background
+        } else {
+            [0xff, 0xff, 0xff]
+        };
+        self.chosen
+            .ramped(self.index)
+            .links
+            .iter()
+            .map(|area| Region {
+                area: [
+                    area[0] * width as f32,
+                    area[1] * height as f32,
+                    area[2] * width as f32,
+                    area[3] * height as f32,
+                ],
+                ink: theme.link,
+                paper,
+            })
+            .collect()
+    }
+
+    /// The two colours a selection is painted between, the right way round for
+    /// the page as it stands. See `regions.wgsl` and `selectionPaint` in
+    /// `viewer.ts`.
+    fn selection_ramp(theme: &Palette) -> (crate::recolor::Rgb, crate::recolor::Rgb) {
+        let lit = theme.recolor
+            && crate::palette::luminance(theme.text) > crate::palette::luminance(theme.background);
+        if lit {
+            (theme.selection_area, theme.selection_text)
+        } else {
+            (theme.selection_text, theme.selection_area)
+        }
+    }
+
     /// The same two questions, answered on the CPU. See [`Software`].
     ///
     /// The one difference that matters is where the theme goes on: there is no
@@ -241,10 +347,14 @@ impl PageWidget {
     /// this path a fallback rather than a design.
     fn ensure_software(&mut self, width: u32, height: u32) -> Option<()> {
         let theme = self.chosen.get();
+        let selection = self.chosen.ramped(self.index).selection;
         if let Some(page) = self.software.as_ref() {
             if page.theme == theme
                 && (self.chosen.holding() || (page.width == width && page.height == height))
             {
+                if page.selected != selection {
+                    self.paint_selection_software(&theme, selection);
+                }
                 return Some(());
             }
         }
@@ -269,6 +379,12 @@ impl PageWidget {
                         theme.keep_colour,
                     );
                 }
+                crate::recolor::duotone_cpu(
+                    &mut rgba,
+                    width,
+                    height,
+                    &self.links(&theme, width, height),
+                );
                 pixels = Some(rgba);
             });
         let drew = began.elapsed();
@@ -284,9 +400,10 @@ impl PageWidget {
         stats::add(&stats::DRAWN, 1);
         stats::add(&stats::DREW_US, drew.as_micros() as u64);
         stats::add(&stats::RESIDENT, (width as u64) * (height as u64) * 4);
+        let pixels = Arc::new(pixels);
         self.software = Some(Software {
             image: ImageData {
-                data: Blob::new(Arc::new(pixels)),
+                data: Blob::new(pixels.clone()),
                 format: ImageFormat::Rgba8,
                 alpha_type: ImageAlphaType::AlphaPremultiplied,
                 width,
@@ -295,8 +412,54 @@ impl PageWidget {
             width,
             height,
             theme,
+            plain: pixels,
+            selected: Vec::new(),
         });
+        if !selection.is_empty() {
+            self.paint_selection_software(&theme, selection);
+        }
         Some(())
+    }
+
+    /// The selection ramp over the page the CPU path has already drawn, and off
+    /// again — from the copy kept beside it. See [`Software::plain`].
+    fn paint_selection_software(&mut self, theme: &Palette, runs: Vec<[f32; 4]>) {
+        let Some(page) = self.software.as_mut() else {
+            return;
+        };
+        let (ink, paper) = Self::selection_ramp(theme);
+        let (width, height) = (page.width, page.height);
+        let regions: Vec<Region> = runs
+            .iter()
+            .map(|area| Region {
+                area: [
+                    (area[0] * width as f32).floor(),
+                    (area[1] * height as f32).floor(),
+                    (area[2] * width as f32).ceil(),
+                    (area[3] * height as f32).ceil(),
+                ],
+                ink,
+                paper,
+            })
+            .collect();
+        // Nothing selected is the page as it was drawn, which is the buffer
+        // already in hand — no copy at all rather than a second identical page.
+        // See [`Software::plain`].
+        let data = if regions.is_empty() {
+            Blob::new(page.plain.clone())
+        } else {
+            let mut pixels = page.plain.as_ref().clone();
+            crate::recolor::duotone_cpu(&mut pixels, width, height, &regions);
+            Blob::new(Arc::new(pixels))
+        };
+        page.image = ImageData {
+            data,
+            format: ImageFormat::Rgba8,
+            alpha_type: ImageAlphaType::AlphaPremultiplied,
+            width,
+            height,
+        };
+        page.selected = runs;
     }
 
     /// Draw the page if it is not already drawn at this size, and put the
@@ -305,6 +468,7 @@ impl PageWidget {
         let theme = self.chosen.get();
         let recolorer = Rc::clone(self.recolorer.as_ref()?);
 
+        let selection = self.chosen.ramped(self.index).selection;
         if let Some(texture) = self.texture.as_ref() {
             // Size and theme together are what `keyFor()` is: a page that
             // matches both is the page already on the screen.
@@ -315,6 +479,12 @@ impl PageWidget {
             // theme is still asked, because a theme changed mid-gesture is a
             // page that is the wrong colour rather than the wrong sharpness.
             if texture.wears(&theme) && (self.chosen.holding() || texture.is(width, height)) {
+                // The selection is the one thing that moves without the page
+                // being redrawn, and it is asked here rather than in the key
+                // for exactly that reason.
+                let (ink, paper) = Self::selection_ramp(&theme);
+                let texture = self.texture.as_mut()?;
+                recolorer.select(texture, &selection, ink, paper);
                 return Some(());
             }
         }
@@ -329,7 +499,8 @@ impl PageWidget {
             .document
             .render(self.index, width, height, self.view, &mut |bitmap| {
                 let began = Instant::now();
-                uploaded_texture = recolorer.upload(ctx, &bitmap, &theme);
+                uploaded_texture =
+                    recolorer.upload(ctx, &bitmap, &theme, &self.links(&theme, width, height));
                 uploaded = began.elapsed();
             });
         let drew = began.elapsed() - uploaded;
@@ -351,6 +522,11 @@ impl PageWidget {
         stats::add(&stats::UPLOADED_US, uploaded.as_micros() as u64);
         stats::add(&stats::RESIDENT, texture.bytes());
         self.texture = Some(texture);
+        if !selection.is_empty() {
+            let (ink, paper) = Self::selection_ramp(&theme);
+            let texture = self.texture.as_mut()?;
+            recolorer.select(texture, &selection, ink, paper);
+        }
         self.fresh = true;
         // And a frame to draw it in.
         if let Some(shell) = &self.shell {

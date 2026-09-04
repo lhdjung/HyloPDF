@@ -765,3 +765,52 @@ fn a_press_that_slides_a_little_is_still_a_press() {
     reader.press_and_drag(".chip.close-doc", 6.0);
     assert!(reader.state().empty, "the document was closed");
 }
+
+/// **The cross on Close reddens under the pointer, and nothing else does.**
+///
+/// `#close-doc:hover svg` in the app's `styles.css` gives the cross
+/// `--negative` and leaves the label the bar's own hover colour, so the warning
+/// sits on the one glyph that means *close* rather than on the whole button.
+/// That is a stylesheet rule there and cannot be one here: an icon is drawn by
+/// usvg from the markup it is serialised as, so its `stroke` comes from the
+/// attribute this reader writes and never from the cascade. The hover is state
+/// instead — which is exactly the kind of thing that gets written once and then
+/// quietly stops working, so it is read off the attribute.
+#[test]
+fn the_cross_on_close_reddens_under_the_pointer() {
+    let mut reader = book();
+    let quiet = reader.attribute_all(".close-doc .icon", "stroke");
+    assert_eq!(quiet.len(), 1, "one Close button while a document is open");
+
+    let (x, y) = reader.harness.center_of(".close-doc");
+    reader.point_to(x, y);
+    let hot = reader.attribute_all(".close-doc .icon", "stroke");
+    assert_ne!(hot, quiet, "the cross did not change under the pointer");
+
+    // The theme's own negative, resolved the way `paint.rs` resolves a shipped
+    // theme — `themes.ts`'s `RED_DARK`, since the reader opens on Hylo Light
+    // unless it is told otherwise.
+    let parsed: theme::Theme = toml::from_str(
+        theme::BUILT_IN[shipped(theme::DEFAULT_LIGHT)].1,
+    )
+    .expect("Hylo Light parses");
+    let red = dioxus_reader::palette::resolve(&parsed, false).negative();
+    assert_eq!(
+        hot[0],
+        dioxus_reader::palette::hex(red),
+        "the cross is the theme's own negative",
+    );
+
+    // And the label beside it is not: only the glyph is unhappy.
+    let label = reader.text_all(".close-doc");
+    assert_eq!(label, vec!["Close".to_string()]);
+
+    // Away again, and it goes back. A hover that only ever turns on is a button
+    // that stays red for the rest of the session.
+    reader.point_to(x, y + 300.0);
+    assert_eq!(
+        reader.attribute_all(".close-doc .icon", "stroke"),
+        quiet,
+        "the cross stayed red after the pointer left",
+    );
+}

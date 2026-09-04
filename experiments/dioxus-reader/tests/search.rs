@@ -492,10 +492,19 @@ fn the_bar_hangs_over_the_document_and_does_not_shorten_it() {
         "the document is the size it was",
     );
     let bar = reader.harness.layout_rect(".find-bar");
-    assert!(bar.y > 0.0 && bar.y < 100.0, "under the toolbar: {bar:?}");
+    let chip = reader.harness.layout_rect(".chip.find");
+    assert!(bar.y > chip.y, "under the toolbar: {bar:?}");
+    // And under the button that opened it, flush with the bar's lower edge,
+    // which is where every other panel in the toolbar comes down. It used to
+    // hang at the window's right edge twelve pixels below the bar, belonging
+    // to nothing.
     assert!(
-        bar.x + bar.width > after.width - 40.0,
-        "and over at the right: {bar:?} against a window {} wide",
+        (bar.x - chip.x).abs() <= 1.0,
+        "and under the Search chip: {bar:?} against {chip:?}",
+    );
+    assert!(
+        bar.x + bar.width < after.width,
+        "with room for it there: {bar:?} in a window {} wide",
         after.width,
     );
 }

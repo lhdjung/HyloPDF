@@ -5187,11 +5187,6 @@ pub fn Reader(
     let find_open = held.find_open;
     let presenting = held.presenting;
     let toolbar_on = held.toolbar && !held.presenting;
-    // Where the find bar hangs: under the toolbar, or up at the window's edge
-    // when there is no toolbar to hang under. `styles.css` says
-    // `calc(var(--toolbar-height) + 12px)` and `12px` in two rules; this is
-    // the same two numbers with the selector done in Rust.
-    let find_top = if toolbar_on { 58 } else { 12 };
     // The pill, and what it says. See [`Viewer::flash_pill`].
     // The note the reader has opened, and what its page is called — the label
     // rather than the position, which is what `showNote` says too.
@@ -5463,6 +5458,168 @@ pub fn Reader(
     drop(held);
 
     let variables = crate::styles::variables(&wearing);
+
+    // **The card hangs off the Search chip**, the way every other panel in
+    // this bar hangs off the button that opens it. Written once and placed
+    // twice: inside the chip's own `.anchor` while the toolbar is up, and at
+    // the window's edge when the toolbar is away and there is no chip left to
+    // hang under.
+    let find_card = {
+        // Cloned in rather than moved: the same three colours and the query
+        // are read by the bar this closure builds and by the toolbar around
+        // it, and a `move` closure would take them.
+        let (ink, ink_on, faint) = (ink.clone(), ink_on.clone(), faint.clone());
+        let (find_query, find_count) = (find_query.clone(), find_count.clone());
+        move |place: &str| {
+            rsx! {
+                div { class: "find-bar", style: "{place}",
+                // The card sits *below* the toolbar, so without this the root's
+                // "a press past the bar puts it away" fires on the bar's own
+                // switches and Highlight all closes the search it was about to
+                // change. Said once here rather than on all eight controls.
+                onmousedown: move |event| event.stop_propagation(),
+                div { class: "find-row",
+                    span { class: "find-icon", Icon { name: "search", stroke: faint.clone() } }
+                    input {
+                        class: "find-field",
+                        r#type: "text",
+                        value: "{find_query}",
+                        placeholder: "Search this document",
+                        // While the bar is up, this is the element that wants
+                        // the keyboard, inside the one that otherwise does —
+                        // which is what makes `give_keyboard_back`'s rule "the
+                        // innermost one asking".
+                        //
+                        // Unless the page field is up: the two are siblings, so
+                        // "innermost" cannot separate them and document order
+                        // would hand ⌥⌘G's field to the find bar. Two fields
+                        // never both ask.
+                        "data-keyboard": if typing_page { None } else { Some("find") },
+                        onmounted: move |event| {
+                            let node = event.data();
+                            let task = node.set_focus(true);
+                            spawn(async move { let _ = task.await; });
+                        },
+                        oninput: move |event| {
+                            let typed = event.value();
+                            let token = viewer.write().find(&typed);
+                            scan(token);
+                        },
+                        // Every key typed here also bubbles to the root, which
+                        // turns keys into actions — so without this, typing
+                        // "just" into the field scrolls the document four times.
+                        // What the field lets past is a chord with a modifier on
+                        // it, so ⌘+ still zooms while somebody is searching.
+                        onkeydown: move |event| {
+                            let key = event.key();
+                            let modifiers = event.modifiers();
+                            let plain = crate::keymap::plain(modifiers);
+                            match key {
+                                // Enter is the find bar's own, and is not in
+                                // `keys.toml`: it means "the next one" here
+                                // and nothing anywhere else.
+                                Key::Enter => {
+                                    event.stop_propagation();
+                                    viewer.write().step_match(!modifiers.shift());
+                                }
+                                // The menu first, for the reason the page
+                                // field gives above.
+                                Key::Escape => {
+                                    event.stop_propagation();
+                                    if !viewer.write().close_menu() {
+                                        viewer.write().close_find();
+                                    }
+                                }
+                                _ if plain => event.stop_propagation(),
+                                // A chord with a modifier is not typing — and
+                                // Blitz applies the keystroke to a focused field
+                                // whatever is held down, so ⌘G stepped to the
+                                // next match *and* put a "g" in the query. What
+                                // the field keeps is what a text field owns.
+                                Key::Character(ref typed)
+                                    if matches!(typed.as_str(), "a" | "c" | "v" | "x" | "z") => {}
+                                _ => event.prevent_default(),
+                            }
+                        },
+                    }
+                    // The count, and the way to the list behind it — see
+                    // [`Viewer::show_results`]. A button rather than a
+                    // readout, and one that only looks pressable when it has
+                    // something to show, which is `.find-status:not(:empty)`
+                    // in the app said with a class because Blitz has no `:empty`.
+                    button {
+                        class: if find_count.is_empty() { "find-count" } else { "find-count ready" },
+                        "aria-label": "Show every match",
+                        onmousedown: move |event| event.stop_propagation(),
+                        onclick: move |_| viewer.write().show_results(),
+                        "{find_count}"
+                    }
+                    // Up and down, which is what the app draws: the matches
+                    // are a place in the document rather than a list to walk
+                    // left and right along.
+                    button {
+                        class: "chip icon-only find-previous",
+                        "aria-label": "Previous match",
+                        onclick: move |_| viewer.write().step_match(false),
+                        Icon { name: "up", stroke: ink.clone() }
+                    }
+                    button {
+                        class: "chip icon-only find-next",
+                        "aria-label": "Next match",
+                        onclick: move |_| viewer.write().step_match(true),
+                        Icon { name: "down", stroke: ink.clone() }
+                    }
+                    // A cross, not a word: closing the find bar finishes
+                    // nothing, it puts a thing away.
+                    button {
+                        class: "chip icon-only find-close",
+                        "aria-label": "Close search",
+                        onclick: move |_| viewer.write().close_find(),
+                        Icon { name: "close", stroke: ink.clone() }
+                    }
+                }
+                // **The three switches, in the app's order and under the field
+                // they belong to.** Two change what is found; the first changes
+                // only how much of it is painted, and is the one a reader
+                // reaches for most. Each wears a tick whether on or not, so
+                // turning one on does not shuffle the others sideways under the
+                // pointer.
+                div { class: "find-options",
+                    button {
+                        class: if highlight_all { "find-option find-all on" } else { "find-option find-all" },
+                        onclick: move |_| viewer.write().toggle_highlight_all(),
+                        Icon { name: "check", stroke: if highlight_all { ink_on.clone() } else { faint.clone() } }
+                        "Highlight all"
+                    }
+                    button {
+                        class: if find_options.match_case { "find-option find-case on" } else { "find-option find-case" },
+                        onclick: move |_| {
+                            let token = viewer.write().set_find_options(crate::search::Options {
+                                match_case: !find_options.match_case,
+                                whole_words: find_options.whole_words,
+                            });
+                            scan(token);
+                        },
+                        Icon { name: "check", stroke: if find_options.match_case { ink_on.clone() } else { faint.clone() } }
+                        "Match case"
+                    }
+                    button {
+                        class: if find_options.whole_words { "find-option find-words on" } else { "find-option find-words" },
+                        onclick: move |_| {
+                            let token = viewer.write().set_find_options(crate::search::Options {
+                                match_case: find_options.match_case,
+                                whole_words: !find_options.whole_words,
+                            });
+                            scan(token);
+                        },
+                        Icon { name: "check", stroke: if find_options.whole_words { ink_on.clone() } else { faint.clone() } }
+                        "Whole words"
+                    }
+                }
+                }
+            }
+        }
+    };
 
     rsx! {
         // Never rewritten. See `styles.rs`: the theme is on the root as
@@ -6170,11 +6327,21 @@ pub fn Reader(
                     // The app's `#find`, which this bar did not have: ⌘F was
                     // the only way in, and a shortcut is not a way in for
                     // somebody who does not already know it is there.
-                    button {
-                        class: if find_open { "chip find on" } else { "chip find" },
-                        onclick: move |_| viewer.write().open_find(),
-                        Icon { name: "search", stroke: if find_open { ink_on.clone() } else { ink.clone() } }
-                        "Search"
+                    // The card hangs off this chip, so the chip is in an
+                    // `.anchor` like every other button in the bar that opens
+                    // something: the card came down at the window's right edge
+                    // and twelve pixels below the bar, which reads as a panel
+                    // belonging to nothing.
+                    div { class: "anchor",
+                        button {
+                            class: if find_open { "chip find on" } else { "chip find" },
+                            onclick: move |_| viewer.write().open_find(),
+                            Icon { name: "search", stroke: if find_open { ink_on.clone() } else { ink.clone() } }
+                            "Search"
+                        }
+                        if find_open {
+                            {find_card("top: calc(100% + 8px); left: 0;")}
+                        }
                     }
                     // **Left and Right, in the bar** rather than in the View
                     // menu, which is a place to go looking for something you do
@@ -6276,7 +6443,9 @@ pub fn Reader(
                                     // one being looked at is the one to type
                                     // over.
                                     div { class: "menu-row",
-                                        label { class: "menu-row-label", "Zoom to" }
+                                        label { class: "menu-row-text",
+                                            span { class: "menu-row-label", "Zoom to" }
+                                        }
                                         crate::prefs::Stepper {
                                             viewer,
                                             value: shown_percent,
@@ -6338,15 +6507,19 @@ pub fn Reader(
                                 // belong where the themes are rather than a
                                 // window away on the Appearance page.
                                 div { class: "menu-row",
-                                    label { class: "menu-row-label", "Dark mode" }
-                                    span { class: "menu-row-note", "{key_dark}" }
+                                    label { class: "menu-row-text",
+                                        span { class: "menu-row-label", "Dark mode" }
+                                        span { class: "menu-row-note", "{key_dark}" }
+                                    }
                                     crate::prefs::Toggle {
                                         on: dark_now,
                                         onchange: move |on: bool| viewer.write().set_dark(on),
                                     }
                                 }
                                 div { class: "menu-row",
-                                    label { class: "menu-row-label", "Light or dark follow system" }
+                                    label { class: "menu-row-text",
+                                        span { class: "menu-row-label", "Light or dark follow system" }
+                                    }
                                     crate::prefs::Toggle {
                                         on: following,
                                         onchange: move |on: bool| viewer.write().set_follow_system(on),
@@ -6469,8 +6642,10 @@ pub fn Reader(
                                 onmousedown: move |event| event.stop_propagation(),
                                 div { class: "menu-section", "Window" }
                                 div { class: "menu-row",
-                                    label { class: "menu-row-label", "Show toolbar" }
-                                    span { class: "menu-row-note", "{key_toolbar}" }
+                                    label { class: "menu-row-text",
+                                        span { class: "menu-row-label", "Show toolbar" }
+                                        span { class: "menu-row-note", "{key_toolbar}" }
+                                    }
                                     // And then leave: this menu hangs off a
                                     // button in the toolbar, so turning the
                                     // toolbar off leaves it anchored to
@@ -6485,8 +6660,10 @@ pub fn Reader(
                                     }
                                 }
                                 div { class: "menu-row",
-                                    label { class: "menu-row-label", "Full screen" }
-                                    span { class: "menu-row-note", "{key_fullscreen}" }
+                                    label { class: "menu-row-text",
+                                        span { class: "menu-row-label", "Full screen" }
+                                        span { class: "menu-row-note", "{key_fullscreen}" }
+                                    }
                                     crate::prefs::Toggle {
                                         on: full_screen,
                                         onchange: move |on: bool| {
@@ -6539,16 +6716,20 @@ pub fn Reader(
                                 }
                                 div { class: "menu-rule" }
                                 div { class: "menu-row",
-                                    label { class: "menu-row-label", "Recolour pictures too" }
-                                    span { class: "menu-row-note", "Off leaves them as printed." }
+                                    label { class: "menu-row-text",
+                                        span { class: "menu-row-label", "Recolour pictures too" }
+                                        span { class: "menu-row-note", "Off leaves them as printed." }
+                                    }
                                     crate::prefs::Toggle {
                                         on: recolor_images,
                                         onchange: move |on: bool| viewer.write().set_recolor_images(on),
                                     }
                                 }
                                 div { class: "menu-row",
-                                    label { class: "menu-row-label", "Show page count while scrolling" }
-                                    span { class: "menu-row-note", "Only when the toolbar is hidden." }
+                                    label { class: "menu-row-text",
+                                        span { class: "menu-row-label", "Show page count while scrolling" }
+                                        span { class: "menu-row-note", "Only when the toolbar is hidden." }
+                                    }
                                     crate::prefs::Toggle {
                                         on: page_pill,
                                         onchange: move |on: bool| viewer.write().set_page_pill(on),
@@ -6572,158 +6753,11 @@ pub fn Reader(
                 }
             }
             }
-            // **The app's own card, under the toolbar at the right.** As a row
-            // of the flex column it took forty pixels off the document for as
-            // long as it was up, so opening it moved the page being read. `top`
-            // is in a style rather than a selector, because the bar comes up to
-            // meet the window's edge when the toolbar is away and there is no
-            // shell attribute here to hang one off.
-            if find_open {
-                div { class: "find-bar", style: "top: {find_top}px;",
-                // The card sits *below* the toolbar, so without this the root's
-                // "a press past the bar puts it away" fires on the bar's own
-                // switches and Highlight all closes the search it was about to
-                // change. Said once here rather than on all eight controls.
-                onmousedown: move |event| event.stop_propagation(),
-                div { class: "find-row",
-                    span { class: "find-icon", Icon { name: "search", stroke: faint.clone() } }
-                    input {
-                        class: "find-field",
-                        r#type: "text",
-                        value: "{find_query}",
-                        placeholder: "Search this document",
-                        // While the bar is up, this is the element that wants
-                        // the keyboard, inside the one that otherwise does —
-                        // which is what makes `give_keyboard_back`'s rule "the
-                        // innermost one asking".
-                        //
-                        // Unless the page field is up: the two are siblings, so
-                        // "innermost" cannot separate them and document order
-                        // would hand ⌥⌘G's field to the find bar. Two fields
-                        // never both ask.
-                        "data-keyboard": if typing_page { None } else { Some("find") },
-                        onmounted: move |event| {
-                            let node = event.data();
-                            let task = node.set_focus(true);
-                            spawn(async move { let _ = task.await; });
-                        },
-                        oninput: move |event| {
-                            let typed = event.value();
-                            let token = viewer.write().find(&typed);
-                            scan(token);
-                        },
-                        // Every key typed here also bubbles to the root, which
-                        // turns keys into actions — so without this, typing
-                        // "just" into the field scrolls the document four times.
-                        // What the field lets past is a chord with a modifier on
-                        // it, so ⌘+ still zooms while somebody is searching.
-                        onkeydown: move |event| {
-                            let key = event.key();
-                            let modifiers = event.modifiers();
-                            let plain = crate::keymap::plain(modifiers);
-                            match key {
-                                // Enter is the find bar's own, and is not in
-                                // `keys.toml`: it means "the next one" here
-                                // and nothing anywhere else.
-                                Key::Enter => {
-                                    event.stop_propagation();
-                                    viewer.write().step_match(!modifiers.shift());
-                                }
-                                // The menu first, for the reason the page
-                                // field gives above.
-                                Key::Escape => {
-                                    event.stop_propagation();
-                                    if !viewer.write().close_menu() {
-                                        viewer.write().close_find();
-                                    }
-                                }
-                                _ if plain => event.stop_propagation(),
-                                // A chord with a modifier is not typing — and
-                                // Blitz applies the keystroke to a focused field
-                                // whatever is held down, so ⌘G stepped to the
-                                // next match *and* put a "g" in the query. What
-                                // the field keeps is what a text field owns.
-                                Key::Character(ref typed)
-                                    if matches!(typed.as_str(), "a" | "c" | "v" | "x" | "z") => {}
-                                _ => event.prevent_default(),
-                            }
-                        },
-                    }
-                    // The count, and the way to the list behind it — see
-                    // [`Viewer::show_results`]. A button rather than a
-                    // readout, and one that only looks pressable when it has
-                    // something to show, which is `.find-status:not(:empty)`
-                    // in the app said with a class because Blitz has no `:empty`.
-                    button {
-                        class: if find_count.is_empty() { "find-count" } else { "find-count ready" },
-                        "aria-label": "Show every match",
-                        onmousedown: move |event| event.stop_propagation(),
-                        onclick: move |_| viewer.write().show_results(),
-                        "{find_count}"
-                    }
-                    // Up and down, which is what the app draws: the matches
-                    // are a place in the document rather than a list to walk
-                    // left and right along.
-                    button {
-                        class: "chip icon-only find-previous",
-                        "aria-label": "Previous match",
-                        onclick: move |_| viewer.write().step_match(false),
-                        Icon { name: "up", stroke: ink.clone() }
-                    }
-                    button {
-                        class: "chip icon-only find-next",
-                        "aria-label": "Next match",
-                        onclick: move |_| viewer.write().step_match(true),
-                        Icon { name: "down", stroke: ink.clone() }
-                    }
-                    // A cross, not a word: closing the find bar finishes
-                    // nothing, it puts a thing away.
-                    button {
-                        class: "chip icon-only find-close",
-                        "aria-label": "Close search",
-                        onclick: move |_| viewer.write().close_find(),
-                        Icon { name: "close", stroke: ink.clone() }
-                    }
-                }
-                // **The three switches, in the app's order and under the field
-                // they belong to.** Two change what is found; the first changes
-                // only how much of it is painted, and is the one a reader
-                // reaches for most. Each wears a tick whether on or not, so
-                // turning one on does not shuffle the others sideways under the
-                // pointer.
-                div { class: "find-options",
-                    button {
-                        class: if highlight_all { "find-option find-all on" } else { "find-option find-all" },
-                        onclick: move |_| viewer.write().toggle_highlight_all(),
-                        Icon { name: "check", stroke: if highlight_all { ink_on.clone() } else { faint.clone() } }
-                        "Highlight all"
-                    }
-                    button {
-                        class: if find_options.match_case { "find-option find-case on" } else { "find-option find-case" },
-                        onclick: move |_| {
-                            let token = viewer.write().set_find_options(crate::search::Options {
-                                match_case: !find_options.match_case,
-                                whole_words: find_options.whole_words,
-                            });
-                            scan(token);
-                        },
-                        Icon { name: "check", stroke: if find_options.match_case { ink_on.clone() } else { faint.clone() } }
-                        "Match case"
-                    }
-                    button {
-                        class: if find_options.whole_words { "find-option find-words on" } else { "find-option find-words" },
-                        onclick: move |_| {
-                            let token = viewer.write().set_find_options(crate::search::Options {
-                                match_case: find_options.match_case,
-                                whole_words: !find_options.whole_words,
-                            });
-                            scan(token);
-                        },
-                        Icon { name: "check", stroke: if find_options.whole_words { ink_on.clone() } else { faint.clone() } }
-                        "Whole words"
-                    }
-                }
-                }
+            // With the toolbar away there is no Search chip to hang under, so
+            // the card comes up to meet the window's edge at the right — which
+            // is `#shell[data-toolbar="hidden"] .find-bar` in the app.
+            if find_open && !toolbar_on {
+                {find_card("top: 12px; right: 18px;")}
             }
             div { class: "body",
             if empty {

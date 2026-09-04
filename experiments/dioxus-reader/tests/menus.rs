@@ -349,3 +349,49 @@ fn the_information_window_fits_its_rows_and_ranges_them_right() {
         row.x + row.width,
     );
 }
+
+/// **Fourteen themes, all on screen at once.** The list was capped at 60% of
+/// the window and the last few were behind a scroll — a scroll to reach a
+/// thing the reader is choosing between. The cap is now the window less the
+/// toolbar and a margin, which is where the app's own overflow correction
+/// leaves it.
+#[test]
+fn the_theme_menu_shows_every_theme_without_a_scroll() {
+    let mut reader = reader();
+    reader.click(".chip.theme");
+    let menu = reader.harness.layout_rect(".menu.theme");
+    let rows = reader.harness.query_all(".menu.theme .menu-item");
+    let last = reader.harness.layout_rect_of(*rows.last().expect("themes"));
+    assert!(
+        last.y + last.height <= menu.y + menu.height,
+        "the last row is inside the menu: {last:?} in {menu:?}",
+    );
+    let window = reader.harness.layout_rect(".root");
+    assert!(
+        menu.y + menu.height <= window.y + window.height,
+        "and the menu is inside the window: {menu:?} in {window:?}",
+    );
+}
+
+/// **A row's note goes under its label, not beside it.** Side by side the two
+/// shared the line, so "Recolour pictures too" with "Off leaves them as
+/// printed." beside it came out as two lines of label and two of note in a
+/// menu wide enough for both on one.
+#[test]
+fn a_settings_row_keeps_its_label_and_its_note_each_on_one_line() {
+    let mut reader = reader();
+    reader.click(".chip.settings");
+    // The first row's label is a short one and fits whatever the layout does,
+    // so it is the height of one line to measure the rest against.
+    let line = reader.harness.layout_rect(".menu.settings .menu-row-label");
+    let height = line.height;
+    for selector in [".menu.settings .menu-row-label", ".menu.settings .menu-row-note"] {
+        for node in reader.harness.query_all(selector) {
+            let rect = reader.harness.layout_rect_of(node);
+            assert!(
+                rect.height <= height * 1.5,
+                "one line: {selector} at {rect:?} against {height}",
+            );
+        }
+    }
+}

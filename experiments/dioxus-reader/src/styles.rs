@@ -339,7 +339,7 @@ body { margin: 0;
 .menu.theme, .menu.settings { right: 0; }
 /* Fourteen themes is taller than a short window, and this is the one list in
    the app that is a list rather than a handful. */
-.menu.theme { max-height: 60vh; overflow: scroll; scrollbar-width: thin; }
+.menu.theme { max-height: calc(100vh - 62px); overflow: scroll; scrollbar-width: thin; }
 /* Wide enough for "Show page count while scrolling" and its note beside a
    switch, which is the widest row any menu here has. */
 .menu.settings { min-width: 330px; }
@@ -387,13 +387,20 @@ body { margin: 0;
    in the app, where the label carries the weight and the control sits at the
    end of it. */
 .menu-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; }
-.menu-row-label { flex: 1 1 auto; color: var(--text); }
+/* **The note goes under the label, not beside it**, which is `.popover-row
+   label` in the app: a column, and the row's one flexible box. Side by side
+   the two shared the line, so "Recolour pictures too" and "Off leaves them as
+   printed." each came out over two lines in a menu wide enough for both on
+   one. The label keeps its own class so the parity test still reads the label
+   and not the sentence under it. */
+.menu-row-text { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
+.menu-row-label { color: var(--text); }
 /* `--text-note` and the row's own size, which is `.popover-note` in the app
    and carries its warning with it: "the difference between them is weight
    rather than size … telling the two apart by fading the note is what made it
    unreadable". This had it at `--faint` and 12px, which is both of the things
    that comment says not to do. */
-.menu-row-note { color: var(--note); }
+.menu-row-note { color: var(--note); white-space: nowrap; }
 /* A theme, two letters wide, in its own colours — `ui.swatch` in the app, and
    its numbers: a wide shallow chip rather than a square, and an inset ring in
    a neutral grey rather than a border in the theme's line colour, so that a
@@ -539,12 +546,17 @@ body { margin: 0;
    four buttons, and the three switches indented under the field so they read
    as belonging to the query rather than as three more buttons.
 
-   `top` is set in `app.rs` rather than in a `calc`, because the toolbar can
-   be put away and the bar has to come up to meet the window's edge —
-   `#shell[data-toolbar="hidden"] .find-bar` in the app, which is a selector
-   this port has no shell attribute for. */
+   **Where it hangs is set in `app.rs`, not here**, because it hangs off two
+   different things: under the Search chip inside that chip's own `.anchor`,
+   which is where every other panel in this bar comes down, and at the
+   window's right edge when the toolbar is away and there is no chip left to
+   hang under — `#shell[data-toolbar="hidden"] .find-bar` in the app, which is
+   a selector this port has no shell attribute for. It used to be `right: 18px`
+   and twelve pixels below the bar in both cases, which is the app's own
+   placement and reads, next to menus that come down flush against the button
+   that opened them, as a panel belonging to nothing. */
 .find-bar {
-  position: absolute; right: 18px; z-index: 30;
+  position: absolute; z-index: 30;
   display: flex; flex-direction: column;
   padding: 6px 8px 8px 12px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;

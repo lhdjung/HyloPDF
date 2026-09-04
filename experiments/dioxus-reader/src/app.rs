@@ -7383,7 +7383,11 @@ fn Start(viewer: Signal<Viewer>, pick: Pick, frame: Frame) -> Element {
                 button {
                     class: "start-open",
                     onclick: open,
-                    Icon { name: "folder", stroke: crate::palette::hex(viewer.read().palette().background) }
+                    // The label's own colour, which is `--accent-contrast`
+                    // and not the theme's paper: the two are close on a dark
+                    // theme and are not the same colour, and `.btn-primary`
+                    // names the first.
+                    Icon { name: "folder", stroke: crate::palette::hex(viewer.read().palette().accent_contrast()) }
                     "Open a document"
                 }
                 if !recents.is_empty() {

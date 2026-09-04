@@ -946,17 +946,32 @@ body { margin: 0;
    in it
 
    The app's `#welcome`, and it stands where the document would. Centred in
-   both axes, on the theme's own paper rather than on `--ground`: the ground
-   is the shade a page stands on, and with no page there is nothing for it to
-   set off. */
+   both axes, on `--ground` — the same shade a page floats on, because it is
+   the same place. It was `--paper` here, which is the toolbar's colour: the
+   window changed shade the moment a document was opened, and the start screen
+   read as one flat panel with the bar. Measured off two screenshots of the
+   same theme, the app's ground was #181A1F and this was #24272F.
+
+   **And 14.5px, not the body's 13.5.** `#welcome` sets its own size, the way
+   `.popover`, `#sidebar` and `.window` do, and this was the fourth surface
+   with the same fault: the recents list came out 5.6% tight — the identical
+   filename measured 228.5 CSS px here against the app's 242 — and its rows
+   34px against 37. Nothing that compares labels can see that. */
 .start {
   flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
-  background: var(--paper); overflow: scroll; scrollbar-width: thin;
+  background: var(--ground); font-size: 14.5px;
+  overflow: scroll; scrollbar-width: thin;
 }
 /* The app's `min(460px, 82vw)`. Blitz resolves `min()` and `vw`, and the
    narrow half matters: a window dragged down to its minimum still has a list
-   in it rather than a list with its right-hand column off the edge. */
-.start-inner { width: min(460px, 82vw); }
+   in it rather than a list with its right-hand column off the edge.
+
+   A flex column so that the one button in it can be `align-self: center`.
+   The app centres it with `text-align: center` on this box and `inline-flex`
+   on the button, which is a shape Blitz has nowhere else in this sheet;
+   `align-self` is Taffy's own and reaches the same place. Everything else
+   here stretches, which is what block layout was already giving it. */
+.start-inner { width: min(460px, 82vw); display: flex; flex-direction: column; }
 .start-name {
   margin: 0; text-align: center;
   font-size: 30px; font-weight: 600; letter-spacing: -0.01em; color: var(--text);
@@ -968,11 +983,18 @@ body { margin: 0;
    Everything else in the chrome is a quiet chip on a transparent ground,
    which is right for a bar of them and wrong for a screen whose whole purpose
    is one action. */
+/* `.btn.btn-primary` in the app, and every number here is one of theirs:
+   `.btn`'s gap of 7 and radius of `--radius`, `.btn-primary`'s height of 36
+   and padding of 0 16px, and the inherited 14.5px. It was 100% wide, 38 tall
+   and 14px — a band across the whole column where the app has a button the
+   width of its own words. Measured off the two screenshots: 460 CSS px
+   against the app's 176. */
 .start-open {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  width: 100%; height: 38px; border: 0; border-radius: 10px;
-  background: var(--accent); color: var(--paper);
-  font-size: 14px; font-weight: 500;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  align-self: center; height: 36px; padding: 0 16px;
+  border: 0; border-radius: 9px;
+  background: var(--accent); color: var(--accent-contrast);
+  font-weight: 500;
 }
 .start-hint { margin-top: 22px; text-align: center; color: var(--note); }
 
@@ -987,7 +1009,12 @@ body { margin: 0;
 .recent:hover .recent-open { color: var(--text); }
 .recent-open {
   display: flex; align-items: center; gap: 10px;
-  flex: 1 1 auto; min-width: 0; height: 34px; padding: 0 4px 0 10px;
+  /* The app's row is `padding: 8px 10px` around a line of 1.45 × 14.5 — 37px
+     laid out, and it was 34 here because this sheet had written the start
+     screen in the body's 13.5. The height is stated rather than left to the
+     padding because the × beside it is a sibling here and a child there, so
+     the two have to agree about the row rather than about their own boxes. */
+  flex: 1 1 auto; min-width: 0; height: 37px; padding: 0 4px 0 10px;
   border: 0; background: transparent; color: var(--muted);
   text-align: left;
 }

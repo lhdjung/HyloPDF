@@ -354,6 +354,42 @@ labels and groups, the three things said over a page, and what all twenty-two
 of `applyTheme`'s custom properties resolve to. Its first run found eight
 divergences nobody had reported.
 
+**What it compared, for a while, was words** — and the start screen is what
+that cost. Every line of it matched while the screen stood on the toolbar's
+colour instead of the ground, ran at the body's 13.5px instead of its own
+14.5, and had a button across the whole 460px column where the app has one
+176px wide. A reader looking at the two side by side could see all three and
+name none of them; nothing in this file could see any of them. So three
+questions were added, and each is the general form of what it caught:
+
+- *What is painted, not what is named.* All twenty-two variables matched while
+  a whole window wore the wrong one of them, so `chrome` in the inventory
+  carries the app's **resolved** toolbar and ground, and the port answers off
+  its own screenshot.
+- *What the type does to a box.* The button's width and the shelf row's height
+  are padding plus a word and padding plus a line, which is the same argument
+  the toolbar's widths already made — it had simply never been asked of the
+  one screen a reader meets first.
+- *The recolouring, against the app's own arithmetic.* `recolor.rs` called
+  itself a faithful port of `recolorByPixel` and `tests/recolor.rs` held the
+  shader to it, but the thing it was faithful *to* was in neither comparison:
+  both could have been wrong together and the only place it would show is a
+  page. `take-recolor.mjs` runs the app's own function in WebKit over 525
+  pixels picked to reach every branch and writes what comes out;
+  `the_recolouring_is_the_app_s` holds the port to it within one level of 255.
+  It passes, and one of its two ramps is the link case — Hylo Light's copper
+  on white — so a cross-reference is now *known* to be the colour the app
+  paints it rather than assumed to be.
+
+**And what is still asserted rather than measured**, because saying so is the
+point of the section. Nothing in this file compares a *document*: a page's
+glyphs are pdfium's and the app's are pdf.js's, and the two rasterise
+differently — the ramp over them is now proven identical and the ink going
+into it is not. Nor does anything compare vertical rhythm (margins and gaps
+between elements, as against the heights of the elements themselves), any
+colour but the two the chrome is mostly made of, or anything that is the
+window's rather than the page's.
+
 Two things about driving it: a harness that clicks a *point* rather than a
 *selector* cannot reach a button below the foot of a scrollable pane, which is
 why the theme editor had never been opened by a test; and the peek handle is

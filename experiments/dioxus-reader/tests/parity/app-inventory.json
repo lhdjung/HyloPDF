@@ -497,6 +497,10 @@
     "nav-item": 32,
     "switch": 20
   },
+  "chrome": {
+    "toolbar": "#ffffff",
+    "ground": "#e1e0dc"
+  },
   "settings": {
     "nav": [
       "Reading",
@@ -630,6 +634,22 @@
     "sub": "A calm place to read.",
     "open": "Open a document",
     "hint": "Or drop a PDF anywhere in this window",
+    "fontSize": 14.5,
+    "background": "#e1e0dc",
+    "boxes": {
+      "open": {
+        "width": 175.9,
+        "height": 36
+      },
+      "inner": {
+        "width": 460,
+        "height": 191.5
+      },
+      "recent": {
+        "height": 37,
+        "padding": "8px 10px"
+      }
+    },
     "recentsTitle": "Recently read"
   }
 }

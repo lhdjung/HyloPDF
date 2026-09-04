@@ -33,7 +33,29 @@ const inventory = await app.page.evaluate(async () => {
     return style.display !== "none" && style.visibility !== "hidden" && !el.hidden;
   };
 
-  const out = { toolbar: {}, menus: {}, sidebar: [], find: {}, theme: {}, rows: {} };
+  const out = { toolbar: {}, menus: {}, sidebar: [], find: {}, theme: {}, rows: {}, chrome: {} };
+
+  /* **What is actually painted, as against what is named.**
+   *
+   * The twenty-two variables below are compared name for name and every one
+   * of them matched while the start screen stood on the wrong one of them —
+   * `--paper` where the app has `--bg`, which is a whole window of the wrong
+   * colour and nothing in this file could see it. So the two largest areas
+   * of the interface are read as *resolved* colours here, and the port is
+   * asked for them off its own pixels. */
+  const painted = (selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return null;
+    return (
+      "#" +
+      (getComputedStyle(el).backgroundColor.match(/\d+/g) ?? [])
+        .slice(0, 3)
+        .map((channel) => (+channel).toString(16).padStart(2, "0"))
+        .join("")
+    );
+  };
+  out.chrome.toolbar = painted("#toolbar");
+  out.chrome.ground = painted("body");
 
   /** How tall a row of some surface is laid out, to the tenth of a pixel.
    *
@@ -312,11 +334,45 @@ const empty = await openApp({
 inventory.start = await empty.page.evaluate(async () => {
   const words = (el) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
   const welcome = document.getElementById("welcome");
+  const box = (el) => {
+    const rect = el.getBoundingClientRect();
+    return { width: +rect.width.toFixed(1), height: +rect.height.toFixed(1) };
+  };
+  const hex = (colour) =>
+    "#" +
+    (colour.match(/\d+/g) ?? [])
+      .slice(0, 3)
+      .map((channel) => (+channel).toString(16).padStart(2, "0"))
+      .join("");
+  // A row of the recents shelf, laid out by the app's own cascade. The shelf
+  // itself is empty here — the browser fallback's `bootstrap` returns no
+  // library at all — so the row is built rather than found, and what is read
+  // off it is the stylesheet's answer and not a number written down twice.
+  const probe = document.createElement("button");
+  probe.className = "recent";
+  probe.textContent = "x";
+  welcome.append(probe);
+  const rowStyle = getComputedStyle(probe);
+  const row = +probe.getBoundingClientRect().height.toFixed(1);
+  const rowPadding = `${rowStyle.paddingTop} ${rowStyle.paddingRight}`;
+  probe.remove();
   return {
     name: words(welcome.querySelector("h1")),
     sub: words(welcome.querySelector(".welcome-sub")),
     open: words(welcome.querySelector("#welcome-open")),
     hint: words(welcome.querySelector(".welcome-hint")),
+    // **What the four lines above cannot see, and what a reader saw anyway.**
+    // The screen was compared by its words alone and every one of them
+    // matched while the port ran it at the body's 13.5px on the toolbar's
+    // colour with a button the width of the whole column. So: the type, the
+    // ground, and the two boxes that are padding plus a word.
+    fontSize: parseFloat(getComputedStyle(welcome).fontSize),
+    background: hex(getComputedStyle(welcome).backgroundColor),
+    boxes: {
+      open: box(welcome.querySelector("#welcome-open")),
+      inner: box(welcome.querySelector(".welcome-inner")),
+      recent: { height: row, padding: rowPadding },
+    },
     // What the shelf is called when there is one. It is written whether or
     // not this launch has anything to put in it, because the words are the
     // thing being compared and an empty library would report `""` for a

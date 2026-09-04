@@ -431,6 +431,127 @@ fn the_start_screen_reads_like_the_app_s() {
     assert_eq!(one(".start-hint"), want("hint"), "the hint at the foot");
 }
 
+/// **And it is laid out and coloured the way the app's is.**
+///
+/// The four lines above all matched while the screen was wrong in three ways
+/// at once, which is the argument for this test: a reader who looked at the
+/// two side by side could say the button was too wide, the ground was the
+/// wrong colour and the names in the shelf were spaced oddly, and nothing
+/// that compares *words* could see any of it.
+///
+/// What each number here catches:
+///
+/// - *The ground.* `#welcome` is `--bg`, the shade a page floats on, because
+///   the start screen stands where the document will. This was `--paper` —
+///   the toolbar's own colour — so the window changed shade the moment
+///   anything was opened, and the screen read as one flat panel with the bar.
+/// - *The type.* `#welcome` sets 14.5px, the way `.popover`, `#sidebar` and
+///   `.window` do; this was the body's 13.5, which is the same fault the
+///   three of them had and this the fourth surface with it. The button's
+///   width is what says so — padding plus icon plus gap plus the word — and
+///   the shelf's row height is the other half, being padding plus a line.
+/// - *The button.* 100% of the column against the app's 176: a band across
+///   the screen where the app has a button the width of its own words.
+///
+/// The ground is read off the *pixels* rather than off a stylesheet, because
+/// a colour named correctly and painted by something else on top is still the
+/// wrong colour on screen. A point in the left margin, well clear of the
+/// 460px column in the middle of it.
+#[test]
+fn the_start_screen_is_laid_out_like_the_app_s() {
+    let mut reader = Reader::empty(Options {
+        width: 1280,
+        height: 860,
+        ..Default::default()
+    });
+    let app = app();
+    let start = &app["start"];
+
+    // The fixture's own two answers agree, which is what makes the assertion
+    // below a comparison and not a number written down twice.
+    assert_eq!(
+        start["background"], app["theme"]["--bg"],
+        "the app's start screen is its `--bg`",
+    );
+
+    let want = start["background"].as_str().expect("the app's ground");
+    let shot = reader.screenshot();
+    let pixel = shot.at(shot.width / 20, shot.height * 3 / 4);
+    let got = format!("#{:02x}{:02x}{:02x}", pixel[0], pixel[1], pixel[2]);
+    assert_eq!(got, want, "the ground the start screen stands on");
+
+    for (name, selector) in [("open", ".start-open"), ("inner", ".start-inner")] {
+        let box_of = |key: &str| start["boxes"][name][key].as_f64();
+        let (_, _, width, height) = reader
+            .box_of(selector)
+            .unwrap_or_else(|| panic!("no {selector}"));
+        // Width alone for the column, which is `min(460px, 82vw)` in both and
+        // whose *height* is the sum of everything in it — a number that says
+        // nothing on its own and would fail for whichever part of it moved.
+        let wanted = box_of("width").expect("a width");
+        // Three pixels here where the toolbar's controls get two, and the
+        // extra one is the flat tracking constant in `body`: 0.6px a
+        // character is measured against WebKit at 13.5px, which is what the
+        // bar is written in, and "Open a document" is fifteen characters at
+        // 14.5. The residual is 2.9px on a button of 176. Widening the
+        // constant per size would be four more numbers in the sheet for a
+        // fault nobody can see; what this number still catches is the two
+        // that could be seen — a button 460 wide, and a screen written in the
+        // body's size, which would come out at about 165.
+        assert!(
+            (width as f64 - wanted).abs() <= 3.0,
+            "{name} is {width} wide and the app's is {wanted}",
+        );
+        if let Some(wanted) = box_of("height").filter(|_| name == "open") {
+            assert!(
+                (height as f64 - wanted).abs() <= 2.0,
+                "{name} is {height} tall and the app's is {wanted}",
+            );
+        }
+    }
+}
+
+/// **A row of the recents shelf is the height of the app's.**
+///
+/// Separate from the test above because it needs a shelf, and a shelf needs a
+/// library: `Reader::empty` opens on a fresh config directory with nothing
+/// read yet. The app's own number is measured rather than stated — see the
+/// probe in `take-inventory.mjs` — because the browser fallback's `bootstrap`
+/// hands the harness no library at all and the row therefore has to be built
+/// out of the app's own cascade.
+///
+/// It was 34 against 37, which is 8px of padding either side of a line of
+/// 1.45 × 13.5 where the app has 1.45 × 14.5. Six rows of it is a shelf a
+/// fifth of a row short, which is exactly the sort of difference a reader
+/// notices and cannot name.
+#[test]
+fn a_recents_row_is_the_height_of_the_app_s() {
+    let app = app();
+    let want = app["start"]["boxes"]["recent"]["height"]
+        .as_f64()
+        .expect("the app's row");
+    // A config directory of its own, a document read in it, and the document
+    // put down again — which is the only way to a shelf with something on it,
+    // there being no seam for seeding one.
+    let dir = std::env::temp_dir().join(format!("hylopdf-parity-shelf-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            width: 1280,
+            height: 860,
+            config: dir,
+            ..Default::default()
+        },
+    );
+    reader.click("[data-item=\"close-document\"]");
+    let (_, _, _, height) = reader.box_of(".recent").expect("no shelf");
+    assert!(
+        (height as f64 - want).abs() <= 2.0,
+        "a row is {height} tall and the app's is {want}",
+    );
+}
+
 /// **The Information window lists what the app's lists, in the app's order.**
 ///
 /// The rows a document produces rather than all ten: a paper with no
@@ -578,4 +699,106 @@ fn what_the_app_says_over_a_page_is_said_here_too() {
     reader.wheel(-10.0);
     reader.settle();
     assert_eq!(one(&reader, ".page-pill"), want("pill"), "the page pill");
+}
+
+
+/// **The two large areas of the interface, by the colour actually on them.**
+///
+/// The twenty-two above are compared name for name and every one of them
+/// matched while the start screen stood on the wrong one: `--paper`, the
+/// toolbar's own colour, where the app has `--bg`. A whole window of the
+/// wrong shade, and nothing that reads a variable could see it — the values
+/// were right and what was painted with them was not.
+///
+/// So these two are read off the pixels. The bar with a document behind it,
+/// and the ground the start screen stands on, which is asserted where the
+/// start screen is. Between them they are nearly all of the app that is not
+/// a page.
+#[test]
+fn the_chrome_is_painted_the_app_s_colours() {
+    let mut reader = reader();
+    let want = app()["chrome"]["toolbar"]
+        .as_str()
+        .expect("the app's bar")
+        .to_string();
+    let (_, y, _, height) = reader.box_of(".toolbar").expect("no bar");
+    let shot = reader.screenshot();
+    // Two pixels in from the left edge: the bar's own padding is ten, so this
+    // is bar and nothing else whatever is on it.
+    let scale = shot.height as f32 / 860.0;
+    let pixel = shot.at(2, ((y + height / 2.0) * scale) as u32);
+    let got = format!("#{:02x}{:02x}{:02x}", pixel[0], pixel[1], pixel[2]);
+    assert_eq!(got, want, "the toolbar");
+}
+
+/// **The recolouring, against the app's own — pixel for pixel.**
+///
+/// `recolor.rs` calls itself a faithful port of `recolorByPixel` and
+/// `tests/recolor.rs` holds the shader to it, but the thing it is faithful
+/// *to* was never in either comparison: both sides could have been wrong
+/// together and the only place it would show is a document. This closes that,
+/// which makes it the one test in the file that is about a page rather than
+/// about the chrome.
+///
+/// The fixture is written by `take-recolor.mjs`, which runs the app's own
+/// function in WebKit over 525 pixels picked to reach every branch of it — the
+/// whole grey ramp, saturated colour, the near-neutrals either side of
+/// `COLOUR_FLOOR`, the washes above `WHITE_POINT`, and a few colours a
+/// plotting library actually emits.
+///
+/// Two ramps, named by what wants them. `duotone` is the one a **link** takes,
+/// in Hylo Light's real copper on the white a page that is not recoloured is
+/// printed on — so this is also what says the port paints a cross-reference
+/// the colour the app paints it. `recolor` is a page put onto a dark theme
+/// with the colours on it kept.
+///
+/// One level out of 255, which is the tolerance the app already holds its own
+/// two paths to and the port already holds its two to.
+#[test]
+fn the_recolouring_is_the_app_s() {
+    let raw = include_str!("parity/recolor-fixture.json");
+    let fixture: Value = serde_json::from_str(raw).expect("the app's recolouring");
+    let bytes = |hex: &str| -> Vec<u8> {
+        (0..hex.len() / 2)
+            .map(|at| u8::from_str_radix(&hex[at * 2..at * 2 + 2], 16).expect("a byte"))
+            .collect()
+    };
+    let colour = |hex: &str| -> [u8; 3] {
+        let bytes = bytes(hex.trim_start_matches('#'));
+        [bytes[0], bytes[1], bytes[2]]
+    };
+    let pixels = bytes(fixture["pixels"].as_str().expect("the page"));
+
+    for ramp in fixture["ramps"].as_array().expect("the ramps") {
+        let name = ramp["name"].as_str().unwrap_or_default();
+        let want = bytes(ramp["out"].as_str().expect("what the app made of it"));
+        let mut got = pixels.clone();
+        dioxus_reader::recolor::recolor_cpu(
+            &mut got,
+            colour(ramp["text"].as_str().expect("ink")),
+            colour(ramp["bg"].as_str().expect("paper")),
+            ramp["keepColour"].as_bool().expect("whether colour is kept"),
+        );
+
+        let (worst, at) = want.iter().zip(&got).enumerate().fold(
+            (0i32, 0usize),
+            |(worst, at), (index, (a, b))| {
+                let off = (*a as i32 - *b as i32).abs();
+                if off > worst {
+                    (off, index)
+                } else {
+                    (worst, at)
+                }
+            },
+        );
+        let pixel = at / 4 * 4;
+        assert!(
+            worst <= 1,
+            "{name}: off by {worst} levels at pixel {} — in {:?}, the app {:?}, this reader {:?}",
+            at / 4,
+            &pixels[pixel..pixel + 4],
+            &want[pixel..pixel + 4],
+            &got[pixel..pixel + 4],
+        );
+    }
 }

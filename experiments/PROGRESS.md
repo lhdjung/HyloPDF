@@ -1,76 +1,20 @@
 # The Dioxus Native experiment: where it stands
 
-`brief.md` is the ask and `dioxus-assessment.md` is the plan. This file is what
-building it actually found — Phases 0 to 3 — and it is the only status file:
-the four it replaces (`FINDINGS.md`, `PHASE1.md`, `FLOOR.md`, `PHASE2.md`) each
-opened by correcting the one before, which is three quarters of a document to
-read before reaching a true sentence. They are in git at `d2b0370` if the
-working is ever wanted.
+`brief.md` is the ask, `dioxus-assessment.md` is the plan, and this is what
+building it found. It is the only status file.
 
-**The experiment is passing its gates and is no longer blocked on anything
-upstream.** IME was the one item that needed a decision rather than a
-workaround, and it is struck: composition events exist at the revision this
-tree is pinned to, the find bar takes 日本語, and nothing in the reader had to
-change for it — see "The platform work" near the end of this file. Five
-upstream *faults* were found and all five are worked around here, with a test
-each that will fail the day they are fixed.
+**The experiment is passing its gates and is not blocked on anything upstream.**
+Phases 0-3 are complete, plus the interface work that followed them. Eighteen
+upstream faults were found; all are worked around here, most with a test that
+will fail the day they are fixed. The list is at the end of this file and is the
+most reusable thing in it.
 
-## What "done" has meant here, and what it has not
+**What is not here is the history.** This file used to be 4,400 lines of
+session-by-session bug narrative. Every fault it recorded is either fixed (and
+in git), or consolidated into the upstream list below. What is kept is what a
+change still has to know.
 
-Every item below is done in the sense its own entry claims, and the tests say
-so. The list still does not add up to an app anybody would use instead of the
-Tauri one, and the reason is the list. **It is the order the app was built in,
-taken from the commit history — and that order is the engine.** Layout,
-rendering, search, links, the library, windows, selection. The *interface* the
-engine is reached through was never an item, so its absence never showed up as
-an unfinished one: no menus, no way to open a second document, no settings
-window, no Keyboard page, no start screen. Progress against each item was real
-and progress towards parity was being overstated by about the size of the
-thing nobody was counting. All five of those are built now, and every one of
-them was found by looking at the app rather than at this list.
-
-Two smaller versions of the same fault, both now fixed and both worth
-recognising by shape. The toolbar's theme and fit chips *cycled*, because a
-list needs a menu and there were no menus — so "themes work" was true and
-choosing one was fourteen keystrokes. And dragging the sidebar deliberately
-deferred the relayout, which was right for the document and wrong for the
-thumbnails directly under the pointer; the entry for it argued the saving and
-never asked which half the reader was looking at.
-
-**The four grievances after those are the same shape again**, and they are
-the clearest statement of it: a page wider than the window pinned to the left
-of it with the rest unreachable, every undrawn page flashing white on a dark
-theme, the page field emptying itself, and a toolbar that wore the same grey
-under all fourteen themes. Every one of those was a *correct answer* — the
-layout centred what fitted, the renderer drew the right pixels, the field took
-the right number, the shade was derived from the theme — placed, coloured or
-timed in a way nobody would sit in front of. No test asks that question, so
-the only thing that finds them is reading with it. See "Four grievances from
-reading with it" and the five after it, below.
-
-**And the largest of them was not a grievance at all, because there was
-nothing on screen to have one about.** The reader had no window with nothing
-in it — no start screen, no shelf, no way to put a document down — and three
-separate entries in this file explain something *else* by naming that absence
-as the reason: ⌘N, `Handover::Fill`, and a column of the keymap that nothing
-read. Each of those explanations was correct. Together they are the same
-lesson one size up: a missing piece of interface does not appear on a list of
-unfinished items, it appears as a shape the rest of the application has been
-built around, and the way to find it is to build the piece and watch three
-other things come loose. See "The window with nothing in it", near the end.
-
-**And the round that fixed those four did not make the reader look right**,
-which is the sharpest version of the lesson so far. Three of the five that came
-back had been sitting underneath the fixes, and one of them was the *cause* of
-a fault the first round had answered somewhere else: the window's size never
-reached the layout at all, so the centring that round added was correct and
-never seen. A fix verified in a harness whose window is one size for the life
-of the test is a fix verified against the wrong window. Reading with it is not
-a step at the end; it is the only instrument that has ever found any of
-these.
-
-**So the measure to use is the app beside it, not this file.** What follows is
-where that comparison actually stands.
+## Running it
 
 ```
 cd dioxus-reader
@@ -79,83 +23,28 @@ cargo run --release -- ~/paper.pdf           # a document of your own
 cargo run --release -- --theme 4             # …in the fifth theme in the list
 cargo run --release -- --measure 60          # read it, and say what it cost
 cargo run --release -- --quit 5              # open, sit still, report, close
-cargo test                                   # 354 tests, about a minute and a half
+cargo test                                   # about 450 tests, ~90s
 cargo test -- --ignored                      # the one that aborts on purpose
 ```
 
-With no path it opens **whatever was open when it was last put down**, and the
-**start screen** when there was nothing — see "The window with nothing in it"
-near the end of this file. `--measure` and `--quit` deliberately do *not*
-restore, and open the app's own `tests/fixtures/book.pdf` instead: every number
-below was taken on that fixture, and a measuring run that quietly used whatever
-had last been read, or nothing at all, would not be comparable with any of
-them. (The fixture used to be documented as `-- book.pdf`, which is a path
-relative to wherever cargo was run from and was therefore usually not there —
-and pdfium reports a missing file as a Debug-printed `io::Error`. Both halves
-of that are fixed.)
+With no path it opens whatever was open when it was last put down, and the
+start screen when there was nothing. `--measure` and `--quit` deliberately do
+*not* restore, and open the app's own `tests/fixtures/book.pdf` instead: every
+number below was taken on that fixture, and a measuring run that quietly used
+whatever had last been read would not be comparable with any of them.
 
-**The keys are the app's own**, because `keys.ts` and `keys.toml` are ported —
-see Phase 3 item 2. `j`/`k` and the arrows move a line, `d`/`u` half a screen,
-space and Page Up/Down a screen, Home/End and `g g`/`G` the ends, `h`/`l` and
-the left/right arrows a page, ⌘+ and ⌘− zoom, ⌘0 fit width, ⌘1 actual size,
-⌘2 fit page, ⌘B the sidebar, ⌘⇧B a mark on the page you are on, ⌘F the find
-bar with ⌘G and ⌘⇧G through the matches and Escape out of it, `p` or ⌥⌘G the
-page field, ⌘[ and ⌘] back and forward through the places you jumped from,
-⌘R and ⌘L turn the page a quarter each way. **Words can be swept with the
-pointer** — a second click takes the word under it — and ⌘A takes the page,
-⌘C copies what is selected, ⌘⇧C copies it with the page it came from.
-`s` spreads
-and `t` the next theme are this experiment's own and are not in the app, and so
-is ⌘C: see item 10, where a key the app never had to write down is the clearest
-thing found so far that leaving the webview costs. Any
-of them can be rebound in `keys.toml`; a key bound to something not built yet
-says so on the notice line. The theme, the zoom, the fit, the spread, the
-sidebar, the trim, the marks and **the page you had got to** are all still
-there the next time it opens.
-
-**Two of the files it reads are watched.** A theme edited in an editor beside
-the reader is worn as soon as it is saved, and a paper recompiled by LaTeX
-underneath it is reopened at the page you were on. Both are the app's own
-`watch.rs`, compiled here unchanged — see Phase 3 item 8.
-
-**There are three menus in the toolbar**, off the document's name, the zoom
-and the theme: open a document or a window, the fit and the spread and the
-rotations, and all fourteen themes with the one in use ticked. ⌘O opens a
-different document in this window and the first item of the document menu is
-the same thing; "Open in a new window…" beside it is the app's own wording for
-the app's own gesture. Each menu item shows the key that asks for the same
-thing, read off the keymap rather than written beside it, so a rebound key is
-what it shows. See "The menus, and opening a document" below.
-
-**A window can be empty, and an empty window is the start screen**: the app's
-own, with the last six documents read and the page each was left on, a button
-that opens one and a × that takes one off the list. ⌘N gives one, "Close
-document" in the Document menu leaves one, a launch with nothing remembered
-begins on one, and a PDF dragged onto any window is caught and opened. The
-same list is the last section of the Document menu, for the reader who has a
-document open and wants yesterday's paper back without going through the
-picker. See "The window with nothing in it", near the end.
-
-**One thing is a setting and nothing else.** One page at a time is
-`scroll_mode = "paged"` in `settings.toml`, with no key and no chip, which is
-the brief's own instruction about it. Trimming the margins is the chip marked
-Trim. See Phase 3 item 6.
-
-**Every key in the app's table answers.** ⌘D is dark mode — the other half of
-the pair the reader chose, not a default — and the machine's own light and
-dark is followed until the reader says otherwise. ⌘P hands the document to a
-program that prints and F1 is the Keyboard page. See "After Phase 3" below,
-which is also where the `SIGSEGV` this file used to record as unexplained is
-explained.
+**The keys are the app's own**, because `keys.ts` and `keys.toml` are ported.
+Any of them can be rebound in `keys.toml`. Three actions are this experiment's
+and are listed separately in `keymap::EXTRA` so the app's table stays exactly
+the app's: `t` (next theme), `s` (spreads), and ⌘C — the last because the
+selection here is the reader's own rather than a webview's, which is the
+clearest thing the port has found that leaving the webview costs.
 
 ## The numbers
 
 One machine, one sitting, macOS 15 on Apple silicon, release builds, a
 1100×900 window at 2×, `tests/fixtures/book.pdf` (400 pages of plain text).
-Every memory figure is **physical footprint** — what Activity Monitor shows and
-what the kernel charges against a limit. Resident size is the wrong unit here
-and cost this experiment a wrong conclusion once; see "Measure footprint, never
-RSS" below.
+Every memory figure is **physical footprint**, never RSS — see below.
 
 | | Tauri + pdf.js | Dioxus Native + pdfium |
 | --- | ---: | ---: |
@@ -167,233 +56,27 @@ RSS" below.
 | pages resident while reading | canvas + proxy + worker copy | 2, at 23MB |
 | binary | 6.2MB | 12MB + 7.2MB pdfium |
 | the sidebar open, thumbnails and all | measured with it shut | +24MB |
-| the whole document indexed for a search | tens of MB, given back with the bar | 15MB, given back with the bar |
-| …and reading it to build that index | pdf.js: mostly worker | **62ms for 400 pages** |
+| the whole document indexed for a search | tens of MB | 15MB |
+| …and reading it to build that index | mostly worker | **62ms for 400 pages** |
 
-The Tauri column is the installed app on the same document measured the same
-way, summed over its four processes. **The assessment's Phase 1 gate — under
-150MB against 346MB — is met**: 144MB against 373MB, a factor of 2.6, for
-twice the binary. That is the trade the brief's goal 2 permits, and it is paid.
-
-**The sidebar row is the app's own warning answered.** `AGENTS.md` says its
-memory table was taken with the panel shut, and that the thumbnail column is
-where a fourth leak would hide next. Here the column is four thumbnails at
-1.2ms each and 12MB of texture, the whole panel costs 123MB → 147MB of
-footprint on the same document, and it does not grow: fifty screenfuls of
-column end where ten of them did. See Phase 3 item 3 — there is no thumbnail
-cache, because the mounting window is one.
+**The Phase 1 gate — under 150MB against 346MB — is met**: a factor of 2.6, for
+twice the binary. That is the trade the brief's goal 2 permits.
 
 What is *not* measured: Windows, Linux, and any document but this one. A
 scanned volume is the shape most likely to behave differently.
 
----
-
-## Phase 0 — the four spikes
-
-`dioxus-spike/`. All four gates pass, on Blitz `main` at `64eb2785`
-(`0.3.0-beta.2`, published as `dioxus-native 0.8.0-alpha.1`), wgpu 29, winit
-`0.31.0-beta.2`, pdfium `chromium/8021`.
-
-```
-cargo run --bin windows -- --auto 3   # three windows, made from a thread
-cargo run --bin pages   -- --pages 20 # a document, drawn by pdfium
-cargo run --bin chrome  -- --menu theme
-cargo run --bin widget                # one widget, and the frames it costs
-cargo run --bin probe                 # the DOM, with no window in front of it
-cargo run --bin floor -- --all        # the stack, one layer at a time
-```
-
-`libpdfium.dylib` is not committed: `vendor/lib/` is filled from
-[bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries), or
-pointed at with `SPIKE_PDFIUM` — the reader reads `HYLO_PDFIUM` and falls back
-to the spike's copy. Blitz comes in as a **git dependency pinned to
-`c6dec888`**, because the Custom Widget API this rests on is on `main` and only
-partly on crates.io.
-
-**It used to be a path dependency into a clone beside this repository**
-(`../../../blitz`), and that clone was a build dependency that is not in this
-repository: a machine without it got `failed to load manifest for dependency
-blitz-dom` and nothing else, which names a path rather than saying what to do
-about it. This file called moving off that "when the next alpha lands", and
-waiting was never going to work — `blitz-test-harness` is `publish = false` in
-upstream's own manifest, so the harness the whole Phase 2 argument rests on can
-never come from crates.io. A pinned revision is the answer instead, both crates
-take it, and **a fresh checkout now builds with nothing beside it**. That is
-what made the CI job below possible; it is the only thing that ever stood in
-its way.
-
-Two things worth knowing from the move onto `main` that preceded it: the API
-this rests on has not moved since `64eb2785`, and **all five of the upstream
-faults in `tests/upstream.rs` are still faults** — every one of those tests
-still passes, and they are written to pass while the bug is there and fail the
-day it is fixed.
-
-**A page is a `blitz_dom::Widget`, and it costs no frames when it is still.**
-The older `<canvas src=…>` paint source set `has_canvas` on the document, which
-made `is_animating()` true for ever: a steady 60fps at 52-62% of a core with
-nobody touching the machine. `Widget` replaced it upstream and added
-`requires_redraw()`, which a page answers `false` to. Measured on the same
-binary: 2 paints in 5.4 seconds against 320 with `--animate`.
-
-**But every widget in the document is painted every frame, on screen or not.**
-`build_custom_widget_scenes` walks all of them. Twenty pages mounted meant
-twenty drawn by pdfium and 265MB of texture. So `mount()` and `OVERSCAN` from
-`viewer.ts` are load-bearing rather than free, and had to be ported before any
-memory number meant anything.
-
-**A shell of our own is required for a second window.**
-`DioxusNativeApplication::add_window` does not do what its name says: it pushes
-onto `BlitzApplication::pending_windows`, which is drained in
-`can_create_surfaces()` and nowhere else, and the Dioxus half of the setup —
-the contexts, `initial_build()` — is done by `launch` for its one window only.
-A window added that way comes up empty and stays empty. `shell.rs` owns
-`BlitzApplication` directly, whose fields are public, and its own comment has
-the shape. Five things it cannot state, because they are about what happens
-when you get them wrong:
-
-- **Resuming is two steps** — `View::resume` starts the renderer and the
-  renderer answers with `BlitzShellEvent::ResumeReady` — so a view must be in
-  `inner.windows` before that event is drained, or the first frame never lands.
-- **`blitz-shell` needs its `custom-widget` feature on** even though
-  `dioxus-native` turns it on for blitz-dom and blitz-paint. Without it a
-  dropped widget's resources are never unregistered. Nothing fails loudly;
-  textures just leak.
-- **The navigation and HTML parser providers are private** to `dioxus-native`
-  and have to be restated (`nav.rs`, six lines), or `dangerous_inner_html`
-  silently does nothing.
-- **`use_window_event` is closed to a shell of our own**: it consumes an
-  `Rc<WindowEventHandlers>` from a context only `DioxusNativeApplication`
-  provides, and the type is private.
-- **macOS still places a window wrong by exactly a title bar** (64 physical
-  pixels of y). `set_outer_position` right after `View::init` fixes it — the
-  same answer `Placements` in the app's `lib.rs` already gives.
-
-**The chrome is recognisably the app's**, rebuilt from `styles.css` with the
-unsupported properties taken out. The gap list and its workarounds are in
-`dioxus-assessment.md`; two things the spike added to it. **Icons need their
-colour baked into presentation attributes** — CSS does not reach inside an SVG
-— *and* the `svg` feature has to be on, which it is not in a
-`default-features = false` build; the two failures look identical, a toolbar of
-blank icons. And **a `<canvas>`, or an `<object>` carrying a widget, must be
-`display: block`** or it lays out at 0×0, which looks exactly like a blank
-window with no cause.
-
-`cargo run --bin probe` is what found that: it builds a document and reads it
-back with no GPU and no window, and it answered the animation question and the
-`nowrap` question in one run. It is the seed the Phase 2 harness grew from.
-
-**The shader is right to one level in 255.** `recolorByPixel` from `themes.ts`
-is ported twice, to Rust and to WGSL, and held to the tolerance
-`recolor.test.mjs` already holds the app's two paths to. Two notes for whoever
-touches it: `target` is a reserved word in WGSL, and the uniform block is two
-`vec4`s rather than two `vec3`s and a float, because there is then one possible
-layout rather than a std140 rule to be right about — the `vec3` version
-compiled, ran, and silently read the flag as zero.
-
----
-
-## Phase 1 — a reader that reads
-
-`dioxus-reader/`. Open a document, scroll it, fit it, zoom it, theme it, with
-the layout ported from `viewer.ts` rather than reinvented and the renderer
-behind one trait from the first line.
-
-**The layout port went exactly as advertised.** `relayout`, `rows`, `row_of`,
-`first_box_ending_after`, `last_box_starting_above`, `mounted`, `page_at`,
-`anchor` and `scroll_target` are `viewer.ts` line for line, with the comments
-that explain *why* carried over with the lines. 250 lines of Rust with no
-renderer, no widget and no window in it, and eleven tests — including the two
-the app can only assert by opening a browser: that the binary searches agree
-with a scan over the whole document, and that the mounting window holds every
-page in the overscan band and no page outside it.
-
-**The renderer trait held its shape.** `render.rs` names four things;
-`pdfium.rs` is the only file that mentions pdfium; nothing else imports it.
-That is the seam rule applied to the new tree, and it is what would make hayro
-a decision rather than a rewrite.
-
-**The per-page architecture is vindicated.** A page is drawn in 3.2ms,
-uploaded in 4.7ms, and exists exactly once — one `wgpu::Texture`, no worker
-copy, no `ArrayBuffer`, no canvas. Two pages are mounted at a time, so the
-document contributes ~46MB and does not grow with the book. The bridge that
-killed the pdfium prototype is genuinely absent: 43ms a page became 4.7ms of
-`write_texture` in the same process.
-
-**Recolouring is free.** A dark theme costs the same milliseconds and the same
-megabytes as a light one, because the ramp is a compute pass over the page as
-it is uploaded, and pdfium's BGRA becomes RGBA in the same pass — the CPU
-swizzle Phase 0 measured at 1.6-5.1ms a page is gone with it. In the app this
-is 835 lines of `themes.ts`, a blend-mode probe, a pixel fallback and a mask
-allocator; here it is one WGSL function.
-
-### Seven things about Blitz that cost time
-
-**1. `MountedData` panics rather than failing.** `scroll`, `get_client_rect`
-and `set_focus` all take `doc_mut()`, and every place a component can call one
-from is already inside a borrow of the document: a DOM event handler runs
-inside `EventDriver`'s borrow, a mounted handler inside
-`flush_queued_mounted_events`'s. The result is `RefCell already borrowed` from
-a stack naming neither. `NodeHandle::try_doc` exists and says as much in its
-own doc comment — the safe method is the one a reader does not need.
-
-*So the scroll offset is ours.* The viewer holds a number, the wheel moves it,
-and the pages are placed against it — which is what `viewer.ts` does in all but
-the last step anyway. What is lost is the scrollbar and the platform's fling:
-a scrollbar we would have to draw, and momentum arrives from the trackpad in
-the event stream regardless. It is the largest single thing given up.
-
-**2. The viewport has to be asked for, not observed.** No `ResizeObserver`, no
-`resize` event, and `get_client_rect` is the call above that panics. The window
-size minus a stated chrome height is what the layout runs on.
-
-**3. A key with nothing focused goes to `<html>`**, which is above anything a
-component can put a handler on, and events bubble up rather than down. So the
-reader's root takes focus when it mounts and one `onkeydown` is the app-level
-handler `main.ts` has. Before that every key did nothing and nothing said why.
-
-**4. A texture must not be registered and drawn in the same frame.** It works
-until something else is unregistered in that frame too — exactly what happens
-when the window's real size arrives and every page is replaced at once — and
-then Vello panics with "tried to draw an invalid empty image" from the atlas
-upload, on the third frame of every run. A page is registered on one frame and
-drawn from the next, with the widget asking the shell for that next frame,
-because `requires_redraw()` cannot: `is_animating()` is read at the *start* of
-a frame, before the paint that would set the flag.
-
-**5. A page's texture belongs to its node, not to its widget.** Unregistering
-from inside `paint` is what item 4 forbids, and leaving a replaced texture
-registered leaks a page for every zoom step. So what `keyFor()` carries — the
-page, the size, the theme — is the *component key*: a change to any of them is
-a different node, a new widget, a new texture, and the old node's resources
-released by Blitz between frames, where it is safe.
-
-**6. Keeping the page as drawn costs more than redrawing it.** Holding
-pdfium's output beside the themed copy makes a theme change a compute pass
-rather than a re-render, and costs 23MB a page — against 3.2ms to redraw. The
-source is uploaded, read once by the compute pass, and dropped.
-
-**7. Two `data-` attributes are the seam for state that has no pixels** —
-where the reader is scrolled to, and which page each `.page` node is. The
-mounting window is the most load-bearing thing in `layout.rs` and is otherwise
-invisible from outside. Everything else a test asserts on is text somebody
-could read off the screen, which is the better bar.
-
----
-
-## The floor, and what was actually in it
-
-Phase 1 measured a fixed ~110MB that an empty Blitz window cost before this
-experiment wrote a line, and named the one finding that would end the
-experiment: that the floor belongs to the stack and does not get better. **It
-is the opposite. None of the floor belonged to Blitz.**
+A reading session on a paper, maximised, measured with `vmmap`: 155MB idle,
+267MB at 900×700, 313MB maximised, 320-390MB peak during a fast scroll,
+settling to 150-190MB a second after it stops. Flat from ten screenfuls to
+sixty, which is what says it is a working set rather than a leak. The levers,
+if it has to come down, are the 12MP page ceiling and the two-textures-per-page
+upload; `device.poll` was measured and ruled out.
 
 ### Measure footprint, never RSS
 
-`stats::rss_mb` shelled out to `ps -o rss`, and on macOS **a GPU buffer is
-charged to a process's physical footprint and only partly to its resident
-size.** The two disagree by a factor of three on exactly this workload. The
-clearest case is the renderer choice, measured on an empty window with one
-frame drawn:
+On macOS **a GPU buffer is charged to a process's physical footprint and only
+partly to its resident size**, and the two disagree by a factor of three on
+this workload. Measured on an empty window with one frame drawn:
 
 | renderer | rss | footprint |
 | --- | ---: | ---: |
@@ -402,91 +85,208 @@ frame drawn:
 
 Eleven times, in the number that matters, and invisible in the one that was
 being read — Phase 1 measured the two at 3% apart and concluded they were
-equivalent. `stats.rs` reports both now and summarises on footprint, which
-costs a few hundred milliseconds (`vmmap --summary` is the only thing that
-answers without linking against mach) and so is read where a session ends and
-never in a frame.
+equivalent. `stats.rs` reports both and summarises on footprint, which costs a
+few hundred milliseconds (`vmmap --summary`) and so is read where a session
+ends and never in a frame.
 
-### The ablation
+The exception is Linux, where `tests/cost.rs` reads `VmRSS` out of
+`/proc/self/status` — no separate footprint counter exists, and the one caller
+runs the whole reader down the **CPU** path, where there is no device and no
+driver and everything the process holds is resident by construction.
 
-`dioxus-spike/src/bin/floor.rs` builds the stack a layer at a time, one
-process per stage, because a stage cannot be unbuilt — a wgpu device that has
-existed has already made its allocator's arenas.
-
-| stage | footprint |
-| --- | ---: |
-| the process alone | 1.8MB |
-| + a winit window | 15.7MB |
-| + a wgpu instance, adapter and device | 16.4MB |
-| + `vello`, resumed, one empty frame | **208.0MB** |
-| + `vello_hybrid`, resumed, one empty frame | **18.8MB** |
-
-**Nothing in Blitz, Stylo, Parley, fontique's system-font enumeration or winit
-costs anything worth naming.** A window with a GPU device and a swapchain
-behind it is 16MB. What costs 190MB is the first frame Vello draws, and it
-costs the same whether the frame is empty or full.
-
-`vello_encoding`'s `BufferSizes::new` is why: seven scene-independent
-constants — `lines` and `segments` at 50.3MB each, `ptcl` at 33.6MB, `tiles`
-and `seg_counts` at 16.8MB each, `blend_spill` 4.2MB, `bin_data` 1.0MB —
-**173.0MB** in total, with a comment in the source saying they were "hand
-picked to accommodate the vello test scenes as well as paris-30k" and *should*
-be derived from the scene. `vmmap` puts 179MB of the `widget` spike's 227MB
-under *Owned physical footprint (unmapped) (graphics)*.
-
-**`vello_hybrid` is the default now** — not as a fallback for hardware without
-compute, which is how the assessment lists it, but for memory. It allocates
-none of the above, is upstream's own default, takes the same textures through
-the same `try_register_custom_resource`, and draws pages correctly. `vello`
-stays behind a cargo feature so the comparison stays runnable.
-
-### And 96MB of it was ours
-
-With Vello's scratch out of the picture the reader still sat at 240MB. `vmmap`
-named it: six `MALLOC_LARGE` regions, 120MB, every one of them **`(empty)`** —
-freed, and still charged, because macOS's allocator does not hand large blocks
-straight back. 23.9M is exactly one page at this window size, and there were
-three per page because:
-
-```rust
-let bitmap = page.render_with_config(&config)?;   // pdfium's own buffer
-Ok(Bitmap { bgra: bitmap.as_raw_bytes().to_vec(), .. })
-//                 ^ returns an owned Vec        ^ and copies it again
-```
-
-**`PdfBitmap::as_raw_bytes` is not a view.** It is `FPDFBitmap_GetBuffer_as_vec`,
-which allocates and copies; the `.to_vec()` allocates and copies again. The
-renderer now draws into a buffer it keeps — `PdfBitmap::from_bytes` wraps a
-slice we own, so pdfium renders straight into it — and lends the bytes to a
-callback for exactly as long as the upload takes. It is resized only when the
-page size changes, so a document scrolled end to end allocates once. Worth
-96MB and 3.2ms a page: Phase 1 reported 6.6ms and attributed it to pdfium;
-half of it was memcpy.
-
-*One thing that looked like the same fix and was not.* Keeping the source
-texture and reusing it costs a permanent 24MB and changes the mid-scroll
-figure not at all, because the pile during a scroll is the *themed* textures,
-which wgpu cannot free until the submission that read them has retired. The
-comment in `gpu.rs` says so, so it is not tried again.
-
-### What is left in the 144MB
+### Where the 144MB is
 
 46MB of page textures (two mounted, and it does not grow with the book), 43MB
-of swapchain (three IOSurfaces at 2200×1800, which is winit's and wgpu's
-rather than ours), 24MB for the page buffer, 21MB of small allocations across
-Rust, Stylo, Parley and pdfium, ~10MB of everything else. None of it is a
-mystery and none of it is a fixed cost of the stack.
+of swapchain (three IOSurfaces at 2200×1800, winit's and wgpu's rather than
+ours), 24MB for the page buffer, 21MB of small allocations across Rust, Stylo,
+Parley and pdfium, ~10MB of everything else. **None of the floor belongs to
+Blitz**: an ablation, one process per stage, put the process alone at 1.8MB, a
+winit window at 15.7MB, and a wgpu device and swapchain at 16.4MB. What cost
+190MB was the first frame `vello` draws, and it costs the same whether the
+frame is empty or full — seven scene-independent constants in
+`vello_encoding`'s `BufferSizes::new` totalling 173MB. **`vello_hybrid` is the
+default now**, not as a fallback for hardware without compute but for memory.
+`vello` stays behind a cargo feature so the comparison stays runnable.
 
-**Mid-scroll is the one number still worth chasing**: 60 screenfuls takes the
-footprint to ~200MB and the peak to 390MB, settling within a second of
-stopping. That is themed textures dropped and not yet retired. The fix, when
-it is worth making, is what `viewer.ts` already has — a pool of page-sized
-textures rather than a new one per page, which is `pageCache` and `discard()`
-in a different register.
+Mid-scroll is the one number still worth chasing: the peak is themed textures
+dropped and not yet retired. The fix, when it is worth making, is what
+`viewer.ts` already has — a pool of page-sized textures rather than a new one
+per page.
 
----
+## What is built
 
-## Phase 2 — the harness
+The reader opens a document, scrolls it, fits it, zooms it, themes it, and
+remembers all of that between runs. Beyond that: the document's own links,
+destinations, page labels and a go-to field, with the jump history that
+following one needs; the sidebar (contents, marks, thumbnails, search results);
+search; margin trimming, rotation and one-page-at-a-time; the library (where
+you were, what a document calls itself, what was open last); watchers on the
+themes directory and the open document; multiple windows, presenting, and a
+start screen; text selection and copying; markup; the Settings window with its
+theme editor; the password prompt; dark mode following the machine; help and
+print.
+
+**Every one of the app's forty-three keyboard actions answers**, and the
+catch-all that used to say "not built yet" is gone — so an action added to
+`keymap` and not handled in `app` is a compile error rather than a sentence in
+the notice line.
+
+**And one thing is built that the app has no counterpart for**: `sign.rs`. A
+reader draws their name once, keeps it, and drops it onto a page as the
+specification's own `/Ink` annotation, with a date or a line of type beside it
+by the same click. It is not parity and does not pretend to be — `tests/parity.rs`
+names it as an exception. It is also not a *cryptographic* signature and the
+window says so in its first sentence; see `signing-assessment.md`.
+
+### What is not built
+
+- **No underline, strike-out or squiggly.** pdfium can write all three; a list
+  showing a mark this reader cannot make would be a list with a dead row in it.
+  The app arrives at the same place from the other side.
+- **No area drag for scans**, the one thing `markup-assessment.md` still lists
+  as unbuilt on both sides.
+- **No text layer, and there is not going to be one** — `select.rs` is what
+  that was for.
+- **No typed-name-in-a-script-face**: it needs a cursive font in the binary,
+  and a signature in somebody else's handwriting is a strange thing to offer.
+- **No cryptographic signing.** Not blocked by this codebase; blocked by the
+  fact that a signature nobody's software trusts is not a signature.
+- **No keyboard link-following** — there is no focus ring to walk and
+  `tabindex` is not honoured in Blitz's focus walk.
+- **Windows is still one process per launch.** The single-instance socket wants
+  a named pipe there and there is no std type for one.
+- **`popover-*` against `menu-*`** is a naming difference and stays one. What a
+  port owes the app is the same elements, labels, order, behaviour and look,
+  not the same class names.
+
+## The rules the port turned up
+
+Ranked by how much a change is likely to need them.
+
+**Work belongs where its data already is.** The seam rule from `AGENTS.md`
+holds here with no bridge to enforce it: `render.rs` names seven questions —
+draw a page, its size, its text, its outline, its links, its labels, its title —
+and `pdfium.rs` is the only file that mentions pdfium. Each question was added
+when something asked, because a trait method with no caller is a guess about
+what the caller will want. That is what would make `hayro` a swap rather than a
+rewrite when it grows text extraction.
+
+**The app's own modules are mounted by `#[path]`, never copied.** `theme.rs`,
+`settings.rs`, `keys.rs`, `library.rs` and `watch.rs` are `src-tauri/src/`'s
+files, compiled here with nothing removed, and their forty-four tests run with
+them. A copy would go stale, and a stale copy of a theme loader is invisible:
+the file is right and what is on screen is the copy. Mounting them means the
+experiment cannot drift, and the day one grows a Tauri dependency this crate
+stops compiling and says which line did it. `watch.rs` needs `AppHandle` and
+`Emitter`, which `lib.rs` supplies with `extern crate self as tauri;` and
+`emit.rs` — the whole of what the assessment budgeted a rewrite for, and it
+happened outside the file. (A *module* called `tauri` does not work: a `use`
+path on a bare identifier is looked up in the extern prelude, not among the
+crate root's modules.)
+
+**`MountedData` panics rather than failing.** `scroll`, `get_client_rect` and
+`set_focus` all take `doc_mut()`, and every place a component can call one from
+is already inside a borrow of the document — a DOM event handler inside
+`EventDriver`'s borrow, a mounted handler inside `flush_queued_mounted_events`'s.
+The result is `RefCell already borrowed` from a stack naming neither. So:
+
+- *The scroll offset is ours.* The viewer holds a number, the wheel moves it,
+  the pages are placed against it — which is what `viewer.ts` does in all but
+  the last step anyway. What is lost is the scrollbar and the platform's fling,
+  and it is the largest single thing given up.
+- *The viewport is asked for, not observed.* No `ResizeObserver`, no `resize`
+  event. A `Screen` context answers out of the real window in the binary and
+  out of two numbers in the harness.
+- *Where the content is comes off the press itself.* A press arrives carrying
+  both its client coordinates and its coordinates within the page it landed on,
+  and the layout knows where that page is — subtract.
+
+**A texture belongs to its node, not to its widget.** A texture must not be
+registered and drawn in the same frame (Vello panics from the atlas upload when
+something else is unregistered in that frame, which is what happens when every
+page is replaced at once), and unregistering from inside `paint` is what that
+forbids. So what `keyFor()` carries — the page, the size, the theme, the view,
+the `edition` a recompile bumps — is the *component key*: a change is a
+different node, a new widget, a new texture, and the old node's resources
+released by Blitz between frames, where it is safe. The viewer is also sized
+from the window **before the first frame** rather than on mount, so there is
+nothing to re-key and no round of renders drawn and thrown away on every launch.
+
+**Every widget in the document is painted every frame, on screen or not.**
+`build_custom_widget_scenes` walks all of them, so `mount()` and `OVERSCAN`
+from `viewer.ts` are load-bearing rather than free. The same rule is why the
+sidebar needs no thumbnail cache: **the thumbnail cache is the mounting
+window**. A thumbnail is a widget on a node, the node exists only while its row
+is in view, and scrolling away gives the texture back through `Drop`. That is
+half of `sidebar.ts` gone — and it is not a saving so much as the only design
+available.
+
+**pdfium has process-wide state and no locking.** Its `thread_safe` feature is
+two `unsafe impl`s and serialises nothing; two threads inside it abort the
+process with `SIGABRT`, no panic and no stack. `pdfium.rs` takes a process-wide
+lock — the *library's*, not the document's — in front of every call. **And a
+`Drop` is a call site, and it is the one call site that does not appear at the
+place it happens**: `FPDF_CloseDocument` runs from `PdfDocument`'s own `Drop`,
+on whatever thread the last `Arc` dies on, and what it corrupts is a
+process-wide map of stock fonts keyed by `CPDF_Document*` — so the crash lands
+in a test that was *opening* a document, caused by a test that was finishing
+one. `impl Drop for Document` takes the lock. That rule is worth carrying to
+anything wrapping a C library behind a lock.
+
+**A shell of our own is required for a second window**, and five things it
+cannot state: resuming is two steps (a view must be in `inner.windows` before
+`ResumeReady` is drained, or the first frame never lands); `blitz-shell` needs
+its `custom-widget` feature on or a dropped widget's resources are never
+unregistered; the navigation and HTML parser providers are private to
+`dioxus-native` and have to be restated (`nav.rs`, six lines) or
+`dangerous_inner_html` silently does nothing; `use_window_event` is closed to
+us, because it consumes an `Rc<WindowEventHandlers>` from a private context;
+and macOS places a window wrong by exactly a title bar until
+`set_outer_position` is called right after `View::init`.
+
+**Everything a window is asked to do is an event.** Closing a window or putting
+one in full screen is reached from a Dioxus event handler, which runs inside a
+borrow of the document *and* the shell's borrow of the window map, so taking a
+window out of that map from in there cannot be written. Every ask is posted to
+the shell proxy and answered on the next turn. It costs a frame nobody can see
+and makes every window verb one shape — the Dock menu needed no special case.
+
+**Rules and windows are two things.** `windows.rs` is `OpenDocuments`,
+`Placements`, `Exiting` and the deciding half of `hand_over` with every mention
+of a window taken out, and it has fourteen tests. `session.rs` is the half that
+actually makes windows and cannot be tested, and it is eighty lines. The app's
+equivalent is untestable only because it is written against `AppHandle`,
+`State<'_, …>` and `WebviewWindow`.
+
+**A key with nothing focused goes to `<html>`**, above anything a component can
+put a handler on, and events bubble up. So the root takes focus when it mounts
+and one `onkeydown` is the app-level handler `main.ts` has. Two consequences:
+
+- *A plain key typed into a text field is also a shortcut*, because the root
+  hears every key in the window. `prefs::typing_is_not_a_shortcut` is the rule,
+  called by `TextField` and `ColorField`. Keys with a modifier still pass, so
+  ⌘A, ⌘C, ⌘V and ⌘Z mean what they mean in a field.
+- *A field that is always present either always asks for the keyboard or holds
+  the focus while not asking* — both are a dead keyboard. So the page field is
+  a button that becomes an input, and stops existing when it is done, which is
+  what the find bar's field already did. Two fields must never both ask: the
+  find field asks only while the page field is not up.
+
+**Rectangles stay in the page's own unturned points**, and `Layout::place_on`
+is the single place a link, a match, a mark or a caret meets the rotation and
+the crop. `unplace_on` is its inverse and is how a press comes back the other
+way — inverted rather than searched for, because a search has no answer for a
+point in the gap between two words. The consequence is that a selection, a link
+and a match survive a zoom, a turn, a trim and a spread with nothing
+recomputed, and that no cache is thrown away on a rotation, where the app has
+to clear three.
+
+**Two `data-` attributes are the seam for state that has no pixels** — where
+the reader is scrolled to, and which page each `.page` node is. Everything else
+a test asserts on is text somebody could read off the screen, which is the
+better bar.
+
+## The harness
 
 `src/harness.rs`, behind a `harness` feature that `cargo test` turns on and
 `cargo build` leaves off. The release binary is 12MB either way.
@@ -505,3895 +305,306 @@ reader.screenshot().save("/tmp/page.png");
 No window, no GPU, no compositor, no PDF worker in another process.
 `Reader::open` is about 40ms and the whole reader suite is under half a second.
 
-**Most of it is upstream's.** `blitz-test-harness` — which did not exist when
-the assessment was written — builds a `DioxusDocument`, resolves style and
-layout against a stated viewport, synthesises pointer, wheel, key and IME
-events through the real event pipeline, and offers the DOM inspection the
-assertions are written against. So Phase 2 was three things rather than a
-harness from nothing: a reader to drive, a `state()` that reads the interface
-the way somebody looking at it would (the page off the pill, the zoom off its
-chip, the theme off the button that changes it — deliberately not out of the
-`Viewer`, because it was the *wiring* that was broken both times something
-was), and a `screenshot()`, which is the half the app's own harness never had.
+**Most of it is upstream's.** `blitz-test-harness` builds a `DioxusDocument`,
+resolves style and layout against a stated viewport, synthesises pointer,
+wheel, key and IME events through the real event pipeline, and offers the DOM
+inspection the assertions are written against. What this crate added: a reader
+to drive, a `state()` that reads the interface the way somebody looking at it
+would (deliberately not out of the `Viewer`, because it was the *wiring* that
+was broken both times something was), and a `screenshot()`.
 
-Three things had to change in the reader, each smaller than the test it makes
-possible and each an improvement on its own account: **a page can be drawn
-without a GPU** (`Software` in `page.rs` runs pdfium's BGRA through
-`recolor_cpu` — which is also the `vello_cpu` fallback the assessment's risk
-table asks for, and a fallback whose pages are the one thing it cannot draw is
-not a fallback); **the window is asked for a number, not for itself** (a
-`Screen`, answered out of the real window by the shell and out of two numbers
-by the harness); and the two `data-` attributes above.
+Three things had to change in the reader, each an improvement on its own
+account: a page can be drawn without a GPU (`Software` in `page.rs`, which is
+also the CPU fallback the assessment's risk table asks for); the window is
+asked for a number rather than for itself; and the two `data-` attributes.
 
-### What it caught, on its first run
+`Options.settings` and `Options.keys` write a real `settings.toml` and
+`keys.toml` through the app's own loaders before the reader opens, so what a
+test exercises is the real path. `press_chord("mod+0")` keeps the platform out
+of the test. Contexts stand in for everything that would otherwise reach the
+machine: `Screen`, `Away` (a browser), `Frame` (the window), `Clip` (the
+clipboard). A suite that took the real clipboard would empty the clipboard of
+whoever is running `cargo test`.
 
-**A click on the theme button crashed the app.** A panic inside Stylo, from a
-stack with nothing of this app in it, on a gesture anybody would make. Pressing
-`t` for the same action was fine, which is why Phase 1 had not found it.
+**The watcher is off in the harness on purpose.** `Watching` has no way to
+stop — the sender the notify callback holds keeps the receiver alive — which is
+nothing at one per process and is a hundred threads on a `cargo test`. One test
+asks for the real thing.
 
-- A `<style>` element whose text changes is a **stylesheet mutation**, and
-  Stylo answers one by walking the tree with `StylesheetInvalidationSet`.
-- That walk calls `each_class` on any element **snapshot** it finds, and
-  `ServoElementSnapshot::each_class` goes through `get_attr`, which is
-  `self.attrs.as_ref().unwrap()`.
-- Blitz takes a **state-only** snapshot for a hover or a press
-  (`snapshot_node_state_only`, "cheaper … as it does not capture attributes"),
-  and that snapshot has `attrs: None`.
+**There are no reference PNGs, and that is a decision.** The rasteriser is
+deterministic; the *fonts* are not. So the pixel tests assert measurable
+properties — paper is paper and the ground beside it is not, a band that should
+hold text is not uniform, a recolouring theme moves the mean of the page below
+80 while the light one leaves it above 200. Each is a sentence somebody could
+check by looking, which is the right bar for a test that stands in for looking.
 
-So a click is two things at once — the pointer lands on a button, which is a
-snapshot, and the handler rewrites the stylesheet — and the second walks over
-the first. Two further conditions must hold, which is why the first three
-attempts at a minimal reproduction all passed: the changed sheet must contain a
-**class selector**, and some rule must depend on the **state bits**.
-`tests/upstream.rs` is the twenty-line reproduction with both; it catches the
-panic rather than letting it fly, so it *passes while the bug is there* and
-fails the day it is fixed. Either side could fix it — Stylo's element-wrapper
-path guards with `has_attrs()` and this path does not, and equally Blitz could
-fill the attributes in. Against `stylo 0.20.0`, `blitz-dom 0.3.0-beta.2`.
+**The memory test is a growth bound, not a ceiling.** Ten screenfuls to reach a
+steady state, then forty more, and the footprint may not climb by more than
+60MB across them — it climbs by zero. It scrolls the thumbnail column too, in
+the same test rather than a second one, because the counters are the process's.
 
-**The reader no longer rewrites its stylesheet, and that is a better design
-anyway.** The theme was interpolated into the sheet, so every change re-parsed
-60 lines of CSS; it is now ten custom properties in the root's `style`
-attribute, and a theme change re-resolves variables. An attribute change is a
-snapshot that *does* carry attributes, so the crash cannot happen.
+**Parity is measured rather than asserted.** `tests/parity/app-inventory.json`
+is taken from the running Tauri app in WebKit through `scripts/ui-harness.mjs`,
+and `tests/parity.rs` asks the port the same questions: what each toolbar group
+holds, what each menu lists in what order and where the rules fall, the
+Settings window's pages with their fields and headings, the sidebar's tabs, the
+find bar's switches, the start screen, the Information window, the theme editor
+(the sentences under the fields, not just the labels), the Keyboard page's
+labels and groups, the three things said over a page, and what all twenty-two
+of `applyTheme`'s custom properties resolve to. Its first run found eight
+divergences nobody had reported.
 
-**`pdfium-render`'s `thread_safe` feature does not serialise anything.** It is
-two `unsafe impl`s — `Send` and `Sync` for `Pdfium` — and a bound on the
-bindings accessor. pdfium itself has process-wide state and no locking, so two
-threads inside it abort the process: `SIGABRT`, exit 134, no panic, no message,
-no stack. Invisible while there was one document on one thread; it arrived the
-moment there was a test suite, because `cargo test` runs test functions in
-parallel. `pdfium.rs` takes a process-wide lock in front of every call now —
-the library's lock, not the document's, because a per-document lock is exactly
-what was already there and exactly what does not help. It costs nothing
-measurable and it is the thing to remember if pages are ever drawn off the main
-thread.
+Two things about driving it: a harness that clicks a *point* rather than a
+*selector* cannot reach a button below the foot of a scrollable pane, which is
+why the theme editor had never been opened by a test; and the peek handle is
+not on screen until somebody reaches for the top edge.
 
-**And a lock in front of every call is not a lock in front of every call**, as
-a `SIGSEGV` a fortnight later showed: `FPDF_CloseDocument` is reached through
-`PdfDocument`'s own `Drop`, which runs wherever the last owner dies and takes
-no lock, and what it corrupts is a process-wide map in pdfium rather than the
-document being closed. See "After Phase 3" below for the crash report that
-names it and the four-line fix. The general form is worth keeping in front of
-this paragraph: **a `Drop` is a call site, and it is the one call site that
-does not appear at the place it happens.**
-
-### What is tested
+## What is tested
 
 | file | what it holds |
 | --- | --- |
-| `tests/reader.rs` | the interface: opening, the wheel, ten keys, the mounting window, fit and zoom, keeping your place through a zoom, the toolbar, spreads, a window of another size, the whole theme list, and settings surviving a restart |
-| `tests/paint.rs` | the pixels: a page where the layout puts it, ink on it, a recolouring theme reaching the page and the chrome, the ink surviving the theme, the picture changing when you scroll |
-| `tests/keys.rs` | the keyboard: chords, the table, `keys.toml`, a rebound key, and the dispatch — `tests/keys.test.mjs`, carried across with the port |
-| `tests/sidebar.rs` | the panel: the contents listed and indented, a heading clicked and the one the reader is under, the column's mounting window, a thumbnail with ink on it, the document giving up exactly the panel's width, and a mark made, named, followed, taken off and remembered |
-| `tests/search.rs` | the find bar: opening and closing it, what is typed reaching the scan, the match the reader lands on, stepping and wrapping, a highlight's rectangle on the page, the three switches, the results tab, a key typed into the field not driving the document, and one slice not reading a whole book |
-| `tests/links.rs` | the links: where one is, where following it lands, the two ways a document writes a destination, an address handed to the system, a link that points nowhere; and the history, the labels and the page field |
-| `tests/view.rs` | the margins measured off a sample and taken away, the page turned, a link that turns with it, and the two together |
-| `tests/paged.rs` | one page at a time: what is laid out, what a page turn is, the ends of the document, and every chord in the keymap failing to leave the mode |
-| `tests/library.rs` | where you were, kept and put back; the switch that turns it off; the page remembered in paged mode; what a document calls itself and when that is not a name; what was open, and what has been deleted |
-| `tests/watch.rs` | what changes on the disk: a theme edited and a theme deleted, a document recompiled and one that got shorter, news about somebody else's document, a rebuild that renames the paper — and one test with a real watcher and a real file behind it |
-| `tests/windows.rs` | the window, asked for rather than made: a second one, closing against quitting, full screen and the way out of it, presenting taking the chrome and the panel and giving them back, and the toolbar naming its own way back |
-| `tests/select.rs` | sweeping words: what a sweep covers and what it reads as, a sweep backwards and one across two pages, a click that is not a selection, a second click taking a word, the page turned under the pointer, ⌘A, ⌘C, ⌘⇧C, Escape's order, a recompile putting it down, and the cap on the pages of text kept |
-| `tests/ime.rs` | composed input: a word from a candidate window reaching the field, one that is in the document being found, a preedit that is not searched for, the empty preedit before a commit, and a composition that does not drive the document |
-| `tests/cost.rs` | the memory assertion |
-| `tests/upstream.rs` | the five faults above, as the smallest thing that shows each |
-| `tests/recolor.rs` | the shader against the reference |
-| `src/layout.rs` | fourteen tests on the ported layout, three of them on the turn, the crop and where a rectangle lands under both |
-| `src/theme.rs`, `src/settings.rs`, `src/keys.rs`, `src/library.rs`, `src/watch.rs` | forty-four, and they are the app's own — see Phase 3 |
-| `src/sidebar.rs` | four on the thumbnail column's geometry |
-| `src/stats.rs` | two on the two lines of `/proc/self/status` the memory test reads on Linux |
-| `src/crop.rs` | seven: the ink box, the padding, the clamp, the refusals, and the sample |
-| `src/windows.rs` | fourteen on the rules the app cannot test at all: which window a document goes to, what a window going means, and where the next one lands |
-| `src/emit.rs` | four on the switchboard: news for one window, news for all of them, and a window that has gone |
-| `src/search.rs` | eighteen: the fold, the origin map, whole words, the scan order, stepping, the cap, and the quads a match becomes |
-| `src/select.rs` | ten on where a caret lands, what two of them cover, what a word is, and what a range reads as |
-| `src/store.rs`, `src/palette.rs` | the layer between them and the reader |
-
-**And it is asked of the thumbnail column too**, in the same test rather than
-a second one, because the counters are the process's and two tests running at
-once would each be reading the other's pages.
-
-**The memory test is a growth bound, not a ceiling.** What a process costs to
-start depends on the machine, the allocator and how many fonts are installed,
-and none of that is what a leak looks like. So: ten screenfuls to reach a
-steady state, then forty more, and the footprint may not climb by more than
-60MB across them — it climbs by zero. The regression it exists to catch is the
-one that cost 96MB and went unnoticed through the whole of Phase 1.
-
-**There are no reference PNGs, and that is a decision.** The rasteriser is
-deterministic; the *fonts* are not. The toolbar is drawn in whatever
-`ui-sans-serif` resolves to, which is a different file on a Mac, in a container
-and on whatever a contributor is using, and pdfium's text rendering moves
-between versions. A byte comparison would fail everywhere but here, and a
-tolerance turns the test into "the picture is roughly the same shape". So the
-pixel tests assert *measurable properties*: paper is paper and the ground
-beside it is not, a band that should hold text is not uniform, a recolouring
-theme moves the mean of the page below 80 while the light one leaves it above
-200, the toolbar wears the theme's own paper to within a level or two. Each is
-a sentence somebody could check by looking, which is the right bar for a test
-that stands in for looking. Reference images become possible the day the
-harness ships its own font.
-
----
-
-## Phase 3 — parity, in progress
-
-The assessment's order: themes and settings, then the keyboard, then the
-sidebar, then search, then links and labels, spreads and trim, the library,
-the watchers, multi-window, and markup last because that is where it stops
-being a port. It came out as eleven rather than ten: markup needs something to
-mark, and selecting words is a whole item — see item 10, which is the first
-place in the port where the webview turned out to be doing something worth
-having.
-
-### 1. Themes and settings — done, and the port was free
-
-**`src/theme.rs` and `src/settings.rs` in this crate are
-`src-tauri/src/theme.rs` and `src-tauri/src/settings.rs`, mounted by `#[path]`,
-with no copy and nothing removed.** Everything they need is `atomic_write` and
-each other. That is the assessment's central claim about the Rust side —
-roughly 2,450 lines port with no change at all — tested rather than asserted,
-and it came back stronger than the claim: the change needed was not "drop
-`#[tauri::command]`" but nothing whatsoever, because neither file ever carried
-one. Only `lib.rs` did.
-
-A copy would have been the ordinary thing and it would have been wrong, for the
-reason `AGENTS.md` gives about every other copy in this tree: the copy goes
-stale, and a stale copy of a theme loader is invisible, because the file is
-right and what is on screen is the copy. Mounting the files means the
-experiment cannot drift, and the day one of them grows a Tauri dependency this
-crate stops compiling and says which line did it.
-
-**Their own tests come with them**, and `cargo test` runs seventeen of them
-here unmodified: the settings write race, hand-edited files that cannot change
-what a setting is, a later version's setting surviving a downgrade, a
-hand-written theme deleted and edited under the name its author gave it, a
-built-in that saves a copy rather than being overwritten. Those are not this
-crate's tests and this crate did not write them; they are the port working.
-
-`build.rs` is the app's, pointed at the app's `themes/` directory rather than a
-second copy of the fourteen files — so the built-in set is the same directory
-on both sides, and a shipped theme that will not parse or that names a colour
-the renderer cannot read fails this build too, by file and field.
-
-What is new here rather than ported:
-
-- **`palette.rs`** — `applyTheme` and `parseColor` from `themes.ts`: strict
-  hex, the derived shades, and `resolve`, which turns a theme's seven optional
-  strings into the fixed set of colours the shader and the stylesheet use. The
-  split is one `themes.ts` already makes and never named. `unreadable` names
-  the fields at fault so a hand-written theme finds out, rather than silently
-  rendering black on white.
-- **`store.rs`** — the layer the reader talks to: which theme is in use,
-  resolved, and a way to change a setting that writes it down. A group at a
-  time, because settings almost never move alone — a theme with the light or
-  dark slot it fills, a zoom with its fit mode. **A theme is remembered by id,
-  never by position**, because the list changes when somebody adds a file to
-  the directory; an id naming nothing falls back to the default rather than to
-  nothing, which is what makes deleting the theme you are wearing survivable.
-- **`config.rs`** — `atomic_write`, and a config directory that is
-  deliberately **not the installed app's**: this crate rewrites every shipped
-  theme on every run, and pointed at the same directory it would be editing
-  the files of the app it is being compared against, very likely while that
-  app is open. `HYLOPDF_CONFIG` overrides it, which is what the tests use.
-
-**What this replaces is the whole bridge.** In the app the same work is
-`api.ts` (898 lines), thirty-three commands, a browser twin of every one, and
-`settings.test.mjs` existing solely because the settings table is written out
-three times — Rust defaults, `fallbackDefaults`, the `Settings` type. Here a
-component calls a method, the table is stated once in the file that already
-stated it, and there is no second copy to drift. That test has nothing left to
-check and does not exist here.
-
-*One thing deliberately not done.* There is no settings *window* and no theme
-editor — those are interface, and an interface is what the items after the
-keyboard are for. The keyboard itself is done — item 2 below — and the settings
-window is now the oldest thing outstanding on this list.
-
-*The other thing on this line has since been done.* Writes happened on
-whichever thread asked, which the app moved off the main thread because
-`remember_position` fires on every pause in a scroll — and nothing here did
-that until the library landed. It does now, and the answer is one thread for
-that one write: see item 7.
-
-### 2. The keyboard — done, and it took a file with it
-
-The reader answered eleven keys through a `match` on `event.key()`. That is
-the shape the app spent a rewrite getting out of, and it had already started
-failing here in the way the app's version did: a modifier was something an arm
-had to *remember* to check, so `+` answered ⌘+ and ⌥+ alike, and ⌘0 could not
-be expressed at all. It is now the app's own table, and a chord is looked up
-rather than matched.
-
-**`src/keys.rs` is the app's, mounted like `theme.rs` and `settings.rs` beside
-it, and `src/keymap.rs` is `keys.ts` in Rust.** That is the third module to go
-across untouched and the most interesting of them, because *its other half is
-TypeScript*. In the app the split is argued for at length — `keys.rs` owns the
-file, `keys.ts` owns the meaning of a line, and validating in Rust as well
-would have meant the same parser written twice — and the argument reads as
-though the bridge is what forced it. It is not: with both halves in Rust and
-no bridge between them, the same split is still the right one, and **nothing
-about it had to change**. `keys.rs` compiles here with no edit, its five tests
-run unmodified, and the template it installs is the app's `keys.toml`.
-
-What the port cost: 700 lines of `keys.ts` became 640 of `keymap.rs`, and two
-things got smaller on the way.
-
-*`isMac` became a parameter.* In the app it is a module-level constant
-imported from `api.ts`, so asking `parseChord` what it would say on Windows
-means compiling the module a second time with the constant substituted — which
-is what `tests/keys.test.mjs` does, and why the app carries
-`HYLOPDF_PLATFORM=other` to lie to `navigator.platform` for the tests that
-cannot. Here `mac` is an argument, both platforms are two calls, and the
-environment variable has nothing left to do.
-
-*The dispatch came out of the handler.* `wireKeyboard` decides what a
-keystroke means while reading and writing four fields of the `App` object, so
-the sequence logic — `g`, then what follows it — can only be tested by pressing
-keys at a browser. `Keymap::resolve` is that logic as a function of the chords
-and what is pending, and `a_pending_prefix_is_continued_dropped_or_used_on_its_own`
-asks it directly.
-
-**Every action in the app's table is carried, including the ones this reader
-cannot do**, because the point is that `keys.toml` means the same thing on
-both sides: a table missing half its rows would report the other half as
-things HyloPDF cannot do, in the reader's own file. What is not built says so
-on the notice line — "Print — handed to a program that prints is not built
-yet" — which turns the
-keyboard into a live list of what Phase 3 has left, and is a better answer than
-silence to somebody pressing ⌘P.
-
-Three actions are this experiment's and are in a list of their own so that the
-app's table stays exactly the app's: `t` for the next theme and `s` for
-spreads, both of which were built because there were no menus, and ⌘C, which
-is there because the selection is this reader's own rather than a webview's —
-see item 10. The test that holds the table against the shipped `keys.toml`
-asserts none of them is in it.
-
-*One number moved.* Half a screen is now half of what a screen scrolls rather
-than half of the window: the app's `scrollByViewport` keeps 60px of the old
-screen on the new one, and `d` twice landing somewhere Space once does not is
-the sort of thing a reader notices and cannot name.
-
-*The harness grew two things, both small.* `Options.keys` writes a real
-`keys.toml` into the reader's config directory before it opens, so what a test
-exercises is the app's own loader reading a real file — `openApp({ keys: … })`
-does the same against the browser twin. And `press_chord("mod+0")` presses a
-chord written the way the binding under test is written, which keeps the
-platform out of the test exactly as `MOD` does in the app's harness.
-
-*What is still missing is the Keyboard page*, which is where the problems
-belong: `keys.toml` is reported in one line at the bottom of the window here,
-and the app shows the whole list beside the keys it is about. That is a
-settings window, which is item 1's other half and waits on the same interface
-work.
-
-### 3. The sidebar — done, and it lost half its code on the way
-
-The document's own table of contents, the pages the reader has pinned, and a
-column of thumbnails. ⌘B opens it, ⌘⇧B marks the page — both the app's own
-bindings, out of the table ported in item 2. Whether the panel is open is a
-setting and the marks are the library, so both are there again next time.
-
-**`sidebar.ts` is 699 lines and about half of them are memory management.**
-`THUMB_CACHE`, `drawn`, `tasks`, `flights`, `trim()`, `forget(release)`,
-`isVisible()` and an `IntersectionObserver` to drive them. `src/sidebar.rs` is
-516 lines including its own tests and its comments, and none of that is in
-it, because **the thumbnail cache is the mounting window**. A thumbnail in the app is a `<canvas>` that
-lives as long as the column does, so drawing one is a commitment and the cap
-is what bounds it; here it is a `PageWidget` on a node, so it lives as long as
-the node does, and the node exists only while its row is in view. Scrolling
-away gives the texture back through `Drop`. There is nothing to trim because
-nothing accumulates.
-
-That is the same rule `mount()` and `OVERSCAN` already apply to the document,
-applied to the column — and it is not a saving so much as the only design
-available, because of what Phase 0 found: every widget in the document is
-painted every frame whether it is on screen or not. An unmounted row is not
-tidiness, it is the difference between a column that costs nothing and one
-that costs four hundred pdfium renders.
-
-What the app buys with `THUMB_CACHE` is that scrolling back a little does not
-redraw. Measured, that is not worth a cache here: a thumbnail is 1.2ms against
-a page's 2.9ms at a fiftieth of the pixels, and the number that made the app's
-cache necessary — a megabyte a canvas, nine hundred of them held for the life
-of the document — cannot arise from a design where the picture belongs to the
-row. **The whole panel costs 24MB**, and the memory test now scrolls the
-column as well as the document, which is `AGENTS.md`'s own warning about where
-a fourth leak would hide, answered.
-
-*A thumbnail wears the theme for free*, which the app's could not: it is the
-same widget reading the same `Chosen`, so the column and the page cannot
-disagree about what theme is on. The app's `redrawVisible` had to cancel a
-render in flight to avoid starting a second one into the same canvas, and had
-a bug there for a long time.
-
-**`library.rs` is the fourth of the app's modules mounted by `#[path]`**, and
-it came across for the marks: a pin in a page has to be somewhere the next run
-can read it. Eight more of the app's own tests run here unmodified. Only
-`touch` and `toggle_mark` are called — where you were, what was open in each
-window and the markup journal are the items of Phase 3 that are about those
-things — and, as with the other three, nothing in it had to change.
-
-*A mark is named for the section it falls in*, which is `sectionFor` in
-`sidebar.ts` and is the reason the outline is read at open rather than when
-the panel is first shown: "A section" is worth a great deal more than "Page 4"
-to somebody looking at a list of their own marks a week later.
-
-**The renderer seam grew its third and fourth questions**, both of which
-`render.rs` had named and not declared since Phase 1: `outline()` and
-`path()`. The outline comes out of pdfium's bookmark tree flattened into rows
-with a depth, which is what `buildOutline` walks a tree to produce anyway. Two
-things about that walk are worth keeping: `iter_direct_children` already walks
-the sibling chain under a node, so following siblings *as well* lists every
-entry but the first of its level twice — which is exactly what the first
-version did; and a malformed document can point a bookmark at its own
-ancestor, so the walk is capped at 20,000 rows and sixteen levels rather than
-finding that out by running out of memory.
-
-**And there is a fixture written in Rust now.** `src/fixture.rs` writes a
-twelve-page document carrying a three-level table of contents, because the app
-has no fixture with an outline in it and adding one to `make-pdf.mjs` would
-mean `cargo test` needed Node — which is the opposite of what "run this suite
-on three platforms" is asking for. `Reader::book()` still points at the app's
-own 400-page fixture, deliberately: it is the document every number above was
-taken on.
-
-*One thing about the panel is a decision rather than a port.* Which tab is
-showing is not remembered, because the app has no setting for it either and
-inventing one would mean adding a key to `settings.rs` — the file this crate
-*mounts* rather than edits. A document with no contents opens on the pages,
-which is what `setDocument` does and is the difference between a panel and an
-empty box.
-
-*And the panel's third tab arrived with item 4*, which is why the tab list can
-change: Results is there while the find bar is and gone when it is not, and
-the panel has to be able to fall back to one of the other two.
-
-**The edge can be dragged now, and it found a Blitz trap of its own.**
-`.sidebar-resize` is a 6px strip absolutely positioned over the panel's right
-border; picking it up sets `resize_from` on the `Viewer`, and `app.rs` puts the
-matching `onmousemove`/`onmouseup` on the *root* rather than the handle,
-because widening the panel carries the pointer out from under whatever
-started the drag — root is the one ancestor a bubbling event cannot leave.
-`drag_sidebar` is a no-op without a drag under way, which is what lets that
-handler sit on every mouse move in the window without costing a render it did
-not ask for.
-
-The trap: the handle never received a single mousedown. `hit_inner` in
-`blitz-dom` only checks a positioned descendant *ahead* of its parent's
-normal-flow content when that descendant carries a non-zero `z-index` — that
-is the sole test for `pos_z_hoisted_children`. Without one, an absolutely
-positioned node is still hit-tested in plain DOM order alongside its normal
-siblings, so `.panel` (later in the DOM, and just as wide) won the hit test
-over the handle stacked visually on top of it. `z-index: 1` fixed it; `right:
--3px` centres the grab target on the border rather than beside it, which
-matters more here than in a browser because there is no cursor-only affordance
-to make up the difference. `tests/sidebar.rs` drags the handle through the
-harness's real `mouse_down_at`/`move_mouse_to`/`mouse_up_at` and
-checks the clamp at both ends and that the width survives being closed —
-though not past the harness's own window edge, which is the same limit a real
-window has without pointer capture: a drag that leaves the window stops being
-tracked, in this app and in an ordinary web page alike.
-
-**And the first working version flickered the whole document white while
-dragging.** `sidebar_width` sits in `PageWidget`'s key beside the page and the
-theme (see `page.rs`), so calling the ordinary `resize()` from `drag_sidebar`
-on every `mousemove` — right, by the pattern everything else here follows —
-meant a new key, and therefore a new widget with no texture yet, for every
-mounted page on every frame of the drag: a fresh pdfium render and upload each
-time, with nothing to show while either ran, which is `.page`'s own CSS
-background (`#ffffff`, unthemed, because the paper colour is baked into the
-bitmap by `recolor()` rather than declared in the stylesheet — see
-`AGENTS.md`, "Recolouring is baked into the bitmap, not applied by CSS"). Fast
-enough dragging read as the document flashing white regardless of theme.
-`drag_sidebar` now moves only `sidebar_width` itself, which is a plain style
-attribute `.sidebar` reads — the boundary line still tracks the pointer
-exactly, because that is flexbox reacting to the width, not a relayout; the
-document's own boxes are untouched until `finish_resize_sidebar` runs the one
-relayout the drag deferred, on release. The same trick `toggle_sidebar` and
-the settings write already used, just applied to the layout as well as the
-write. `the_document_does_not_relayout_until_the_drag_ends` is the regression
-test: the `.page` rect is unchanged through a mousedown and a move with the
-button still down, and only changes once `mouse_up_at` lands.
-
-*The `#ffffff` in that paragraph was the other half of the same complaint and
-is gone.* Deferring the relayout stopped the drag causing the flash; it left
-every other re-key — a zoom step, a jump, a theme, a turn — causing it, and
-those cannot be deferred, because the new size is the whole point of them.
-`.page` is `var(--page)` now, which is the theme's paper under a recolouring
-theme. See "Four grievances from reading with it" near the end of this file.
-
-### A click cost the reader its keyboard, and had since Phase 1
-
-Found by the first test that pressed a key *after* clicking something, which
-is the whole reason this item's tests are worth their length.
-
-Blitz clears the focus when a click lands on nothing it knows how to focus —
-it walks up from the target looking for a text input, a checkbox, a radio, a
-summary, a label or a link, and a plain `<button>` is on none of those lists.
-A key with nothing focused goes to `<html>`, which is above anything a
-component can put a handler on. So from the first click on any chip, tab or
-row, every shortcut in this reader did nothing at all.
-
-**And the page cannot answer it.** `MountedData::set_focus` takes `doc_mut()`
-the moment it is called, and every place a component can call it from is
-already inside a borrow of the document — including a task spawned from one,
-which is polled inside that same borrow. It panics with "RefCell already
-borrowed" from a stack naming neither.
-
-So the element that wants the keyboard says so — `data-keyboard` on the
-reader's root — and whoever owns the window hands it back after a click:
-`shell.rs` in the real app, and the harness for a window that does not exist,
-in the same one line through the same function. The policy is that focus
-landing *inside* the reader belongs to whatever took it, which is what makes
-this survived the find bar's field arriving in item 4 — with one addition,
-which is that the innermost element asking for the keyboard is the one that
-gets it. `tests/upstream.rs` has
-the twenty-line reproduction and `tests/reader.rs` the regression.
-
-It is the third upstream fault this experiment has found and the second that
-`shell.rs` pays for. What would end it is either blitz honouring `tabindex` in
-that walk, which is what a browser does, or a `set_focus` that queues instead
-of borrowing.
-
-### 4. Search — done, and it is half the size it is in the app
-
-⌘F opens a bar under the toolbar, typing searches, ⌘G and ⌘⇧G walk the
-matches, Escape closes it, and the panel grows a third tab listing the results
-with a line of the document either side of each. "Match case", "Whole words"
-and "Highlight all" are the app's three switches and the app's three settings,
-so they outlive the bar and the session.
-
-**`search.ts` is 540 lines and `search.rs` is 600 before its tests, and the
-difference is not Rust — it is that pdfium answers per character.** pdf.js
-hands over *runs*, a string and a transform, and a run is not where a word is:
-so the app joins the runs into one string, keeps a `starts[]` saying where each
-began, binary-searches that to turn a match back into a run and an offset
-inside it, hands the pair to the DOM as a `Range`, and measures the range
-against a text layer of spans that exist only to be selected. `FPDFText_GetLooseCharBox` makes a match a
-range of characters and a range of characters a list of rectangles, so
-`items`, `starts`, `position()` and the text layer are all simply absent —
-along with the four comments in `viewer.ts` explaining which way round each of
-them goes.
-
-**And a highlight is a node rather than pixels.** `paintSelection` and
-`paintHighlights` copy the page canvas, run the copy through the luminance
-ramp and lay it back over the line, because giving `::selection` a colour puts
-pdf.js's text layer on screen and a page's bold type comes back regular, its
-mathematics comes back as boxes, and every letter shifts. There is no text
-layer here and nothing to put on screen: a match is a rectangle in PDF points,
-so it is a `div` over the page in the theme's own selection colours and the
-glyphs under it are the ones pdfium drew. `.hit` is two lines of CSS.
-
-**What is ported exactly is `fold`**, because it is the app's most heavily
-tested function and every line of it is a fact about typography rather than
-about JavaScript: ligatures split, accents decomposed and their marks dropped,
-soft hyphens taken out, case optional and the other three not offered as
-choices because nobody types a soft hyphen on purpose. One thing came *out* on
-the way — `search.ts` iterates its input by code point deliberately, with a
-comment, because indexing a JavaScript string walks UTF-16 code units and
-`normalize` on half a character does nothing, so a document set in
-mathematical bold could not be searched with the letters on the keyboard. A
-`Vec<char>` cannot be half a character and the bug cannot be written.
-
-*The fold is also tested through the renderer and not only in isolation*, and
-that found two things worth knowing, both in `fixture::prose_pdf`:
-
-- **pdfium splits ligatures itself.** A `/fi` glyph named in a `/Differences`
-  array comes back as "f" and "i" with a box each — with a `/ToUnicode` saying
-  U+FB01 and without one alike. So on this renderer the ligature half of the
-  fold has nothing to do, where on pdf.js it is the difference between finding
-  "find" in a typeset book and not. It stays: it is the app's own tested
-  behaviour, hayro will not do pdfium's normalising for us, and a document can
-  carry U+FB01 by other routes.
-- **A soft hyphen is only a soft hyphen if the document says so.** Written as
-  the byte 0255 under WinAnsiEncoding it is an ordinary hyphen, because that
-  is what the encoding says code 0255 *is* — so the fixture needs a
-  `/ToUnicode` to produce the case the fold exists for. That took a probe to
-  notice and would have made a passing test that proved nothing.
-
-An accent, meanwhile, arrives precomposed, exactly as it does in the app, and
-"resume" finds "résumé" because of the fold and for no other reason.
-
-**The scan is sliced, and the reason has changed.** In the app the streaming
-is there because pdf.js is slow *per page* and because every flush makes the
-browser lay out the text layer again — a single letter in a long article turned
-typing into a slideshow. Here a page costs 0.18ms in the 400-page fixture and
-1.3ms in a 376-page book of typeset mathematics: 62ms and 498ms for the whole
-document. A page is nothing; half a second is still half a second, and a window
-that stops answering for it while somebody is typing is precisely what "fast
-with no lags" is about. So there are still slices, at 8ms each, and
-`one_slice_of_the_scan_does_not_read_the_whole_book` counts them.
-
-*What a slice yields to is dioxus's scheduler, not a timer.* `breathe()` in
-`search.ts` is `setTimeout(resolve, 0)`; here it is a future that wakes itself
-and returns `Pending`, so `poll_tasks` puts it back in the queue, sees the
-signal the slice just wrote, and hands the turn to whoever is driving the
-document — the event loop in the real app, `pump()` in the harness. There is
-no clock anywhere in it.
-
-**The index costs about seventy bytes a character and goes when the bar
-does** — 15MB for the 400-page fixture, measured. That is the app's own trade
-in the app's own words, "a fair trade while the find bar is up and no trade at
-all once it is closed", and it is settled the same way. Two notes for whoever
-wants it smaller: the boxes are half of it and could be dropped for a page
-with no match on it, and the footprint does not *fall* when the index is put
-down — the allocator keeps the blocks and the next thing that needs memory
-uses them, which is the same macOS behaviour Phase 1 spent a day on.
-
-Measured on one machine in one sitting, the same document idle, before and
-after: 225MB and 200MB. The search costs nothing when the bar is down, and the
-difference between those two numbers is the machine rather than the change.
-The binary went from 12,653,968 bytes to 12,819,488 — **162KB**, most of it
-`unicode-normalization`'s NFKD tables, which is what a Rust binary pays for
-what `String.prototype.normalize` gives a webview for free.
-
-#### Two more Blitz traps, and both of them are about the find bar
-
-**A focused text field takes a chord as typing, whatever is held down.** ⌘G
-stepped to the next match *and* put a "g" in the query, which started a search
-for something nobody typed — and because the answer arrived a slice later, it
-looked like the search losing its results rather than like a keystroke going
-to two places. Blitz dispatches `keydown` to the field and bubbles it to the
-root, and then applies its own default action to the field regardless of the
-modifiers. So the field's handler stops propagation for anything plain (or
-"just" typed into it would scroll the document four times on the way) and
-calls `prevent_default` for anything modified — except `a`, `c`, `v`, `x` and
-`z`, which are what a text field owns. That is the same shape as the app's
-find bar handing arrows and Home back to a focused field, arrived at from the
-other direction.
-
-**And hit-testing does not clip on overflow.** `.viewer` has `overflow:
-hidden` and Blitz *paints* correctly — a page scrolled past the top is clipped,
-which the screenshots show — but a page whose box starts at −2789px is still
-hit-tested where its box says it is, which is over the toolbar and the find
-bar. So clicking "Done" with the document scrolled at all landed on the page
-behind it and did nothing, and clicking it at the top of a document worked
-perfectly, which is the worst way round. Every row of the window that is not
-the document now carries `position: relative` and a `z-index`, which is the
-same trap and the same fix as `.sidebar-resize` in item 3, one level out.
-
-*And the keyboard handback grew to cover keys.* `shell.rs` gave the focus back
-to the reader after a click; a key can take the focused node away with it —
-Escape closes the find bar and the field it was typed into stops existing —
-after which every shortcut in the reader is dead again, which is the third
-appearance of the same upstream fault. `give_keyboard_back` also picks the
-*innermost* element that asks for it now, which is what lets the field keep
-the keyboard while the bar is up and hands it back to the root when the bar
-goes: one rule, two elements, and no state anywhere saying which.
-
-### 5. Links, destinations, page labels and the go-to field — done
-
-A cross-reference is a rectangle you can click, a citation's page number is a
-number you can type, and both of them remember where you were so that ⌘[ comes
-back. Four things that look like four features and are one: they are the
-document's own account of where its parts are, and every one of them is a
-*jump*.
-
-**The renderer seam grew its fifth and sixth questions**, `links_of` and
-`labels`, and both are what the assessment's rule asks for — small in, small
-out. Three things about pdfium's answers.
-
-*A destination arrives two ways and a document uses either.* Most links carry
-a `/Dest` on the annotation; one written as a `/GoTo` action carries it under
-`/A`. That is the same fork `read_outline` already had for bookmarks, which is
-the sort of thing worth noticing: it is not a quirk of outlines, it is how the
-format works, and a reader that follows one route finds half the links in the
-wild. `fixture::links_pdf` writes one of each on purpose.
-
-*Where on the page a destination means is one call, not six.*
-`offsetWithin` in `viewer.ts` reads a raw destination array and switches on
-`XYZ`, `FitH` and `FitBH` by name; pdfium's `FPDFDest_GetLocationInPage`
-answers all seven view forms through `PdfDestinationViewSettings`, so the
-whole of it is "is there a y, and is a y what this form means". The 0.95 clamp
-is the app's and is kept for the app's reason: a destination at the very
-bottom of a page scrolls that page out of the window, and the reader lands
-looking at the next one with nothing to say why.
-
-*And a link with neither an action nor a destination is dropped at the
-renderer.* A `/Launch` naming a program, a `/JavaScript`, a `/Dest` that
-resolves to no page: each is a hit area over printed words that does nothing
-when it is clicked, which reads as the app being broken rather than as the
-document being odd. `a_link_that_points_nowhere_is_not_a_link` asks the
-renderer rather than the DOM, because it is a question about the document.
-
-**A link is a node and nothing is drawn**, which is the second half of what
-item 4 found about highlights. In the app, `tintLinks` bakes the link colour
-into the bitmap *and* `renderLinks` lays real anchors over the top in
-percentages of the page — two things, because a canvas cannot be clicked. Here
-the colour is still the page's business (pdfium draws whatever the document
-says, and `recolor` keeps a hue), and the clickable half is a `div` in points
-multiplied by the page's own scale. What goes with it is the whole of the app's
-percentage arithmetic and the comment explaining which fraction is of what:
-the page's box *is* the render here, so points are one multiplication from
-pixels and a fraction would be two.
-
-*It is deliberately not an `<a href>`*, which is the app's own decision made
-again for a different reason. There it is that an anchor carrying the address
-navigates on a middle click, which never reaches the click handler, so the
-webview left the app and took the document with it. Here an `href` would go
-through `nav.rs` — the chrome's door, which knows only http, https and
-mailto — and an internal link would find no scheme it allows and do nothing at
-all. Both ways round, the rule is that one place decides what following a link
-means.
-
-**Where an address goes is a context, not a call.** `Away` is `Screen`'s
-shape: the default is the system browser and is right in the app, and the
-harness provides its own, so `a_link_out_of_the_document_is_handed_to_the_system`
-asserts on the address without a browser window arriving on somebody's screen
-halfway through `cargo test`. A `Viewer` has no browser in it and neither has a
-test.
-
-**The history is fifty places deep and only jumps go in it.** `jumpTo` in
-`viewer.ts`, carried over with the distinction it exists for: scrolling,
-turning a page and stepping through search results move *through* a document
-and leave no trace; following a cross-reference, picking a chapter and typing
-a page number move *across* it. `scrolling_is_not_a_jump` is that sentence as
-a test. The one thing the app does that this had to be told to do as well is
-that a jump landing where the reader already is is not a jump — otherwise
-Escape from the page field, which re-runs the jump with the number already
-there, fills the history with copies of one place.
-
-**And the page field is a readout that becomes a field, which is where this
-parts company with the app.** The app's is always an `<input>`. Here that
-cannot work, and it is Blitz's focus rule that decides it rather than taste:
-the keyboard is handed back to the innermost element asking for it, so a field
-that is always in the toolbar either always asks — and then every keystroke in
-the reader goes into it, and no shortcut works again — or stops asking while
-still holding the focus, which is the same dead keyboard one level along. That
-second one is what the first version did, and the test that caught it is the
-one that presses `j` after Escape.
-
-The find bar has neither problem because its field *stops existing* when the
-bar closes and the focus goes with it. So the page field does the same: a
-button showing the label, an input while it is being typed into, and
-`onmounted` asking for the focus exactly as the find field does. It is the
-fourth appearance of the same upstream fault and the first time the answer was
-to change the interface rather than the shell.
-
-*Two fields must never both ask.* The page field and the find field are
-siblings rather than one inside the other, so "innermost" cannot separate them
-and would settle it by document order — which would hand ⌥⌘G's field to the
-find bar. The find field asks only while the page field is not up. One rule,
-two elements, and no third state saying which.
-
-**Labels are read at open and dropped if they say nothing.** A document that
-numbers its pages 1 to n has said exactly what the position already said, and
-carrying that list means every lookup runs for no reason — the app decides the
-same thing in `readLabels`, and here it is decided in `pdfium.rs`, at the one
-place that reads all of them. What a reader types is read as a label first and
-a position second, which is the order that makes a number off an index find
-what the index meant: in `fixture::links_pdf`, "3" is the label of page six
-*and* the position of page three, and page six is what it opens.
-
-*One consequence for the harness.* `state().page` used to come off a pill
-reading "4 / 400" and now comes off the field, which for a document with
-labels says "vii" and is not a number at all. That is the interface being
-right: a reader in the front matter of a book is on page vii, and nowhere on
-screen says it is also the seventh thing in the file. `state().label` is what
-the field says, and is the assertion to write for a document that numbers its
-own pages.
-
-**One bug fixed on the way, and it was in the fixtures.** `contents_pdf`,
-`prose_pdf` and now `links_pdf` each wrote a temporary file named for the
-*process* and renamed it into place — and `cargo test` runs its tests as
-threads of one process, so two tests wanting a fixture neither had yet wrote
-the same temporary and both renamed it: the first won and the second failed
-with `NotFound` on a file it had just written. It had never fired because no
-two tests had ever raced for the same new fixture. One `written()` now, with a
-counter in the name.
-
-*What is still missing from this item*: nothing follows a link with the
-keyboard, because there is no focus ring to walk and `tabindex` is not honoured
-in Blitz's focus walk (the same fault as item 3's). The links carry
-`role="link"` and a name saying where they go, which is what a screen reader
-needs and what the app had to add for the same reason — a bare rectangle over
-printed words has no text of its own, and a page of them otherwise reads as
-"link, link, link".
-
-### 6. Trimming the margins, turning the page, and one page at a time — done but for presenting
-
-Three of the four things in this item. **Presenting is the fourth and is the
-window's rather than the page's** — full screen with nothing on it — which is
-the one category `PROGRESS.md` has said from Phase 2 cannot be tested here at
-all, and it waits for the multi-window work of item 9 where the rest of the
-window lives.
-
-**Trimming is `measureCrop` and `inkBox` from `viewer.ts`, and the whole of the
-machinery around them is gone.** In the app it is an `async` method with a
-`cropping` generation counter, a check after every `await` that the document
-has not been closed and the run has not been superseded, and a `void` call at
-three sites — because eight page renders in a browser are eight trips through
-pdf.js's worker and cannot be waited for. Here eight pages at a hundred and
-sixty pixels wide is under five milliseconds in the same call, so a toggle
-measures and lays out before it returns. There is no run to supersede and no
-state to be stale. `src/crop.rs` is the module and it is 190 lines against the
-app's 130 plus the counter threaded through the viewer.
-
-The constants come across unchanged and so do the arguments for them: eight
-pages sampled because the shapes that vary are the front matter, the plates
-and the index; the union rather than a per-page crop, because a per-page crop
-changes the scale from page to page and in continuous scrolling that is a
-document that breathes as you read it; `INK` at 235, which is the same
-threshold `WHITE_POINT` recolours by, so a hairline printed at 90% white is
-paper to both; and never more than a third off any one side, because a page
-whose margins measure wider than that is more likely to be a page this has
-misread and the cost of being wrong is a reader who cannot see the top line.
-
-*The switch is remembered and the measurement is not.* `trim_margins` is
-already a key in the app's own `settings.rs`, which this crate mounts, so
-there was nothing to add: a run that had it on measures *this* document rather
-than putting back the last one's rectangle. And a document with nothing to
-trim keeps the switch and says so, which is the difference between "off" and
-"on, and there was nothing there" — the chip reads Trimmed either way and the
-notice line is what tells them apart.
-
-**Rotation is four lines of arithmetic and a rectangle that turns with it.**
-The crop is a rectangle on the page as the reader sees it, so a quarter
-clockwise takes `(x, y, w, h)` to `(1 − y − h, x, h, w)` — turning it is exact
-and free, where measuring it again would be eight renders for an answer
-already in hand. Nothing is written down: a rotation is a way of looking
-rather than a property of the file, which is what `viewer.ts` says of it and
-what Preview, Acrobat and Sumatra all do.
-
-*And no cache is thrown away, which is where this parts company with the app.*
-There `rotate()` clears the link cache, the note cache and the markup cache,
-because all three hold **fractions of a turned page** — the app's link layer
-is a DOM overlay sized in percentages, so it has to know the shape it is a
-percentage of. Here every rectangle stays in the page's own unturned points
-and one function does the turning where it is drawn: `Layout::place_on`, the
-single place a link, a match or a mark meets the rotation and the crop. It
-replaced three multiplications by a scale that were spelled out in three
-places, so the port came out shorter than what it replaced *and* gained a
-feature.
-
-**Paged mode made the app's sparse-array trap into a type.** `AGENTS.md` calls
-that array "a genuine trap — two binary searches, `trackCurrentPage`,
-`pointAt` and `mount` all have to know about it — and every one of them did,
-each with a comment saying why", and calls that "the correct amount of defence
-for the shape". In Rust the shape defends itself: `boxes` is
-`Vec<Option<PageBox>>`, `box_of` was already returning an `Option` for the
-out-of-range case, and nothing can read a box without answering the question.
-The five comments are still there, because the *reasoning* is what was paid
-for, but none of them is load-bearing any more.
-
-*There is no key for it and no chip, on purpose.* The brief calls continuous
-scrolling a strong default that may only ever change if the reader explicitly
-opts into it, and says a shortcut for it would be a thing to hit by accident.
-So the whole interface is a line in `settings.toml`, exactly as the app has
-it — and `tests/paged.rs` presses every chord in the keymap at a paged reader
-to hold it to that, which is the only way to make a claim about a keymap
-rather than about the twenty keys somebody thought of.
-
-*What a page turn is, and it is not a scroll.* One page is laid out, so
-arriving at a page starts at the top of it; scrolling past the bottom of a
-page turns it, and past the top turns back **to the bottom of the page
-arrived at**, because that is where the reader was reading. Everything that
-moves a reader now goes through one door — `Viewer::go_to` — so the history,
-a link, a heading, a typed page number and a search result all turn the page
-in paged mode without any of them knowing which mode is on. That door did not
-exist before this item and four call sites were each doing
-`scroll_target` then `scroll_to` by hand.
-
-**The harness grew one thing: `Options.settings`**, which writes a real
-`settings.toml` through the app's own `set_many` before the reader opens.
-`openApp({ settings })` is the same trick in the app's harness and it is here
-for the same reason — some of what this reader does is deliberately not
-reachable by pressing anything.
-
-### 7. The library — done, and it cost one thread
-
-Where you were in each document, what the document calls itself, and what was
-open when the reader put it down. The marks came in item 3 and the history in
-item 5; this is the rest of `library.rs`, and it is the fourth of the app's
-modules to be used rather than the fourth to be ported — it has been mounted
-since item 3 and needed no change for any of this either.
-
-**A position moves sixty times a second, and that is the whole of what made
-this interesting.** Everything else this reader remembers is chosen a few
-times a session: a theme, a zoom, a fit mode, the panel. The scroll offset
-changes on every wheel event, and every change is a read-modify-write of the
-whole of `library.toml`. `AGENTS.md` describes exactly what that costs on the
-thread drawing the window — "a whole-file rewrite of `library.toml` was
-landing in the middle of the one gesture this app exists to make smooth" — and
-`store.rs` had a comment since item 1 saying that when the library landed, this
-is where the thread would go. It went there.
-
-`Scribe` is one thread, asleep on a channel. `Store::remember` sends it a
-place; it keeps the latest one *per document* and writes when nothing new has
-arrived for 700ms, which is `onScroll`'s own `setTimeout` in `main.ts` turned
-inside out. So a reader scrolling through a chapter costs one write at the end
-of it rather than four hundred, and the cost on the thread that is scrolling is
-a channel send.
-
-*Per document, and that is not fastidiousness.* The thread is the process's and
-`cargo test` runs its tests in parallel, so a single pending slot would have
-one test's position quietly replacing another's — intermittently, by timing,
-which is the worst shape a test failure comes in. There is one window here, so
-in the real binary the map has one entry and the keying costs nothing.
-
-*And `flush()` is the other half of the same design.* A place is written when
-the scrolling stops, and quitting is the one way to stop scrolling that does not
-wait — so `main.rs` flushes once the event loop has returned, which is the same
-call `savePosition` is awaited for on the app's way out. It is also what a test
-calls instead of sleeping: `tests/library.rs` opens a reader, scrolls it,
-flushes, and opens a *second* reader over the same directory, which is what "the
-next time you open it" means when there is no window to close.
-
-**Restoring is held rather than done.** `Viewer::new` runs before anything is
-mounted, so the layout has a viewport of 0×0 and every page in it is zero high:
-a place turned into a scroll offset there is turned back into page one the
-moment the window says how big it is. So `restore` keeps it as what it is — a
-page and a fraction of it — and the first `resize` spends it, through `go_to`
-rather than through `scroll_target` because in paged mode arriving at a page is
-a relayout. `remember_place` says nothing while one is pending, or the
-relayouts on the way to the first frame would record page one over the place
-being restored. Both of those were bugs before they were comments.
-
-**`2310.06825v3.pdf` is not a name.** The document usually knows better, so
-`title()` is the renderer seam's seventh question and `worth_calling` is
-`main.ts`'s own judgement ported: a title under four characters or over two
-hundred, the file name over again, anything beginning "untitled" or "Microsoft
-Word -", anything ending in a document suffix — each of those is *worse* than
-the file name, because it looks deliberate. It decides what the toolbar says,
-what the window is called and what goes in the library, and it is asked once,
-at open.
-
-*One thing the port improved by accident.* In the app this is `adoptDocumentTitle`,
-an async method that runs after the document has been parsed and rewrites the
-toolbar when it lands — because pdf.js cannot answer until then. pdfium answers
-at open, so the title is settled before the first frame and the toolbar is never
-briefly wrong. The `.title` slot in the toolbar used to say "400 pages", which
-the pill beside it already said.
-
-*The one deviation from the app is a rule kept rather than a rule broken.*
-`/^untitled\b/i` rejects any title *beginning* with the word, so "Untitled
-Letters" — a real book — falls back to its file name. Carried across as
-written: "Untitled document" and "Untitled 1" are what producers actually emit,
-the cost is a file name instead of a name, and a port that quietly disagrees
-with the app about a judgement is the drift this whole experiment is arranged
-to avoid. The test says so in as many words.
-
-**What was open comes back, and a document that is gone does not.**
-`set_open` is written at open — one path, because there is one window; the
-file has been a list since the app had two, and `one_or_many` in `library.rs`
-is what makes both readable. `store::reopening` is what `main.rs` asks before
-there is a window to hold a `Store`, and it does the two things the app's
-`bootstrap` does in the same order: `prune`, so a document that has been moved
-or deleted is not reopened and failed on at every launch for ever, and
-`reopen_last_document`, which is asked *there* rather than left to the caller
-for the app's own reason — two sides that each assume the other checked it are
-two sides that disagree about whether the window has anything in it.
-
-*What was deliberately not built is the shelf, and it is built now.*
-`library.toml` holds twenty-four recently-read documents with their titles and
-where you were in each, and when this was written there was nowhere to show
-them: the app has a start screen and this reader always had a document open.
-The list was kept and pruned correctly against the day there was one, which is
-the day this paragraph is about — see "The window with nothing in it" at the
-end of this file. `Store::recents` is the whole of what that day needed, and
-it turned out to be `library::prune` and a `map`.
-
-*And the write is still a whole file.* `remember` re-reads and rewrites
-`library.toml` for every position it records — which is the app's design and
-costs nothing at one write per pause, and would be the first thing to look at
-if the recents list ever grew a thumbnail.
-
-### 8. The watchers — done, and the app's file was mounted rather than ported
-
-The themes directory and the open document are the two files this reader is
-looking at that are not its own. A theme is TOML precisely so that somebody —
-or something asked on their behalf — can open it in an editor, and until this
-item an edit was seen at the next launch. A document is very often a paper
-being recompiled by LaTeX under the reader, and reopening it by hand to see the
-new draft is the same poor way round.
-
-**`watch.rs` is the fifth of the app's modules to be mounted, and the
-assessment said it would be the first to need a change.** It listed the file
-under "survives nearly unchanged" with one line against it: "`emit_to(window,
-…)` becomes an `EventLoopProxy::send_event`". That was nearly right, and the
-"nearly" is the interesting half — the change is real and it is on *this* side
-of the file rather than in it. Not one line of `watch.rs` was touched.
-
-What made that possible is that the Tauri in it is two names. The file opens
-`use tauri::{AppHandle, Emitter};`, calls `app.emit` twice, and is otherwise
-about the disk from top to bottom: a change is a burst and not an event, a
-theme reload is decided by comparing the themes rather than by something having
-moved, a document is not believed until it ends the way a PDF ends, and the
-watch goes on the *directory* because a compiler replaces a file by renaming
-another one over it. So this crate supplies the two names. `extern crate self
-as tauri;` in `lib.rs` puts the crate in its own extern prelude under that
-name, `AppHandle` and `Emitter` are re-exported at its root, and `src/emit.rs`
-is where they actually live — about a hundred and thirty lines, most of it
-comment.
-
-*The obvious version of the trick is a module called `tauri`, and it does not
-work.* A `use` path anchored on a bare identifier is looked up in the extern
-prelude and not among the crate root's modules; the compiler says so and helpfully
-suggests `crate::tauri::…`, which is the one thing that cannot be written here,
-because what is being avoided is editing the file.
-
-*What the signatures cost.* They are Tauri's, because a shim taking a nicer
-argument would be a shim the app's file does not compile against — which is
-the whole of what is being tested. `Emitter::emit` therefore wants `S:
-Serialize`, so the fourteen themes arrive as a `serde_json::Value` and are
-deserialised on the other side. That is the bridge's serialisation surviving in
-a build with no bridge, it is the only place in this crate that still does it,
-and it happens when somebody saves a theme file. A `watch.rs` genuinely
-rewritten for this crate would hand the vector over; this one is not rewritten,
-and that is the point.
-
-**Fourteen tests came with the file**, which is the fifth time that has
-happened and is beginning to be the strongest single argument in this
-experiment: the burst settling, a document that is only half written, a rewrite
-of the same length inside one tick of a coarse clock, a window's own write
-absorbed before it is reported, two windows sharing one folder. None of them
-needed a line of change, and one of them — `a_second_window_reading_the_same_folder_keeps_the_watch`
-— is about a situation this crate cannot have yet.
-
-**The wire, on this side, is a waker.** The watcher is a thread and the reader
-is a Dioxus task, so what is needed between them is not a channel but a way for
-a thread to say "poll me" to a task it cannot see. `Post` in `emit.rs` is a
-mailbox with a `Waker` in it, and the chain it starts already existed: waking
-the task marks it ready, which wakes the virtual DOM, which — through the waker
-`View::poll` builds out of the shell proxy — puts an event on the winit loop,
-which polls the document. So a theme saved in an editor reaches the screen with
-nothing anywhere polling a clock. In the harness the same wake marks the same
-task ready and the next `pump()` runs it, which is why the whole feature can be
-tested with no window and no thread.
-
-That is the answer to a question the assessment left open and `PROGRESS.md`
-has been keeping a list of: what owning the window costs. Here it cost nothing
-— the shell needed no new event, and `Windows`/`Remote` were not touched.
-
-**What the reader does about it.** `themes_changed` is `themesChanged` in
-`main.ts`: the set is replaced, whatever is in use is put back on from the new
-files, and nothing is written down, because nobody chose a theme and an editor
-saving every few seconds must not be a rewrite of `settings.toml` every few
-seconds. A theme whose file has *gone* hands the reader to another one — the
-one remembered for that half of the light/dark pair, else anything of the same
-darkness, else whatever is left — and *that* is written down, because it is a
-choice made on the reader's behalf.
-
-*A shipped theme cannot go, and finding that out took a test.* `load_all` falls
-back to the copy embedded in the binary, so deleting `hylo-light.toml` deletes
-nothing a reader can see — it is reinstated on the next run and answered from
-memory in the meantime. The theme that can actually vanish is the one that only
-ever existed as a file, which is the one this is for.
-
-*One case the app has and this does not.* A theme being composed in the editor
-window is the live theme and has no id, so every save in the directory reads as
-"the theme you are reading in has been deleted"; `isEditingTheme()` is the
-app's guard. There is no settings window here yet — item 1's other half — and
-the line is marked in `themes_changed` for the day there is.
-
-**`document_changed` is a reload that keeps the reader's place**, and where
-they are comes off the layout rather than out of the library, for `main.ts`'s
-reason: the library has the last position *written down*, and this is the one
-moment the two can differ by a whole scroll. What goes is everything read out
-of the old file — the outline, the labels, the links, the search index, the
-crop — and everything that points into it, which is the history. What stays is
-everything that is the reader's: the fit, the zoom, the spread, the rotation,
-the panel, the theme. A draft that lost its last chapter lands on the end of
-what is left, because `go_to` clamps and `Layout::replace_sizes` clamps
-`current` — paged mode lays out `current` and nothing else, so a page number
-past the end is a window with nothing in it.
-
-*And it needed one new number.* A page keeps its texture for as long as its key
-does not move — the page, the size, the theme, the view — and a recompile
-changes none of those while changing every pixel. `generation` could not do it:
-it is bumped by opening the sidebar, which must not throw a texture away. So
-`edition` counts drafts, it is in the key, and Blitz releases the old textures
-between frames the way it does for a zoom.
-
-*A rebuilt paper may also call itself something else*, so the title is asked
-again and `library::retitle` — the app's own, which writes only when there is a
-difference — records it. That is the seventh question of the renderer seam
-earning its keep a second time.
-
-**Eight tests of the reader's half, and one of them has a file system in it.**
-The other seven post the news through the mailbox the reader really listens on,
-which is deterministic and is how the app's own suite tests this side. The
-eighth deletes and rewrites a real theme file beside a reader with the real
-watcher running, and it is the only test in this suite that waits on a clock —
-because the thing being waited for is a clock. Two things about it are worth
-keeping:
-
-*The watch is set up on a thread and nothing says when it is up.* A save made
-before that produces no event at all, and no amount of waiting afterwards
-conjures one. So the test saves again — which is what an editor with the file
-open does anyway — with a pause between saves longer than the watcher's own
-settle window, or the burst never ends and nothing is ever reported.
-
-*And a test that writes into `/tmp` on macOS must canonicalise it.* `/var` is a
-symlink to `/private/var`; the file system reports the real path and the
-watcher decides an event is about the themes directory by comparing the event's
-parent with the directory it was given, so a directory named through the link
-never matches and nothing is ever reported. Nothing a reader has is behind a
-link. This cost an hour and is the sort of thing that only ever bites a test.
-
-**One thing that is off in the harness on purpose: the watcher itself.**
-`Watching` has no way to stop — the sender the notify callback holds keeps the
-receiver alive, so the thread outlives the handle — which is nothing at one per
-process and is a hundred threads and a hundred file-system watches on a `cargo
-test`. `Config::watch` is therefore true in the binary and false in the
-harness, and the one test that wants the real thing asks for it. The day
-`watch.rs` learns to stop is the day that flag can go.
-
-### 9. Two documents at once, and presenting — done
-
-Everything in this item is the *window's* rather than the page's, which is why
-it is last of the nine and why `PROGRESS.md` has been saying since Phase 2 that
-this category cannot be tested here at all. Most of that turned out to be
-wrong, and the reason is the most useful thing the item found.
-
-**The app's window story is two things wearing one coat: rules, and windows.**
-`AGENTS.md` is plain about the cost of that — "None of this can be tested in
-the harness, which has no Rust behind it and no windows", followed by a list of
-things somebody checked by hand in a running app: two documents handed over,
-three windows restored from a session, ⌘N, a window closed, "New Window" from
-the Dock. Every one of those is a *rule* — which window gets a document, what a
-window going means, where the next one goes — and not one of them needs a
-window to be true. They are untestable there because they are written against
-`AppHandle`, `State<'_, …>` and `WebviewWindow`, so asking "what would happen
-if a second file arrived now" means having an application running to ask.
-
-So they are separated here. **`windows.rs` is `OpenDocuments`, `Placements`,
-`Exiting` and the deciding half of `hand_over`, with every mention of a window
-taken out**, and it has fourteen tests: that nothing is ever displaced, that a
-document already open comes to the front rather than opening twice, that
-quitting forgets nothing while closing a window forgets that window, that
-closing the *last* window writes nothing because no flag can tell "finished
-with this" from "goodbye" there, and that three windows closed one at a time
-come back as the third alone. `session.rs` is the half that makes windows and
-cannot be tested, and it is eighty lines.
-
-**The reader's own side goes through one door and the door is written down.**
-`Frame` is a context holding one closure — the shape `Screen` and `Away`
-already had, for the same reason: the thing it stands for does not exist in a
-test. A key asks for `Ask::NewWindow`, `Close`, `Quit` or `FullScreen(bool)`,
-the shell answers each against winit, and the harness appends it to a list. So
-"⌘N asks for a window", "⌘W and ⌘Q are not the same ask" and "Escape leaves
-full screen" are tests — and the last of those is specifically called out in
-`AGENTS.md` as a real-app check, because a browser in full screen keeps the
-Escape key and the app's harness is a browser.
-
-**What is left for the real app is one file, and it is `shell.rs`.**
-
-#### What the port lost
-
-Most of `spawn_window`, and each thing it lost says something about what the
-app's version is actually for.
-
-*There is no `Placements` map.* In the app a window is built with a position,
-then *shown*, and showing it on macOS moves it onto the launch window's frame —
-so the spot has to be remembered and applied again afterwards, and windows
-still coming up have to be counted as taken or a restored session lands three
-windows in one place. Here a window is made, positioned and drawn in one turn
-of the main thread with nothing on screen in between, so the windows that exist
-are the whole of what is taken and the cascade is a pure function of where they
-are. `cascade` is the app's arithmetic exactly, including the bounded walk.
-
-*There is no `Pending`, no `ready` and no "is the frontend listening yet".*
-Those exist because a Tauri window and its interface are two processes that
-have to shake hands: a document arriving before the webview reports in has to
-be held somewhere. Here the virtual DOM is built before the window is on
-screen, so a window is *made for* a document and there is nothing to hold.
-
-*There is no `visible(false)` and no three-second safety net thread.* The app
-hides a new window until its frontend says it has painted, so a dark theme
-never flashes white, and spawns a thread to show it anyway if that never
-happens. The equivalent here is that the theme is read during the first render,
-before anything is painted at all.
-
-*And there is no capability list.* `capabilities/default.json` naming
-`["main", "reader-*"]` is a Tauri fact; a window outside it gets no permissions
-and fails as a webview that never reports in.
-
-#### The one thing that has no equivalent, and it is the start screen
-
-**This section is superseded.** It is kept as it was written because the
-finding it records was correct and is the clearest statement of what one
-missing panel had done to the shape of the application; see "The window with
-nothing in it" at the end of this file, where the start screen is built and
-all three of the consequences below come loose. What follows is the state
-before that.
-
-`Desk::hand_over` has three answers — bring that window forward, fill an empty
-window, make one — and **the middle one is unreachable in this reader**. The
-app can have a window with nothing in it because it has something to show in
-one; item 7 already recorded that this reader does not, because "there is
-nowhere to show a recently-read list in a reader that always has a document
-open". So a window is made for a document and never before one.
-
-That decides ⌘N, which in the app is an empty window. Here it is **a second
-window on what the front one is reading** — which is not a compromise: two
-places in one book at once is a thing readers want, and the app's own "Open in
-a new window…" is the picker version of the same gesture. The picker itself is
-a door of its own (`rfd`, in the assessment's table); it was built with the
-menus — see "The menus, and opening a document" — and ⌘N is unchanged by it,
-because ⌘N was never the gesture that wanted one. The `Fill` arm is kept
-because the rule is right and
-because a window whose document failed to open is that case arriving by the
-back door.
-
-#### A mailbox became a switchboard, and `watch.rs` did not notice
-
-Item 8 mounted the app's `watch.rs` unchanged by supplying the two names it
-imports, and said the cost of one window was nothing. This is the bill.
-`watch.rs` reports a rewritten document with `emit_to(label, …)` and the themes
-with `emit`, so with more than one window the handle has to *route*:
-`emit::Exchange` is a label-to-mailbox table, a window joins when it is made
-and leaves when it is destroyed, and `emit` with no target goes to everybody.
-Forty lines, four tests, and not one line of the app's file.
-
-Leaving matters as much as joining: news for a window that has gone piles up in
-a mailbox nobody reads, and that mailbox holds a `Waker` into a virtual DOM
-that no longer exists.
-
-The watcher itself is one per *process*, provided as a context — which is the
-shape `watch.rs` already had, since `follow` counts what wants a directory
-rather than unwatching it along with the document that named it. A watcher per
-window would be that many watches on one themes directory and that many copies
-of every theme reload.
-
-#### The store was writing the open list and had to stop
-
-`Store::opened` ended with `library::set_open(&dir, &[self.file])`, with a
-comment saying "one path because there is one window". A `Store` is one
-window's, so with three windows whichever rendered last wrote a list of one and
-took the other two out of it. The rule that replaced it is the one the app has:
-**whoever makes a window records what it shows** — `Session::window` in the
-binary, and the harness for a reader that has no window at all.
-
-#### Everything a window is asked to do is an event, even when it needn't be
-
-Closing a window and putting one in full screen are both reached from a Dioxus
-event handler, which runs inside `View::handle_winit_event` — inside a borrow
-of the document and inside the shell's own borrow of the window map. Taking the
-window out of that map from in there cannot be written. So every ask is posted
-to the shell proxy and answered on the next turn, where nothing is borrowed: it
-costs a frame nobody can see and it makes every window verb one shape. The Dock
-menu, which in the app has to spawn a thread because it is invoked on the main
-thread and `spawn_window` asks questions only the main thread can answer,
-needed no special case at all — it posts the same event everything else does.
-
-#### Presenting, and why the chrome is a method
-
-Presenting is full screen with nothing else on it, and it is the last part of
-item 6. The chrome is `TOOLBAR + NOTICE + HAIRLINE` and was a constant; it is
-`Viewer::chrome()` now, because either of the first two can be taken away and a
-subtraction at the call site only knows what was on screen when it was written.
-⌘T puts the toolbar down and presenting puts everything down — but *not* the
-notice line when only the toolbar goes, because the message saying how to get
-the toolbar back is written on it, and it names whatever key `keys.toml` says
-rather than a chord this file states. The panel is hidden rather than closed,
-so stopping puts back what was open.
-
-Full screen and presenting are two switches, not one: a reader who was in full
-screen, presented, and then stopped is still in full screen, which is where
-they were. Escape leaves them in the order the reader arrived — page field,
-find bar, presenting, full screen.
-
-#### One instance is a socket, and binding it is the claim
-
-The app uses `tauri-plugin-single-instance` and needs it for a reason
-`AGENTS.md` states: three double-clicked documents are three launches, and
-three processes writing over each other's `settings.toml` is a race no lock
-inside one of them can help with. `single.rs` is a Unix socket, and it is
-thirty lines because the socket does both jobs — **binding it is the claim and
-connecting to it is how the document gets across**. A lock file would need a
-second channel beside it, and that channel would be this. It connects before it
-looks, because a socket file proves nothing: a process killed outright leaves
-one behind.
-
-Two things it cannot do. Windows wants a named pipe and there is no std type
-for one, so a second launch there is still a second process — the same state
-this experiment has been in since Phase 0, and honest about. And **Apple Events
-are out of reach, because there is no application bundle**: `RunEvent::Opened`
-is how macOS tells an app that is already running to open a document, and
-before any `NSApplicationDelegate` there has to be an `Info.plist` saying this
-program opens PDFs. Every other route a document arrives by — a second launch
-with an argument, "Open with" on Linux, the command line — is a launch with an
-argument, and a launch with an argument comes through the socket.
-
-#### What it cost to find: a crash that was not multi-window's fault
-
-The first run of two windows died on the third frame with
-`MissingTextureBinding(TextureId(4))` from inside Vello's atlas upload, about
-two runs in three. It was not about two windows: **one window, made after the
-event loop had started, dies exactly the same way** — which is a path that had
-existed in `shell.rs` since Phase 0 and had never once been taken, because
-until this item every window was made before the loop began.
-
-The cause is the one `page.rs` already has a long comment about, one level
-along. A page's texture is registered on one frame and drawn from the next
-(`fresh`), because registering and drawing in the same frame breaks when
-something else is unregistered in that frame — and something else is
-unregistered whenever every page in the document is replaced at once. That
-happened on every launch: the viewer was laid out at a default viewport and
-corrected by `onmounted`, so the first frame drew every page at the wrong size
-and the second re-keyed all of them. The `fresh` flag moved the collision one
-frame along rather than removing it, and a window made late enough for its
-frames to land differently found it again.
-
-The fix is a line and it is worth more than the crash: **the viewer is sized
-from the window before the first frame rather than on mount**. There is nothing
-to re-key, so nothing is unregistered while something else is being registered
-— and a full round of pdfium renders and texture uploads is no longer drawn and
-thrown away on every launch. Five runs for five, both paths.
-
-#### What was checked in the real app
-
-A launch, a second launch on another document (the socket handed it over in
-9ms, the window cascaded to exactly the position it asked for, and both entries
-landed in `library.toml`), a third launch on a document already open (no window
-made, no entry added, the window brought forward), a second launch with no
-document at all (⌘N's own path: a second window on the same book, and
-`set_open` deduplicating it to one entry), and a quit (`CloseRequested` for
-every window, `tidy` for each, and the session list surviving, which is the
-whole of what `Exiting` is for).
-
-**What could not be checked is anything needing a keystroke.** Synthetic keys
-through System Events reach nothing in this binary — it is not a bundle, and
-`AGENTS.md` already records that driving the real app this way is unreliable —
-so ⌘N, ⌘T, presenting and closing a window from the keyboard were exercised
-through the harness and through the socket rather than through the keyboard.
-The shell's own answers to those asks — `set_fullscreen`, `focus_window`,
-`CloseRequested` — are one file and the last two are covered by the launches
-above.
-
-### 10. Selecting text — done, and it is the first thing the webview was doing for us
-
-Markup needs something to mark, and this reader had nothing: `PROGRESS.md` has
-said "no text layer, no selection" since Phase 1. So item 10 is selecting
-words, and item 11 is what the plan calls item 10.
-
-**`select.rs` is the file the app does not have, and the reason it does not is
-that a webview comes with one.** In the app, selecting is the browser's: pdf.js
-lays a text layer over every page — spans that exist to be selected rather than
-seen — and `paintSelection` then spends a hundred lines undoing the damage,
-because a `::selection` colour puts those spans on screen and a page's bold
-type comes back regular, its mathematics as boxes, every letter shifted as its
-line is stretched to the width the printer used. It copies the pixels under
-each selected line off the page canvas, runs them through the same luminance
-ramp that recolours a page, and lays them back down.
-
-Here there is no text layer, so there is nothing to hide. pdfium answers per
-character — `PageText` is characters and their boxes, indexed together — so a
-selection is **two indices**, what it covers is a range of characters, and what
-it looks like is `PageText::quads`, which the search has been drawing since
-item 4. The glyphs under it are the ones pdfium drew, because nothing is drawn
-over them but a translucent rectangle in the theme's own `selection_area`.
-`select.rs` is 240 lines including its tests; `paintSelection`, `joinRuns` and
-the text layer it was written against are rather more than that.
-
-What that costs is what a text layer buys, and it is worth naming: **no
-keyboard selection, no idea what a word is until `words_around` guesses, and
-nothing about right-to-left or vertical text** — a selection here is a range of
-indices in the document's own order, which is the order pdfium reports and
-usually but not always the order somebody would sweep. The app inherits the
-browser's answers to all three. This is the first place in the whole port where
-the webview was doing something worth having.
-
-#### The pointer is the one thing that arrives in the wrong space
-
-Everything else in this reader starts life in the page's own unturned points —
-a link's area, a match's quad, a character's cell — and goes *out* through
-`place_on` once, on its way to the screen. A press starts on the screen and has
-to come back the other way, through the same crop and the same rotation, which
-is `Layout::unplace_on`: `place_on` inverted, rather than a search for the
-rectangle the point is in. The search was the other way to write it and it has
-no answer for most of a page — a character's box is eight points wide, and a
-point in the gap between two words or in the leading between two lines is in
-none of them. Inverting the transform gives every point an answer and leaves
-*which character* to `caret_at`, which has the whole page in hand.
-
-`caret_at` is a browser's rule and is the one nobody notices when it is right:
-the nearest line, then the nearest character on it, then whichever side of that
-character the point actually fell — so a click past the end of a line lands
-after its last character rather than at the start of the next one, and a sweep
-that runs off the bottom of the page selects to the end of it. Vertical
-distance is weighted a thousand to one against horizontal, which is what makes
-a sweep leaving the right edge carry on along the line rather than jumping to
-whatever is directly below. `page_at_point` does the same thing one level up
-and never returns "no page": a sweep into the gutter of a spread, into the grey
-either side, or past the last page is still a sweep, so the nearest page is
-chosen and the point is clamped into it.
-
-**Where the content is, is worked out from the press itself.** A `MountedData`
-call borrows the document and every place a component can call one from is
-already inside a borrow of it — the same wall `Screen` exists for — so the
-viewer cannot ask the DOM where it is. It does not have to: the press arrives
-carrying both its client coordinates and its coordinates within the page it
-landed on, and the layout knows where that page is, so subtracting gives the
-origin. It is taken once per sweep and the scroll offset is added on every
-move, which is what makes scrolling mid-sweep extend the selection through the
-text that goes past rather than through the pixels the pointer is over.
-
-Because the selection is characters and not rectangles, **it survives a zoom, a
-turn, a trim and a spread with nothing recomputed** — the same property item 6
-found for links and matches, arriving for free a third time.
-
-#### A page never hears a click, and that is a fault worth having found
-
-`onclick` and `ondoubleclick` on a page do nothing at all, ever. A page is a
-custom widget, and `handle_dom_event` in `blitz-dom` forwards an event whose
-target is a widget straight to the widget and then **returns**, before the
-match that runs default actions — and `click` is the default action of
-`pointerup`, `dblclick` the default action of `click`. Handlers still run,
-because the handler phase is before the default action, which is why
-`onmousedown` and the root's `onmouseup` work and why this took an hour to see:
-the pointer is plainly reaching the node, and the two events that never arrive
-are the two that would say a *gesture* happened.
-
-The two it takes away are precisely the two a widget cannot generate for
-itself. A click is not a pointerup — it is a press and a release on the same
-node — and a double click is two of those within half a second and two pixels.
-So `begin_sweep` counts the second press itself, with Blitz's own numbers, so
-that a page and a text field in the same window answer a double click the same
-way. It is the fifth entry in `tests/upstream.rs` and the fourth that runs with
-the suite: a widget, a click, and an assertion that the handler heard nothing,
-which will fail the day it is fixed.
-
-#### Copying, and the key the app never needed
-
-⌘C is not in the app's table because it is not the app's key: the webview owns
-the selection, so it owns copying it, and `main.ts` reaches for the clipboard
-only for ⌘⇧C — a quote with its page number attached, which is the one thing a
-browser will not do for itself. Here the selection is the reader's own, so
-plain copying has to be an action like everything else. `keymap::EXTRA` now has
-three entries rather than two, and this one is different in kind from the other
-two: `t` and `s` were built because there were no menus and would go away on a
-merge, and `copy` would have to *join* the app's table. It is the clearest
-thing this port has found that leaving the webview costs — a key nobody ever
-had to write down.
-
-⌘⇧C is the app's own format and its own reasoning, carried across: the page is
-the one the selection *began* on rather than the one in the toolbar, because a
-selection that runs across a page boundary began where it began. ⌘A is "select
-the text of this page", which is the app's label and the app's decision — a
-reader who means the whole document means a file.
-
-`Clip` is a context holding one closure, which is `Away` and `Frame` for the
-third time: the real one is the machine's clipboard through the shell provider
-Blitz hands every window, and the harness provides its own. A suite that took
-the real one would empty the clipboard of whoever is running `cargo test`,
-which is a worse trespass than opening a browser window because it takes
-something away rather than adding something.
-
-**The clipboard costs 96 bytes.** `blitz-shell`'s `clipboard` feature was off —
-the trait method is on `ShellProvider` either way and it is the *implementation*
-that is behind the feature, so every copy would have silently returned `Err`
-and the reader would have pasted whatever it had an hour ago. Turning it on
-took the release binary from 13,054,096 to 13,054,192 bytes, which is arboard
-reduced to a few calls into `NSPasteboard` by LTO. `file-dialog` is the other
-half of that default set; it was turned on when ⌘O was built, and it costs
-rather more — about 1MB, because `rfd` is a real dependency and not a few
-calls into a system object.
-
-#### What is tested, and how
-
-Eighteen tests in `tests/select.rs`, and the interesting part is how they ask.
-**What is selected is asked by copying it**, because that is the only way a
-reader can find out too — the rectangles on the page carry no text, and a test
-that reached into the viewer would be asserting on a field rather than on the
-reader. So `selected()` presses ⌘C and reads the harness's clipboard, which
-exercises the whole path every time: a sweep of three pointer events, the
-caret arithmetic, the quote, and the door out.
-
-The fixture is `prose_pdf`, six pages of one line each, whose text is a
-constant in `fixture.rs` — so "the sweep covered the line" is an assertion
-about the document rather than about whatever came back. A sweep backwards
-covers the same words; a click is not a selection; a sweep below the line
-reaches the end of it; a sweep from page one to page two selects on both; a
-turn of the page selects what is under the pointer, which is the case that says
-`unplace_on` really is `place_on` backwards; Escape puts the selection down
-*after* the find bar and *before* presenting, which is the same "outward, in
-the order the reader arrived" rule item 6 established. And a recompile puts
-the selection down, because a selection is indices into a document and a paper
-rebuilt by LaTeX is a different document — markup is the case where a passage
-*does* survive a rebuild, and it survives as a quote to be looked up again
-rather than as a range.
-
-And the cache is asserted rather than assumed. `Viewer::texts` is the one cache
-in `app.rs` that is bounded where the links beside it are not, because a page of
-text is a `char` and a `Rect` per character — about thirty-six bytes each, so a
-four-hundred-page book read end to end would be 40MB, a quarter of what this
-whole reader costs, held for a feature nobody may have used. Eight pages,
-oldest out first, and `stats::TEXT_PAGES` is what a test reads to say so.
-
-#### What was checked in the real app
-
-That it still starts, draws and quits, and that the shell provider really does
-reach `Clip` — the one line no test covers, checked with a print and then taken
-out again. **The clipboard itself was not exercised in the real app**, because
-copying means writing to the machine's own clipboard and taking somebody's
-clipboard away is not a thing to do without being asked. Everything above it —
-the sweep, the caret, the quote, the page number — is exercised by the harness
-against the real event path.
-
-### The platform work, which was supposed to come after markup
-
-`dioxus-fit.md` was written from the other side of the fence — against QRnew's
-own migration, built the same week onto the same Blitz revision — and its
-recommendation was to reverse the order this file had been working in: **do the
-cheap platform work before the expensive feature work**, because the two
-structural risks left are both about platforms and both were un-probed, while
-the feature work remaining is large and well understood. Finishing markup on
-macOS and *then* finding out the shell does not hold on Windows is the worst
-available sequence. So markup waited, and this is what came first.
-
-#### Blitz is a pinned git revision now, and a fresh checkout builds
-
-Both crates, at `c6dec888`, which is the revision the clone was already sitting
-on. The whole change is seven lines of `Cargo.toml` in the reader and six in
-the spike; the lockfiles moved and nothing else did, and all 270 tests passed on
-the other side of it without a rebuild of anything but the dependency graph.
-
-The reason this was worth doing first is that it is the only thing that stood
-between this tree and a machine other than this one. See Phase 0 above for what
-it replaces.
-
-#### And there is a CI job on three platforms
-
-`.github/workflows/experiment.yml`. It is the third of the three things to
-carry forward, which has been on that list since Phase 2 and is the item
-`dioxus-fit.md` calls the highest information per hour left in the experiment:
-`cargo test` needs no GPU, no screen and no compositor, so the whole reader —
-Stylo, Parley, fontique, Taffy, the layout, the shader's CPU twin, pdfium and
-every one of the app's five mounted modules — can be run on Windows and Linux
-for the price of a runner. **Nothing in this experiment had ever run on
-either.**
-
-It is a workflow of its own rather than a job in `ci.yml` because the two share
-nothing: that one is Node and Tauri and a webview. Four things it needs, and
-each was a small discovery:
-
-- **pdfium is downloaded per platform**, from the same `chromium/8021` release
-  `vendor/lib` was filled from. The Windows archive keeps the DLL in `bin/` and
-  its import library in `lib/`, so the directory `HYLO_PDFIUM` names is not the
-  same on all three.
-- **Linux needs `libfontconfig1-dev`**, because `yeslogic-fontconfig-sys` looks
-  for fontconfig with pkg-config at build time and panics out of a build script
-  without it — long before any test runs. Its own escape hatch,
-  `RUST_FONTCONFIG_DLOPEN=1`, is not one here: it changes the crate's API
-  surface enough that `fontique` stops compiling against it. That was found by
-  trying it.
-- **Node, for one file.** `Reader::book()` is the app's own 400-page fixture,
-  which the app generates rather than commits, and `make-pdf.mjs` has no
-  dependencies — no `npm ci`, one command. `src/fixture.rs`'s own documents are
-  written in Rust precisely so that this is the *only* place the suite needs
-  anything but cargo.
-- **No `cargo fmt --check`**, unlike the app's Rust job, and deliberately: the
-  keymap is one row per action so that it can be read against `keys.ts`, the
-  macro above it is one line per arm, and rustfmt explodes both. Clippy runs,
-  on one runner, and is clean.
+| `tests/reader.rs` | the interface: opening, the wheel, ten keys, the mounting window, fit and zoom, keeping your place through a zoom, the toolbar, spreads, a window of another size, the theme list, settings surviving a restart |
+| `tests/paint.rs` | the pixels: a page where the layout puts it, ink on it, a recolouring theme reaching page and chrome, the ink surviving the theme |
+| `tests/keys.rs` | chords, the table, `keys.toml`, a rebound key, and the dispatch |
+| `tests/sidebar.rs` | contents listed and indented, a heading clicked, the column's mounting window, a thumbnail with ink on it, a mark made, named, followed, taken off and remembered |
+| `tests/search.rs` | opening and closing the bar, what is typed reaching the scan, stepping and wrapping, a highlight's rectangle, the three switches, one slice not reading a whole book |
+| `tests/links.rs` | where a link is, where following it lands, the two ways a document writes a destination, one that points nowhere; the history, the labels, the page field |
+| `tests/view.rs` | margins measured off a sample and taken away, the page turned, a link that turns with it |
+| `tests/paged.rs` | one page at a time, and every chord in the keymap failing to leave the mode |
+| `tests/library.rs` | where you were, kept and put back; what a document calls itself; what was open, and what has been deleted |
+| `tests/watch.rs` | a theme edited and deleted, a document recompiled and one that got shorter, a rebuild that renames the paper — and one test with a real watcher behind it |
+| `tests/windows.rs` | a second window, closing against quitting, full screen and the way out, presenting |
+| `tests/select.rs` | what a sweep covers and reads as, backwards, across two pages, a second click taking a word, the page turned under the pointer, ⌘A, ⌘C, ⌘⇧C, Escape's order, the cap on pages of text kept |
+| `tests/markup.rs` | a mark written into the file and read back, removal, the journal, a rebuilt document's quotes looked up again |
+| `tests/sign.rs` | a name placed, its shape kept, the signatures a document already carries, a signature field that is not a signature |
+| `tests/ime.rs` | a word from a candidate window reaching the field, one found in the document, the empty preedit before a commit |
+| `tests/chrome.rs`, `tests/parity.rs` | the bar, the menus, and the port against the app's own inventory |
+| `tests/cost.rs` | the memory bound |
+| `tests/upstream.rs` | the upstream faults, as the smallest thing that shows each — written to **pass while the bug is there** and fail the day it is fixed |
+| `tests/recolor.rs` | the shader against the reference, to one level in 255 |
+| `src/*.rs` | unit tests beside the code: the ported layout, the crop, the search fold, the caret, the window rules, the switchboard, the palette |
+| `src/{theme,settings,keys,library,watch}.rs` | forty-four, and they are the app's own |
+
+**How a test asks matters.** What is selected is asked by *copying* it, because
+that is the only way a reader can find out too. Whether a highlight is visible
+is asked by rendering the page and looking at a pixel, because reading the
+annotation back is exactly the check that passed on the invisible version.
+
+Two harness traps worth knowing: `cargo test` runs tests as threads of one
+process, so anything keyed by pid collides (the fixture writer uses a counter);
+and a test writing into `/tmp` on macOS must canonicalise it, because `/var` is
+a symlink to `/private/var` and the watcher compares real paths.
+
+## CI
+
+`.github/workflows/experiment.yml`, three platforms. `cargo test` needs no GPU,
+no screen and no compositor, so the whole reader — Stylo, Parley, fontique,
+Taffy, the layout, the shader's CPU twin, pdfium and all five mounted modules —
+runs on Windows and Linux for the price of a runner. Before it, nothing in this
+experiment had ever run on either. Four things it needs:
+
+- **pdfium downloaded per platform**, from the same `chromium/8021` release.
+  The Windows archive keeps the DLL in `bin/` and its import library in `lib/`,
+  so the directory `HYLO_PDFIUM` names is not the same on all three.
+- **`libfontconfig1-dev` on Linux**, or `yeslogic-fontconfig-sys` panics out of
+  a build script before any test runs. Its escape hatch,
+  `RUST_FONTCONFIG_DLOPEN=1`, is not one: it changes the crate's API enough
+  that `fontique` stops compiling.
+- **Node, for one file** — `Reader::book()` is the app's 400-page fixture,
+  generated by `make-pdf.mjs`, which has no dependencies. `src/fixture.rs`'s
+  own documents are written in Rust precisely so this is the only place the
+  suite needs anything but cargo.
+- **No `cargo fmt --check`**, deliberately: the keymap is one row per action so
+  it can be read against `keys.ts`, and rustfmt explodes it. Clippy runs.
 
 What it cannot cover is the window — the shell, the cascade, full screen, the
-Dock menu and the socket. Item 9 is what makes that a small hole rather than a
-large one: the *rules* are in `windows.rs` with fourteen tests of their own, and
-what is left needing a real window is the part that genuinely is a window.
-
-**One thing was answered before the job ever ran.** `cargo check --all-targets
---target x86_64-pc-windows-msvc` compiles, from this machine, with the standard
-library for the target and no linker: the `cfg(not(unix))` arm of `single.rs`,
-`stats.rs` without `vmmap`, and everything under them. Linux cannot be
-cross-checked the same way, because fontconfig wants a sysroot — which is the
-entry above, and is why the runner is the answer.
-
-#### IME exists, and it was never going to need a decision
-
-This file has carried IME as **the** one item that needed a decision rather
-than a workaround, on the strength of `dioxus-assessment.md`'s "IME does not
-exist — no `compositionstart` / `update` / `end`". Both were right when they
-were written and neither is now. `packages/blitz-dom/src/events/ime.rs` takes
-the focused node's editor and applies the composition through Parley;
-`blitz-shell` routes all four of winit's `WindowEvent::Ime` variants into it
-and reports the cursor area back so the candidate window lands in the right
-place.
-
-What arrives is not a DOM `CompositionEvent` and never will be, and that is the
-right answer rather than a shortfall: the DOM's composition events are a
-*notification* that a composition is under way, and what a find bar wants is
-the result. `Reader::compose` sends what an input method sends — a run of
-preedits, then the word — and `tests/ime.rs` types 日本語 into the field by
-composition, finds `résumé` in the document by composing it, and asserts that
-the reader is taken to the page it is on. **Nothing in `app.rs` had to change**:
-the find field is an ordinary `<input>` and a committed composition is an
-`input` event like any other.
-
-Two things came out of writing it that were not the point.
-
-*A preedit is not a query, and here that is free.* Blitz answers a preedit with
-a redraw and no `input` event, so the reader never searches for a half-typed
-romaji. A browser **does** fire `input` mid-composition, with `isComposing` set
-for the application to check — and `main.ts` does not check it, so the app runs
-a scan of the whole document for every intermediate guess. That is the second
-time the port has come out ahead by inheriting a stricter substrate.
-
-*The empty preedit before a commit is winit's contract and not a nicety.*
-Without it, the commit is inserted beside the composing region rather than in
-place of it, and the field ends up holding にほん日本語 — which looks exactly
-like a Blitz fault and is not one. `compose` sends it, and one test sends the
-raw pair the other way round so that the contract is written down somewhere
-that fails if it changes.
-
-So: struck from the risk list, struck from "worth raising upstream", and struck
-from the two documents that called it blocking. It cost an afternoon and five
-tests.
-
-#### The memory bound now binds on the platform CI runs on
-
-`tests/cost.rs` is a growth bound, and `footprint_mb()` answered `0.0` anywhere
-but macOS — so on the machine that will now run this on every push, the one
-test written to catch the shape of regression that cost 96MB and went unnoticed
-through the whole of Phase 1 was checking counters and nothing else.
-
-Linux answers out of `/proc/self/status`: `VmRSS`, and `VmHWM` for the peak.
-**That is RSS, in a file whose own heading says never to measure RSS**, and the
-exception is exact rather than convenient. The rule is about a Mac and about
-the GPU — a `wgpu` allocation is charged to the physical footprint and only
-partly to the resident size, which is how `vello` and `vello_hybrid` were
-measured at 3% apart when they are eleven times apart. Neither half holds here:
-Linux has no separate footprint counter to prefer, and the one caller runs the
-whole reader down the **CPU** path, where a page is an `ImageData` on the heap,
-there is no device and no driver, and everything the process holds is resident
-by construction.
-
-The parsing is a function of a string with two tests on it, because the machine
-this was written on cannot run the function that reads the file. Windows still
-answers nothing: `GetProcessMemoryInfo` means a dependency for one number, and
-the test already knows what to do with silence.
-
-#### One thing seen once and not since — solved, later; see "After Phase 3"
-
-**It was the first candidate below, and this section's own last paragraph
-named the fix.** Left as written because the reasoning is what is worth
-keeping: the crash came back a fortnight later, twice in six runs of the
-suite, and macOS had written a crash report that ended the guessing in one
-line. `FPDF_CloseDocument` from `Drop`, outside the lock, corrupting a
-process-wide map in pdfium keyed by the document being closed. What follows is
-what could honestly be said before that report existed.
-
-A single `SIGSEGV` out of the test binary, on the first run after the IME tests
-were written, with two of the five having passed. It has not come back in
-twenty-seven runs of that binary and four of the whole suite, and a probe
-written for the most likely cause — documents opened and dropped on eight
-threads while others are read, which is the one thing pdfium's process-wide
-lock does not cover, since `FPDF_CloseDocument` runs from `Drop` outside it —
-did not reproduce it in twelve runs either.
-
-It is recorded rather than fixed because the honest state is that it is not
-understood. The other candidate is font fallback: those tests are the first
-thing in this tree to shape Japanese, and first-time CJK fallback on several
-threads at once goes through fontique and the platform's font machinery. If it
-returns, it will most likely return on the CI job, which runs a cold process on
-a cold machine every time — and the two places to look are a `Drop` for
-`pdfium::Open` that takes `library()` before the document goes, and the font
-context.
-
-### The menus, and opening a document — done, and not on the list at all
-
-Taken out of order for the reason at the top of this file: these were the two
-things somebody comparing this with the app noticed first, and neither was an
-item, so neither was ever going to be reached by working down the list.
-
-**Three menus, in a layer of their own.** `Menu` in `app.rs` is which one is
-down and the panels are a sibling of the toolbar rather than a child of it —
-a menu inside a 46px row is a panel taller than its parent, and the layer is
-out of the flow so the column above it is exactly what it was. What is in them
-is the app's: the document's name carries open, open beside, a window and
-close; the zoom carries the three fits, the three spreads and the two
-rotations; the theme carries all fourteen. The chips still *say* what is in
-force, which is what the harness reads off them and how a reader reads them
-too — what changed is that clicking one shows the choices rather than stepping
-to the next of them.
-
-**Every menu item's chord is read off the keymap** (`Viewer::chord_for`),
-never written beside the item. It is the reason the app's Keyboard page was
-rewritten to be drawn from the keymap: a hand-written chord cannot show a
-rebound one, and the table it replaced had already drifted. A reader who
-unbinds ⌘O sees an item with no chord on it, which is true.
-
-Three things about them are Blitz's rather than taste, and two are traps
-already recorded one level away:
-
-- *A menu needs a non-zero `z-index` to be **hit-tested*** ahead of what it is
-  drawn over. Same fault as `.sidebar-resize`, and a menu that paints and
-  cannot be clicked is worse than no menu.
-- *A press inside a menu must not reach the root*, which is what dismisses it
-  — and the three buttons a menu hangs off must stop propagation too, or the
-  press closes the menu on the way down and the click opens it straight back
-  up. Clicking an open menu's own button would then be the one gesture that
-  did nothing.
-- *Escape cannot be ordered from one place.* The app puts the whole dismissal
-  order in one document-level capturing handler; here the keyboard belongs to
-  the innermost element asking for it, so a field that has it has to defer to
-  the menu itself. `Action::Dismiss` has the order for when no field has the
-  keyboard, and the find field and the page field each check the menu first.
-
-**⌘O opens a different document in this window**, which is what the app's ⌘O
-does — `openDialog` calls `this.open(path)` — and ⇧⌘O is a menu item and not a
-key there either. This used to be the one place where the port's "there is no
-empty window" finding did *not* apply — ⌘N gave a second window on the
-document in front, and ⌘O was never about empty windows. There is a start
-screen now and ⌘N is an empty one; ⌘O is unchanged, which is the half of that
-sentence that was always about ⌘O rather than about the finding.
-`Viewer::open_here` is `document_changed` plus the library entry, because a
-recompile is the same document and this is a different one: the marks, the
-title and the remembered place all move, and the fit, zoom, spread, rotation,
-panel and theme stay, because those are settings.
-
-**The picker is `blitz-shell`'s**, behind its `file-dialog` feature, which is
-`rfd`. It costs 1MB — 12MB of binary to 13MB. It is reached through `Pick`, a
-context holding one closure, for the reason `Clip` is one and one step further:
-the real answer is a modal window belonging to the operating system, and a
-suite that opened one would sit there until somebody clicked it. `tests/menus.rs`
-answers with a path and tests everything downstream of the answer.
-
-**Three things outside the window have to hear about a swap and none of them
-is the window's**: the desk, which is what the restore list is read from; the
-watch, which is following the file that was open a moment ago; and the
-window's own title. `Ask::Showing { path, title }` is all three, answered by
-`Shell::on_swap` and `Session::showing`. The name travels with the path
-because the reader has already worked it out and asking pdfium again would
-mean opening the file again.
-
-**And the thumbnails follow the drag now.** The document's relayout is still
-deferred to the end of a sidebar drag, and the entry that decided that
-(`drag_sidebar`) was right about the document and never asked about the
-column: a thumbnail is a twenty-fifth of a page in area and it is the thing
-directly under the pointer. `relay_column` is live; the pages are not.
-
-*Nine tests in `tests/menus.rs`, one more in `tests/sidebar.rs`.* Everything
-here goes through Blitz's real event pipeline and real hit-testing, which is
-what the harness is.
-
-#### The one thing in this section a person still has to check
-
-**The picker has never been seen to open.** `Pick`'s default calls
-`ShellProvider::open_file_dialog`, and every test stubs it — correctly, since
-the real one is a modal window. Driving the real app to check it did not work
-either, and the reason is worth recording beside what `AGENTS.md` already says
-about foreground testing: **plain keys sent by System Events reach this app and
-modified chords do not.** `j` scrolled the document; ⌘O and ⌘B, sent the same
-way with the window frontmost and clicked into, did nothing at all — the app
-never saw them, which the diagnostic in `Pick` confirmed by never printing.
-So: press ⌘O in a running reader by hand, once, before this is believed.
-
-#### And a `MissingTextureBinding` seen once, on a cold binary
-
-The launch immediately after a fresh `cargo build --release` died with
-`MissingTextureBinding(TextureId(2))` — the fault item 9 recorded and fixed by
-sizing the viewport from the window before the first frame. It has not come
-back in nineteen launches since, including six with a focus change and a
-screen capture thrown at the first seconds. The difference on the run that
-died was that everything was cold: first render, first shader compile. That
-would change the frame ordering the `fresh` flag depends on, which is exactly
-the shape of the original fault. Recorded rather than fixed, because one
-observation is not a diagnosis — and the place to look is `page.rs`'s `fresh`,
-not anything added here.
-
-### Four grievances from reading with it — done, and none of them was on the list either
-
-The menus above came from the same place these did: reading with the thing.
-All four are a correct answer badly placed, badly coloured, or out of reach,
-which is the class of fault a suite that asks "does it work" will never raise.
-
-**A page wider than the window was pinned to the left of it, with the rest
-unreachable.** `#viewer` in the app is `overflow: auto` and `#pages` is
-`margin: 0 auto` — a page narrower than the window is centred by the box model
-and a wider one scrolls. Blitz has neither, and the pages here are placed
-absolutely against a box `layout.rs` sizes, so both halves had to be
-arithmetic and only the first half had been written. At 200% the page sat
-twenty pixels from the left edge with a fifth of it off the screen and no
-gesture that would reach it.
-
-`Viewer::across` is the fix and the shape is the part worth keeping: **a
-fraction, not an offset** — where the middle of the window sits across the
-content, half by default. An offset would have to be recomputed at each of
-the dozen places that relay the document out; a fraction is resolved against
-whatever the content is now, so a page that has just become wider than the
-window arrives with its middle in the middle, and a reader who zooms back out
-to something that fits gets it centred rather than left where they had
-panned. The other axis of a trackpad pans it, and ⇧-wheel with it — AppKit
-turns the second into the first before winit sees either.
-
-**Every undrawn page was white, whatever the theme.** `.page { background:
-#ffffff }`, and a page whose texture has not arrived draws as that and nothing
-else — so a zoom step, a jump, a theme change or a turn, all of which re-key
-every mounted page, flashed white rectangles on a dark theme. `--page` is the
-theme's paper under a recolouring theme and white under one that is not,
-which is the colour the page is about to be. It does not make pdfium faster;
-it makes the frame before pdfium answers the right colour, which is the whole
-of what a reader was seeing.
-
-**The page field opened empty.** The app selects the field's contents
-(`el.pageNumber.select()`); this emptied it instead, and the entry for it said
-that came to the same thing for anybody who then types. It does not — the
-number vanishing is the reader losing the one thing the field was showing
-them. There is no imperative door onto parley's selection (it will select all
-when a keystroke asks and not otherwise), so it is emulated: the field opens
-holding the page it is on, `page_fresh` is the "all of it is selected" state,
-and the first thing typed replaces the lot.
-
-*The interesting half is where that replacement had to go.* Cancelling the
-keystroke and writing the character in through the `value` attribute works —
-Blitz's `set_text` replaces the editor's string — but `set_text` does not
-touch the *selection*, and a field just built has its caret at offset 0. So
-the second digit landed in front of the first and "50" was typed as "05",
-which parses to page 5 and passes every test written in one digit. Letting the
-editor do its own insertion moves the caret; the replacement then happens in
-`oninput`, where fresh means the caret was at the front and taking the old
-label off the end of the new value leaves exactly what was typed. A click
-inside the field ends the fresh state, which is both what a click into a
-selected field does anywhere else and what keeps that arithmetic true.
-
-And **a press anywhere else puts the field away**, which is the field's own
-`blur` handler in `main.ts`. It had none, so the field held the keyboard until
-Escape or Enter and a reader who clicked away was typing into something they
-were no longer looking at.
-
-**The toolbar wore a grey rather than the theme.** `--muted` was mixed halfway
-between paper and ink, and halfway between any two colours is a mid-grey — so
-Mark, Trim, the zoom and the two steppers came out very nearly the same under
-all fourteen themes, which reads as the theme not having loaded. `--text-soft`
-in `themes.ts` is `mix(text, bg, 0.26)`; `Palette::muted` is now that number
-said from the other end, and `faint` with it. `tests/chrome.rs` asserts the
-distance from the theme's own ink rather than a hex value, so it is a claim
-about every theme rather than about one.
-
-`tests/chrome.rs` is the nine tests for all of it.
-
-### And five more, from reading with it again — four of which the first round had not touched
-
-The round above fixed what it said it fixed and the reader still did not look
-right, which is worth naming: **three of these five were sitting under the
-fixes, and one of them was the *cause* of a fault the first round had answered
-somewhere else.**
-
-**The window's size never reached the layout.** The largest of them, and behind
-two of the five complaints. Blitz answers `WindowEvent::SurfaceResized` by
-moving its own viewport and asking for a redraw, and tells nobody — so the
-chrome followed the window and `Viewer::layout` kept the viewport it was handed
-when the window was mounted, at `onmounted`, once, for the life of the window.
-A window opened at 1100 and dragged to 1600 laid its pages out for 1100 inside
-a `.viewer` that was now 1600: the page centred in a `.pages` box narrower than
-the window, which on screen is a page against the left of the screen, and Fit
-width fitting a width the window no longer had.
-
-**So the first round's centring was right and invisible.** `Viewer::across`
-does centre the page, and every test of it passed, because a harness window
-never changes size. Nothing in the suite had ever resized one — which is the
-same shape as the menus and the four above: not a wrong answer, an answer
-computed against something that had stopped being true.
-
-The wire is the one every other piece of news uses. `Shell::on_resized` is
-winit's half, `main.rs` turns it into an emit, and the `window-resized` arm in
-the mailbox task refits from `Screen` — which in the app reads winit and in the
-harness reads a `Cell` that `Reader::resize` sets. There is no `ResizeObserver`
-here and `get_client_rect` cannot be called from inside an event, so news is
-the only door. What is *not* measured is what a live drag costs: each step
-re-keys every mounted page and that is a pdfium render each, the same as the
-app's, and the placeholder is at least the theme's paper now rather than white.
-
-**The panel's hairline was outside its width**, so the document was laid out
-for a viewport one pixel wider than the box it was drawn into: every page flush
-against the panel with its far edge a pixel over the window. `box-sizing:
-border-box`, and it is the resize fault in miniature — the layout's idea of the
-viewport and the viewport disagreeing.
-
-**A menu came down at the end of the toolbar rather than under its button.**
-The menus shipped as one layer pinned to the bar's two ends, on the reasoning
-that a measured offset would need keeping in step by hand and there is no way
-to ask an element where it is from here. Both halves of that were true and the
-conclusion was wrong: an absolutely positioned child of a `position: relative`
-wrapper needs no measurement, and it is the browser that keeps it in step. The
-View menu — whose button sits between Trim and the theme — came down under the
-page field, three chips to the right of what had been clicked. `.anchor` is the
-wrapper; the panel is still out of the flow, so the 46px row is still 46px.
-
-**`text-align` does nothing to a text input, and the page number sat against
-the left wall of its box.** `create_text_editor` in Blitz copies the font size,
-the line height and the brush into parley and stops — no alignment — and calls
-`editor.set_width(None)`, so there is no box to align within either. Parley has
-`set_alignment`; nothing calls it. Centring is therefore not available, so the
-box is made to fit instead: `page_box` is the padding, the border and the
-number, and the readout and the field take the same width so opening one moves
-nothing. It is a workaround, and it is also the better answer — the number
-never sits in a puddle of empty box.
-
-*And the selection was invisible.* The emulated select-all from the round above
-was real and nothing on screen said so, so the field opened looking like a
-field somebody had clicked into and the first digit replacing all of it came as
-a surprise. `.page-field.fresh` is the theme's own selection colours — the pair
-a swept passage on the page is drawn in — and `--found-ink` is what that
-needed. The platform's blue focus ring went with it, for the accent border the
-app uses: it belonged to no theme here, and under Hylo Ember it was the one
-cold thing on screen.
-
-**The toolbar was still grey, and the accent was still the only colour in it.**
-The round above set `--muted` to the app's own `--text-soft` and that was
-correct and beside the point: every theme in this app names a near-monochrome
-text colour — `#2f3237`, `#e9eaee`, `#f8f8f2` — so *any* shade of it is a grey,
-in the app as much as here. What carries a theme in the bar is the accent, and
-it was arriving as one bright word among the grey with nothing under it. So
-`--accent-soft` (a fifth of the way from paper to accent) is the ground a chip
-in force stands on, which is `.btn.on` in `styles.css` said exactly; and minus,
-the readout and plus are one sunk `.zoom-group` rather than three more quiet
-words in a row of quiet words.
-
-`tests/chrome.rs` is fifteen tests now.
-
-### The icons, which were the other half of the grey bar
-
-Every button in the app's `index.html` carries a `data-icon` and none here did,
-so the bar was a row of words where the app's is a row of small drawings with
-words beside them. That is most of what "the toolbar is grey" was about, and no
-amount of choosing a better grey answers it.
-
-**Inline SVG works here, and not the way it looks like it works.** Blitz does
-not lay an `<svg>` out as elements: `construct.rs` takes the subtree's
-`outer_html`, injects an `xmlns` if it is missing, and hands the string to
-usvg. That is why `dangerous_inner_html` is the right door — the paths from
-`icons.ts` go in as the string they already are — and it is also why **an icon
-cannot inherit its colour**. usvg parses its own document with no cascade
-behind it, so `stroke="currentColor"` resolves to black on every theme, which
-on Hylo Dark is an icon that is not there. The shade travels with the icon
-instead: `Icon` takes a `stroke`, and `color` beside it, because two of these
-drawings fill part of themselves with `currentColor` — the theme circle's dark
-half and the cog's centre — and usvg resolves that against `color` and
-otherwise against black.
-
-The cost is the one thing a browser gives free: an icon does not follow its
-label through `:hover`. It does follow the `on` state, because that is a state
-the component knows about.
-
-**`src/icons.rs` is a copy and `tests/icons.rs` is the gate.** The app's file
-is TypeScript, so it cannot be mounted the way `theme.rs` and `settings.rs`
-are; a copied *drawing* is exactly the kind of copy `AGENTS.md` warns about,
-because both sides draw something and only one is ever looked at. The test
-parses `src/icons.ts` and compares the fourteen shared names character for
-character — the same trick `settings.test.mjs` plays on the settings table.
-One icon is this reader's own and the test says so: `crop`, for the Trim chip,
-which lives in the app's settings and has never needed a drawing there.
-
-### The Settings window, which was item 1's other half
-
-The oldest thing outstanding since Phase 3 began, and the last large piece of
-interface — which is, per the top of this file, the category that was not on
-the list in the first place.
-
-**It is a window in the flow, not a window of the system's**, and the app is
-the same: `showWindow` in `ui.ts` is a scrim and a frame in the same document.
-That matters more here than there. A second winit window would be a second
-`Viewer` over a second `Store`, and every setting changed in it would reach
-the reader on its next launch — `AGENTS.md` describes exactly that staleness
-between two reader windows, and it is tolerable between two documents and not
-between a switch and the thing the switch is about. It also means the whole
-window is testable in a harness that has no windows.
-
-Five pages: **Reading** (progression, spread, the gap, trim, zoom, recolouring
-pictures, and the three things that are remembered), **Appearance** (every
-theme in the folder as a swatch of its three deciding colours, resolved
-through `parseColor` first — a swatch that hands its raw string to the
-renderer is the picker lying about the page), **Window**, **Keyboard**, and
-**About**. `.field` is `ui.field`: the control on the name's line and the
-sentence under both, which is most of why that window reads as prose rather
-than as a form.
-
-**The Keyboard page is drawn from the keymap and never from a list of its
-own**, which is the app's own hard-won rule: its hand-written table had
-already drifted, naming ⌘T twice and unable to know about a key the reader had
-rebound. Every row is an action out of `keymap.rs` with whatever `keys.toml`
-gave it, the file's complaints come first because a key that does nothing is
-otherwise found out about by pressing it, and Reload is a button because that
-directory is written to several times a minute while somebody is scrolling.
-
-**The stepper is where Blitz charged for it.** A number that can be typed
-needs two things this engine does not give: the caret starts at offset 0, so
-Backspace does nothing and a typed digit goes *in front* — 20 with 3 typed
-into it is 320, which clamps to the maximum — and there is no way to select
-what is in a field. So the page field's emulation is here too: a `fresh` flag,
-the first keystroke replacing the lot, the replacement done in `oninput`
-where the editor has already moved the caret. What is new is that the field
-holds its own text while it is being typed into, because a typed number is
-clamped on the way out and echoing the clamped one back would rewrite the
-editor under the caret. `set_text` is a no-op when the text already matches,
-which is the whole reason the echo is free the rest of the time.
-
-**And Escape had to be answered inside the field.** The keyboard goes to the
-innermost element asking for it, and a stepper is that the moment the window
-opens; every plain key has to be stopped there or it reaches the root and
-scrolls the document behind the window — including the one key that closes the
-thing the reader is looking at. That is the focus fault turning up a fifth
-time. `tests/prefs.rs` is eight tests.
-
-### 11. Markup — done, and it is the item where pdfium wins outright
-
-The last item on the list, and the one the plan put last because it is where
-the port stops being a port: everything above it is the app's behaviour said
-in Rust, and this is a place where the two renderers disagree about what is
-*possible*.
-
-**A marked passage is a `/Subtype /Highlight` in the file**, with
-`/QuadPoints`, `/C` and the appearance stream pdfium generates for it — the
-specification's own annotation, the one Preview, Acrobat and Zotero read.
-Sweep a sentence, let go, and six swatches come up under the line; press one
-and the mark is in the document. `src/markup.rs` is 400 lines including its
-doc comments and `tests/markup.rs` is sixteen tests.
-
-#### Removal is one call, and in the app it is several hundred lines
-
-`saveDocument()` in pdf.js writes an incremental update and no markup subtype
-overrides `Annotation.save()`, so **an annotation already in the file cannot
-be edited or deleted through it at all**. `AGENTS.md` says so in as many
-words, and what the app does about it is the largest single piece of
-machinery in the feature: keep a pristine copy of every document it has ever
-written to, load it detached, replay every highlight but the one being
-removed into it, work out which of them are the app's to replay and which are
-baked into the backup already, refuse when the file carries markup neither
-the backup nor the journal can account for — and a one-level byte-truncation
-undo for the case even that cannot reach.
-
-Here it is `FPDFPage_RemoveAnnot`, which `pdfium-render` wraps as
-`delete_annotation`, and `markup::remove` is eleven lines. That is the whole
-difference, and it is worth being precise about where it comes from: it is
-not that pdfium is better software, it is that this reader *owns the
-document* — pdfium hands over a mutable `PdfDocument` and a save, where
-pdf.js hands over a read model and an annotation-storage side channel that
-was built for its own editor.
-
-**What pdfium charges for it, and it is a real charge.** `save_to_bytes` is
-`FPDF_SaveAsCopy` with `flags = 0`, and `pdfium-render` does not expose the
-flags — `FPDF_INCREMENTAL` is in its own bindings with a `TODO` above the
-hard-coded zero. So where the app appends new objects and leaves every
-original byte untouched, this re-serialises the document. For a paper that is
-nothing; for a signed one it is the end of the signature, which is why the
-reader is told once and asked rather than refused. `.hylopdf-original` is
-kept beside the document the first time this reader ever writes into one —
-the app's own file under the app's own name, kept here for the other reason.
-
-#### Two faults found by writing it, and one of them was in the reader
-
-**A highlight written with `PdfQuadPoints::from_rect` is invisible, and
-round-trips perfectly.** The specification numbers a quad's corners
-upper-left, upper-right, lower-left, lower-right, and pdfium reads them back
-that way — `RectFromQuadPointsArray` takes its left and bottom from the third
-point and its right and top from the second. `from_rect` instead *walks* the
-rectangle: bottom-left, bottom-right, top-right, top-left. Written that way,
-the annotation is in the file with the right colour, pdfium's own
-`GenerateHighlightAP` builds it an appearance stream whose `/BBox` has its
-left and right the same number, and nothing draws it. And `to_rect` takes the
-minimum and maximum of the four points, so it undoes `from_rect` exactly: the
-mark reads back correct through the library that wrote it, and only something
-else opening the document ever finds out. That is why the test beside it
-renders the page and looks at a pixel rather than re-reading the annotation.
-
-**And red and blue were the wrong way round in every page this reader has
-ever drawn.** `PdfRenderConfig::new()` turns `FPDF_REVERSE_BYTE_ORDER` on —
-the crate's own source says why, and the reason is `image`'s `DynamicImage`
-rather than anything about PDF — so a bitmap asked for as BGRA came back
-RGBA. Both paths above it take pdfium at its word: the GPU uploads the buffer
-as `Bgra8Unorm` and lets the sampler swizzle, and the software path swaps the
-two channels by hand. Both were swapping an order that had already been
-swapped.
-
-It is invisible on almost everything this reader draws, which is why nine
-phases of work and 313 tests never caught it: a page of black type on white
-paper is the same picture either way, and so is every scan. The first thing
-in the whole reader to put a *known* colour on a page is markup, and a
-passage marked in `#ff0000` came back on screen as `#0000ff`. One line in
-`pdfium.rs`, and it broke no test — which is the same evidence twice.
-
-#### What the file cannot carry, and the journal that holds it
-
-The journal is `library.toml` — the app's own file, through the app's own
-`library.rs`, mounted here rather than copied, so a journal one of them
-writes is a journal the other reads. The rule is `syncMarkup`'s: **everything
-is thrown away and rebuilt from the file on every read**, and what survives
-is only what a file cannot say.
-
-*A document that cannot be written.* Asked of the disk before the gesture
-rather than found out from a write that failed — `OpenOptions::new().write(true)`
-is the only question whose answer is actually true, because permission bits,
-a read-only volume, another owner and a sandbox all come back the same way.
-The mark is kept beside the document with its quads and its quote, the row in
-the panel says "beside the document", and the reader is told once.
-
-*A document that was rebuilt.* A paper recompiled by LaTeX is a new file and
-every annotation went with it — the case this whole app goes out of its way
-to support everywhere else. So every mark in the document is written into the
-journal with the passage it covers, and a reload that finds the annotations
-gone finds the quotes still written down. "Put 1 passage back" appears in the
-panel, looks each one up through `search::fold` — ligatures split, soft
-hyphens dropped, whitespace flattened, because a passage that moved has very
-often been re-set on the way — starting from the page it used to be on and
-working outwards, and writes back what it finds. What it does not find is
-left in the journal and counted out loud: a passage that was rewritten is not
-a passage that moved. It is a button and never a thing that happens on its
-own, which is the app's own sentence about the same button: re-anchoring is a
-guess, however good a one.
-
-*And a mark the reader took off is not a mark a rebuild lost.* Both are
-"missing from the file", and telling them apart is a bug the app had and
-fixed in exactly the same place: the journal is written **before** the file
-is, so the reload cannot offer back what was just deliberately removed.
-
-#### Three things this reader had to learn that the app never had to
-
-**The file has to be let go of before it can be written.** pdfium reads a
-page's objects when the page is asked for, so `FPDF_LoadDocument` keeps the
-file open for the life of the document — the same lazy read the app gets out
-of `read_range`, arrived at from the other end. On Windows nothing can rename
-over a file held open that way, and nothing can truncate it either. So
-`PageSource::release` exists: the write path lets go, writes, and reopens
-through the path a recompile already uses, and the reopen is unconditional
-because a released document draws nothing. The app needs none of this — the
-handle it holds is Rust's own `File`, which shares writing and deletion, and
-the bytes it writes came out of the worker rather than through that handle.
-
-**A press on the swatches must not reach the page.** It would begin a sweep
-of its own and put down the very selection it is there to mark. The app has
-the same problem from the other side and answers it the other way round: in a
-webview the browser collapses the selection before any handler runs, so there
-is nothing to stop and `captureSelection` takes a copy on the way in. Here
-the selection is the reader's own, so stopping the press is enough — which is
-what the toolbar menus one layer up already do.
-
-**A mark is drawn by pdfium, not by this reader.** Every other rectangle in
-this app — a search hit, a selection, a link — is a node over the page,
-because there is no text layer here and a rectangle is what those things
-actually are. Markup is the exception and it is the right way round: a
-highlight is *in the document*, `PdfRenderConfig` draws annotations by
-default, and that means a document arriving with markup somebody else made
-shows it too. The one cost is that a mark goes through the recolouring shader
-with the page it is on, exactly as it does in the app.
-
-#### What is not built, of markup
-
-No underline, no strike-out, no squiggly: pdfium can write all three and they
-are not offered, because a list that showed a mark this reader has no way to
-make would be a list with a dead row in it. The app arrives at the same place
-from the other side — `saveNewAnnotations` in `pdf.worker.mjs` has a case for
-`HIGHLIGHT` and none for the other three. No area drag for scans, which is
-the one thing `markup-assessment.md` still lists as unbuilt on both sides. No
-note attached to a mark: `/Contents` on a highlight is a comment somebody
-asked for, and the quote in the panel is read off the page instead — which
-has the property that matters, in that it is right for markup this reader did
-not make.
-
-### What is not built
-
-No theme editor. There is still no text *layer*, and there is not going to be
-one: item 10 is what that was for. (There was no start screen either, when
-this was written. See "The window with nothing in it", below.)
-
-**Phase 3 is complete.** Eleven items, and the last one came out ahead of the
-thing it was porting.
-
----
-
-## After Phase 3: dark mode, help, print — and the last empty arm
-
-Three of the app's forty-three keyboard actions still answered "not built
-yet", and the sentence was carried by a catch-all at the bottom of `perform`
-that turned the keyboard into a live list of what was left. **The list is
-empty and the catch-all is gone**, which is worth more than the three
-features: an action added to `keymap.rs` and not handled in `app.rs` is now a
-compile error rather than a sentence in the notice line.
-
-The three were the three that are about something *outside* the document, and
-that is why they were last rather than because they are hard.
-
-### Dark mode, and the machine's own light and dark
-
-The reader had fourteen themes, a menu to choose one from and a `t` that
-cycled; what it did not have was the one gesture the brief asks for by name —
-"dark mode that is easy to toggle (via UI or shortcuts)". Two settings for it
-were already being written, because `Store::wear` has recorded `light_theme`
-and `dark_theme` beside `theme` since Phase 3 item 1: which slot a theme fills
-is read off its own paper, because that is the only thing that actually makes
-a theme dark. Nothing read them back.
-
-Now ⌘D does, and it moves between **the pair the reader chose** rather than
-between two defaults — Sepia by day and Tokyo Night by night is the case the
-two slots exist for, and it is a test.
-
-**`follow_system_theme` was listed as needing a signal this reader does not
-get. It does get one**: winit's `WindowEvent::ThemeChanged`, which macOS has
-answered since winit 0.28, plus `Window::theme()` for the startup question.
-Both go through `Appearance`, which is `Screen`'s sibling in every respect —
-a context holding one closure, answered by the shell out of the real window
-and by the harness out of a cell, because a component that asks winit what
-the system appearance is cannot be built without winit and the harness has no
-window. The event carries nothing: it says there is a new answer and the
-reader asks, exactly as a resize does, so one place answers the question and
-the startup path uses it too.
-
-**The one place this is not a port is the shape of the answer.** The app's
-`darkOutside()` is `matchMedia`, which always says light or dark because a
-webview is a browser; `Window::theme()` is an `Option`, and the absence is
-real. Read as "light" it would move every reader on a platform that does not
-report an appearance to the light theme at every launch, and turn following
-off the first time they chose a dark one. So `Store::outside` is
-`Option<bool>` all the way down and every rule is written against `Some` —
-which is a test of its own, because it is the half that is easy to write the
-wrong way round.
-
-Three rules came across unchanged and they are what make the switch feel like
-a decision rather than a mode:
-
-- Following is asked **before the first frame**, not after mounting, so a dark
-  machine never sees a white page on the way in. It is the same call as the
-  viewport question above it and for the same reason.
-- Choosing a theme whose darkness disagrees with the machine **stops
-  following**, and says so, and writes it down. Left following, the machine's
-  next word would take the choice straight back off them. ⌘D is that same
-  rule arriving through the same door, which is why `toggle_dark` goes
-  *through* `set_theme` rather than around it.
-- Choosing another theme of the darkness already in force says nothing about
-  the machine and leaves the switch alone.
-
-The two switches are on the Appearance page. The following one shows **the
-setting, not the setting narrowed by whether it can do anything today** — a
-control that reads back other than what is in the file is the picker lying
-about the page, which is `AGENTS.md`'s rule about swatches one step along. The
-sentence under it is where "this machine does not report an appearance" is
-said.
-
-One line more than the app's, deliberately: `other_half` checks that the slot
-holds a theme of the darkness it is the slot *for*. A theme file whose paper
-was edited from dark to light is still named by `dark_theme`, and the app
-trusts the name — so ⌘D hands back a light theme, records it in the other
-slot, and the pair repairs itself after having done nothing anybody could see.
-
-### Help, and print
-
-Help is the Keyboard page, which is the app's own answer and the reason that
-page is a key at all: "Help" behind a cog is a strange place to keep the
-answer to "what can this thing do". One line, now that the Settings window
-exists.
-
-Print prints nothing. It hands the document to a program that does —
-`open -a Preview`, Edge by absolute path on Windows, `xdg-open` on Linux —
-and the app's reasoning under those choices is the part worth having: the
-point of *naming* a program is that it is **not us**, because the system's
-default handler for a PDF may well be this reader, and handing a document to
-ourselves to print it is a loop. It is a `Printer` context beside `Clip` and
-`Pick`, for the reason those are contexts: `cargo test` must not be able to
-open Preview on four hundred pages.
-
-### And the `SIGSEGV` that was seen once is understood
-
-`PROGRESS.md` has carried "seen once and not understood: a single `SIGSEGV`
-from the test binary, not reproduced in thirty runs since", with two
-candidates. It came back — twice in six full runs of the suite, in two
-different test binaries, with no panic and no assertion — and this time macOS
-had written a crash report, which named it outright:
-
-```
-__tree_remove(…)
-CPDF_Document::~CPDF_Document()
-FPDF_CloseDocument
-<PdfDocument as Drop>::drop
-drop_in_place<dioxus_reader::pdfium::Open>
-drop_in_place<dioxus_reader::harness::Reader>
-```
-
-It was the first candidate, and the reason it took a report to see is that the
-call is invisible in the source. **Nothing in this crate calls
-`FPDF_CloseDocument`** — `PdfDocument`'s own `Drop` does, whenever the last
-`Arc<dyn PageSource>` goes, on whatever thread that happens to be. Every other
-call into pdfium in `pdfium.rs` is taken behind the process-wide lock, and
-this one is not written down anywhere to be taken behind anything.
-
-What it corrupts is not the document being closed. **pdfium keeps a
-process-wide map of stock fonts keyed by `CPDF_Document*`**, and
-`~CPDF_Document` erases its own entry from it; erase a node from a red-black
-tree while another thread is inserting one and the tree is broken, after which
-any thread that walks it dies. So the crash lands in a test that was opening a
-document, caused by a test that was finishing one — which is exactly why it
-looked random, moved between binaries, and would not reproduce alone.
-
-The fix is an `impl Drop for Document` that takes the library lock and closes
-the document inside it, which is `release()`'s one line again; the `Open` that
-drops afterwards has nothing left to close. Eight consecutive clean runs of
-the suite against two failures in the six before it — evidence rather than
-proof, which is what a race allows.
-
-The rule it leaves is general and worth carrying to anything wrapping a C
-library behind a lock: **a `Drop` is a call site, and it is the one call site
-that does not appear at the place it happens.** The second candidate in that
-note — CJK font fallback on several threads — is not ruled out by this and is
-also not needed to explain anything any more.
-
-### And this one was checked in the real app, because it had to be
-
-`Window::theme()` and `WindowEvent::ThemeChanged` are the window's, so the
-harness proves the rules and proves nothing about the wire. Both halves were
-run for real: the reader was left set to Sepia with following on, the machine
-was in dark mode, and it launched wearing Hylo Dark — so the startup question
-is answered before the first frame, and the answer is written down. Then the
-machine was switched to light and back with the reader open, and it moved to
-**Sepia** and back to Hylo Dark — not to Hylo Light, which is the pair doing
-what the two slots are for. `follow_system_theme` stayed on throughout, which
-is the other half: following the machine is not the reader overruling it.
-
-`tests/prefs.rs` is 14 and `src/store.rs` has four of its own; 339 in total.
-
----
-
-## The window with nothing in it
-
-The largest single thing the interface did not have, and the one whose absence
-had reached furthest into the rest of the reader. Three entries in this file
-named it as the reason for something else being the way it was, each of them
-correctly, and each of them is now out of date:
-
-- `Session::another` said "**this is where the port stops being a port**",
-  because ⌘N in the app gives an empty window and here there was nowhere to
-  put one, so it opened a second window on the document already in front of
-  somebody.
-- `Desk::hand_over` carried a comment saying its middle arm — `Fill`, for a
-  window with nothing in it — was **unreachable in this reader**, and that
-  the day a window could be empty was the day it would be needed.
-- `Spec::needs_document` in `keymap.rs` was carried unread for two phases,
-  because there was no window without a document for the flag to mean anything
-  in.
-
-All three were true. What they add up to is that "no start screen" was not one
-missing panel; it was a shape the whole application had been built around, and
-the way to find that out was to build the panel and watch three other things
-come loose.
-
-**What is there now** is the app's own `#welcome`, item for item: the name, one
-line under it, one filled button, the last six documents read with the page
-each was left on and a × to take one off, and the sentence saying a document
-can simply be dropped on the window. It stands where the document would rather
-than over it — the app lays it over the viewer and reveals it with a
-`[data-empty]` selector, which is a webview arrangement for a webview reason,
-and here it replaces the region, which is the same picture and one fewer thing
-on screen.
-
-**And a document of no pages is how there is no document.** `render::Nothing`
-is a `PageSource` whose `pages()` is 0, and it is the whole of the mechanism.
-The alternative was `Option<Arc<dyn PageSource>>` threaded through the viewer,
-the layout, the search, the sidebar and every component under them — several
-hundred arms whose every branch says "there is no document, do nothing", which
-is what a document of no pages already says. The layout has no boxes, the
-mounting window holds nothing, the search finds nothing, the sidebar has
-nothing to draw. One predicate, `Viewer::empty`, decides what is on the
-screen; everything above it goes on being written for a document.
-
-### What came loose, and what it now does
-
-**⌘N is an empty window**, which is the app's own answer and no longer a
-difference to explain. Two places in one book at once is still one gesture:
-"Open in a new window…" under the document's own name, with the document
-already there.
-
-**A document handed over lands in a window that is showing nothing.**
-`Handover::Fill` finally happens, and the path it takes is the one every other
-piece of news takes — the window's mailbox — so the bookkeeping afterwards is
-⌘O's own: the desk, the restore list, the watch and the window's title are all
-set by the single call that sets them for ⌘O. `Desk` had to learn about
-windows rather than only about documents for this: `idle()` used to look at
-the front window alone, not as a shortcut but because there was no list of
-windows-showing-nothing to walk, there being none.
-
-**Closing a document is a gesture**, and it is the one that empties the
-restore list. `AGENTS.md` draws that distinction for the app — a window closed
-because the app is quitting was open at the end, a document the reader put
-down is one they have finished with — and here it is an `Ask::Showing` with an
-empty path, which every one of the three things outside the window takes in
-its stride.
-
-**A launch with nothing remembered is the start screen**, not the 400-page
-fixture. Opening a test document nobody asked for was a strange first
-impression, and it was only ever there because there was nowhere else for a
-window to go. `--measure` and `--quit` keep the fixture, for the same reason
-they already refuse to restore: the numbers in this file were taken on it.
-
-**The keyboard knows.** `needs_document` is read now, in one place, and
-`tests/keys.rs` checks **every** flag against `src/keys.ts` rather than four of
-them — because a flag that is wrong one way is a key that does nothing on a
-document and wrong the other way is a key that scrolls a layout of no pages,
-and neither shows up as anything but a reader pressing a key and being
-ignored.
-
-*Which turned up four keys the app leaves unflagged that are plainly about a
-document*: `find`, `find-next`, `find-previous` and `mark`. ⌘F on the app's own
-start screen puts up a bar whose placeholder reads "Search this document" over
-a window that has none; ⌘⇧B says "Marked page 0". The table here is left
-agreeing with the app, because that table is a port and the gate is what keeps
-it one; the three guards are in `Viewer::open_find`, `step_match` and
-`mark_page`, each with a line saying so. It is worth raising over there.
-
-### Dropping a document on the window
-
-"Or drop a PDF anywhere in this window" is the last line of that screen and it
-is a promise. In the app the webview keeps it, through `dragover` and `drop`;
-here there is no webview and no DOM event — winit reports it on the *window*,
-which is the right place for it in both applications, because what is being
-dropped is a file and files are the Rust side's business.
-
-`Shell::on_drop` is the fourth hook of its shape after `on_resized`,
-`on_theme` and `on_swap`, and it carries three states rather than one:
-`DragEntered` with whether there is a document among the paths, `DragLeft`,
-and `DragDropped` with the one path that will be opened. The paths are
-filtered before they leave the shell, so the hint can say *this will not be
-caught* while there is still time to not let go — which is the difference
-between a hint that means something and a hint that appears for every drag
-across the screen. `DragMoved` is deliberately unanswered: it fires per pixel
-and says nothing `DragEntered` has not.
-
-**And the hint itself was got wrong first, which reading with it found.** The
-first version was a solid `--accent-soft` over the whole window with the words
-in a pill — correct, legible, and a curtain drawn across the one thing
-somebody dragging a file wants to see, which is the window they are dragging
-onto. The app's own is a dashed accent border inset ten pixels over a veil of
-the theme's paper: the window saying it will catch this, rather than something
-standing in front of it. That is what is there now, with `--veil` mixed in
-`variables()` as an eight-digit hex rather than written as `color-mix`, so
-that what reaches the renderer is a colour and not a function it may or may
-not implement.
-
-### And two smaller things the bar was missing
-
-The **cog** is at the right end of the toolbar, where the app puts it and
-where every application that has one puts it. It was only ever an item in the
-Document menu here, which is a strange place to keep the answer to "how do I
-change something" — the same objection the Keyboard page answers by being a
-key of its own. `icons.rs` grew the app's own cog for it, and `tests/icons.rs`
-grew a row.
-
-The **shelf is in the Document menu** as well as on the start screen, which is
-the app's own last section of that menu. The start screen is unreachable
-without first putting a document down, and "the paper I was reading yesterday"
-should not cost a trip through the file picker to find again.
-
-### What it was checked with
-
-`tests/shelf.rs` is fourteen tests and `tests/keys.rs` gained the gate above;
-**354 in total**. The one thing the harness cannot reach is winit's own delivery
-of `DragDropped`, so the wire was run for real: the reader was launched with an
-empty config directory, came up on the start screen, and a second launch naming
-a document exited quietly while the first window filled with it — which is
-`Handover::Fill`, the `open-document` news, `open_here` and `Ask::Showing`, end
-to end, in a process with a window in it.
-
-### What is still not at parity
-
-Reading the app's `index.html` beside this, what is left is smaller than what
-went:
-
-- **The theme editor.** Still the largest, still not built; the Appearance page
-  shows every theme as a swatch and cannot make one.
-- **The toolbar peek handle.** ⌘T puts the bar away and the notice line names
-  the key that brings it back, which is the app's fallback rather than its
-  answer: there, a strip along the top edge brings the bar down on hover.
-- **The page pill**, the floating readout the app shows while scrolling with
-  the toolbar hidden.
-- **Rotate.** The app has Left and Right in the bar; here they are in the View
-  menu and on ⌘R alone.
-- **"Show in Finder"**, which needs a door of its own beside `Away`.
-
----
-
-## The bar, read against the app's — and three bugs behind it
-
-Five things asked of this reader after reading with it, and every one of them
-turned out to be about the same half-finished port: the toolbar was built to
-the app's *older* layout and nothing had gone back to check it against
-`index.html`.
-
-**Mark and Trim were chips this bar had and the app's does not.** Trim is a
-setting on the Reading page there — something turned on for a scanned book and
-left on — and marking a page is an item under the document's name. Both are
-where the app puts them now, and the two places in the bar they were taking are
-what the page controls needed.
-
-**The bar is three groups.** `.bar-left` gives way because it holds a title and
-a title has an ellipsis to shrink into, `.bar-center` never gives way, and
-`.bar-right` grows against the left so the two sides share the slack. That is
-`styles.css` rule for rule, and it is what puts "23 / 297" in the middle of the
-window instead of at the far right beside the cog, with a step either side of
-it.
-
-**"Open…" is a menu of its own.** The app split it from the document's menu and
-this had not followed: a menu opened by pressing the name of the paper you are
-reading, four of whose items were about papers you are not. The picker, a
-second window and the shelf answer *open something*; a mark, a highlight and a
-print belong to the document already on screen.
-
-**The notice line is a pill over the document**, shown when there is something
-to say and gone four seconds later, which is `ui.ts`'s own 4200ms. It was a row
-of the flex column and took thirty pixels whether or not it said anything —
-a grey band across the bottom of every screenshot in this file.
-
-### The menus had only ever worked by accident
-
-Removing that band took the menus with it, and the reason is the most
-load-bearing thing learned this round.
-
-**Blitz gathers every z-indexed box into the nearest stacking context, and
-hit-tests that context's children only when the point falls inside the union of
-their own boxes** (`matches_hoisted_content` in `hit_inner`). A toolbar menu
-lives in `.toolbar`'s context, and `.toolbar` is 46px tall — so the root's union
-was a 46px strip across the top of the window, and a menu hanging below it was
-drawn where nothing would hit-test it.
-
-It had worked because `.notice` was a `z-index: 1` row at the *foot* of the
-window, which stretched that union over the whole of it. Delete the notice row
-and every menu item became unclickable, with nothing anywhere saying why.
-
-The fix is to make the document an explicit layer rather than to rely on one:
-`.toolbar, .findbar { z-index: 2 }`, `.sidebar { z-index: 1 }`, `.body
-{ position: relative; z-index: 1 }`. **`z-index: 0` does not do it** — Blitz's
-hoist test is `z_index != 0`, so a zero is not a layer.
-
-### Three more, found by measuring rather than by reading
-
-**The sidebar's tabs did not shrink**, and neither did a result row.
-`flex: 1 1 auto` with no `min-width: 0` keeps a flex item at the width of its
-content, so at a narrow panel the three tabs overflowed the sidebar and
-*Results* — the third, and the one that comes and goes — was drawn over the
-document. Which is not only ugly: out there the document's layer is on top, so
-the tab could be seen and could not be pressed. "I can't go back to Results
-after clicking somewhere else" was that, and nothing to do with tabs. The
-result rows were the same fault one panel down, showing as something stranger:
-a button is laid out as a *centring* flex box by the user-agent sheet, so a row
-too wide overflowed at both ends and the page number went off the left. The
-number had been there all along, outside the panel.
-
-The app's `.tab` carries `flex: 1 1 0; min-width: 0; overflow: hidden`, and
-this now does too — with the word in a span of its own, because `text-overflow:
-ellipsis` is not implemented here and a mask has to stand in for it. Below
-250px the word goes and the drawing stays: three tabs reading "C", "P", "R" are
-three tabs nobody can tell apart.
-
-**The count in the find bar is the way through to the list.** `el.findStatus`
-in `main.ts` is a button for the reason its comment gives — "3 of 128" answers
-*is it in here* and not *which one did I mean* — and this reader had it as a
-readout. It is a button now, and it goes one better than the app: a panel the
-search opened is *borrowed*, so one Escape takes the bar down and the panel
-with it. A panel the reader had open before any of that is theirs and stays.
-
-**And Backspace was not deleting anything, in any field, on macOS.** AppKit
-does not deliver the editing keys as keystrokes at all: it reads them against
-the standard key bindings and calls `doCommandBySelector:` with a name, which
-winit surfaces through `ApplicationHandlerExtMacOS::standard_key_binding` — a
-callback separate from `window_event`. `blitz-dom` knows this and says so, its
-`Key::Backspace` arm being `#[cfg(not(target_os = "macos"))]`; `BlitzApplication`
-implements the callback and returns itself from `macos_handler`. **`Shell`
-wraps it, implements `ApplicationHandler` itself, and was answering `None`** —
-winit's default — so every one of those commands was dropped. The find bar, the
-go-to-page field and every field in the settings window were write-only, and
-nothing in the suite could see it because a harness has no AppKit either.
-`Reader::apple_binding` now sends what AppKit would, so `press("Backspace")`
-means on a Mac what it means everywhere else, and two tests cover it.
-
-### What a reading session costs, measured again
-
-`cargo run --release`, one paper, `vmmap` rather than Activity Monitor:
-
-| what                                   | footprint |
-| -------------------------------------- | --------: |
-| idle, no document                      |     155MB |
-| reading, 900×700                       |     267MB |
-| reading, maximised                     |     313MB |
-| a second after a scroll stops          | 150-190MB |
-| peak during a fast scroll              | 320-390MB |
-
-Flat from ten screenfuls to sixty, which is what says it is a working set
-rather than a leak. Of the 313MB: 43MB of window drawables shared with
-WindowServer, about 104MB of wgpu/Metal with 50MB of that the two textures per
-page, 24MB of pdfium page buffer, about 40MB of malloc, and the rest dirty
-library data across 1041 mapped images. **The Tauri app on the same document is
-346MB steady and 466MB after sixty screenfuls**, so this is not the underwhelming
-half of the comparison — a wgpu device and a Metal driver are simply a floor
-that a webview does not pay twice. The levers, if it has to come down, are the
-12MP page ceiling and the two-textures-per-page upload; `device.poll` was
-measured and ruled out.
-
-## Five more from the bar, and the one underneath them
-
-A second reading session against the app, and five more differences. Four are
-the sort this file has collected all along — a label, an order, a message. The
-fifth was underneath the other four and is the largest single fault found in
-this experiment: **no ⌘ chord had ever worked in the real app.**
-
-### Every ⌘ chord was dead, and the harness said they all worked
-
-⌘T cycled the theme. ⌘F opened nothing. Neither is a mistake anybody made in
-the keymap: `mod+t` is Toolbar and `mod+f` is Find in `keymap.rs`, and
-`tests/keys.rs` presses both and passes.
-
-`keyboard_types::Modifiers` carries **both `META` and `SUPER`**. Its own
-`meta()` asks for `META`. `winit_modifiers_to_kbt_modifiers` in `blitz-shell`
-answers winit's `meta_key()` — Command, on macOS — with **`SUPER`**. So
-`event.modifiers().meta()` is false with ⌘ held, `chords_of` spelled the
-keystroke without a modifier at all, and ⌘T arrived as a bare `t`, which is
-`next-theme`. Every ⌘ chord either did nothing or did whatever its plain letter
-does.
-
-**And the harness was writing `META` by hand.** `spell_out` turns a chord back
-into a keystroke, and it had been spelling `mod` the way the type reads rather
-than the way the shell sends — so 350-odd tests exercised a keyboard no machine
-has. That is the whole lesson: a harness that constructs its own events is a
-second implementation of the platform, and it has to be checked against the
-first one. `spell_out` sends `SUPER` now, `keymap::command` reads either bit,
-and `command_is_read_whichever_bit_it_arrives_in` says so out loud.
-
-It also explains a note left two rounds ago — "driving the real app failed
-because plain keys sent by System Events reach this app and modified chords
-(⌘O, ⌘B) do not". System Events was delivering them perfectly.
-
-`keymap::plain` came out of the same fix: three fields ask "is this typing or a
-chord" before letting a key through to the root, and all three were asking
-`meta()`.
-
-### The other four
-
-**The theme chip said the name of the theme; the app's says "Theme".** A button
-says what pressing it does, and which of the fourteen is on is the tick in the
-menu. The settings chip was the one button in the bar wearing a drawing and no
-word, and a cog is exactly the icon somebody has to have learned. Both are
-`index.html` now, `#theme` and `#settings`. The harness reads the theme off
-`data-theme` — the reader's own account of what it is wearing, and not a label
-anybody has to look at.
-
-**A page number past the end is the last page, not a complaint.** ⌘9 in a
-browser with four tabs open goes to the fourth. The field is gone by the time
-the notice arrives, so the sentence was all the reader got for it. The notice
-is kept for what cannot be clamped: text that is neither a label this document
-uses nor a number at all.
-
-**A search shows its matches.** The count in the bar is still the door back to
-the list, but the list no longer waits behind it: the panel opens with the
-first hit, on the Results tab, with each match cited by the page's *label* —
-`this.viewer.label(result.page)` in `sidebar.ts`, which is what a book that
-numbers its front matter i, ii, iii needs. The panel is borrowed, as it already
-was, so closing the bar takes it back down; it is offered once per search, or a
-scan of a long book would reopen it on every slice. A search that finds nothing
-opens nothing. And the bar's last button is a × rather than the word "Done" —
-closing the find bar finishes nothing, it puts a thing away — with the three
-switches in the app's order, "Highlight all" first, because it is the one that
-changes only how much is painted.
-
-### And the hit test, a fourth time
-
-**Clicking Contents while the Pages tab was scrolled did nothing.** Blitz
-hit-tests without clipping on `overflow: hidden` — this file has the entry
-already — and a thumbnail is placed at `top - thumb_scroll`, so a scrolled
-column puts rows at negative offsets, painted clipped and hit-tested over the
-tab strip. `.tabs` carries `position: relative; z-index: 1` now, and
-`.sidebar-resize` beside it goes to 2 so the drag edge keeps the top 35px it
-overlaps. It worked perfectly at the top of the column, which is where anybody
-checking it would look, and that is the fourth time this trap has cost an hour
-in this experiment.
-
-## Reading the app's own source instead of waiting to be told
-
-The round above was five differences, found by using the two apps side by
-side. The reader's answer to it was the right one: **why is the interface
-being reinvented, when it is all in `index.html`, `styles.css` and
-`main.ts`?**
-
-It was, and the reason is the one this file has recorded twice already: the
-eleven items were the order the app was *built* in — layout, rendering,
-search, links, library, windows, selection — so the interface was never an
-item, and the toolbar and the find bar were built from what the app was
-remembered to do rather than from what it does. **The way to find the rest is
-not to read with it. It is to diff it**: every class in `styles.css` against
-every class in `styles.rs`, and every `show*Menu` in `main.ts` against the
-menu beside it. That takes a minute and it names everything at once.
-
-What the diff found, and what this round did about it:
-
-**The find bar is a card, not a row.** `styles.css` hangs it under the
-toolbar at the right, over the document, in two rows — the query with its four
-buttons, and the three switches indented under the field so they read as
-belonging to the query. Here it was a row of the flex column, which is simpler
-and is not what a find bar is: it took forty pixels off the viewport for as
-long as it was up, so opening the search moved the page being read. Two rows
-now, `.find-icon` at the head of it, up and down for the matches, a × to
-close, and "Highlight all" first of the three because it is the one that
-changes only how much is painted.
-
-**Rotate left and right are buttons in the bar.** `#rotate-left` and
-`#rotate-right`, beside Search — they were items in the View menu here, which
-is a place to go looking for something you press twice in a row while reading
-a scan that came in sideways.
-
-**The zoom menu is `showZoomMenu`, item for item**: the three fits, a number
-to type, and 50 to 300% under it. It had grown spread and rotation instead,
-and was missing the half that makes it a zoom menu at all. And `ZOOMS` is
-`ZOOM_LADDER` again — 175%, 250% and 600% had been dropped on the way across,
-so ⌘+ walked a shorter ladder and stopped at 400%.
-
-**The cog opens a menu, not the window.** `showSettingsMenu`: the toolbar and
-full screen, continuous or paged, the three spreads, whether a picture takes
-the theme, whether the pill appears — and "All settings…" at the foot of it.
-Going straight to the window put a window over the document for a switch that
-is one press.
-
-**The theme menu has two switches and a swatch a row.** Dark mode and "Light
-or dark follow system" were on the Appearance page alone, which is a window
-away from the list they are about. And neither that menu nor the zoom menu
-closes on a choice any more: a theme is something you try on, so the tick
-moves and the list stays — the app's own rule, in the same two places.
-
-**The page pill and the peek handle, both missing entirely.** With the toolbar
-away this reader had no way back but the key the notice names, and no way to
-tell which page it was on. `#toolbar-peek` drops in when the pointer reaches
-the top edge — 8px, or 46 in full screen, where the system's own bars land on
-that band — and `#page-pill` says where you are for a second after a scroll.
-Both are timers-as-threads, the shape the notice line already had.
-
-**Notes: the annotations a document already carries, made readable.** pdfium
-paints an annotation's own appearance into the page, so a sticky note arrives
-as the little icon it was drawn as and a comment arrives highlighted — and the
-words behind either of them live in the annotation, which nothing here was
-reading. So the icon sat there looking like a button and was not one, which is
-`renderNotes`'s own sentence about the same fault on the other side.
-`PageSource::notes_of` is the seam's eighth question; a marker is pressable
-all over and a comment over a passage answers on a strip at its right edge, so
-that the words underneath stay in reach of a pointer that wants to select
-them.
-
-**The theme button says "Theme" and the cog says "Settings"**, and a page
-number past the end goes to the last page rather than raising a notice — the
-two from the round above that belong to this list rather than that one.
-
-### One Blitz finding, and it is a layout one
-
-**A flex item whose basis is its content does not shrink.** `.chip.title` is
-`flex: 0 1 auto; min-width: 0; overflow: hidden` — the app's `.doc-title` with
-its ellipsis — and when the bar grew two rotate buttons the group gave way and
-the button inside it kept its full width, so a long file name was drawn
-straight across the page controls in the middle of the bar. `flex: 1 1 0` is
-what shrinks, which is the shape `.tab` in the sidebar already uses for the
-same reason one panel over. Worth knowing before the next thing that has to
-give way.
-
-### What is left, and it is now a list rather than a search
-
-- **The theme editor**, which is the whole of Appearance's second half and the
-  three items the theme menu is still missing: New theme…, Edit this
-  theme… / Make a copy…, Delete this theme. The largest thing outstanding, and
-  the oldest. *(Built — see "Parity, measured rather than asserted" below.)*
-- **A password prompt.** `ui.askForPassword` has no counterpart here; an
-  encrypted document opens as an error. *(Built — see "A document behind a
-  password" below.)*
-- **`.loading` and `.page-placeholder`**, which is what the app shows where a
-  page has not been drawn yet.
-- **`.title-drag`**, which is macOS window dragging with the toolbar hidden.
-  It may not apply — this window keeps its own title bar — and that is a
-  question to answer rather than a thing to build.
-- **`popover-*` against `menu-*`.** The two files name the same components
-  differently. Deliberate, and worth writing down: what a port owes the app is
-  the same elements, labels, order, behaviour and look, not the same class
-  names, and renaming them costs a test suite and buys a reader nothing.
-
----
-
-## Six more, and the window was the size of most of them
-
-Six things a reader listed after using it. Two were bugs with one cause each;
-three were one cause between them; and the sixth turned out to be the window
-rather than the interface in it.
-
-### The picker crashed the app, and it was right to
-
-⌘O and Open ▸ Open document… killed the process:
-
-```
-thread 'main' panicked at winit-common-0.31.0-beta.2/src/event_handler.rs:134:
-tried to handle event while another event is currently being handled
-```
-
-`rfd` shows an `NSOpenPanel` and runs it **modally**, which spins a nested run
-loop; a nested run loop delivers events to winit; and winit is already inside
-`EventHandler::handle`, because a click on a menu item is what got us there.
-That handler holds a `RefMut` on itself for exactly this reason. The panic is
-the guard doing its job.
-
-So the picker cannot answer where it was asked. `Pick` is an *ask* now:
-`pick.ask(Opening::Here)` opens the panel on a thread of its own, where `rfd`
-dispatches it back onto the main queue — which the main thread reaches after
-the click has been handled and the handler is free — and the answer comes back
-as news in the mailbox, beside the document dropped on the window and the
-document handed over by a second launch, both of which were already that shape.
-`Opening::Beside` is the other door, "Open document in new window…", carried in
-the event's name because by the time the answer arrives the menu it was chosen
-from is long shut. The harness's `Pick` posts the same news from its queue of
-paths, so a test still hands over a path and reads the outcome; nothing in
-`tests/menus.rs` changed.
-
-### Everything was too small, and none of it was the font
-
-Three of the six were about size, and the first thing to do was measure rather
-than adjust. The app was opened in Playwright's WebKit at 1100×900 and asked
-for the computed font and the box of every control in its toolbar; the port was
-opened in the harness at the same size and asked for the same boxes. The
-answers: the same family (`ui-sans-serif` falls through to `-apple-system`,
-which Blitz maps to `SystemUi`, which is what a WKWebView resolves it to as
-well), the same 13.5px, the same 16px icons, the same 30px chips, and widths
-within four per cent — parley does not apply the optical tracking WebKit gives
-SF at small sizes, and that is the whole of the difference.
-
-**What was actually small was the window.** `settings.rs` — the app's own file,
-mounted here — says `window_width = 1280`, `window_height = 860` and
-`window_maximized = true`, and this reader had `--width 1100` hard-coded in
-`main.rs` and never wrote the geometry back. So the app opens filling the
-screen and the port opened in a small window, and every comparison a reader made
-was between a bar with room in it and the same bar squeezed. The flags still
-win, because they are what a measuring run asks with; otherwise the setting
-decides, and the launch window's size is written back on the way out. Geometry
-belongs to the launch window, which is the app's own rule and the app's own
-reason.
-
-### And the name of the document was twenty pixels wide
-
-`.chip.title` had `flex: 1 1 0` — a basis of nothing, asking for whatever the
-bar has left over, which in a bar carrying fourteen controls is nothing at all.
-The name came out as three letters at every window size. The app's `.doc-title`
-is `flex: 0 1 auto`: it asks for the name and gives way under pressure, which is
-what `min-width: 0` and the fade are for. The icon in front of it went too — the
-app has none there, this is the one thing in the bar that is not a verb, and it
-was costing the name twenty-three pixels in a bar with none to spare. And
-`of 400`, not `/ 400`, which is `#page-count` in `index.html` said exactly.
-
-### Three labels kept the last theme's colour
-
-The zoom readout stayed the colour of the theme before last and caught up at the
-next zoom step. So did the document's name. So did the page number, which on a
-dark theme after a light one was black on black and simply not there.
-
-Blitz settles the colour of a run of text when it *builds* the run, and a change
-to a custom property several levels above does not put that layout among the
-damage. Which elements are hit is the surprising half: a `<p>` in the same place
-comes out right and a `<button>` does not, because a button builds an inline
-layout of its own rather than joining its parent's. So a label sitting inline
-beside something that did change is rebuilt along with it — which is why
-"of 400" was always right, being a span in the same box as the number — and a
-label alone inside its own box is not. Every other chip in the bar carries an
-icon whose `stroke` is written out as the theme's colour, so every other chip is
-mutated on a theme change and comes out right. The three with no icon now name
-their colour the same way. `tests/upstream.rs` carries the smallest thing that
-shows it, and passes while the bug is there.
-
-### The one that did not reproduce
-
-"The Close button triggers the document button beside it" could not be
-reproduced: clicked by coordinate at 1100, 1280, 1512 and 1728 wide, with the
-pointer moved onto it first, and with the document menu already open, the Close
-chip closes the document every time. What was certainly wrong beside it is the
-title chip above, which was twenty pixels of button with its text overflowing —
-and hit-testing in Blitz does not clip. It is worth pressing again now that the
-name has a box of its own.
-
----
-
-## Seven more, and two of them were one fault
-
-### A press that slides is not a press
-
-Blitz turns a two-pixel movement with the button down into a text selection and
-then declines to dispatch the click, so a press made with a mouse rather than a
-trackpad answered perhaps one time in three and highlighted the button's label
-instead. Every browser's user-agent stylesheet says `user-select: none` for a
-button; `blitz-dom/assets/default.css` does not. `blitz-button-select.md` and
-`blitz-button-select.patch` are the report and the fix, beside the QRnew note
-they are modelled on.
-
-Two things came out of chasing it. `user-select` **does not reach an element
-from an ancestor** — Blitz reads it off the node the press landed on and its
-parent, so saying it once on the root is not enough; `styles.rs` says it on
-`.root *`. And the shared test harness sends its moves with **no buttons held**,
-which is exactly the field Blitz reads, so a press-and-drag could not be
-expressed with it at all: `Reader::press_and_drag` builds the events itself.
-
-### The document's name was standing on the two buttons to its left
-
-`.chip.title` had `flex: 1 1 0`, so the chip was twenty pixels wide and its
-label was laid out from a negative offset — which is why it read "ool" rather
-than "book.pdf". The text node's box therefore covered Close and Open, and the
-anchor around it is positioned, so it was hit-tested ahead of them: hovering
-Open highlighted the name, and pressing Close opened the name's menu. One
-cause, three complaints, and `flex: 0 1 auto` — the app's own value — is all
-of it.
-
-### Colours: no, they were not the same
-
-Every derived shade was a near-miss of `applyTheme`'s: a surface 6% towards the
-ink where the app pulls it 55% towards white, a ground 13% towards the ink
-where the app takes it 7% towards black, an accent tint mixed from the paper
-rather than from the surface. Near-misses are the worst kind, because the two
-apps then look almost the same and nobody can say what is different. `Palette`
-is now `applyTheme` arithmetic for arithmetic, including the four `--bar-*`
-shades the toolbar needs because it stands on the paper rather than on the
-surface, and `--positive`, `--negative` and the two contrast inks.
-
-### Zoom by trackpad did not exist
-
-macOS reports a pinch as `WindowEvent::PinchGesture`, not as a modified wheel,
-so a reader listening only for ⌃-wheel hears nothing at all. Both are answered
-now — the gesture through `Shell::on_pinch` and the mailbox, ⌃/⌘-wheel in the
-viewer's own handler — and both go through `Viewer::zoom_by`, which is a
-*proportion* rather than a step on the ladder: a trackpad sends a stream of
-small events and a mouse sends one large one, and stepping on each took 125% to
-400% in one gesture. The setting is written through a new `Store::set_soon`,
-which hands the value to the library's scribe and lets it coalesce — a pinch
-produces one of these a frame.
-
-### A thread per timer, which a session ran out of
-
-```
-failed to spawn thread: Os { code: 35, kind: WouldBlock }
-```
-
-The page pill is armed by every change in the scroll offset, and arming it was
-`thread::spawn` followed by `sleep`. A minute of reading is a few thousand
-threads that exist only to sleep, and macOS stops giving them out. `emit::after`
-is one thread, a heap of deadlines and a condvar, for the whole process.
-
-### And the picker crashed the app
-
-`rfd` runs `NSOpenPanel` modally, which spins a nested run loop, which delivers
-events to winit while winit is still inside `EventHandler::handle`. That
-handler panics on re-entry, correctly. `Pick` is an *ask* now: the panel opens
-on a thread of its own, where `rfd` dispatches it back onto the main queue —
-which the main thread reaches once the click has been handled — and the answer
-comes back as news in the mailbox, beside the document dropped on the window.
-
-### Menu items have their icons
-
-`menuItem` in `ui.ts` puts one between the tick and the label, and eleven of
-this reader's items were missing theirs. `print`, `copy` and `edit` came across
-from `icons.ts` with them.
-
----
-
-## Parity, measured rather than asserted
-
-Everything above was found by using the two readers side by side, one fault at
-a time. This is the other way round: **`tests/parity/app-inventory.json` is
-taken from the running Tauri app** — in WebKit, through
-`scripts/ui-harness.mjs` — and `tests/parity.rs` asks the port the same
-questions. What it records is what each toolbar group holds, what each of the
-five menus lists in what order and where the rules fall, the Settings window's
-pages with their fields, headings and buttons, the sidebar's tabs, the find
-bar's switches, and what all twenty-two of `applyTheme`'s custom properties
-resolve to.
-
-Six tests, and the first run of them found eight divergences that nobody had
-reported:
-
-- The **document menu** was missing "Show in Finder" and "Information", had an
-  item the app does not have, and put its rules in two other places.
-- The **theme menu** stopped at the fourteenth theme: no New theme…, no Make a
-  copy…, no All appearance settings…
-- **There was no theme editor at all** — the oldest outstanding item, and the
-  three menu entries above are its front door. It is `themeEditor` field for
-  field: the same seven colours in the same order with the same sentences
-  under them, the draft worn while it is being written, and Cancel, Save and
-  Delete at the foot. The one difference is the platform's: the app puts an
-  `<input type="color">` beside each hex field and Blitz has no colour input,
-  so what is here is a swatch and the hex.
-- The Settings window's **Reading** page carried "Recolour pictures too",
-  which belongs on Appearance; **Window** had Full screen and Presenting as a
-  *sentence* rather than two switches (the component had no `Frame` to throw
-  them with, and now takes one); **Keyboard** was missing "Open keys file" and
-  **About** both of its buttons.
-- **Appearance** had two of the app's three switches, in the other order.
-- And `--accent-soft` was one level out, because `mix` here rounded at every
-  step where the app rounds once at the end.
-
-Two things the inventory cannot cover, and both are named where they occur:
-anything about the *window* — dragging it, full screen, the traffic lights —
-and anything drawn with a browser widget the renderer has no counterpart for.
-
----
-
-## Four from the bar, and the first one was the type
-
-A second reading of the two side by side, and the first of the four is behind
-most of the other three.
-
-### The font was the same file and not the same type
-
-`ui-sans-serif, -apple-system, …` resolves on both sides to
-`/System/Library/Fonts/SFNS.ttf` — fontique reaches it through
-`GenericFamily::SystemUi`, WebKit through `system-ui`, and at 27px and above
-the two lay out the same string to within a third of a pixel. Below that they
-diverge by about a tenth, and the reason is SF's `trak` table: **the system
-font carries tracking that grows as the size falls, WebKit applies it, and
-parley does not read the table at all.**
-
-So the chrome came out tighter and darker than the app's, which is what a UI
-face looks like with its small-size tracking taken away and is exactly what
-was reported — "less spacious, more machine-like, a tiny bit too strong".
-Measured against WebKit over the same string at every size the sheet uses, the
-missing advance is 0.61px a character at 11px, 0.59px at 13.5px and 0.55px at
-16px. Flat enough across that band for one number to say it, so `body` says
-`letter-spacing: 0.6px`. Above about 17px SF's tracking falls away towards
-nothing and the flat number is too much; the two headings up there carry the
-app's own `-0.01em` and cancel it.
-
-Three things were ruled out on the way, and each is worth knowing:
-`font-variation-settings` **does nothing in Blitz** — `'wght' 100` and
-`'wght' 900` lay out identically, so the `opsz` axis on the variable system
-font cannot be reached from CSS; parley's advances are exactly linear in the
-font size, so there is no optical sizing anywhere in the pipeline; and the
-face itself was never in doubt, because `fontique` names the file.
-
-### Which is why every chip in the bar was five per cent narrow
-
-`Contents` 96 against the app's 101.3, `of 400` 38 against 41.5, the name of
-the document 64 against 70.3 — the whole bar, uniformly, and no test could see
-it because every test compares *labels*. `tests/parity/app-inventory.json` now
-carries `getBoundingClientRect().width` for each control and the width of each
-group, and `tests/parity.rs` asserts them to within two pixels — which is as
-tight as it can be, because the app's numbers are fractional and Blitz rounds
-a box to whole pixels. That one assertion covers the font, the padding and the
-box model at once, and it is the test that would have caught this on the day
-it was written.
-
-It found a second thing immediately. **`* { box-sizing: border-box }` — the
-first line of `styles.css` — was missing here**, so every `width`, `min-width`
-and `height` in the sheet meant the padding on top rather than inside. Five
-rules had been patched to say it for themselves as each near-miss was noticed;
-the one that had not was `.zoom-level`'s `min-width`, which came out as 82
-rather than 62 in the group that was already the widest thing in the bar.
-
-### The page count was cramped because it had a floor under it
-
-`.page-jump` in the app is a transparent box with `padding: 0 4px` holding one
-bordered field and one plain count. This had no padding and a `--bar-sunk`
-fill under the pair, so "of 400" was written on a grey panel that ended
-exactly where the last zero did. That is the whole of "almost cut off on the
-right": a word with a background behind it and no room between the two. The
-field keeps its own sunk ground, because in the app the field is the only part
-of this that is a control — and its floor is the app's 44px now rather than
-28, so page 1 of anything is not a slot half the width of the count beside it.
-
-**And the middle group is now in the middle.** The app's two side groups have
-a basis of `auto`, so each starts from what it holds and the slack is split
-evenly on top — which puts the middle off centre by exactly half the
-difference between the two sides, a hundred and eleven pixels here, at every
-width, for ever. The app can afford that because seventy-eight pixels of its
-bar are given to the traffic lights and the offset lands about where the eye
-expects the middle to be. This window keeps its own title bar and has none, so
-the same rule reads as a page counter that has slid left. A basis of nought
-asks for nothing and both sides are given an equal share of the whole bar;
-`min-width: auto` on `.bar-right` is its content, so it can grow past its
-share and never below it, and `.bar-left` says `0` and is the side that gives
-way — which is the app's rule and the app's reason, kept exactly. Above about
-1500px the middle is centred; below it the right takes what it needs.
-
-### The find bar had one way out, and the app has six
-
-Only the × closed it. `onFindOutside` in `main.ts` is the rule — "reaching
-past the bar puts it away, the way the Theme and Settings menus do" — together
-with `wire()`'s `opens(…)`, which every control in the bar that opens
-something of its own is wrapped in. The app spells its exceptions as a
-selector, `FIND_KEEPS_OPEN`, and a handler in this reader has no `closest` to
-ask with: so the top strip is asked for by *height*, which is the whole of
-what that half of the selector means, and the other four stop the press
-themselves the way the menus already do. `show_menu` closes the search for all
-five menus at once, Contents closes it from its button and not from its
-shortcut — which is the split the app has — and the results panel and its tab
-stop the press, because that list is this search seen larger and picking a
-line out of it must not close the thing that found it.
-
-### And the document's name was faded whether or not it had run out of room
-
-Blitz has no `text-overflow: ellipsis`, so a gradient mask over the last
-twenty-four pixels stands in for one — and it was on the button
-unconditionally. On `book.pdf`, a button sixty-four pixels wide, that is more
-than a third of it going pale, and it reads as precisely what was reported: a
-button too small for its name. `app.rs` puts the class on only when the name
-is longer than the box can hold, counted rather than measured against the same
-`34ch` the app caps at. Erring long is the safe direction — a name a character
-or two past the cap is cut without a fade, which is what a narrow column has
-always looked like; a name inside the cap is never faded, which was the
-complaint.
-
----
-
-## Everything that floats or lists was a size too small
-
-The four above were what a reader noticed. This is what reading the two
-stylesheets against each other turned up, and it is one fault with eleven
-faces: **`.popover`, `#sidebar` and `.window` each say `font-size: 14.5px` in
-the app and none of them said anything here**, so every menu, the contents
-list, the results, the thumbnail column and the whole Settings window were
-written in the toolbar's 13.5. A size is not a detail on those surfaces. The
-bar is glanced at and a menu is read; the app writes the second a size larger
-for exactly that reason, and a menu of fourteen themes in 13.5 grey reads as
-more chrome rather than as somewhere you have arrived.
-
-Everything that follows from it was measured the same way, `styles.css` rule
-against `styles.rs` rule:
-
-- **A menu row.** 30px and no padding against `.popover-item`'s `7px 10px`,
-  which is 35 — and the difference is not the five pixels, it is that a fixed
-  height does not grow with the type and padding does. Gap 8 against 10, the
-  tick column 12 against 14, the ink full-strength `--text` against
-  `--text-soft`, no `box-shadow` at all under a thing that floats over a
-  document, and `min-width` 190 against 232.
-- **The sentences.** `--faint` is 0.52 of the way from the ink to the paper and
-  `--text-note` is 0.28, and `themes.ts` carries the reason beside the number:
-  at 0.38 the note "fell under 4.5:1 against the paper … the sentence that
-  explains a switch was harder to read than the switch". Every note in this
-  port — a menu row's, a field's, the pane lede, the start screen's subtitle
-  and hint — was at `--faint` and a size smaller again. That is the other half
-  of "too strong in the chrome, too weak in the notes": the chrome had lost its
-  tracking and the notes had been faded past the point the app's own comment
-  warns about.
-- **The tint that says which one.** `.tab.on` and `.result.current` were
-  `--sunk` and `--text` — a grey chip of grey words under all fourteen themes.
-  This is the third time this fault has been found in this port (`.chip.on` and
-  the toolbar were the first two) and it has the same answer every time: the
-  app tints with `--accent-soft` and writes in `--accent`, because the tint is
-  what carries the theme.
-- **The current thumbnail had nothing on it.** `.thumb canvas` in the app is a
-  hairline ring and `.thumb.current canvas` an accent one; this had a drop
-  shadow under every picture and no ring at all, so which page is being read
-  was said by a twelve-pixel number under a three-hundred-pixel column and by
-  nothing else.
-- **The scrim was black.** `color-mix(in srgb, var(--bg) 62%, transparent)`
-  against `rgba(0,0,0,0.34)`: a black wash over Hylo Light reads as the
-  application having been switched off, and over Hylo Ember it takes the warmth
-  out. `--scrim` is mixed in `palette.rs` now, where the rest of the shades
-  are, because `color-mix` is not something this renderer has and `rgba()` is.
-- **The Settings window stood on the wrong shade** — `--paper`, the colour of
-  the page, where `.window` stands on `--surface`. On a light theme the two are
-  near enough that nobody would look twice; on a dark one the window came up
-  the colour of a sheet of paper in a dark room. Its nav column was the surface
-  where the app's is the sunk shade, which is what tells the column from the
-  page once the window itself is the surface.
-- **And the switch was a lamp with the light on.** 40×23 with a white knob
-  under a drop shadow, against the app's 34×20 with a knob in the faint ink and
-  a hairline round the track. A row of them down the Settings window all looked
-  live whether they were on or not.
-
-### The fade, a second time
-
-`.tab-label` was faded at its end in every panel at every width, and it is
-exactly the fault the document's name had: a `mask-image` is relative to the
-box, and a label that is `flex: 0 1 auto` *is* its word, so the last ten pixels
-of the word are always under the gradient. The rows below it get away with an
-unconditional mask because their boxes are the full width of the panel and the
-faded band falls on empty ground when the text is short — which is worth
-knowing, because it is what makes this a bug about `flex` rather than about
-masks. `TAB_LABELS_ROOMY` is the width at which all three tabs fit labelled,
-and `sidebar.rs` says `tight` only below it.
-
-### The test that would have caught all of it
-
-`app-inventory.json` now carries the **height** of a menu item, a menu heading,
-a tab, a nav item, the window bar and a switch, and `parity.rs` asserts them to
-within two pixels. It is the same argument as the widths one section up, turned
-ninety degrees: a row is its padding plus its line, both readers agree about the
-padding, so the height is the type. Every one of the eleven above shows up in
-one of six numbers, and nothing that compares labels could see any of them.
-
----
-
-## Five faults a reader found, the sentence they did not want, and the question they asked
-
-Reading with it turned up four things, and fixing them turned up two more. Two
-of the faults were one report — a pinch that blanked the document was one bug
-above another, and the second was only visible once the first was gone. The
-sentence is the reload notice, which is now not said. The question is signing.
-Everything below is done except the last, which is answered.
-
-### Backspace did nothing in any field, and the fix from last round was half of it
-
-**Backspace is not a key on a Mac.** AppKit does not deliver the editing keys
-as keystrokes at all: it reads them against the standard key bindings and calls
-`doCommandBySelector:` with a name — `deleteBackward:` — which winit surfaces
-through `ApplicationHandlerExtMacOS::standard_key_binding`, a callback separate
-from `window_event`. `blitz-dom` knows this and says so, its `Key::Backspace`
-arm being `#[cfg(not(target_os = "macos"))]`. The bar round found that this
-shell answered `macos_handler()` with winit's default `None` and forwarded the
-callback. **It was still dead**, and the second half took an instrumented build
-to see: the shell's forwarding was never called, because
-
-> **winit only reads a keystroke against the standard key bindings when IME is
-> enabled on the window.** `key_down` calls `interpretKeyEvents` inside
-> `if ime_capabilities.is_some()`, and `interpretKeyEvents` is the only thing
-> that ever calls `doCommandBySelector:`.
-
-`blitz-dom` does mean to enable it — `Node::focus` asks the shell for IME when
-the node it is focusing is a text input — and **it asks one moment too early**.
-A text input's editor is built by `create_text_editor` during *layout
-construction*; this reader focuses its fields from `onmounted`, which runs
-before the first layout, so `text_input_data()` is still `None`, the request is
-never made, and the focus never leaves the field and comes back to make it
-again. A window probe put the fault beyond argument: `ImeRequest::Update` came
-back `Err(NotEnabled)` on every keystroke typed into the find bar.
-
-`Shell::keep_ime_in_step` asks the window instead, whenever a text input holds
-the focus — on every window event, because a field's editor does not exist
-until the layout after it is mounted and a layout happens on a redraw rather
-than on anything the shell sees go past, and again after the proxy queue is
-drained, because ⌘F is a keystroke and the bar it opens is rendered on the poll
-that follows. Nothing turns it off again, and that is upstream's doing rather
-than a decision: winit's `set_ime_allowed` returns early when IME is already
-on, so `ImeRequest::Disable` does nothing at all.
-
-**This was invisible to the whole test suite, and would have stayed so.** The
-harness has no AppKit, so `Reader::apple_binding` sends the
-`AppleStandardKeybinding` event itself — which is right, and is the only way
-the editing keys can be tested at all off a Mac, and it means the tests were
-exercising the half below the fault. Both halves of this bug live between winit
-and the window, which is the one seam the harness is built to do without.
-
-### A pinch blanked the document until the fingers stopped
-
-A trackpad sends a magnification event a frame, and each one changes the size
-every page is laid out at. A page whose size changed is a page whose texture is
-registered afresh — and a texture registered on one frame must not be *drawn*
-until the next, which is the `fresh` dance in `page.rs` and is there to stop
-Vello's `MissingTextureBinding`. So every frame of the gesture registered and
-painted nothing, and pdfium was asked for a page sixty times a second to
-produce it. The document went blank for the length of the pinch and came back
-when the fingers stopped, which is exactly what was reported.
-
-**What holds it together is that a pinch is one gesture rather than a hundred
-zoom steps.** `Chosen::holding` — the shared cell that already carries the
-theme to every mounted page — now also carries whether a zoom gesture is
-running. While it is, a page keeps the texture it has and is stretched to
-whatever box the layout is asking for this frame, which is what a browser does
-under a pinch: the words grow under the reader's fingers, a little soft, and
-come back sharp when it settles. The frozen size is in the component key too
-(`Viewer::zoom_held_at`, which is the scale the gesture began at divided by the
-scale it is at now), so nothing is re-keyed on the way either — and the key is
-computed from the *baseline* rather than accumulated from the live size, so it
-does not drift a pixel per frame and re-key by rounding.
-
-The gesture has no end in it — macOS sends magnification and says nothing about
-the last one — so what ends it is the gap after it: `ZOOM_SETTLES`, 180ms,
-through the same `emit::after` door the notice line and the page pill use, with
-the same token guard so a gesture that ran on past one timer is not ended by
-it. `set_zoom` and `set_fit` end it outright, because a zoom asked for by name
-is not a gesture. It covers ⌃-wheel as well as the trackpad, because both
-arrive at `zoom_by` and neither is a step on the ladder.
-
-`.page` carries `data-drawn` now for the same reason it carries `data-page`:
-the difference between a page drawn and a page stretched is the one thing on
-screen that nothing in the DOM says, and a test that could not read it would
-have to photograph it.
-
-**And that was half of it, again.** With the texture held, the reported blank
-became something stranger: the page's *border* grew under the fingers and the
-print inside it stayed exactly where it was, arriving at the right size only
-once the gesture settled. The stretch was being asked for and was not
-happening, and the reason is one arm of somebody else's `match`:
-
-> **`anyrender_vello_hybrid`'s `fill` ignores `brush_transform` for a
-> `PaintRef::Resource`.** It takes the shape's *origin*, draws the texture
-> there at its own size, and stops. Only the other arm — an image the renderer
-> owns rather than a registered texture — reads the brush transform at all.
-
-So the scale goes in the *scene* transform instead, and the destination
-rectangle is the texture's rather than the box's:
-`draw_texture_rects` composes it, `effective_path_transform() * rect.transform`,
-and that is the one hook there is. This was a latent fault in its own right —
-any page held under `MAX_PIXELS` was already being drawn small in the corner of
-its box — and it had gone unseen because before the zoom hold a texture was
-always exactly the size of its box.
-
-**The harness could not see this one either**, and for a reason worth writing
-down beside the IME fault: the harness renders through `vello_cpu`, which is
-the software path in `page.rs`, which builds an `ImageBrush` and takes the
-*other* arm — the one that honours the brush transform. The test added for the
-hold passes on both. What the harness exercises is the arm the bug is not in.
-
-### Markup could be removed, and there was nowhere to do it
-
-This one was not a bug in the feature. `markup::remove` is `FPDFPage_RemoveAnnot`
-and eleven lines, it has had a test since the day markup landed, and it works:
-driving the real app, a passage was marked, the file was rewritten, the mark
-was taken out and the file was rewritten again with it gone. **The only way to
-reach it was a × the width of a full stop**, on a row in the Contents panel —
-and marking a passage with the panel shut and then opening it lands on *Pages*,
-because `show_markup_panel` only moves the tab when the panel is already open.
-So a reader who marked something and wanted it gone had, on screen, nothing.
-
-A mark is a thing on a page, so the way to take it off is on the page: click it
-and it says `Remove highlight`. The question is asked on the *release* and only
-when nothing was swept — `end_sweep`, not `begin_sweep` — because a passage
-that is already marked is exactly the passage somebody wants to select and
-copy, and a popover that opened on the press would take itself down again as
-the sweep went on. Escape puts it away, in the same list as the colour swatches
-and one line below them.
-
-**The general shape is worth keeping**, because it is the third time this port
-has found it: *a feature that is built, correct and tested can still be a
-feature the reader does not have.* The item list said markup was done, the test
-said removal worked, and both were true.
-
-### `alpha_idx too large`, which was a frame that never reached the screen
-
-While the fixes above were being checked in the real app the machine's display
-went to sleep and locked, and the reader died on the way with
-`vello_common/src/strip.rs:205: alpha_idx too large` — inside vello's own strip
-generation, from a stack with nothing of this crate in it. It was written down
-as a one-off. It is not one:
-
-> **A frame that fails to reach the screen is not thrown away, and the next one
-> is drawn on top of it.** `render` in `anyrender_vello_hybrid` builds the
-> scene, asks the surface for a texture to draw into, and resets the scene at
-> the very end — *after* the present has succeeded. Two early returns stand
-> before that point, one for a surface texture that cannot be had and one for a
-> present that fails, and neither resets.
-
-So a window whose surface has gone away accumulates: every redraw appends
-another whole frame to the same scene, the alpha buffer behind it grows without
-bound, and at about two billion the index runs into the bit `Strip` packs its
-fill flag into. The assert is the symptom; the cause is a hundred thousand
-frames stacked in one scene. It takes a while to get there, which is why the
-way to see it is to leave the reader open and let the display sleep — the app
-dies while nobody is looking at it, and the reader's next sight of it is that
-it is gone.
-
-Blitz already declines to paint an *occluded* window, which is the case macOS
-reports. This is the case it does not, and it is not specific to sleep: a
-`Timeout` from `get_current_texture` during any surface hiccup poisons the
-scene the same way and never recovers on its own.
-
-The fix upstream is two lines on those two paths. From outside the crate there
-is still a hook, because the draw closure is handed the scene and `PaintScene`
-has `reset` on it — so `steady.rs` wraps `DioxusNativeWindowRenderer` and
-resets at the *start* of every frame, discarding whatever a failed frame left
-behind and costing nothing when there was none. The base colour is filled back
-in, because the reset takes the inner renderer's own fill with it. The rest of
-that file is eight methods of delegation and exists only because
-`WindowRenderer` is a trait rather than something with a blanket impl.
-
-### The reload notice, taken out
-
-"Reloaded — the document changed on disk" is what this reader used to say when
-a paper was recompiled underneath it. It is gone. A reader watching a document
-rebuild sees the page redraw and, when the `\title{}` moved, the toolbar
-change — which is the whole of the news. The sentence told somebody who does
-not know what a reload is that something they did not do had happened to their
-file, which can only worry them. `Store::renamed` is still *called*, because
-calling it is what renames the document; what is no longer done is announce it.
-`reopen` had already reached this conclusion for its other caller, and its
-comment said so.
-
-### And the question: can this sign a document?
-
-Two different things travel under that name, and the answer is different for
-each.
-
-**A visible signature — what Preview calls Sign — is a day or two, and this
-reader has already built most of it.** A drawn or imported signature is an
-image in a stamp annotation, positioned by dragging on the page:
-`create_stamp_annotation` and `PdfPageImageObject::new` are both in
-`pdfium-render` today, and everything around the write already exists for
-markup — the release-write-reopen through `PageSource::release`, the atomic
-write, the `.hylopdf-original` kept beside the document the first time this
-reader ever appends to it, and the reload that rebuilds every cache. It would
-be a new gesture and a new annotation kind, and nothing structural.
-
-**A cryptographic signature is a project of its own, and pdfium cannot be part
-of it.** pdfium's whole signature surface is eight `FPDF_GetSignature*`
-entry points and every one of them reads: there is no call that writes a
-`/Sig`. Worse, `save_to_bytes` is `FPDF_SaveAsCopy` with flags hard-coded to 0,
-which is a **full rewrite** — the one thing a signed document cannot survive,
-since a signature covers a byte range of the file it was made over. So signing
-could not go through this reader's write path at all; it would need a PDF
-writer of its own that appends an incremental update: a `/Sig` dictionary, a
-`/ByteRange` covering the whole file bar a `/Contents` placeholder, a detached
-CMS blob computed over that range and written back into the hole, and a
-`/AcroForm` signature field to hang it on. Then the part that is not PDF at
-all: reaching a key the reader actually has, which is the Keychain on macOS
-(`SecIdentityCopyPreferred` through Security.framework), CryptoAPI on Windows
-and a PKCS#12 file on Linux — and, for a signature anything else will call
-valid, an RFC 3161 timestamp and a chain that resolves.
-
-Call it two to four weeks with the trust story, and note that the trust story
-is the hard half: a signature that no other reader accepts is worse than none,
-and this is the one feature in the whole application where being *nearly* right
-is indistinguishable from being wrong. The recommendation is the visible
-signature, said plainly as what it is — a mark on the page, not a claim about
-who made it — and cryptographic signing left as a decision to take on its own
-merits rather than as an increment on markup.
-
-The long form is `signing-assessment.md` at the root of the repository, beside
-`markup-assessment.md`: the two things the word covers, what each needs, why
-neither renderer can write a `/Sig` today, and the three ways round it.
-
----
-
-## A document behind a password, which was the oldest thing left
-
-`ui.askForPassword` was the largest item on the previous section's list, and
-the sentence beside it was the whole complaint: *an encrypted document opens as
-an error*, in a reader whose premise is that it opens what you give it. It
-asks now, in the app's own window with the app's own two sentences, and it
-opens on the answer.
-
-**Locked is a question and everything else is a failure, and the type says
-so.** `render::open` used to answer `Result<_, String>`, which is right for
-every way a document can refuse — missing, not a PDF, the library did not load
-— because there is nothing a reader can do about any of them but read a
-sentence. A locked document is the one case where there *is* something to do,
-so `Refusal` has two arms and `Locked` is one of them. pdfium is what makes
-that possible: `FPDF_ERR_PASSWORD` is a different answer from `FPDF_ERR_FORMAT`,
-so a document that wants a password and a document that is broken do not
-arrive looking the same. The alternative was matching on English in an error
-message, which works until pdfium rewords one.
-
-Which of the two sentences goes over the field — "It needs a password before it
-can be opened" or "That password was not right" — is decided by the *caller*,
-because pdfium reports both as the same error and the difference is whether a
-password was supplied. That is `open_here_with`, and it is the whole of the
-state machine.
-
-**A locked document makes a window rather than refusing one.** `window_on` used
-to answer `None` for anything that would not open, and a window is exactly
-where the question has to be asked — so a launch on a locked file now comes up
-empty with the prompt over it. Until it is answered the window is showing
-*nothing*, which is what it is: the desk, the restore list and the window's
-title are all about a document that has been opened, and the answer goes back
-out through the `Ask::Showing` that ⌘O already uses. The question travels as a
-prop rather than as news down the mailbox, because it is true before the first
-frame: a window made to ask has never had anything else in it, and a message
-posted to a window that has not rendered is a question about arrival order.
-
-### Masking, which Blitz does not do and the obvious workaround gets wrong
-
-Blitz reads `type="password"` — `create_text_editor` accepts it and
-`accessibility.rs` gives it `Role::PasswordInput` — and it does not mask it. A
-field left to itself shows somebody's password to the room.
-
-The obvious answer is to put bullets in the field's `value` and keep the
-password beside it. **It works until somebody presses a key twice.**
-`InputData::set_text` in `blitz-dom` only touches the editor when the string it
-is given differs from the one it holds, and `PlainEditor::set_text` collapses
-the selection to the front — so a field whose value never matches what was
-typed has its caret thrown to offset 0 after every keystroke, and "hylo" is
-typed in as "olyh". The page field beside it has never seen this because what
-it writes back is what was typed, so the guard skips and the caret stays; the
-mask is what breaks the invariant. Nor could it be worked around by
-intercepting the keys: **Backspace is not a keystroke on macOS**, it is a
-`doCommandBySelector:` the editor answers directly, and no handler in this
-reader can decline it. That is the same fact the bar round found about the find
-bar, arriving from the other side.
-
-So the field holds the password and does not show it: `color: transparent`
-with a `caret-color` of its own, and a span over the top holding one bullet a
-character. Editing, selection, Backspace and paste are all the editor's own and
-all correct, and the password is in the DOM of that window while the question
-is up — which is where a browser keeps it too. The day Blitz masks the field
-this becomes a bullet under a bullet rather than a fault.
-
-### A window that comes up with a field in it had no way to get the keyboard
-
-`app::KEYBOARD` is the account of why a component here cannot focus itself and
-the window has to hand the keyboard back. What that machinery had never been
-asked for is a field that is on screen *before anything has happened*: every
-other field in this reader is opened by a key or a click, and both already
-hand the focus back afterwards. A window made asking for a password has had no
-event at all, so the one thing anybody came to it for would sit there
-unfocused until they touched something.
-
-`Shell::painted` is the answer, and it is once per window rather than once per
-frame: the first `RedrawRequested` a window draws hands the keyboard back, and
-the query that costs walks the document — which is the one thing a scroll must
-not grow. The harness does the same one line after its first settle.
-
-### And markup does not go into an encrypted document
-
-This is the arm the port did not have, and it arrived with the prompt: before
-there was one, a locked document never got as far as being markable. pdfium's
-only way to write a document back is `FPDF_SaveAsCopy`, which is a full
-rewrite, and what that makes of a document opened with a password is not a
-thing to find out over somebody's file. So `Standing` asks it first, before the
-disk — an encrypted document may sit in a folder anybody can write to and still
-be one this reader will not rewrite — and the mark goes into the journal
-instead, which is what the journal has always been for.
-
-### Two the suite was already red on
-
-`cargo test` was failing two before any of the above, and both are worth
-writing down.
-
-*`a_recompiled_document_is_reopened_where_the_reader_was` was asserting a
-sentence that had been deliberately taken out.* "Reloaded — the document
-changed on disk" went two commits ago and the assertion went with the reason
-rather than with the code. It now says the opposite, which is the decision.
-
-*`the_watcher_is_wired_to_the_reader` could not succeed once it had failed
-once, and the retry loop was what made it look like a flake.* The watcher
-decides a theme reload by comparing what it has just loaded against **the last
-set it handed over** — `known` in `watch.rs` — and that is the right rule,
-because the app writes into that directory itself on every launch and a write
-that changes nothing is not news. The test's six rounds all saved the *same
-bytes*, so the moment round one's news was missed — the watch is set up on a
-thread of its own and nothing says when it is up — no later round could ever
-produce an event, and the test spent thirty-two seconds proving it. Each round
-renames the theme now, which is also what an editor saving twice actually
-does.
-
-### What is left
-
-- **`.loading` and `.page-placeholder`**, which is what the app shows where a
-  page has not been drawn yet.
-- **`.title-drag`**, which is macOS window dragging with the toolbar hidden.
-  It may not apply — this window keeps its own title bar — and that is a
-  question to answer rather than a thing to build.
-- **`popover-*` against `menu-*`.** The two files name the same components
-  differently, deliberately: what a port owes the app is the same elements,
-  labels, order, behaviour and look, not the same class names.
-
----
-
-## Four surfaces nothing was comparing
-
-`tests/parity.rs` judges the port against a fixture taken from the running app
-in WebKit, which is the right shape, and it had been pointed at the toolbar,
-the menus, the sidebar's tabs, the find bar and the Settings window. Four
-surfaces were outside it. A surface nothing compares is a surface that drifts,
-so `take-inventory.mjs` takes all four now:
-
-- **The start screen**, which is the first thing anybody sees. Taken from a
-  second launch with nothing in it rather than by closing the document in the
-  first, because closing one is a gesture with a *history* — the shelf has the
-  paper just put down at the top of it — and what the port has to match is the
-  screen a reader meets on opening the app.
-- **The Information window**, the title menu's last item, and the only window
-  in the app that is neither Settings nor a question. The rows a document
-  produces rather than all ten: a paper with no `/Subject` has no Subject row
-  in either reader, so the fixture's own answer is the question.
-- **The theme editor**, which is Appearance's second half — eight fields *and
-  the sentence under each*, and the sentences are the half a comparison of
-  labels would have missed. A colour called "Accent" with no sentence under it
-  is a field whose meaning the reader has to guess.
-- **The three things said over a page**: the way back to a toolbar that has
-  been put away, what a dragged file is told, and the page pill.
-
-The port agreed on every one of them, which is the answer worth having and is
-now the answer a change has to keep.
-
-**And the Keyboard page, three columns wide rather than one.**
-`every_row_agrees_with_the_app_s_own_table` read `needsDocument` and nothing
-else, which is the column nobody sees; the label and the group are the two a
-reader reads on every visit to that page, and they had been carried across by
-hand with nothing comparing them. They agree; now they have to.
-
-Two things learned driving it, and both are about the difference between a
-harness that clicks a *selector* and one that clicks a *point*. A button under
-fourteen theme cards is below the foot of the pane at the size the fixture is
-taken at, so a pointer cannot reach it until the pane is scrolled — a browser's
-`.click()` reaches an element wherever it is, which is why the theme editor had
-never been opened by a test at all. And the peek handle is not on screen until
-somebody reaches for the top edge, which is the app's own rule and the reason
-it is a handle rather than a button.
-
-### What is left, now
-
-- **`.loading` and `.page-placeholder` are dead CSS in the app.** Both were on
-  the list of things the port did not have. Neither is ever applied: nothing in
-  `src/`, `index.html`, `tests/` or `scripts/` creates an element with either
-  class, and `.page-placeholder` appears exactly once in the whole tree, in
-  `styles.css`. There is nothing to port. The rules are the app's to delete and
-  not this branch's.
-- **`.title-drag`** is macOS window dragging with the toolbar hidden, and it
-  does not apply: `titleBarStyle: Overlay` runs the app's document up under the
-  title bar and leaves no native strip to drag by, and this window keeps its
-  own. The question is answered rather than outstanding.
-- **`popover-*` against `menu-*`** is a naming difference and stays one. What a
-  port owes the app is the same elements, labels, order, behaviour and look,
-  not the same class names.
-
-## Signing, which is the first thing here the app cannot do
-
-`signing-assessment.md` was written when a reader asked whether the app could
-sign documents. Its answer was that two unrelated features travel under that
-word: a **visible signature**, which is a picture of a name placed on a page
-and proves nothing, and a **cryptographic signature**, which is a `/Sig`
-dictionary holding a detached CMS blob over a byte range and says who signed
-and that nothing has changed since. It recommended building the first and
-treating the second as its own decision, because a signature nobody's software
-trusts is not a signature.
-
-The first is built, on this branch, in `src/sign.rs`. A reader draws their name
-once, keeps it, and drops it onto a page.
-
-**Ink rather than a stamp**, which is where this parts company with the
-assessment's own plan. It reached for `create_stamp_annotation` and
-`PdfPageImageObject`, which is what Preview writes. `/Ink` is better here for
-three reasons and the third decided it: it is vector, so a signature read at
-400% is drawn from its strokes rather than resampled; it needs no rasteriser,
-and the only one in this crate is behind the `harness` feature and deliberately
-not in the binary; and it is *the annotation that means this* — `/Ink` is what
-the specification has for a mark made by hand, and every other reader shows one
-as what it is and offers to delete it.
-
-**Which settles the one caveat the assessment said to settle before shipping
-rather than after.** It wrote: *it cannot be removed afterwards*, and that is
-true of the app — `Annotation.save()` is not overridden by any markup subtype,
-so nothing already in a file comes out through `saveDocument()` at all. Here it
-is `FPDFPage_RemoveAnnot`, the same one call a highlight comes out through. So
-the Sign window lists what is already on the document and each row has a bin
-beside it. A signature on the wrong page is the ordinary case, not the corner.
-
-**What it reuses is the whole markup write path**, which is what the assessment
-predicted: `markup::edit` releases the file, loads the bytes, changes the
-document and writes it back atomically; `markup::backup` leaves
-`.hylopdf-original` beside it the first time; and the reader is put back where
-they were through the path a LaTeX recompile already uses. `sign::standing` is
-`markup::standing` with one question renamed — a read-only file, an encrypted
-document, and whether this one carries a cryptographic signature.
-
-**That last is asked and not refused.** It is their document, and an
-incremental update is exactly what a signature exists to detect — except that
-pdfium's save is `FPDF_SaveAsCopy`, a *full rewrite*, so it is not even
-incremental. So a signed document can still be signed with ink and the reader
-is told once, before it happens, in a sentence that names the consequence
-rather than the mechanism: *this will make that signature stop verifying, and
-the original is kept beside it.* Nobody signing a contract needs to know what
-`FPDF_SaveAsCopy` is.
-
-**The window says what it is in its first sentence**, above everything else in
-it, because a reader who wanted the other kind of signing should find that out
-before they have drawn anything.
-
-### One scale, in three places, and two of them had two
-
-A signature goes through three scalings between the pad and the page —
-`keep_signature`, `Signature::trimmed` and `sign::place` — and the first two
-divided x and y by *different* numbers. Each on its own looks reasonable:
-"put the drawing into a unit box" is a sentence that reads correctly and
-throws the shape away. The result is that every signature ever saved came
-back square: a name written across a pad arrived on the page as a tall narrow
-scribble.
-
-Nothing that asks *whether* a signature is in the file can see this, which is
-why `a_wide_name_lands_wide` measures the box it landed in and
-`a_wide_name_keeps_its_shape` measures the trim on its own. The strokes are
-**normalised by height** now: y runs 0 to 1 and x runs 0 to however wide the
-hand made it, so `aspect` is a real number and one multiplication does both
-axes. Height is the unit because height is what a reader means by how big a
-signature should be.
-
-### Two faults the feature found in what was already there
-
-**A press in the middle of an empty pad was measured from the wrong corner.**
-An event carries coordinates relative to the node it *landed on*, and the pad's
-"Draw your name here" hint sat at `top: 50%` — which is exactly where anybody
-starts drawing. So a signature begun in the middle came out measured from the
-middle, and its whole first half clamped to the top edge. The hint fills the
-pad now and carries `pointer-events: none`, which says the same thing a second
-way so that a change to the layout cannot bring it back.
-
-**A plain key typed into a text field was also a shortcut.** The root's
-`onkeydown` hears every key in the window — that is how a key with nothing
-focused reaches the reader at all — so a field with the focus gets its
-keystroke *and* so does the keymap. Typing "A Reader" into the Sign window's
-Name field sent `space` and `d` to the document behind it, which is a screen
-down and half of one.
-
-This was not the Sign window's bug. The password field carries the rule inline
-and its comment calls it "the same two rules every field in this file has",
-which was true of that field and of no other: **the theme editor's Name field
-had it the whole time**, and typing a theme name scrolled the document. The
-rule lives in `prefs::typing_is_not_a_shortcut` now, called by `TextField` and
-by `ColorField`, so every field in the reader carries it. Keys with a modifier
-still pass, so ⌘A, ⌘C, ⌘V and ⌘Z mean what they mean in a field.
-
-### What is not built, and is not a gap
-
-No typed-name-in-a-script-face, which the assessment listed beside the drawing:
-it needs a cursive font bundled with the binary, and a signature in somebody
-else's handwriting is a strange thing to offer a reader who has a trackpad.
-Cryptographic signing is where the assessment left it: not blocked by anything
-in this codebase, blocked by the fact that a signature nobody's software trusts
-is not a signature.
-
-## And reading the ones a document already carries
-
-The assessment's recommendation had two halves and only the first was built.
-The second — *"add signature reading alongside it, because the API is free and
-'signed by X, intact' is a real answer to a real question"* — is built now, and
-building it found that the sentence is wrong twice over.
-
-**There is no "signed by X".** pdfium has six `FPDFSignatureObj_Get*` getters
-and not one of them is a name: the signer's name lives in the certificate
-inside the PKCS#7 blob, and reading it means parsing DER and then choosing
-between the several common names a chain carries. A guess about who signed a
-contract is worse than silence. There is no "intact" either — that is a hash
-over the byte ranges compared against the message digest in the same blob.
-
-**And two of the eight are unreachable from here at all.**
-`FPDFSignatureObj_GetByteRange` and `GetSubFilter` are in `pdfium-render`'s
-bindings trait, the wrapper wraps neither, and `PdfSignature::handle` and
-`PdfDocument::handle` are both `pub(crate)` — so there is no door onto them
-short of a fork. The byte range is the loss worth naming: comparing where it
-ends against the length of the file says whether anything was appended after
-the signature was made, which is the one genuinely useful answer obtainable
-with no crypto whatsoever.
-
-What is left is four facts, each certain, and they are what `sign::Seal` holds:
-that something was actually signed, when it says it was, why, and whether it
-forbids changes. The Sign window lists them above the pad, under the sentence
-that says what this feature is not — a reader who came here wanting the green
-tick should meet the document's own signatures before they meet a drawing
-surface.
-
-### A signature field is not a signature
-
-`FPDF_GetSignatureCount` counts every `/FT /Sig` field in the `/AcroForm`,
-signed or not. A blank one is ordinary furniture: it is the line at the foot of
-a contract, put there by whoever wrote the contract, and nobody has signed
-anything. `markup::is_signed` counted those, so **the warning that ink would
-break a digital signature fired on documents that had never been signed** —
-which is worse than saying nothing, because a warning nobody can act on is one
-they learn to ignore.
-
-The app's own `tests/fixtures/signed.pdf` is exactly this shape, which is how
-it was found and why nothing had noticed: the one document in the repository
-that was supposed to be signed is a field with no `/V`, the test asserting the
-warning fired was passing on it, and every reader of every contract with a
-blank signature line was being told the same thing. `/Contents` is what tells
-them apart, and `fixture::signed_pdf` is a document that carries a real `/Sig`
-so that the two cases can be tested against each other.
-
-## And the line beside the signature
-
-*The form under a signature usually wants both* is the assessment's whole
-argument for a date field, and it is right: a signature on its own is half of
-what anybody is actually asked to fill in. So the Sign window has a second
-half — a line of text, a **Today** button that fills it with today's date, and
-the same click on the page that puts a signature down.
-
-**One armed slot, not two.** `app::Placing` is `Hand(Signature)` or
-`Line(String)`, and everything downstream of it — the crosshair, Escape, the
-click on a page, the notice — is the same code. Placing something on a page is
-one gesture to a reader whichever of the two it is, and it would be two
-features if it were written as two.
-
-**A `/Stamp`, and not the annotation named for this.** `/FreeText` is what the
-specification has for a line of type on a page, and it is unreachable:
-`pdfium-render` exposes `objects_mut()` on ink and stamp alone, and a free text
-annotation whose appearance stream is empty is text that no reader draws —
-pdfium's own renderer included, which is how it would have shipped invisible.
-A stamp holding a real Helvetica text object is drawn by everything, because
-there is nothing left to generate. The test counts dark pixels on the rendered
-page rather than reading the annotation back, because reading it back is
-exactly the check that would have passed on the invisible version.
-
-Both kinds read back out of the page together and both come off with the same
-bin: `sign::Written` is which of the two a row is, `Placed.by` is the name for a
-hand and the words themselves for a line, and the notice says which one was
-taken off. A stamp this reader did not write shows as "A stamp" rather than
-being hidden — it is on the page, and a reader who wants it off should be able
-to say so.
-
-**Today is UTC**, because there is no timezone crate here and adding one to
-fill in a text field would be the wrong trade. It is offered as the initial
-value of a field somebody can edit, not stamped on their behalf, which is what
-makes that acceptable rather than a bug waiting for a reader in Auckland.
-
----
+Dock menu, the socket. `windows.rs` is what makes that a small hole.
+
+Blitz comes in as a **git dependency pinned to `c6dec888`** in both crates, so
+a fresh checkout builds with nothing beside it. It used to be a path dependency
+into a clone that is not in this repository, and waiting for a release was
+never going to work: `blitz-test-harness` is `publish = false` upstream, so the
+harness this whole argument rests on can never come from crates.io.
 
 ## Three things to carry forward
 
-1. **Write the test with the feature.** The harness is a quarter-second for
-   ten tests. The excuse not to is gone.
-2. **The CPU path is real code, not a test fixture.** A widget added in Phase 3
-   that draws through wgpu needs its `Software` half, or the screenshots
-   quietly stop covering it.
-3. **The CI job exists now, and until it has gone green nothing here has run
-   on Windows or Linux.** `experiment.yml` runs `cargo test` on three runners,
-   which needs no GPU and no screen and exercises Stylo, Parley, fontique,
-   Taffy and the whole reader on engines this is not developed on. It was
-   blocked on one thing — a path dependency into a clone — and that is gone.
-   Window dragging and the traffic lights are the window's rather than the
-   page's and cannot be tested there at all, though item 9 found that most of
-   what was on this list *can* be, once the rules are separated from the
-   windows they are about.
+1. **Write the test with the feature.** The harness is a quarter-second for ten
+   tests. The excuse not to is gone.
+2. **The CPU path is real code, not a test fixture.** A widget that draws
+   through wgpu needs its `Software` half, or the screenshots quietly stop
+   covering it.
+3. **Reading with it is the only instrument that finds some things.** A long
+   run of faults — a page pinned to the left of a window with the rest
+   unreachable, every undrawn page flashing white on a dark theme, the page
+   field emptying itself, a toolbar wearing one grey under fourteen themes —
+   were each a *correct answer* placed, coloured or timed in a way nobody would
+   sit in front of. No test asks that question. Neither does a list of items:
+   the list was the order the app was built in, which is the engine, so the
+   *interface* was never an item and its absence never showed up as an
+   unfinished one.
 
 ## Eighteen things worth raising upstream, and none of them is blocking
 
-- `type="password"` is accepted, given `Role::PasswordInput` and then rendered
-  in the clear. It is the one input type whose whole meaning is what it does
-  *not* draw, and the two ways an application can work around it are both
-  wrong: masking through `value` fights `set_text`'s selection collapse, and
-  intercepting the keys cannot reach macOS's `doCommandBySelector:`. See "A
-  document behind a password" above for the workaround this reader carries.
+- **`blitz-shell` reports Command as `Modifiers::SUPER` while `keyboard_types`'
+  own `meta()` reads `Modifiers::META`.** `winit_modifiers_to_kbt_modifiers` in
+  `packages/blitz-shell/src/convert_events.rs` answers winit's `meta_key()`
+  with `SUPER`; every application asking `event.modifiers().meta()` — which is
+  what the DOM calls that key — gets `false` with ⌘ held. So on macOS no ⌘
+  shortcut in any Blitz application works, silently, and the keystroke arrives
+  as its bare letter. One line, and either bit would do as long as the accessor
+  and the sender agree.
 
-- `vello`'s `BufferSizes` sized from the scene rather than from paris-30k. The
-  comment in the source already says it should be. A tenth of every one of
-  those constants would do for a reader, and it is not a fault only a PDF
-  reader has.
-- `PdfBitmap::as_raw_bytes` named as the copy it is. A function that looks like
-  a view and allocates 24MB is a trap anybody using `pdfium-render` for a
-  reader will fall into.
-- `PdfQuadPoints::from_rect` in `pdfium-render` numbering the corners the way
-  the PDF specification does. It walks the rectangle — bottom-left,
-  bottom-right, top-right, top-left — where 12.5.6.10 and pdfium's own
-  `RectFromQuadPointsArray` want upper-left, upper-right, lower-left,
-  lower-right. A text-markup annotation built with it is written, saved, read
-  back correctly by the same crate, and drawn by nothing: the appearance
-  stream pdfium generates has a `/BBox` of no width. It is `from_rect`, it is
-  the obvious call, and its result is invisible from inside the library that
-  made it. See Phase 3 item 11.
-- `PdfDocument::save_to_writer` taking the flags. `FPDF_INCREMENTAL` and
-  `FPDF_NO_INCREMENTAL` are both in `pdfium-render`'s own bindings and the
-  flags word is hard-coded to zero, with a `TODO` above it from 2022 saying
-  there is not a lot of information on what they do. There is one thing worth
-  knowing about them and it decides a feature: an incremental save leaves the
-  original bytes untouched, which is what a signature, a syncing folder and a
-  document somebody else's software wrote all care about. It is one argument.
-- `PdfRenderConfig::new()` defaulting `FPDF_REVERSE_BYTE_ORDER` to *on*. The
-  crate's own comment says why — it is for `image`'s `DynamicImage` — and the
-  cost is that a bitmap asked for as `BGRA` is not BGRA. Anything drawing into
-  a buffer of its own, which is the whole point of `PdfBitmap::from_bytes`,
-  gets a silent channel swap that is invisible on grey pages. Defaulting it
-  off, or naming the format `RGBA` when it is set, would have made this
-  impossible to get wrong. See Phase 3 item 11.
-- A click clearing the focus onto `<html>`, with no way for a component to take
-  it back. Either half alone is defensible, but together they mean an
-  application whose shortcuts live on its own root stops answering them the
-  first time anybody clicks anything. See Phase 3 item 3 — and item 4, where
-  the same fault turns up a third time because a key can destroy the node that
-  had the focus, and item 5, where it turns up a fourth and decided the shape
-  of the page field: an element that stops asking for the keyboard while still
-  holding the focus is the same dead keyboard, and the only reliable way to
-  make it let go is to stop existing. `tabindex` honoured in the focus walk,
-  which is what a browser does, would answer all four — and the fix has an
-  address: `handle_click` in `packages/blitz-dom/src/events/pointer.rs` walks
-  up from the target matching on `el.name.local` and clears the focus if the
-  walk reaches the root unmatched, **without ever consulting `is_focussable()`**,
-  which is `packages/blitz-dom/src/node/element.rs`'s own predicate, already
-  honours `tabindex >= 0`, and is already used by `focus_next_node`. One call,
-  in a file that has the answer in it.
-- Hit-testing that does not clip on `overflow: hidden`, so a node scrolled far
+- **A click clears the focus onto `<html>`, with no way for a component to take
+  it back.** Either half alone is defensible; together they mean an application
+  whose shortcuts live on its own root stops answering them the first time
+  anybody clicks anything. The fix has an address: `handle_click` in
+  `packages/blitz-dom/src/events/pointer.rs` walks up from the target matching
+  on `el.name.local` and clears the focus if the walk reaches the root
+  unmatched, **without ever consulting `is_focussable()`** — which is
+  `node/element.rs`'s own predicate, already honours `tabindex >= 0`, and is
+  already used by `focus_next_node`. One call, in a file that has the answer in
+  it. It bit four times here and decided the shape of the page field.
+
+- **A stacking context's hoisted children are hit-tested only inside the union
+  of their own boxes**, so an absolutely positioned panel hanging *out* of a
+  short context — a menu under a toolbar, the ordinary case — is drawn where
+  nothing will hit it. Painting gets it right; only the hit test does not, and
+  the failure is silent: the menu is there, it highlights on hover, and
+  pressing it does nothing. Worse, an unrelated z-indexed box elsewhere in the
+  same context can make it work by enlarging the union, which is how this went
+  unnoticed for two phases.
+
+- **Hit-testing does not clip on `overflow: hidden`**, so a node scrolled far
   out of its container is still clickable where its box says it is, over
-  whatever is drawn there. Painting gets this right; only the hit test does
-  not. See Phase 3 item 4.
-- A stacking context's hoisted children hit-tested only inside the union of
-  their own boxes, so an absolutely positioned panel hanging *out* of a short
-  context — a menu under a toolbar, which is the ordinary case — is drawn where
-  nothing will hit it. Painting again gets it right and only the hit test does
-  not, and the failure is silent: the menu is there, it highlights on hover,
-  and pressing it does nothing. Worse, an unrelated z-indexed box elsewhere in
-  the same context can make it work by enlarging the union, which is how this
-  one went unnoticed for two phases. See "The menus had only ever worked by
-  accident" above.
-- `ApplicationHandler::macos_handler` being an opt-in that a wrapper silently
-  loses. An application that delegates to `BlitzApplication` for everything
-  else gets working text fields on Linux and Windows and write-only ones on
-  macOS, with nothing at either end saying so. `blitz-shell` cannot fix this
-  from where it stands, but a line in its docs beside `BlitzApplication` would
-  have saved the afternoon it cost here.
-- **`blitz-shell` reporting Command as `Modifiers::SUPER` while
-  `keyboard_types`' own `meta()` reads `Modifiers::META`.**
-  `winit_modifiers_to_kbt_modifiers` in `packages/blitz-shell/src/convert_events.rs`
-  answers winit's `meta_key()` with `SUPER`; every application asking
-  `event.modifiers().meta()` — which is what the DOM calls that key, and what
-  the type's own accessor is named for — gets `false` with ⌘ held. So on macOS
-  no ⌘ shortcut in any Blitz application works, silently, and the keystroke
-  arrives as its bare letter. One line, and either bit would do as long as the
-  accessor and the sender agree. See "Every ⌘ chord was dead" above.
-- **Text that keeps the colour it was built with when a custom property changes
-  above it.** Blitz puts the brush into the parley layout when it builds a run
-  and a change to a custom property several levels up is not among the damage,
-  so a label alone in its own box — a `<button>`, which builds an inline layout
-  of its own — stays in the old colour until something else touches it. A `<p>`
-  in the same place is fine, which is what makes it so easy to miss. In a themed
-  application it means a bar that changes colour except for the two or three
-  labels that have nothing else in them. See "Three labels kept the last theme's
-  colour" above.
+  whatever is drawn there. Painting again gets it right.
+
+- **Text keeps the colour it was built with when a custom property changes
+  above it.** Blitz puts the brush into the parley layout when it builds a run,
+  and a change several levels up is not among the damage — so a label alone in
+  its own box (a `<button>`, which builds an inline layout of its own) stays in
+  the old colour until something else touches it. A `<p>` in the same place is
+  fine, which is what makes it easy to miss. In a themed application it means a
+  bar that changes colour except for the two or three labels with nothing else
+  in them.
+
 - **No `user-select: none` for a button in the user-agent stylesheet**, so a
   press that slides two pixels becomes a text selection and the click is never
   dispatched. Every browser's UA sheet has this rule. Patch prepared:
-  `experiments/dioxus-reader/blitz-button-select.patch`. The same investigation
-  found that `user-select` does not reach an element from an ancestor — the
-  check in `handle_pointermove` reads the pressed node and its parent and stops
-  — and that `Harness::move_mouse_to` sends no buttons, so a drag is not
-  expressible in the shared test harness.
-- A custom widget swallowing every default action, so `click` and `dblclick`
-  never happen over one — `handle_dom_event` forwards the event to the widget
+  `blitz-button-select.patch`. The same investigation found that `user-select`
+  **does not reach an element from an ancestor** — the check reads the pressed
+  node and its parent and stops — and that `Harness::move_mouse_to` sends no
+  buttons, so a drag is not expressible in the shared harness at all.
+
+- **A custom widget swallows every default action**, so `click` and `dblclick`
+  never happen over one: `handle_dom_event` forwards the event to the widget
   and returns before the match that generates them. The two it takes away are
   exactly the two a widget cannot generate for itself, because a click is a
-  press and a release on the same node rather than a pointerup. See Phase 3
-  item 10.
+  press and a release on the same node rather than a pointerup.
 
-- **The system font's `trak` table is not read**, so every UI face that has one
-  lays out too tight below about 17px — on macOS that is SF, which is to say
-  every application that says `system-ui` and does not set its own tracking.
-  A browser applies it; parley does not, and the difference is a tenth of the
-  width of a word at the sizes an interface is actually written at. There is
-  nothing wrong with the face, the file or the shaping: the advances are
-  simply the untracked ones. See "The font was the same file and not the same
-  type" above, which carries the measurements at every size from 11 to 30.
+- **`ApplicationHandler::macos_handler` is an opt-in that a wrapper silently
+  loses.** AppKit does not deliver the editing keys as keystrokes: it calls
+  `doCommandBySelector:`, which winit surfaces through a callback separate from
+  `window_event`. An application that delegates to `BlitzApplication` for
+  everything else gets working text fields on Linux and Windows and write-only
+  ones on macOS, with nothing at either end saying so.
+
 - **A text input focused before its first layout never asks for IME**, and on
   macOS that is the whole of the editing keys. `Node::focus` asks the shell for
-  IME when the node it is focusing has `text_input_data()`, and that is built by
+  IME when the node has `text_input_data()`, and that is built by
   `create_text_editor` during *layout construction* — so a field focused from a
-  mount handler, which is the ordinary way to focus a field that has just
-  appeared, is focused a moment before the data exists. Nothing asks again,
-  because the focus does not move. On macOS `interpretKeyEvents` is called only
-  while IME is enabled and is the only thing that ever calls
-  `doCommandBySelector:`, so the result is a field that can be typed into and
-  cannot be corrected: Backspace, ⌥Backspace, ⌘←, every editing key. Asking
-  again on the next layout would fix it. See "Backspace did nothing in any
-  field" above, and `Shell::keep_ime_in_step`, which is this reader's way round.
+  mount handler, the ordinary way to focus a field that has just appeared, is
+  focused a moment before the data exists, and nothing asks again. Asking again
+  on the next layout would fix it. `Shell::keep_ime_in_step` is the way round.
+
 - **winit's `set_ime_allowed` cannot turn IME off.** Its first line is
-  `if self.ivars().ime_capabilities.get().is_some() { return; }`, so the disable
-  path — `ImeRequest::Disable`, which calls it with `None` — returns before it
-  reaches anything, and the only state reachable after the first enable is
-  enabled. It is not what this reader wanted fixed, and it is worth knowing:
-  it means "enable when a field has the focus" is the only rule any Blitz
-  application can actually implement, whatever it writes for the other half.
-  winit-appkit 0.31.0-beta.2, `src/view.rs`.
-- **`anyrender_vello_hybrid` ignores `brush_transform` for a texture.** `fill`
-  has an arm for `PaintRef::Resource` that reads the shape's *origin*, draws
-  the registered texture there at its own size through `draw_texture_rects`,
-  and never looks at the brush transform it was handed. Every other paint —
-  solid, gradient, an image the renderer owns — goes down the other arm and
-  honours it. So a texture cannot be scaled by the documented means, silently:
-  the call is accepted and the picture comes out the wrong size in the corner
-  of its box. The way round is to put the scale in the scene transform and make
-  the shape the texture's own rectangle, which `draw_texture_rects` composes.
-  `anyrender_vello_hybrid 0.10.0`, `src/scene.rs`.
-- **A frame that fails to present is never discarded.** `render` in the same
-  crate resets the scene only after a successful present, and returns early
-  without resetting both when the surface texture cannot be had and when the
-  blit-and-present fails. A window whose surface has gone away — a display
-  going to sleep, a `Timeout` during any hiccup — therefore accumulates one
-  whole frame per redraw in a single scene until `vello_common` panics with
-  ``alpha_idx` too large`, which is a `u32` running into `Strip`'s packed fill
-  flag at about two billion. The assert names strip generation and the cause is
-  a hundred thousand stacked frames. Two lines on the two early returns. See
-  ``alpha_idx too large`, which was a frame that never reached the screen`
-  above, and `steady.rs`.
+  `if self.ivars().ime_capabilities.get().is_some() { return; }`, so
+  `ImeRequest::Disable` returns before reaching anything and the only state
+  after the first enable is enabled. It means "enable when a field has the
+  focus" is the only rule any Blitz application can implement, whatever it
+  writes for the other half. winit-appkit 0.31.0-beta.2, `src/view.rs`.
+
+- **`type="password"` is accepted, given `Role::PasswordInput`, and rendered in
+  the clear.** It is the one input type whose whole meaning is what it does
+  *not* draw, and both workarounds are wrong: masking through `value` fights
+  `set_text`'s selection collapse, and intercepting the keys cannot reach
+  macOS's `doCommandBySelector:`.
+
+- **A stylesheet mutation walks state-only snapshots and unwraps their absent
+  attributes.** Stylo answers a `<style>` text change with
+  `StylesheetInvalidationSet`, whose walk calls `each_class` on any element
+  snapshot it finds; `ServoElementSnapshot::each_class` goes through `get_attr`,
+  which is `self.attrs.as_ref().unwrap()`. Blitz takes a state-only snapshot for
+  a hover or a press, and that snapshot has `attrs: None`. So *clicking* the
+  button that changes the theme panicked in Stylo while pressing a key for the
+  same action was fine. Two further conditions must hold, which is why the first
+  three minimal reproductions all passed: the changed sheet must contain a class
+  selector, and some rule must depend on the state bits. Either side could fix
+  it. `stylo 0.20.0`, `blitz-dom 0.3.0-beta.2`.
+
 - **`font-variation-settings` is parsed and dropped.** `stylo_to_parley.rs`
   converts it and hands it on, and `'wght' 100` and `'wght' 900` lay out
   identically — so a variable font's axes cannot be reached from CSS at all,
-  including the `opsz` axis that would otherwise have been the answer to the
-  entry above. The failure is silent, which is what makes it expensive: the
+  including the `opsz` axis that would otherwise answer the entry below. The
   declaration is accepted and nothing happens.
 
-**IME used to be an entry of its own and the only blocking one**, on the strength
-of there being no composition events at all: a reader writing CJK could not
-search. It is struck. Blitz applies a composition to the focused element's
-editor through Parley and tells the application about the result, `blitz-shell`
-routes all four of winit's IME variants into it, and `tests/ime.rs` types 日本語
-into the find field and finds a composed word in a document. Nothing in this
-reader had to change for it. See "The platform work" above — and note that what
-arrives is not a `CompositionEvent` and does not need to be.
+- **The system font's `trak` table is not read**, so every UI face that has one
+  lays out too tight below about 17px — on macOS that is SF, which is to say
+  every application that says `system-ui` and does not set its own tracking. A
+  browser applies it; parley does not, and the difference is a tenth of the
+  width of a word at the sizes an interface is actually written at.
+
+- **`anyrender_vello_hybrid` ignores `brush_transform` for a texture.** `fill`
+  has an arm for `PaintRef::Resource` that reads the shape's *origin*, draws the
+  registered texture there at its own size, and never looks at the brush
+  transform. Every other paint honours it. So a texture cannot be scaled by the
+  documented means, silently. The way round is to put the scale in the scene
+  transform and make the shape the texture's own rectangle.
+  `anyrender_vello_hybrid 0.10.0`, `src/scene.rs`.
+
+- **A frame that fails to present is never discarded.** `render` in the same
+  crate resets the scene only after a successful present, and returns early
+  without resetting when the surface texture cannot be had and when the
+  blit-and-present fails. A window whose surface has gone away — a display
+  sleeping, a `Timeout` during any hiccup — accumulates one whole frame per
+  redraw in a single scene until `vello_common` panics with `` `alpha_idx` too
+  large``, which is a `u32` running into `Strip`'s packed fill flag at about two
+  billion. The assert names strip generation and the cause is a hundred thousand
+  stacked frames. Two lines on the two early returns.
+
+- **`vello`'s `BufferSizes` sized from the scene rather than from paris-30k.**
+  The comment in the source already says it should be. A tenth of every one of
+  those constants would do for a reader, and it is not a fault only a PDF reader
+  has. Worth 173MB — see "Where the 144MB is".
+
+- **Four in `pdfium-render`.** `PdfQuadPoints::from_rect` numbers the corners
+  the way the rectangle walks — bottom-left, bottom-right, top-right, top-left —
+  where §12.5.6.10 and pdfium's own `RectFromQuadPointsArray` want upper-left,
+  upper-right, lower-left, lower-right. A text-markup annotation built with it
+  is written, saved, **read back correctly by the same crate**, and drawn by
+  nothing: the appearance stream pdfium generates has a `/BBox` of no width, and
+  `to_rect` takes the min and max of the four points so it undoes `from_rect`
+  exactly. It is the obvious call and its result is invisible from inside the
+  library that made it. `PdfBitmap::as_raw_bytes` should be named as the copy it
+  is — a function that looks like a view and allocates 24MB is a trap anybody
+  writing a reader will fall into. `PdfDocument::save_to_writer` should take the
+  flags: `FPDF_INCREMENTAL` and `FPDF_NO_INCREMENTAL` are both in its own
+  bindings and the flags word is hard-coded to zero under a `TODO` from 2022,
+  and the one thing worth knowing about them decides a feature — an incremental
+  save leaves the original bytes untouched, which is what a signature, a syncing
+  folder and somebody else's software all care about. And `PdfRenderConfig::new()`
+  defaults `FPDF_REVERSE_BYTE_ORDER` to *on* for `image`'s sake, so a bitmap
+  asked for as BGRA is not BGRA — invisible on grey pages, which is why it
+  survived nine phases and 313 tests until markup put a *known* colour on one
+  and `#ff0000` came back `#0000ff`.
+
+**IME used to be an entry here and the only blocking one**, on the strength of
+there being no composition events at all. It is struck: Blitz applies a
+composition to the focused element's editor through Parley, `blitz-shell` routes
+all four of winit's IME variants into it, and `tests/ime.rs` types 日本語 into
+the find field. Nothing in this reader had to change. What arrives is not a DOM
+`CompositionEvent` and does not need to be — the DOM's composition events are a
+*notification*, and what a find bar wants is the result. (A preedit is not a
+query here, and that is free: Blitz answers one with a redraw and no `input`
+event, where a browser fires `input` mid-composition with `isComposing` set for
+the application to check — and `main.ts` does not check it, so the app scans the
+whole document for every intermediate guess.)

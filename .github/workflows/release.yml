@@ -39,6 +39,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  PDFIUM_TAG: "chromium%2F8021"
 
 jobs:
   # The same types and tests CI runs, on the commit being released, before
@@ -55,9 +56,6 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - name: This releases main
         if: github.ref != 'refs/heads/main'
@@ -99,7 +97,27 @@ jobs:
             exit 0
           fi
 
-          node scripts/set-version.mjs "$VERSION"
+          # The version lived in five files under Tauri and lives in two now:
+          # `Cargo.toml`, which the bundler reads, and `Cargo.lock`, which
+          # cargo rewrites from it whether or not the change was committed.
+          # Both are written here so the commit this tags is coherent.
+          python3 - "$VERSION" <<'PY'
+          import re, sys
+          version = sys.argv[1]
+          toml = open("Cargo.toml").read()
+          open("Cargo.toml", "w").write(
+              re.sub(r'^version = ".*"$', f'version = "{version}"', toml, count=1, flags=re.M)
+          )
+          lock = open("Cargo.lock").read()
+          open("Cargo.lock", "w").write(
+              re.sub(
+                  r'(\[\[package\]\]\nname = "hylopdf"\nversion = )".*"',
+                  lambda m: m.group(1) + f'"{version}"',
+                  lock,
+                  count=1,
+              )
+          )
+          PY
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -140,11 +158,13 @@ jobs:
           - name: macOS (Apple silicon)
             os: macos-latest
             target: aarch64-apple-darwin
-            bundles: dmg
+            formats: dmg
+            pdfium: pdfium-mac-arm64.tgz
           - name: macOS (Intel)
             os: macos-latest
             target: x86_64-apple-darwin
-            bundles: dmg
+            formats: dmg
+            pdfium: pdfium-mac-x64.tgz
           # 22.04 rather than the newest Ubuntu on purpose: a Linux binary runs
           # on the glibc it was built against and anything newer, never
           # anything older, so the runner's age is what decides whether the
@@ -156,34 +176,44 @@ jobs:
           - name: Linux
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            bundles: deb,rpm,appimage
+            formats: deb,appimage
+            pdfium: pdfium-linux-x64.tgz
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            bundles: msi,nsis
+            formats: wix,nsis
+            pdfium: pdfium-win-x64.tgz
     steps:
       - uses: actions/checkout@v4
         with:
           # The commit the tag job made, not the one the run started from.
           ref: ${{ needs.tag.outputs.tag }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
           key: ${{ matrix.target }}
       - name: System libraries
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf libxdo-dev
-      - run: npm ci
+          sudo apt-get install -y libfontconfig1-dev fonts-dejavu-core patchelf
+
+      # pdfium travels inside the bundle: `Contents/Frameworks` in the `.app`,
+      # `/usr/lib/HyloPDF` in the `.deb`, beside the `.exe` on Windows. Which
+      # archive is which is the matrix's business — the Intel DMG needs the
+      # Intel library even though an Apple silicon runner built it.
+      - name: pdfium
+        shell: bash
+        run: |
+          mkdir -p pdfium
+          curl -sSfL -o pdfium.tgz \
+            "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_TAG/${{ matrix.pdfium }}"
+          tar xzf pdfium.tgz -C pdfium
+
+      - name: cargo-packager
+        run: cargo install cargo-packager --locked
 
       # See the note in ci.yml: the bundler decides whether to sign by whether
       # these are present, and a secret this repository does not have arrives
@@ -211,6 +241,7 @@ jobs:
           done
 
       - name: Build the installers
+        shell: bash
         env:
           # linuxdeploy is itself an AppImage, and a GitHub runner has no FUSE
           # for it to mount itself with; unpacking it instead is the supported
@@ -218,14 +249,17 @@ jobs:
           # the libraries it is handed and errors rather than skipping them.
           APPIMAGE_EXTRACT_AND_RUN: 1
           NO_STRIP: true
-        run: npm run tauri build -- --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+          cargo packager --release --target ${{ matrix.target }} \
+            --formats ${{ matrix.formats }}
 
       - name: Hang them off the draft
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.tag.outputs.tag }}
-          DIR: src-tauri/target/${{ matrix.target }}/release/bundle
+          DIR: target/${{ matrix.target }}/release
         run: |
           set -euo pipefail
           found=0

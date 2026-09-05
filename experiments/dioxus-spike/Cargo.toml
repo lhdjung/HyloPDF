@@ -1,0 +1,45 @@
+[package]
+name = "dioxus-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+
+# Not a member of anything: the app's crate is src-tauri and this is a scratch
+# crate that answers questions about a possible replacement for it.
+[workspace]
+
+# Blitz is a pinned git revision rather than crates.io, because the published
+# `dioxus-native 0.7.10` predates the Custom Widget API — it still has
+# `use_wgpu` and the `<canvas src=…>` custom paint source, which is the path
+# that makes a document animate for ever. See `../PROGRESS.md`, Phase 0. The
+# revision is the one `dioxus-reader` is pinned to, so the two crates share a
+# checkout and cannot disagree about what upstream says.
+[dependencies]
+dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
+dioxus-core = "0.7"
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["vello", "system-fonts", "html", "svg"] }
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget"] }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget", "system-fonts", "svg"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget"] }
+anyrender = "0.13"
+anyrender_vello = "0.14"
+anyrender_vello_hybrid = "0.10"
+wgpu_context = "0.9"
+wgpu = "29"
+peniko = "0.6"
+winit = "=0.31.0-beta.2"
+webbrowser = "1"
+pollster = "1.0.1"
+pdfium-render = { version = "0.9.3", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+[dev-dependencies]
+pollster = "1.0.1"

@@ -1,12 +1,11 @@
-# HyloPDF ships to three platforms with three different web engines, and the
-# ones it is not developed on are the ones that break: WebKitGTK on Linux and
-# WebView2 on Windows disagree with WKWebView about exactly the things this app
-# leans on — canvas blend modes, pinch gestures, text layout. Building on all
-# three on every push is the cheapest way to hear about it from a machine
-# rather than from a reader.
+# Every push to main and every pull request: the suite on macOS, Linux and
+# Windows. It checks; it does not release. `release.yml` is the switch for
+# that, and it calls the same `checks.yml` before it bundles anything.
 #
-# This builds; it does not release. `release.yml` is the switch for that, and
-# it calls the same checks before it bundles anything.
+# The bundle job below is on dispatch only. It is four release builds of a
+# crate whose profile is `lto = true, codegen-units = 1`, and nothing about the
+# packaging changes between pushes — but when it does change, this is how to
+# find out without cutting a release.
 
 name: CI
 
@@ -14,76 +13,75 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  PDFIUM_TAG: "chromium%2F8021"
 
 jobs:
   checks:
     uses: ./.github/workflows/checks.yml
 
   bundle:
-    name: Bundle (${{ matrix.os }})
-    # Three full platform builds is the most expensive thing this workflow
-    # does — compiling the Rust side and packaging it, times three OSes.
-    # Nothing here depended on the checks passing first, so a broken type or a
-    # failing Rust test still got a full matrix build anyway, on every push.
-    # Waiting the few seconds those take costs far less than the minutes a
-    # bundle does.
-    needs: checks
+    name: The bundle (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - os: macos-latest
+            pdfium: pdfium-mac-arm64.tgz
+            formats: dmg
+          - os: ubuntu-22.04
+            pdfium: pdfium-linux-x64.tgz
+            formats: deb,appimage
+          - os: windows-latest
+            pdfium: pdfium-win-x64.tgz
+            formats: nsis
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
-      - name: System libraries
-        if: matrix.os == 'ubuntu-latest'
+          key: bundle-${{ matrix.os }}
+
+      - name: What fontconfig and an AppImage need
+        if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf libxdo-dev
-      - run: npm ci
-      # Signing is the one thing this cannot do without secrets. On macOS an
-      # unsigned build is quarantined on any machine but the one that made it,
-      # and on Windows it draws a SmartScreen warning — so a release workflow
-      # has to supply these, and the Tauri bundler reads them straight from the
-      # environment.
-      #
-      # It reads them by presence, though, and a secret this repository does not
-      # have arrives as an empty string rather than as nothing at all. Named
-      # directly in the build step's `env`, `APPLE_CERTIFICATE` is therefore
-      # always set, always empty, and always taken as "here is a certificate" —
-      # and the build dies at `security import` having compiled perfectly. So
-      # they come in under names the bundler does not read, and only the ones
-      # carrying something are promoted to the names it does.
-      - name: Signing certificates, if this repository has any
-        if: matrix.os == 'macos-latest'
-        env:
-          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          ID: ${{ secrets.APPLE_ID }}
-          PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          sudo apt-get install -y libfontconfig1-dev fonts-dejavu-core patchelf
+
+      # Where `resources` and `frameworks` in `Cargo.toml` look, and where
+      # `pdfium.rs` then finds it: inside the bundle, beside the executable.
+      - name: pdfium
+        shell: bash
         run: |
-          for name in CERTIFICATE CERTIFICATE_PASSWORD SIGNING_IDENTITY ID PASSWORD TEAM_ID; do
-            if [ -n "${!name}" ]; then
-              {
-                echo "APPLE_$name<<HYLOPDF_EOF"
-                echo "${!name}"
-                echo "HYLOPDF_EOF"
-              } >> "$GITHUB_ENV"
-            fi
-          done
-      - name: Build the app
-        run: npm run tauri build -- --ci
+          mkdir -p pdfium
+          curl -sSfL -o pdfium.tgz \
+            "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_TAG/${{ matrix.pdfium }}"
+          tar xzf pdfium.tgz -C pdfium
+
+      - name: cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: The bundle
+        shell: bash
+        env:
+          # linuxdeploy is an AppImage itself and a runner has no FUSE to mount
+          # it with; unpacking is the supported way round that.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          cargo build --release
+          cargo packager --release --formats ${{ matrix.formats }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.os }}
+          path: |
+            target/release/*.dmg
+            target/release/*.deb
+            target/release/*.AppImage
+            target/release/*setup.exe
+          if-no-files-found: error

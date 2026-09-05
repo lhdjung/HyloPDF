@@ -1,0 +1,22 @@
+--- a/packages/blitz-dom/assets/default.css
++++ b/packages/blitz-dom/assets/default.css
+@@ -87,6 +87,12 @@
+ button,
+ input[type="submit"],
+ input[type="reset"],
+ input[type="button"] {
+     border: 1px solid #999;
+     border-radius: 1px;
+     padding: 1px 6px;
+     color: black;
+     background-color: #EFEFEF;
+     text-align: center;
+     display: inline-flex;
+     align-items: center;
+     justify-content: center;
++    /* A press that slides two pixels turns into a text selection otherwise —
++     * `handle_pointermove` sets `DragMode::Selecting`, and `handle_pointerup`
++     * then declines to dispatch the click. Every browser's user-agent sheet
++     * says this for a button; the label of a control is not prose. */
++    user-select: none;
+ }

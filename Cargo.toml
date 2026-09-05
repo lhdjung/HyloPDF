@@ -1,0 +1,190 @@
+[package]
+name = "hylopdf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "HyloPDF — a smooth reading experience"
+
+# A workspace of one, and `experiments/dioxus-spike` is a workspace of its own:
+# the spike is Phase 0's four answers, kept because they still compile and that
+# is what keeps the pinned Blitz revision honest.
+[workspace]
+
+# Which renderer Blitz composites through, and it is the single largest
+# decision in this crate's memory.
+#
+# `vello` is the full compute pipeline. Before it draws anything it allocates
+# 173MB of scratch buffers whose sizes are hand-picked constants in
+# `vello_encoding` — "hand picked to accommodate the vello test scenes as well
+# as paris-30k", with a comment saying they should be derived from the scene
+# and are not. A page of a PDF and a toolbar is not paris-30k.
+#
+# `vello-hybrid` splits the work CPU/GPU and allocates none of it: an empty
+# window is 18.8MB against 208MB. It is upstream's default and it is ours.
+#
+# A build-time choice rather than a runtime one because
+# `DioxusNativeWindowRenderer` picks its inner renderer with `cfg_if`.
+[features]
+default = ["vello-hybrid"]
+vello = ["dioxus-native/vello"]
+vello-hybrid = ["dioxus-native/vello-hybrid"]
+
+# The headless harness. It pulls in a second renderer (`vello_cpu`),
+# upstream's own test harness and a PNG encoder, none of which belong in a
+# binary whose size is one of the numbers this reader is judged on. The
+# self dev-dependency below is what turns it on for `cargo test` and leaves it
+# off for `cargo build`.
+harness = [
+    "dep:blitz-test-harness",
+    "dep:anyrender_vello_cpu",
+    "dep:png",
+    "dep:keyboard-types",
+    "blitz-dom/system-fonts",
+]
+
+[dependencies]
+dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
+dioxus-core = "0.7"
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["system-fonts", "html", "svg"] }
+# `clipboard` is arboard, and it is here for one key: ⌘C. `file-dialog` is
+# `rfd`, and it is here for ⌘O — the picker was the one door in the assessment's
+# table that had no implementation on either side. Both trait methods are on
+# `ShellProvider` either way; it is the *implementation* that is behind the
+# feature, and without it every copy silently returns `Err` and every Open
+# silently chooses nothing. `accessibility` is still not taken — that is the
+# item it is about.
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget", "clipboard", "file-dialog"] }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget", "system-fonts", "svg"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget"] }
+anyrender = "0.13"
+anyrender_vello = "0.14"
+wgpu_context = "0.9"
+wgpu = "29"
+peniko = "0.6"
+winit = "=0.31.0-beta.2"
+webbrowser = "1"
+pdfium-render = { version = "0.9.3", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+
+# What the app's own `theme.rs` and `settings.rs` need, and nothing more. They
+# are compiled into this crate by path rather than copied — see `lib.rs` — so
+# these are their dependencies, listed here because that is where the compiler
+# looks for them.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"   # the app's version, so the modules mounted from it compile against what they were written against
+
+# What `fold` in `search.rs` needs, and the whole of what it needs: NFKD, one
+# character at a time. `search.ts` reaches for `String.prototype.normalize`,
+# which the platform already carries; a Rust binary has to bring the tables
+# with it, and these are 100KB of them.
+unicode-normalization = "0.1"
+
+# What the app's own `watch.rs` needs, and it is mounted by path like the other
+# four — see `src/emit.rs` for how a file that says `use tauri::…` compiles in
+# a crate with no Tauri in it.
+notify = "8"
+
+# The harness's own, optional. See the `harness` feature above.
+blitz-test-harness = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", optional = true }
+anyrender_vello_cpu = { version = "0.17", optional = true }
+png = { version = "0.18", optional = true }
+keyboard-types = { version = "0.7", optional = true }
+
+# The rasteriser the harness draws through is `vello_cpu`, and an unoptimised
+# `vello_cpu` is about twenty times slower than an optimised one: the memory
+# test went from thirty seconds to under two. Dependencies are optimised even
+# in a debug build; this crate is not, so a panic still names a line.
+# `build.rs` reads the app's fourteen theme files and refuses to build one that
+# will not parse or that names a colour the renderer cannot read.
+# **`font-variation-settings` is behind a Stylo pref that nothing turns on.**
+# Blitz sets five of these itself and not this one, so `stylo` parses the
+# declaration and throws it away — see `styles::use_variable_fonts`. The crate
+# is already in the tree under `stylo`; naming it here is how the pref is
+# reached, and it is the same version Blitz's own copy resolves to.
+stylo_static_prefs = "0.20"
+
+[build-dependencies]
+toml = "0.8"   # the app's version, so the modules mounted from it compile against what they were written against
+
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+[dev-dependencies]
+pollster = "1.0.1"
+# `tests/keys.rs` reads the app's own `keys.toml` and checks the table against
+# it, which is the drift no type checker can see. An integration test does not
+# inherit the library's dependencies, so it is named again here.
+toml = "0.8"
+# A dev-dependency on itself, which is legal and is the one way to make
+# `cargo test` build the library with a feature that `cargo build` leaves off.
+# Without it the harness would either be in the shipped binary or behind a flag
+# every test run had to remember.
+hylopdf = { path = ".", features = ["harness"] }
+# Named again here so that a test can reach them directly, which only
+# `tests/upstream.rs` does — a minimal reproduction owes nothing to this crate.
+blitz-test-harness = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
+dioxus = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
+
+# The Dock menu, which is AppKit and nothing else: neither winit nor Tauri
+# reaches `NSApplication`'s `dockMenu`, so `src/dock.rs` goes to the runtime
+# directly. It is the app's own version, which is the app's own dependency —
+# and it is already in the tree under winit, so it costs nothing to build.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+
+# What the Dock and the task manager show, which is the binary's own name and
+# not the bundle's around it — which is why the target is named rather than
+# taking the crate's own lower-case name.
+[[bin]]
+name = "HyloPDF"
+path = "src/main.rs"
+
+# The bundles, through `cargo-packager` — the bundler `tauri-bundler` is a fork
+# of, without the app around it. It reads the fields `tauri.conf.json` read, so
+# every value below is that file's value; what it does not have is a front end
+# to build first. The signing variables are the same `APPLE_*` names
+# `release.yml` has always set, and nothing has ever been signed with them.
+[package.metadata.packager]
+product-name = "HyloPDF"
+identifier = "app.hylopdf"
+category = "Productivity"
+description = "A calm PDF reader"
+long-description = "HyloPDF is a calm, fast PDF reader: no clutter, easy dark mode, flexible themes."
+# **No `license-file`.** cargo-packager turns one into a DMG licence agreement
+# — a dialogue to accept before the disk image will even mount, which the app's
+# own DMG has never shown. The licence is in the repository and in the archive
+# beside this.
+copyright = "Copyright © 2026 Lukas Jung and the HyloPDF contributors"
+icons = [
+    "icons/32x32.png",
+    "icons/128x128.png",
+    "icons/128x128@2x.png",
+    "icons/icon.icns",
+    "icons/icon.ico",
+]
+
+# pdfium is a shared library and is not in this repository; CI downloads it to
+# `pdfium/` beside the checkout and `pdfium.rs` looks for it beside the
+# executable. On macOS that means `Contents/Frameworks`, where a signed dylib
+# has to live for notarisation; everywhere else it is the executable's own
+# directory, which is what `resources` gives.
+resources = ["pdfium/lib/*.so", "pdfium/bin/*.dll"]
+
+[[package.metadata.packager.file-associations]]
+extensions = ["pdf"]
+name = "PDF document"
+mime-type = "application/pdf"
+role = "viewer"
+
+[package.metadata.packager.macos]
+frameworks = ["pdfium/lib/libpdfium.dylib"]

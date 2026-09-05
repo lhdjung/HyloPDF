@@ -216,7 +216,12 @@ fn the_message_names_whatever_key_the_reader_bound() {
     );
     reader.press_chord("shift+b");
     let notice = reader.state().notice;
-    assert!(notice.contains("⇧B"), "notice was {notice:?}");
+    // Asked through the same function the notice is written with, because how
+    // a chord reads is the platform's business: ⇧B on a Mac, `Shift+B` on
+    // Windows and Linux. What is being tested is that the *rebound* key is the
+    // one named, not the default.
+    let want = dioxus_reader::keymap::describe_binding("shift+b", cfg!(target_os = "macos"));
+    assert!(notice.contains(&want), "notice was {notice:?}, wanted {want:?}");
 }
 
 /// And it is a setting, so a reader who reads without one gets none next time.

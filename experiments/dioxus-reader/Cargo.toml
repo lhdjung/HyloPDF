@@ -159,7 +159,10 @@ identifier = "app.hylopdf"
 category = "Productivity"
 description = "A calm PDF reader"
 long-description = "HyloPDF is a calm, fast PDF reader: no clutter, easy dark mode, flexible themes."
-license-file = "../../LICENSE"
+# **No `license-file`.** cargo-packager turns one into a DMG licence agreement
+# — a dialogue to accept before the disk image will even mount, which the app's
+# own DMG has never shown. The licence is in the repository and in the archive
+# beside this.
 copyright = "Copyright © 2026 Lukas Jung and the HyloPDF contributors"
 icons = [
     "../../src-tauri/icons/32x32.png",

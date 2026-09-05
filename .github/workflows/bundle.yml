@@ -1,0 +1,185 @@
+# The installers, and the links a person clicks to get one.
+#
+# One place, called twice: `nightly.yml` on every push to main and `release.yml`
+# when a version is named. Packaging is the part that is easy to get subtly
+# wrong twice, so it is not written twice.
+#
+# **The asset names carry no version.** A release's own tag says which version
+# it is, and a fixed name is what lets the notes below be a fixed template —
+# the whole point of this file is that the links work without anybody editing
+# them.
+
+name: Bundle
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release to build into. It has to exist already.
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  PDFIUM_TAG: "chromium%2F8021"
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not take the others down with it: three
+      # installers and a note about the fourth beats nothing at all.
+      fail-fast: false
+      matrix:
+        include:
+          # Both macOS builds run on Apple silicon and the Intel one
+          # cross-compiles, because the Intel runners were retired at the end of
+          # 2025. Apple's toolchain targets either architecture from either
+          # host, and bundling never runs what it built. Two DMGs rather than
+          # one universal build: a universal installer carries both
+          # architectures to run one of them, and the brief asks for a small
+          # binary.
+          - name: macOS (Apple silicon)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            arch: arm64
+            formats: dmg
+            pdfium: pdfium-mac-arm64.tgz
+          - name: macOS (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            arch: x64
+            formats: dmg
+            pdfium: pdfium-mac-x64.tgz
+          # 22.04 rather than the newest Ubuntu on purpose: a Linux binary runs
+          # on the glibc it was built against and anything newer, never
+          # anything older, so the runner's age is what decides whether the
+          # `.deb` installs on Debian stable.
+          - name: Linux
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            arch: x86_64
+            formats: deb,appimage
+            pdfium: pdfium-linux-x64.tgz
+          # NSIS and not WiX: `-setup.exe` is what a person downloads and runs,
+          # and an `.msi` is for deploying to a hundred machines at once, which
+          # is not this audience.
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: x64
+            formats: nsis
+            pdfium: pdfium-win-x64.tgz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: System libraries
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev fonts-dejavu-core patchelf
+
+      # pdfium travels inside the bundle — `Contents/Frameworks` in the `.app`,
+      # `/usr/lib/HyloPDF` in the `.deb`, beside the `.exe` on Windows — and
+      # `resources` and `frameworks` in `Cargo.toml` are what put it there. The
+      # Intel DMG needs the Intel library even though an Apple silicon runner
+      # built it.
+      - name: pdfium
+        shell: bash
+        run: |
+          mkdir -p pdfium
+          curl -sSfL -o pdfium.tgz \
+            "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_TAG/${{ matrix.pdfium }}"
+          tar xzf pdfium.tgz -C pdfium
+
+      - name: cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: The installers
+        shell: bash
+        env:
+          # linuxdeploy is itself an AppImage and a runner has no FUSE for it to
+          # mount itself with; unpacking is the supported way round that.
+          # NO_STRIP because the runner's strip is newer than the libraries it
+          # is handed and errors rather than skipping them.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          NO_STRIP: true
+        run: |
+          set -euo pipefail
+          cargo build --release --target ${{ matrix.target }}
+          cargo packager --release --target ${{ matrix.target }} \
+            --formats ${{ matrix.formats }}
+
+      # The bundler names its output after the version; the release is named
+      # after the version. One of the two has to be fixed for the notes to be
+      # able to link to it, and it is this one.
+      - name: Under the names the notes link to
+        id: rename
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          cd "target/${{ matrix.target }}/release"
+          for f in *.dmg;       do mv "$f" "HyloPDF-macos-${{ matrix.arch }}.dmg"; done
+          for f in *.deb;       do mv "$f" "HyloPDF-linux-amd64.deb"; done
+          for f in *.AppImage;  do mv "$f" "HyloPDF-linux-x86_64.AppImage"; done
+          for f in *setup.exe;  do mv "$f" "HyloPDF-windows-setup.exe"; done
+          ls -lh HyloPDF-*
+
+      # `--clobber` rather than a plain upload, because a re-run lands on a
+      # release that already has the asset.
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd "target/${{ matrix.target }}/release"
+          gh release upload "${{ inputs.tag }}" HyloPDF-* --clobber
+
+  notes:
+    name: The download links
+    needs: package
+    # Three installers and a link to a fourth that is not there beats a release
+    # whose notes nobody wrote.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Put them at the top of the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          body=$(gh release view "$TAG" --json body --jq .body)
+          # A re-run must not stack a second copy of the table on the first.
+          if printf '%s' "$body" | grep -q '^## Download'; then
+            echo "The notes already carry the links."
+            exit 0
+          fi
+          dl="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG"
+          {
+            echo "## Download"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **macOS** | [Apple silicon]($dl/HyloPDF-macos-arm64.dmg) · [Intel]($dl/HyloPDF-macos-x64.dmg) |"
+            echo "| **Linux** | [AppImage]($dl/HyloPDF-linux-x86_64.AppImage) · [.deb]($dl/HyloPDF-linux-amd64.deb) |"
+            echo "| **Windows** | [Installer]($dl/HyloPDF-windows-setup.exe) |"
+            echo
+            echo "None of these is signed by a certificate your system has heard of, so each is refused on first launch. On macOS, open *System Settings → Privacy & Security* and click *Open Anyway*; on Windows, click *More info* → *Run anyway*."
+            echo
+            printf '%s\n' "$body"
+          } > notes.md
+          gh release edit "$TAG" --notes-file notes.md

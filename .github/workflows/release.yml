@@ -133,152 +133,16 @@ jobs:
 
           draft
 
+  # Four installers into the draft, and the download table into its notes.
+  # `bundle.yml` is the same file `nightly.yml` calls, because packaging is
+  # what is easy to get subtly wrong twice.
   bundle:
-    name: ${{ matrix.name }}
     needs: tag
-    runs-on: ${{ matrix.os }}
-    strategy:
-      # One platform failing should not take the other three down with it: the
-      # whole point of the retry above is that the ones that worked do not have
-      # to be built again.
-      fail-fast: false
-      matrix:
-        include:
-          # Two macOS builds rather than one universal binary. A universal
-          # build carries both architectures in every installer and roughly
-          # doubles what a reader downloads to run one of them; the brief asks
-          # for a small binary, and the two DMGs are named apart by
-          # architecture anyway.
-          #
-          # Both are built on Apple silicon, the Intel one cross-compiled,
-          # because the Intel runners were retired at the end of 2025. Apple's
-          # toolchain targets either architecture from either host, so this is
-          # a `--target` and nothing else; what it cannot do is run what it
-          # built, which bundling does not need.
-          - name: macOS (Apple silicon)
-            os: macos-latest
-            target: aarch64-apple-darwin
-            formats: dmg
-            pdfium: pdfium-mac-arm64.tgz
-          - name: macOS (Intel)
-            os: macos-latest
-            target: x86_64-apple-darwin
-            formats: dmg
-            pdfium: pdfium-mac-x64.tgz
-          # 22.04 rather than the newest Ubuntu on purpose: a Linux binary runs
-          # on the glibc it was built against and anything newer, never
-          # anything older, so the runner's age is what decides whether the
-          # .deb installs on Debian stable. This image is deprecated from
-          # September 2026 and unsupported from April 2027 — and bumping the
-          # label is the wrong fix when it goes, because it silently narrows
-          # the set of machines the release runs on. Build in a container of
-          # the oldest glibc worth supporting instead.
-          - name: Linux
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            formats: deb,appimage
-            pdfium: pdfium-linux-x64.tgz
-          - name: Windows
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            formats: wix,nsis
-            pdfium: pdfium-win-x64.tgz
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # The commit the tag job made, not the one the run started from.
-          ref: ${{ needs.tag.outputs.tag }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-      - name: System libraries
-        if: startsWith(matrix.os, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev fonts-dejavu-core patchelf
-
-      # pdfium travels inside the bundle: `Contents/Frameworks` in the `.app`,
-      # `/usr/lib/HyloPDF` in the `.deb`, beside the `.exe` on Windows. Which
-      # archive is which is the matrix's business — the Intel DMG needs the
-      # Intel library even though an Apple silicon runner built it.
-      - name: pdfium
-        shell: bash
-        run: |
-          mkdir -p pdfium
-          curl -sSfL -o pdfium.tgz \
-            "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_TAG/${{ matrix.pdfium }}"
-          tar xzf pdfium.tgz -C pdfium
-
-      - name: cargo-packager
-        run: cargo install cargo-packager --locked
-
-      # See the note in ci.yml: the bundler decides whether to sign by whether
-      # these are present, and a secret this repository does not have arrives
-      # as an empty string rather than as nothing at all. So they come in under
-      # names it does not read, and only the ones carrying something are
-      # promoted to the names it does.
-      - name: Signing certificates, if this repository has any
-        if: startsWith(matrix.os, 'macos')
-        env:
-          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          ID: ${{ secrets.APPLE_ID }}
-          PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          for name in CERTIFICATE CERTIFICATE_PASSWORD SIGNING_IDENTITY ID PASSWORD TEAM_ID; do
-            if [ -n "${!name}" ]; then
-              {
-                echo "APPLE_$name<<HYLOPDF_EOF"
-                echo "${!name}"
-                echo "HYLOPDF_EOF"
-              } >> "$GITHUB_ENV"
-            fi
-          done
-
-      - name: Build the installers
-        shell: bash
-        env:
-          # linuxdeploy is itself an AppImage, and a GitHub runner has no FUSE
-          # for it to mount itself with; unpacking it instead is the supported
-          # way round that. NO_STRIP because the runner's strip is newer than
-          # the libraries it is handed and errors rather than skipping them.
-          APPIMAGE_EXTRACT_AND_RUN: 1
-          NO_STRIP: true
-        run: |
-          cargo build --release --target ${{ matrix.target }}
-          cargo packager --release --target ${{ matrix.target }} \
-            --formats ${{ matrix.formats }}
-
-      - name: Hang them off the draft
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.tag.outputs.tag }}
-          DIR: target/${{ matrix.target }}/release
-        run: |
-          set -euo pipefail
-          found=0
-          # One at a time, and read through a loop rather than an array,
-          # because macOS runners answer `bash` with 3.2 — no mapfile, and no
-          # `xargs -d` either. `--clobber` is what makes a retry replace the
-          # asset rather than fail on the name.
-          while IFS= read -r file; do
-            echo "uploading $(basename "$file")"
-            gh release upload "$TAG" "$file" --clobber
-            found=1
-          done < <(find "$DIR" -type f \
-            \( -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' \
-               -o -name '*.AppImage' -o -name '*.msi' -o -name '*-setup.exe' \))
-          if [ "$found" = 0 ]; then
-            echo "The build produced no installers in $DIR." >&2
-            find "$DIR" -maxdepth 2 >&2 || true
-            exit 1
-          fi
+    uses: ./.github/workflows/bundle.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write
 
   publish:
     name: Publish

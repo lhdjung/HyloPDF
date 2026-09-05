@@ -9,17 +9,23 @@ you left.
 
 ## Installation
 
-Every [release](../../releases) has an installer for each platform:
+Download and run — no store, no package manager, nothing to build:
 
 | | |
 |---|---|
-| macOS | `HyloPDF_<version>_aarch64.dmg` (Apple silicon) or `_x64.dmg` (Intel) |
-| Linux | a `.deb` or an AppImage |
-| Windows | an `.msi`, or `-setup.exe` |
+| **macOS** | [Apple silicon](../../releases/latest/download/HyloPDF-macos-arm64.dmg) · [Intel](../../releases/latest/download/HyloPDF-macos-x64.dmg) |
+| **Linux** | [AppImage](../../releases/latest/download/HyloPDF-linux-x86_64.AppImage) · [.deb](../../releases/latest/download/HyloPDF-linux-amd64.deb) |
+| **Windows** | [Installer](../../releases/latest/download/HyloPDF-windows-setup.exe) |
 
-The builds are not signed yet, so the first launch on macOS needs a right-click → Open, or a nudge in System Settings → Privacy & Security.
+Those links always point at the newest build; [every release](../../releases)
+is listed if you want a particular one.
 
-Windows SmartScreen will want "More info" → "Run anyway".
+> **macOS first launch:** macOS blocks the app because it is not signed. After
+> the warning, open *System Settings → Privacy & Security*, scroll to the
+> *Security* section, and click *Open Anyway*.
+
+> **Windows first launch:** SmartScreen blocks it. Click *More info* on the
+> warning, then *Run anyway*.
 
 ## Dev build
 

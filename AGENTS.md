@@ -1154,13 +1154,24 @@ pdfium is a shared library and is not in this repository. `HYLO_PDFIUM` names
 the directory holding it; without that, `pdfium.rs` looks inside the bundle and
 then at the copy vendored with the Phase 0 spike.
 
-Three workflows, and the split is deliberate. `checks.yml` is the suite on
-macOS, Linux and Windows, and it is a *reusable* workflow rather than a job,
-because two things need it — a push and a release — and a second copy would
-drift. `ci.yml` runs it on every push to main and every pull request, and
-carries a dispatch-only bundle job for when the packaging itself changes.
-`release.yml` is the only thing that names a version, and it runs only when you
-press the button.
+Five workflows, and the split is deliberate. `checks.yml` is the suite on
+macOS, Linux and Windows, and it is *reusable* rather than a job, because two
+things need it — a push and a release — and a second copy would drift.
+`bundle.yml` is the installers, reusable for the same reason: packaging is the
+part that is easy to get subtly wrong twice. `ci.yml` runs the checks on every
+push to main and every pull request. `nightly.yml` replaces the rolling
+`nightly` release with a build of every push to main, which is where a person
+actually downloads the app from. `release.yml` is the only thing that names a
+version, and it runs only when you press the button.
+
+**The assets carry no version in their names** — `HyloPDF-macos-arm64.dmg`,
+`HyloPDF-linux-x86_64.AppImage`, `HyloPDF-windows-setup.exe` and so on. The
+release's tag says which version it is, and a fixed name is what lets
+`bundle.yml` write the download table into the notes from a template, and the
+README link to `releases/latest/download/<name>` without anyone editing it
+after a release. It is also why the `notes` job exists at all: GitHub collapses
+the assets list, so a release whose body is prose looks like it has nothing to
+download.
 
 **Nothing has ever been signed.** The Tauri releases were not, and neither are
 these: on macOS the first launch wants *Privacy & Security → Open Anyway* and

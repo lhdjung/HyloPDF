@@ -60,16 +60,16 @@ jobs:
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             arch: x86_64
-            formats: deb,appimage,rpm
+            formats: deb,appimage
             pdfium: pdfium-linux-x64.tgz
-          # NSIS and not WiX: `-setup.exe` is what a person downloads and runs,
-          # and an `.msi` is for deploying to a hundred machines at once, which
-          # is not this audience.
+          # Both: `-setup.exe` is what a person downloads and runs, and the
+          # `.msi` is what deploys to a hundred machines at once. NSIS is named
+          # first because it is the one the notes lead with.
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
             arch: x64
-            formats: nsis
+            formats: nsis,wix
             pdfium: pdfium-win-x64.tgz
     steps:
       - uses: actions/checkout@v4
@@ -118,6 +118,33 @@ jobs:
           cargo build --release --target ${{ matrix.target }}
           cargo packager --release --target ${{ matrix.target }} \
             --formats ${{ matrix.formats }}
+
+      # **The `.rpm` is converted, not built.** `cargo-packager` 0.11 makes
+      # `app`, `dmg`, `wix`, `nsis`, `deb`, `appimage` and `pacman` and nothing
+      # else — it says so when asked for anything else — so Fedora's format
+      # comes from `alien` over the `.deb` that was just built. It is checked
+      # before it is kept: an `.rpm` that does not carry the binary is worse
+      # than no `.rpm` at all, because the AppImage beside it runs anywhere.
+      - name: And the .rpm, if it converts cleanly
+        if: startsWith(matrix.os, 'ubuntu')
+        shell: bash
+        run: |
+          set -uo pipefail
+          sudo apt-get install -y alien rpm >/dev/null
+          cd "target/${{ matrix.target }}/release"
+          if ! sudo alien --to-rpm --keep-version --scripts ./*.deb; then
+            echo "alien could not convert it; no .rpm this time." >&2
+            exit 0
+          fi
+          sudo chown "$USER" ./*.rpm 2>/dev/null || true
+          for f in ./*.rpm; do
+            if rpm -qlp "$f" | grep -q 'HyloPDF'; then
+              echo "keeping $f"
+            else
+              echo "$f carries nothing recognisable; dropping it." >&2
+              rm -f "$f"
+            fi
+          done
 
       # The bundler names its output after the version; the release is named
       # after the version. One of the two has to be fixed for the notes to be
@@ -171,15 +198,40 @@ jobs:
             exit 0
           fi
           dl="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG"
+          # `|| true` on the alternates below is not decoration: `set -e` kills
+          # the step on a failing `a && b`, and "this asset is not there" is
+          # exactly that.
+          #
+          # Only what is actually attached gets a link. A platform whose build
+          # failed is a line that is not written, rather than a link that leads
+          # to a 404 — and the alternates below (`.msi`, `.rpm`) are formats
+          # that may not have been produced at all.
+          assets=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          have() { printf '%s\n' "$assets" | grep -qx "$1"; }
+          link() { printf '[%s](%s/%s)' "$1" "$dl" "$2"; }
+
           # A list rather than a table, and one line per platform: somebody who
-          # has never heard of CI should be able to find their download in the
-          # first two seconds, without reading the word "asset".
+          # has never heard of CI should find their download in the first two
+          # seconds, without reading the word "asset".
           {
             echo "### Download"
             echo
-            echo "- [macOS]($dl/HyloPDF-macos-arm64.dmg) — Apple silicon, or [Intel]($dl/HyloPDF-macos-x64.dmg)"
-            echo "- [Windows]($dl/HyloPDF-windows-setup.exe) — or an [.msi]($dl/HyloPDF-windows.msi)"
-            echo "- [Linux]($dl/HyloPDF-linux-x86_64.AppImage) — an AppImage, or [.deb]($dl/HyloPDF-linux-amd64.deb) · [.rpm]($dl/HyloPDF-linux-x86_64.rpm)"
+            if have HyloPDF-macos-arm64.dmg; then
+              printf -- '- %s — Apple silicon' "$(link macOS HyloPDF-macos-arm64.dmg)"
+              have HyloPDF-macos-x64.dmg && printf ', or %s' "$(link Intel HyloPDF-macos-x64.dmg)" || true
+              echo
+            fi
+            if have HyloPDF-windows-setup.exe; then
+              printf -- '- %s' "$(link Windows HyloPDF-windows-setup.exe)"
+              have HyloPDF-windows.msi && printf ' — or an %s' "$(link .msi HyloPDF-windows.msi)" || true
+              echo
+            fi
+            if have HyloPDF-linux-x86_64.AppImage; then
+              printf -- '- %s — an AppImage' "$(link Linux HyloPDF-linux-x86_64.AppImage)"
+              have HyloPDF-linux-amd64.deb && printf ', or %s' "$(link .deb HyloPDF-linux-amd64.deb)" || true
+              have HyloPDF-linux-x86_64.rpm && printf ' · %s' "$(link .rpm HyloPDF-linux-x86_64.rpm)" || true
+              echo
+            fi
             echo
             echo "Neither the macOS app nor the Windows installer is signed by a certificate your system has heard of, so both are refused on first launch. On macOS, open *System Settings → Privacy & Security* and click *Open Anyway*; on Windows, click *More info* → *Run anyway*."
             echo

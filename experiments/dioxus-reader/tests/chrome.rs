@@ -172,6 +172,18 @@ fn a_menu_comes_down_under_the_button_that_opened_it() {
 
     let mut reader = book();
     reader.click(".chip.title");
+    // Said this way round rather than letting `layout_rect` panic on a missing
+    // selector: a menu that did not open is a click that landed somewhere else,
+    // and where everything was is the whole of what tells you why — a runner
+    // whose `ui-sans-serif` is wider lays the bar out differently.
+    assert!(
+        reader.box_of(".menu.document").is_some(),
+        "the document menu did not open: title {:?}, middle {:?}, left {:?}, right {:?}",
+        reader.box_of(".chip.title"),
+        reader.box_of(".bar-center"),
+        reader.box_of(".bar-left"),
+        reader.box_of(".bar-right"),
+    );
     let menu = reader.harness.layout_rect(".menu.document");
     let chip = reader.harness.layout_rect(".chip.title");
     assert!(

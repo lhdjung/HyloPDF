@@ -180,7 +180,7 @@ resources = ["../../pdfium/lib/*.so", "../../pdfium/bin/*.dll"]
 extensions = ["pdf"]
 name = "PDF document"
 mime-type = "application/pdf"
-role = "Viewer"
+role = "viewer"
 
 [package.metadata.packager.macos]
 frameworks = ["../../pdfium/lib/libpdfium.dylib"]

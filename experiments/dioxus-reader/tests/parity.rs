@@ -25,6 +25,17 @@
 use dioxus_reader::harness::{Options, Reader};
 use serde_json::Value;
 
+/// Two pixels on macOS, where the fixture was taken, and six anywhere else.
+///
+/// The numbers in `app-inventory.json` came out of WebKit on the machine this
+/// was written on, where `ui-sans-serif` is SF Pro. A Windows runner resolves
+/// that stack to Segoe UI and a Linux one to whatever fontconfig has; both set
+/// the same words a couple of per cent narrower, and no CSS makes a different
+/// typeface measure the same. What is still worth asserting off macOS is that
+/// the *arrangement* is the app's, so the allowance widens rather than the
+/// test being skipped.
+const SLACK: f64 = if cfg!(target_os = "macos") { 2.0 } else { 6.0 };
+
 fn app() -> Value {
     let raw = include_str!("parity/app-inventory.json");
     serde_json::from_str(raw).expect("the app's inventory")
@@ -109,7 +120,7 @@ fn the_toolbar_is_the_size_of_the_app_s() {
         .expect("the middle group's width");
     let got = reader.width_of(".bar-center").expect("the middle group");
     assert!(
-        (got - want).abs() <= 2.0,
+        (got - want).abs() <= SLACK,
         "the middle group is {got} wide and the app's is {want}",
     );
 
@@ -140,7 +151,7 @@ fn the_toolbar_is_the_size_of_the_app_s() {
             .width_of(selector)
             .unwrap_or_else(|| panic!("no {selector}"));
         assert!(
-            (got - want).abs() <= 2.0,
+            (got - want).abs() <= SLACK,
             "{id} is {got} wide and the app's is {want}"
         );
     }
@@ -173,7 +184,7 @@ fn the_surfaces_are_the_size_of_the_app_s() {
         assert!(menu.harness.query(selector).is_some(), "no {selector}");
         let got = menu.harness.layout_rect(selector).height as f64;
         assert!(
-            (got - tall).abs() <= 2.0,
+            (got - tall).abs() <= SLACK,
             "{name} is {got} tall and the app's is {tall}",
         );
     }
@@ -184,7 +195,7 @@ fn the_surfaces_are_the_size_of_the_app_s() {
     let tab = panel.harness.layout_rect(".tab").height as f64;
     let wanted = want("tab").expect("the app's tab");
     assert!(
-        (tab - wanted).abs() <= 2.0,
+        (tab - wanted).abs() <= SLACK,
         "a tab is {tab} tall and the app's is {wanted}"
     );
 
@@ -199,7 +210,7 @@ fn the_surfaces_are_the_size_of_the_app_s() {
         let Some(tall) = want(name) else { continue };
         let got = window.harness.layout_rect(selector).height as f64;
         assert!(
-            (got - tall).abs() <= 2.0,
+            (got - tall).abs() <= SLACK,
             "{name} is {got} tall and the app's is {tall}",
         );
     }
@@ -258,6 +269,13 @@ fn every_menu_lists_what_the_app_s_lists() {
                     .trim()
                     .to_string()
             })
+            .collect();
+        // The fixture was taken on macOS and says "Show in Finder"; the app
+        // names the platform's own file manager there and so does the port,
+        // which is a difference between machines rather than between the two.
+        let want: Vec<String> = want
+            .into_iter()
+            .map(|label| label.replace("Finder", dioxus_reader::app::file_manager_name()))
             .collect();
         reader.click(chip);
         let got: Vec<String> = reader
@@ -498,12 +516,12 @@ fn the_start_screen_is_laid_out_like_the_app_s() {
         // showed it worst. Setting the font's optical size instead took that
         // to 0.1px and the allowance went back with it.
         assert!(
-            (width as f64 - wanted).abs() <= 2.0,
+            (width as f64 - wanted).abs() <= SLACK,
             "{name} is {width} wide and the app's is {wanted}",
         );
         if let Some(wanted) = box_of("height").filter(|_| name == "open") {
             assert!(
-                (height as f64 - wanted).abs() <= 2.0,
+                (height as f64 - wanted).abs() <= SLACK,
                 "{name} is {height} tall and the app's is {wanted}",
             );
         }
@@ -546,7 +564,7 @@ fn a_recents_row_is_the_height_of_the_app_s() {
     reader.click("[data-item=\"close-document\"]");
     let (_, _, _, height) = reader.box_of(".recent").expect("no shelf");
     assert!(
-        (height as f64 - want).abs() <= 2.0,
+        (height as f64 - want).abs() <= SLACK,
         "a row is {height} tall and the app's is {want}",
     );
 }

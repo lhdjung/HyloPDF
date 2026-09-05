@@ -9,27 +9,24 @@
 //! the PDF document format" — which is what somebody who has just made this
 //! their default PDF reader sees, every time.
 //!
-//! **It goes to `NSAppleEventManager` rather than to a delegate**, and that is
-//! measured rather than chosen: AppKit's own `'odoc'` handler forwards to
-//! `application:openURLs:` on `NSApp`'s delegate, and winit sets no delegate at
-//! all — `[NSApp delegate]` is nil for the life of the process, so there is
-//! nothing to add the method to and nothing for AppKit to forward to. Taking
-//! the event class directly is the one route that does not depend on somebody
-//! else's object, and it costs the descriptor-walking below.
-//!
-//! **Armed from `can_create_surfaces`, not from `main`.** `NSApplication`
-//! installs its own `'odoc'` handler while it finishes launching, so a handler
-//! set before the event loop starts would be the one that gets replaced.
-//! `can_create_surfaces` is the first callback after that, and the Finder's
-//! event is queued behind it even on a cold launch — so the document arrives
-//! after the window that will take it, which is what
-//! [`crate::session::Session::hand_over`] wants: a start screen with nothing in
-//! it is filled rather than displaced.
+//! **It is a delegate of our own, and that is measured rather than chosen.**
+//! Two other routes were tried. Adding `application:openURLs:` to winit's
+//! delegate class fails because there is no such object: `[NSApp delegate]` is
+//! nil for the life of the process. Taking `'aevt'`/`'odoc'` off
+//! `NSAppleEventManager` works for an application that is already running and
+//! **loses the document on a cold launch** — the Finder's event is queued
+//! before `NSApplication` finishes launching and dispatched as part of it, and
+//! anything armed after that is armed too late, while anything armed before it
+//! is replaced by AppKit's own handler. So the object below is set as the
+//! application's delegate before the event loop starts, and AppKit's own
+//! machinery delivers the queued event to it at the moment it is meant to.
+//! Nothing is displaced: winit sets no delegate, and this one answers two
+//! selectors and no others.
 
 use std::ffi::{c_char, CStr};
 use std::sync::OnceLock;
 
-use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, NSObject, Sel};
+use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, NSObject, Sel};
 use objc2::{msg_send, sel, ClassType};
 
 use crate::shell::Remote;
@@ -39,48 +36,22 @@ use crate::shell::Remote;
 /// same arrangement, and the same reason, as `dock.rs`.
 static SHELL: OnceLock<Remote> = OnceLock::new();
 
-/// The four-character codes this needs, which have no Rust binding here:
-/// `'aevt'`, `'odoc'`, `'----'` (the direct object) and `'furl'` (a file URL).
-const CLASS_APPLE_EVENT: u32 = u32::from_be_bytes(*b"aevt");
-const EVENT_OPEN_DOCUMENTS: u32 = u32::from_be_bytes(*b"odoc");
-const KEY_DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
-const TYPE_FILE_URL: u32 = u32::from_be_bytes(*b"furl");
-
 fn tracing() -> bool {
     std::env::var_os("HYLOPDF_TRACE").is_some()
 }
 
-/// One item of the event's list, as a POSIX path.
-///
-/// The descriptor carries a URL rather than a path — `file:///Users/…/a%20b.pdf`
-/// — so it is coerced to `'furl'`, read as bytes, and handed to `NSURL`, whose
-/// `path` is the decoded answer. Doing the decoding here instead would be a
-/// second percent-decoder in a codebase that already links the system's.
-unsafe fn path_of(item: *mut AnyObject) -> Option<String> {
+/// Hand one path to the shell, which is where every other route ends too.
+fn opened(path: String) {
+    let Some(shell) = SHELL.get() else { return };
+    if tracing() {
+        eprintln!("openfiles: {path}");
+    }
+    shell.request(Some(path));
+}
+
+/// The POSIX path of an `NSURL`, or nothing if it is not a file URL.
+unsafe fn path_of(url: *mut AnyObject) -> Option<String> {
     unsafe {
-        let url_desc: *mut AnyObject = msg_send![item, coerceToDescriptorType: TYPE_FILE_URL];
-        if url_desc.is_null() {
-            return None;
-        }
-        let data: *mut AnyObject = msg_send![url_desc, data];
-        if data.is_null() {
-            return None;
-        }
-        let bytes: *const u8 = msg_send![data, bytes];
-        let length: usize = msg_send![data, length];
-        if bytes.is_null() || length == 0 {
-            return None;
-        }
-        let text = std::slice::from_raw_parts(bytes, length);
-        let text = std::str::from_utf8(text).ok()?;
-        let ns_string: *mut AnyObject = msg_send![
-            AnyClass::get(c"NSString").expect("NSString"),
-            stringWithUTF8String: std::ffi::CString::new(text).ok()?.as_ptr()
-        ];
-        let url: *mut AnyObject = msg_send![
-            AnyClass::get(c"NSURL").expect("NSURL"),
-            URLWithString: ns_string
-        ];
         if url.is_null() {
             return None;
         }
@@ -96,68 +67,86 @@ unsafe fn path_of(item: *mut AnyObject) -> Option<String> {
     }
 }
 
-/// `-[… handleOpen:withReplyEvent:]`. One event carries every document of a
-/// multiple selection, so this is a list and not a path.
-extern "C" fn handle_open(
+/// `-[NSApplicationDelegate application:openURLs:]`, which is what AppKit
+/// calls on any system still supported. One call carries the whole of a
+/// multiple selection.
+extern "C" fn open_urls(
     _this: *mut AnyObject,
     _cmd: Sel,
-    event: *mut AnyObject,
-    _reply: *mut AnyObject,
+    _app: *mut AnyObject,
+    urls: *mut AnyObject,
 ) {
-    let Some(shell) = SHELL.get() else { return };
     unsafe {
-        let list: *mut AnyObject = msg_send![event, paramDescriptorForKeyword: KEY_DIRECT_OBJECT];
-        if list.is_null() {
-            return;
-        }
-        // Apple Event lists are indexed from one.
-        let count: i32 = msg_send![list, numberOfItems];
-        for index in 1..=count {
-            let item: *mut AnyObject = msg_send![list, descriptorAtIndex: index];
-            if item.is_null() {
-                continue;
-            }
-            if let Some(path) = path_of(item) {
-                if tracing() {
-                    eprintln!("openfiles: {path}");
-                }
-                shell.request(Some(path));
+        let count: usize = msg_send![urls, count];
+        for index in 0..count {
+            let url: *mut AnyObject = msg_send![urls, objectAtIndex: index];
+            if let Some(path) = path_of(url) {
+                opened(path);
             }
         }
     }
 }
 
-/// Take `'odoc'` for this process, once.
+/// `-[NSApplicationDelegate application:openFile:]`, the older selector, kept
+/// because it costs four lines and is what some senders still reach for.
+extern "C" fn open_file(
+    _this: *mut AnyObject,
+    _cmd: Sel,
+    _app: *mut AnyObject,
+    path: *mut AnyObject,
+) -> Bool {
+    unsafe {
+        if path.is_null() {
+            return Bool::NO;
+        }
+        let utf8: *const c_char = msg_send![path, UTF8String];
+        if utf8.is_null() {
+            return Bool::NO;
+        }
+        opened(CStr::from_ptr(utf8).to_string_lossy().into_owned());
+    }
+    Bool::YES
+}
+
+/// Become the application's delegate, once, before the event loop starts.
 pub fn install(shell: Remote) {
     if SHELL.set(shell).is_err() {
         return;
     }
     unsafe {
-        let Some(mut builder) = ClassBuilder::new(c"HyloPDFOpenFiles", NSObject::class()) else {
+        let Some(mut builder) = ClassBuilder::new(c"HyloPDFDelegate", NSObject::class()) else {
             return;
         };
         builder.add_method(
-            sel!(handleOpen:withReplyEvent:),
-            handle_open as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject),
+            sel!(application:openURLs:),
+            open_urls as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject),
+        );
+        builder.add_method(
+            sel!(application:openFile:),
+            open_file as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject) -> Bool,
         );
         let class = builder.register();
-        // Never released: it is the handler for as long as the process lives,
-        // and `NSAppleEventManager` does not retain it.
+        // Never released: AppKit does not retain a delegate, and this one is
+        // the delegate for as long as the process lives.
         let target: *mut AnyObject = msg_send![class, new];
 
-        let manager: *mut AnyObject = msg_send![
-            AnyClass::get(c"NSAppleEventManager").expect("NSAppleEventManager"),
-            sharedAppleEventManager
+        let app: *mut AnyObject = msg_send![
+            AnyClass::get(c"NSApplication").expect("NSApplication"),
+            sharedApplication
         ];
-        let _: () = msg_send![
-            manager,
-            setEventHandler: target,
-            andSelector: sel!(handleOpen:withReplyEvent:),
-            forEventClass: CLASS_APPLE_EVENT,
-            andEventID: EVENT_OPEN_DOCUMENTS,
-        ];
+        let existing: *mut AnyObject = msg_send![app, delegate];
+        if !existing.is_null() {
+            // Somebody else's — winit's, one day. Theirs stays; a reader who
+            // cannot close a window is worse off than one who cannot
+            // double-click a document.
+            if tracing() {
+                eprintln!("openfiles: the application already has a delegate; left alone");
+            }
+            return;
+        }
+        let _: () = msg_send![app, setDelegate: target];
         if tracing() {
-            eprintln!("openfiles: armed on 'aevt'/'odoc'");
+            eprintln!("openfiles: delegate set");
         }
     }
 }

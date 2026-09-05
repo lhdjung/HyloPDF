@@ -365,6 +365,11 @@ fn main() {
     }
     #[cfg(target_os = "macos")]
     hylopdf::dock::install(windows.remote());
+    // The Finder's own door: a double-clicked document is an Apple Event and
+    // not an argument, and it has to be answered before the application
+    // finishes launching or the first one is lost. See `openfiles.rs`.
+    #[cfg(target_os = "macos")]
+    hylopdf::openfiles::install(windows.remote());
 
     if measure > 0 {
         drive(windows.remote(), measure, window_height - CHROME);

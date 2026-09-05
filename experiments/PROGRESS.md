@@ -500,7 +500,17 @@ harness this whole argument rests on can never come from crates.io.
    *interface* was never an item and its absence never showed up as an
    unfinished one.
 
-## Eighteen things worth raising upstream, and none of them is blocking
+## Nineteen things worth raising upstream, and none of them is blocking
+
+- **A flex item is shrunk past its own padding.** `.chip.title` is `flex: 0 1
+  auto; min-width: 0; padding: 0 8px`, which is the app's `.doc-title` exactly.
+  Squeeze the app's bar and WebKit floors that button at sixteen pixels — the
+  two paddings, no name, still a button. Blitz takes it to **zero**: on the
+  Linux runner, whose `ui-sans-serif` is DejaVu rather than SF Pro, the
+  document's name came out `(311, 8, 0, 30)` at the harness's 1100px and the
+  Document menu could not be clicked at all. `min-width` in `styles.rs` now
+  says the floor out loud, which is a workaround and not the rule: padding is
+  not shrinkable in CSS, and a used width below it should not be reachable.
 
 - **`blitz-shell` reports Command as `Modifiers::SUPER` while `keyboard_types`'
   own `meta()` reads `Modifiers::META`.** `winit_modifiers_to_kbt_modifiers` in

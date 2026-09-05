@@ -170,19 +170,7 @@ fn a_menu_comes_down_under_the_button_that_opened_it() {
     );
     assert!(menu.y > chip.y, "and below it");
 
-    // The one menu in the bar whose button is the document's name, so the one
-    // whose button has a width only while there is bar left to give it: the
-    // name is on `.bar-left`, which is the side that gives way (see
-    // `.bar-group` in `styles.rs`), and 1100px of window is not enough for it
-    // on a machine whose `ui-sans-serif` is DejaVu rather than SF Pro. The
-    // width the app's own inventory was taken at is enough on all three.
-    let mut reader = Reader::open_with(
-        &Reader::book(),
-        Options {
-            width: 1280,
-            ..Options::default()
-        },
-    );
+    let mut reader = book();
     reader.click(".chip.title");
     // Said this way round rather than letting `layout_rect` panic on a missing
     // selector: a menu that did not open is a click that landed somewhere else,

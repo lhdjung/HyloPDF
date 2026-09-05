@@ -448,7 +448,15 @@ body { margin: 0;
 .chip.title {
   /* The air in front of the name is on `.anchor.titled`, not here, so that
      the menu still comes down flush with the button it belongs to. */
-  flex: 0 1 auto; min-width: 0; max-width: 276px;
+  /* **`min-width` is the two paddings, not nought**, because that is where
+     the app's own name stops: squeeze its bar and `.doc-title` bottoms out at
+     sixteen pixels — an empty box you can still click — while this one went to
+     *nothing*, taking its padding with it and the Document menu with that.
+     Blitz shrinks a flex item past its own padding where WebKit floors at it,
+     so the floor is said here rather than left to the engine. It bites on a
+     machine whose `ui-sans-serif` is wider than SF Pro: at 1100px with DejaVu
+     the name was 0px wide and the menu unreachable. */
+  flex: 0 1 auto; min-width: 16px; max-width: 276px;
   padding: 0 8px; font-size: 13px; font-weight: 400; color: var(--faint);
   white-space: nowrap; overflow: hidden;
   /* **A name too long for the box has to lose its end, not its beginning.**

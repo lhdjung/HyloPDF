@@ -170,7 +170,18 @@ fn a_menu_comes_down_under_the_button_that_opened_it() {
     );
     assert!(menu.y > chip.y, "and below it");
 
-    let mut reader = book();
+    // 1280 rather than the harness's 1100, for the reason `tests/menus.rs`
+    // gives: this menu hangs off the document's name, and at 1100 there is no
+    // bar left to give the name — it is squeezed to its floor and, where
+    // `ui-sans-serif` is wider than SF Pro, out of its own group, which is
+    // where Blitz stops hit-testing it.
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            width: 1280,
+            ..Options::default()
+        },
+    );
     reader.click(".chip.title");
     // Said this way round rather than letting `layout_rect` panic on a missing
     // selector: a menu that did not open is a click that landed somewhere else,

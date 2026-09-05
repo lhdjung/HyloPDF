@@ -474,8 +474,49 @@ experiment had ever run on either. Four things it needs:
 - **No `cargo fmt --check`**, deliberately: the keymap is one row per action so
   it can be read against `keys.ts`, and rustfmt explodes it. Clippy runs.
 
+**It is green on all three, and what it took to get there was six things, five
+of them in the tests.** The suite had never run to the end on Windows or Linux
+and every fault it found was the same fault: the fixture in `tests/parity` was
+taken from the running app in WebKit on macOS, where `ui-sans-serif` is SF Pro,
+and neither runner has that typeface. Segoe UI sets the same words a couple of
+per cent narrower and DejaVu Sans several per cent wider, so the fixed two
+pixels of allowance became a proportional one — six per cent of the number
+being measured, floor six pixels, still two on macOS. "Show in Finder" is
+`file_manager_name()` on both sides. A chord reads `Shift+B` where it reads ⇧B
+here, so the notice is read through the function that writes it. Four tests
+open the Document menu, which hangs off the *document's name*, and the name is
+on the side of the bar that gives way: at the harness's 1100px there is no bar
+left to give it, so they open at 1280 — the width the app's own inventory was
+taken at — and `sign.rs` borrows that width for the click and hands it back.
+The sixth was not a test: see the flex item shrunk past its own padding, below.
+
 What it cannot cover is the window — the shell, the cascade, full screen, the
 Dock menu, the socket. `windows.rs` is what makes that a small hole.
+
+## The bundles
+
+`cargo packager`, driven by `[package.metadata.packager]` in the reader's
+`Cargo.toml` — the bundler `tauri-bundler` is a fork of, with no app around it.
+The `bundle` job in the same workflow builds a `.dmg`, a `.deb`, an AppImage
+and an NSIS installer on dispatch, because four release builds of a crate whose
+profile is `lto = true, codegen-units = 1` is not something to do on every push.
+The fields are `tauri.conf.json`'s fields: identifier, icons, category, the PDF
+association, the copyright. Two things are the port's own:
+
+- **pdfium travels with the binary**, and the four formats disagree about
+  where: `Contents/Frameworks` in a `.app`, where a signed dylib has to be;
+  `/usr/lib/HyloPDF` beside `/usr/bin/HyloPDF` in a `.deb`; the executable's
+  own directory in an `.msi`. `library_dir()` in `pdfium.rs` stats all three,
+  after `HYLO_PDFIUM` and before the copy vendored beside the spike.
+- **No `license-file`.** cargo-packager turns one into a DMG licence agreement
+  — a dialogue to accept before the image will mount, which the app's own DMG
+  has never shown.
+
+The macOS bundle was mounted, copied out and run: 20MB on disk, and it opens a
+document through the dylib in its own `Frameworks`. What is *not* done is
+signing and notarisation — the bundler reads the same `APPLE_*` variables
+`release.yml` already sets, so that step transplants, but nothing has been
+signed yet.
 
 Blitz comes in as a **git dependency pinned to `c6dec888`** in both crates, so
 a fresh checkout builds with nothing beside it. It used to be a path dependency
@@ -511,6 +552,11 @@ harness this whole argument rests on can never come from crates.io.
   Document menu could not be clicked at all. `min-width` in `styles.rs` now
   says the floor out loud, which is a workaround and not the rule: padding is
   not shrinkable in CSS, and a used width below it should not be reachable.
+  There is a second half to it, and the floor makes it visible: a flex item
+  that overflows its parent's box — `.bar-left` says `min-width: 0`, which is
+  the app's own rule — is *painted* where CSS says and **not hit-tested there**.
+  So the name comes back at sixteen pixels and still cannot be clicked, which
+  is why four test files open a wider bar rather than relying on the floor.
 
 - **`blitz-shell` reports Command as `Modifiers::SUPER` while `keyboard_types`'
   own `meta()` reads `Modifiers::META`.** `winit_modifiers_to_kbt_modifiers` in

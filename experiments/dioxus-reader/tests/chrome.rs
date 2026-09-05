@@ -374,8 +374,9 @@ fn the_page_box_is_the_app_s_width_until_the_number_outgrows_it() {
     // Blitz gives parley no alignment for a text input's own text and calls
     // `set_width(None)`, so `text-align: center` on one does nothing at all —
     // which left the page number pinned against the left wall of a box wide
-    // enough for four digits. Centring is not available; a box that fits is,
-    // and it is the better answer. See the comment on `.pill` in `app.rs`.
+    // enough for four digits. A box that fits is most of the answer, and the
+    // padding under it is the rest — see the test below. See the comment on
+    // `.pill` in `app.rs`.
     //
     // **The floor is the app's 44px**, not the smallest box a digit will sit
     // in. `.page-jump input` is `width: 44px` whatever is in it — four digits
@@ -812,5 +813,82 @@ fn the_cross_on_close_reddens_under_the_pointer() {
         reader.attribute_all(".close-doc .icon", "stroke"),
         quiet,
         "the cross stayed red after the pointer left",
+    );
+}
+
+/// **The box fitting its contents settles three digits and not one.**
+///
+/// The floor holds page 1 in a box wide enough for three, so there are
+/// twenty-odd pixels of slack in it and Blitz lays the run out from the leading
+/// edge — the number the go-to-page key had just selected jumped to the left
+/// wall of its own field the moment the readout became one. The slack is split
+/// and paid as left padding, which is the one half of centring Blitz does
+/// honour.
+#[test]
+fn the_number_stays_in_the_middle_of_a_box_wider_than_it() {
+    fn padding(reader: &Reader) -> f64 {
+        let style = reader
+            .harness
+            .attr(".page-field", "style")
+            .unwrap_or_default();
+        style
+            .split("padding-left:")
+            .nth(1)
+            .and_then(|rest| rest.trim().trim_end_matches(&[';', 'x', 'p'][..]).trim().parse().ok())
+            .unwrap_or_else(|| panic!("no padding in {style:?}"))
+    }
+
+    let mut reader = book();
+    reader.press("p");
+    // One digit in a 44px box: the sheet's own 6px, and half the slack again.
+    let one = padding(&reader);
+    assert!(one > 12.0, "page 1 is pushed off the wall: {one}");
+
+    // Four digits fill the box they grew, so there is no slack to split and the
+    // padding is the sheet's — which is what keeps the two cases one rule
+    // rather than a special case for short numbers.
+    reader.type_text("1250");
+    let four = padding(&reader);
+    assert!((four - 6.0).abs() < 0.5, "a fitted number is not moved: {four}");
+}
+
+/// **The go-to-page key borrows a toolbar that is not there.**
+///
+/// There is nowhere to put the cursor with the bar away, so the shortcut brings
+/// it in itself rather than making the reader do that first — and gives it back
+/// when the jump is made or abandoned, because it borrowed the bar without
+/// changing the setting. `focusPageNumber` in `main.ts` and the `blur` handler
+/// that undoes it.
+#[test]
+fn the_go_to_page_key_brings_a_hidden_toolbar_in_and_puts_it_back() {
+    let mut reader = book();
+    reader.press_chord("mod+t");
+    assert!(!reader.state().toolbar, "the toolbar is away");
+
+    reader.press("p");
+    assert!(
+        reader.harness.query(".toolbar").is_some(),
+        "and the key that needs it brings it in",
+    );
+    assert!(typing(&reader), "with the field open and holding the page");
+
+    reader.type_text("37");
+    reader.press("Enter");
+    assert!(
+        reader.harness.query(".toolbar").is_none(),
+        "the loan ends with the jump",
+    );
+    reader.press_chord("mod+t");
+    assert_eq!(reader.state().page, 37, "which is still made");
+
+    // Abandoning it gives the bar back too, and neither is the setting: the
+    // switch in the Settings menu still says what the reader chose.
+    reader.press_chord("mod+t");
+    reader.press("p");
+    assert!(reader.harness.query(".toolbar").is_some());
+    reader.press("Escape");
+    assert!(
+        reader.harness.query(".toolbar").is_none(),
+        "and so does abandoning it",
     );
 }

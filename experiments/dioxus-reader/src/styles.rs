@@ -1372,8 +1372,14 @@ body { margin: 0;
   flex: 0 0 186px; display: flex; flex-direction: column; gap: 2px;
   padding: 10px 8px; border-right: 1px solid var(--line); background: var(--sunk);
 }
+/* `justify-content` beside `text-align` for the reason `.chip.title` names:
+   Blitz's user-agent sheet centres a button's flex items as well as its text,
+   and the icon and the label here are two items with nothing between them to
+   take up the slack — so the pair floated in the middle of a 186px column and
+   no two rows lined up. `.menu-item` escapes it because `.menu-label` grows;
+   this has no such item, so the alignment has to be said. */
 .nav-item {
-  display: flex; align-items: center; gap: 9px;
+  display: flex; align-items: center; justify-content: flex-start; gap: 9px;
   height: 32px; padding: 0 10px; border: 0; border-radius: 9px;
   background: transparent; color: var(--muted); font-weight: 500;
   text-align: left;
@@ -1512,14 +1518,18 @@ body { margin: 0;
 .theme-card.on { border-color: var(--accent); background: var(--accent-soft); }
 /* `align-self` and `box-sizing`, both load-bearing: a flex item in a column
    does not stretch here on its own, and the padding and the hairline would
-   otherwise be added to the 52. */
+   otherwise be added to the 52. The rest is `.theme-card .preview`: a line of
+   the theme's own body ink and a link in the theme's own link colour, centred
+   on a ground of the theme's paper — which is the app's card and is what puts
+   a theme's link colour on screen at all. `align-items: baseline` so the two
+   sizes sit on one line rather than on their own boxes. */
 .theme-swatch {
-  display: flex; align-items: flex-end; align-self: stretch; gap: 5px;
-  box-sizing: border-box;
-  height: 52px; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+  display: flex; align-items: baseline; justify-content: center; align-self: stretch;
+  gap: 8px; box-sizing: border-box;
+  height: 52px; padding: 15px 8px 0 8px; border-radius: 8px;
+  border: 1px solid var(--line); font-size: 17px;
 }
-.swatch-ink { flex: 1 1 auto; height: 6px; border-radius: 3px; }
-.swatch-accent { flex: 0 0 18px; height: 6px; border-radius: 3px; }
+.swatch-link { font-size: 13px; text-decoration: underline; text-underline-offset: 2px; }
 .theme-name { font-size: 13px; font-weight: 500; }
 
 /* The Keyboard page's table: two columns, and the chord in the quiet shade

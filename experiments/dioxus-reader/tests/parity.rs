@@ -216,12 +216,15 @@ fn the_surfaces_are_the_size_of_the_app_s() {
 /// A port that quietly grew items would be a port whose parity claim means
 /// nothing, so the exceptions are a list — the same arrangement
 /// `keymap::EXTRA` has for the three keyboard actions this reader has and the
-/// app has not. There is one, and it is signing: see `src/sign.rs`, and
-/// `signing-assessment.md` for the two things that word means and which of
-/// them this is.
+/// app has not. Two: signing — see `src/sign.rs`, and `signing-assessment.md`
+/// for the two things that word means and which of them this is — and one
+/// zoom preset. 175% is a step on `ZOOM_LADDER` that ⌘+ walks through in both
+/// and that neither menu offered, so reaching it took the stepper or a count
+/// of key presses; it was asked for, and the app's own ladder already says it
+/// is a size somebody reads at.
 ///
 /// Adding a row here is a decision. Anything not in it is drift.
-const OURS: [(&str, &str); 1] = [("document", "Sign…")];
+const OURS: [(&str, &str); 2] = [("document", "Sign…"), ("view", "175%")];
 
 #[test]
 fn every_menu_lists_what_the_app_s_lists() {

@@ -379,3 +379,62 @@ fn a_machine_that_will_not_say_leaves_the_reader_alone() {
         "{notes:?}"
     );
 }
+
+/// **A page of settings starts at the top of its box.**
+///
+/// The pane scrolls — Reading is taller than the window — and the offset
+/// belonged to the node rather than to what was in it, so leaving a scrolled
+/// Reading for About kept the scroll and About, which is four short paragraphs,
+/// sat entirely above the top of the box: the reader saw a blank page and
+/// reported the About page as empty.
+#[test]
+fn a_page_opened_after_a_scrolled_one_starts_at_the_top() {
+    let mut reader = book();
+    reader.press_chord("mod+,");
+    let fresh = reader.harness.layout_rect(".pane-title").y;
+
+    reader.wheel_over(".window-pane", 400.0);
+    assert!(
+        reader.harness.layout_rect(".pane-title").y < fresh,
+        "Reading scrolls",
+    );
+
+    // About is the last of the five and the shortest.
+    reader.click_nth(".nav-item", 4);
+    assert_eq!(page(&reader), "About");
+    assert_eq!(
+        reader.harness.layout_rect(".pane-title").y,
+        fresh,
+        "and About is where a page starts",
+    );
+    assert!(
+        reader.harness.text_content(".window-pane").contains("A calm place to read"),
+        "with what is on it on screen",
+    );
+}
+
+/// **A theme card shows a page, not a palette.**
+///
+/// Two bars of colour said what a theme was made of; the app's card says what
+/// reading under it looks like — a word of body text and a link, each in the
+/// ink it would really be drawn in. The link is the half that was missing:
+/// nothing in this window showed a theme's link colour, which is a colour a
+/// reader picks a theme for and cannot otherwise see until they meet a link.
+#[test]
+fn every_theme_card_shows_its_own_link_colour() {
+    let mut reader = book();
+    reader.press_chord("mod+,");
+    reader.click_nth(".nav-item", 1);
+
+    let cards = reader.harness.query_all(".theme-card").len();
+    assert!(cards > 1, "the shipped themes are listed: {cards}");
+    assert_eq!(
+        reader.harness.query_all(".swatch-link").len(),
+        cards,
+        "one link on every card",
+    );
+    assert!(
+        reader.harness.text_content(".theme-card").contains("Link"),
+        "and it says so",
+    );
+}

@@ -967,6 +967,10 @@ pub struct Viewer {
     /// Whether the handle that gives the toolbar back is down. See
     /// [`Viewer::reach_for_toolbar`].
     peek: bool,
+    /// The toolbar is on screen for as long as the page field is in use, though
+    /// the setting still says it is hidden. `toolbarPeeking` in `main.ts`. See
+    /// [`Viewer::open_page_field`].
+    borrowed_toolbar: bool,
     /// Whether this search has already put its results on screen. Once per
     /// search, like [`Viewer::revealed`] beside it and for the same reason:
     /// a scan is many slices and the reader must be able to close what one of
@@ -1253,6 +1257,7 @@ impl Viewer {
             pill_up: false,
             pill_token: 0,
             peek: false,
+            borrowed_toolbar: false,
             sidebar_width: 252.0,
             resize_from: None,
             tab: Tab::Contents,
@@ -1560,10 +1565,17 @@ impl Viewer {
     /// get the toolbar back is written on it. Presenting is where everything
     /// goes, which is what presenting *is*.
     pub fn chrome(&self) -> f64 {
-        if self.presenting || !self.toolbar {
+        if self.presenting || !self.toolbar_up() {
             return 0.0;
         }
         TOOLBAR + HAIRLINE
+    }
+
+    /// Whether the bar is on screen, which is not the same question as whether
+    /// the reader wants it there: the page field borrows it for as long as it
+    /// is in use. See [`Viewer::open_page_field`].
+    pub fn toolbar_up(&self) -> bool {
+        self.toolbar || self.borrowed_toolbar
     }
 
     /// The window is this big. What the document gets is the rest.
@@ -1589,6 +1601,10 @@ impl Viewer {
     /// because `keys.toml` decides which key it is.
     pub fn toggle_toolbar(&mut self) {
         self.toolbar = !self.toolbar;
+        // Asking for the bar by name ends the loan: otherwise ⌘T while the
+        // page field is open reads as a no-op, and closing the field then
+        // takes away a toolbar the reader had just asked for.
+        self.borrowed_toolbar = false;
         self.store
             .set(vec![("show_toolbar".into(), json!(self.toolbar))]);
         if !self.toolbar {
@@ -3528,7 +3544,7 @@ impl Viewer {
     /// answers from further down and sits below them, which is the app's
     /// reasoning and its two numbers.
     pub fn reach_for_toolbar(&mut self, y: f64) {
-        if self.toolbar || self.presenting {
+        if self.toolbar_up() || self.presenting {
             self.peek = false;
             return;
         }
@@ -3546,7 +3562,7 @@ impl Viewer {
     /// signal is written to: `onmousemove` fires on every move in the window
     /// and a write is a render. The same guard `resize_from` gets.
     pub fn peek_changes(&self, y: f64) -> bool {
-        if self.toolbar || self.presenting {
+        if self.toolbar_up() || self.presenting {
             return self.peek;
         }
         let reach = if self.full_screen { 46.0 } else { 8.0 };
@@ -3566,7 +3582,7 @@ impl Viewer {
     /// it. Returns the token of the flash, which the thread that takes it down
     /// carries.
     pub fn flash_pill(&mut self) -> Option<u64> {
-        if self.toolbar || self.presenting || self.empty() || !self.page_pill() {
+        if self.toolbar_up() || self.presenting || self.empty() || !self.page_pill() {
             return None;
         }
         self.pill_token += 1;
@@ -3646,9 +3662,42 @@ impl Viewer {
     /// `focus()` and then `select()`; see [`Viewer::typing_page`] for what
     /// stands in for the second half.
     pub fn open_page_field(&mut self) {
+        // Nothing to go to, and nowhere to type it: the bar's document half is
+        // not there on an empty window, and presenting is where the whole bar
+        // goes. Without the second the field went into a state with no field in
+        // it — `typing_page` true and nothing on screen holding the keyboard —
+        // which took an Escape to leave. `focusPageNumber` returns on the first
+        // of these too.
+        if self.empty() || self.presenting {
+            return;
+        }
+        // **There is nowhere to put the cursor when the toolbar is away**, so
+        // the shortcut brings the bar in itself rather than making the reader
+        // do that first — and only for as long as the field is in use. Unlike
+        // the toolbar key this does not change the setting; committing or
+        // abandoning the jump puts the bar back into hiding. `focusPageNumber`
+        // in `main.ts`, and the same loan.
+        if !self.toolbar {
+            self.borrowed_toolbar = true;
+            self.refit();
+            self.generation += 1;
+        }
         self.typing_page = true;
         self.page_typed = self.label(self.page());
         self.page_fresh = true;
+    }
+
+    /// Give the toolbar back, if the page field had borrowed it.
+    ///
+    /// Before the jump rather than after: `go_to_page` resolves a scroll offset
+    /// against the window the document is about to have, and a bar that goes
+    /// away afterwards leaves the reader a toolbar's height off.
+    fn return_toolbar(&mut self) {
+        if self.borrowed_toolbar {
+            self.borrowed_toolbar = false;
+            self.refit();
+            self.generation += 1;
+        }
     }
 
     /// The reader typed into the field: whatever is in it now.
@@ -3664,6 +3713,7 @@ impl Viewer {
     /// page the reader is on, which is what the app does by putting the
     /// current label back into it.
     pub fn commit_page(&mut self) {
+        self.return_toolbar();
         let typed = std::mem::take(&mut self.page_typed);
         self.typing_page = false;
         // Nothing was typed: the field is holding the page it opened on, and
@@ -3694,6 +3744,7 @@ impl Viewer {
     }
 
     pub fn cancel_page(&mut self) {
+        self.return_toolbar();
         self.typing_page = false;
         self.page_typed.clear();
         self.page_fresh = false;
@@ -4174,6 +4225,22 @@ impl Viewer {
                 Spread::Cover => "cover",
             }),
         )]);
+        // **Two across has to mean two on screen.** At a fixed zoom it does
+        // not: 175% is 175% whatever is beside it, so asking for a spread at
+        // one put two pages of a letter book across 2,870 pixels of a window
+        // half that wide, and centred them — the reader got the inner half of
+        // each, which is the single page they had been looking at with a seam
+        // down it. A reader choosing a spread is choosing to see the pair, and
+        // a percentage that makes that impossible gives way to the fit that
+        // does not. `set_fit` says so on the notice line, because a fit mode
+        // that changed itself has to be seen to have changed.
+        //
+        // Only out of actual size, because the two fit modes cannot overflow;
+        // and never on the way *back* to one page across, where the width the
+        // reader is scrolling through is their own zoom's doing and not this.
+        if spread != Spread::Single && self.layout.max_scroll_x() > 0.0 {
+            self.set_fit(Fit::Width);
+        }
     }
 
     /// Wear the theme at `index` in the list, and remember it.
@@ -5186,7 +5253,11 @@ pub fn Reader(
     let sidebar_open = held.sidebar_open;
     let find_open = held.find_open;
     let presenting = held.presenting;
-    let toolbar_on = held.toolbar && !held.presenting;
+    // The bar on screen, which the page field can borrow with the setting
+    // still off — see [`Viewer::toolbar_up`]. `toolbar_set` is the switch in
+    // the Settings menu, which has to keep saying what the reader chose.
+    let toolbar_on = held.toolbar_up() && !held.presenting;
+    let toolbar_set = held.toolbar;
     // The pill, and what it says. See [`Viewer::flash_pill`].
     // The note the reader has opened, and what its page is called — the label
     // rather than the position, which is what `showNote` says too.
@@ -5333,6 +5404,18 @@ pub fn Reader(
     // in: a narrower floor makes page 1 a slot half the size of the count
     // beside it. Growing past 44 only happens at four digits.
     let page_box = (14.0 + 9.1 * page_field.chars().count() as f64).max(44.0);
+    // **And where the number sits inside that box, which the box's width alone
+    // does not settle.** `.page-field` says `text-align: center` and Blitz
+    // ignores it on an input — `create_text_editor` calls
+    // `editor.set_width(None)`, so there is no box to align within and the run
+    // starts at the leading edge. That is invisible while the box is the width
+    // of its contents and plain the moment it is not: the floor holds page 1 in
+    // a 44px box, so pressing the go-to-page key moved the number it had just
+    // selected to the left wall. The slack the floor leaves is split in half
+    // and paid as left padding, which is the one thing Blitz does honour — so a
+    // one-digit field is centred and a four-digit one, which is already fitted,
+    // is unchanged.
+    let page_pad = 6.0 + ((page_box - 14.0 - 9.1 * page_field.chars().count() as f64) / 2.0).max(0.0);
     // What an icon is drawn in, and why it is a string rather than a class.
     // An inline `<svg>` here is handed to usvg with no cascade behind it — see
     // [`Icon`] — so the shade a chip's label resolves to has to be passed down
@@ -6202,7 +6285,7 @@ pub fn Reader(
                         if typing_page {
                         input {
                             class: if page_fresh { "page-field fresh" } else { "page-field" },
-                            style: "width: {page_box}px;",
+                            style: "width: {page_box}px; padding-left: {page_pad}px;",
                             r#type: "text",
                             value: "{page_field}",
                             // Not the root's business: see its `onmousedown`.
@@ -6456,7 +6539,7 @@ pub fn Reader(
                                             onchange: move |value: f64| viewer.write().set_zoom(value / 100.0),
                                         }
                                     }
-                                    for percent in [50.0_f64, 75.0, 100.0, 125.0, 150.0, 200.0, 300.0] {
+                                    for percent in [50.0_f64, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 300.0] {
                                         {
                                             let on = fit == Fit::Actual && (zoom_now - percent).abs() < 0.5;
                                             rsx! {
@@ -6652,7 +6735,7 @@ pub fn Reader(
                                     // nothing. The app closes it for the same
                                     // reason and says so in the same words.
                                     crate::prefs::Toggle {
-                                        on: toolbar_on,
+                                        on: toolbar_set,
                                         onchange: move |_| {
                                             viewer.write().toggle_toolbar();
                                             viewer.write().close_menu();

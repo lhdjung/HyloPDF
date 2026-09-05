@@ -309,3 +309,78 @@ fn the_whole_shipped_theme_set_is_wearable() {
     reader.press("t");
     assert_eq!(reader.state().theme, seen[0]);
 }
+
+/// **Two across has to mean two on screen.**
+///
+/// At a fixed zoom it did not. 175% is 175% whatever is beside it, so asking
+/// for a spread at one laid two letter pages across 2,870 pixels of a window
+/// half that wide and centred them: the reader got the inner half of each,
+/// which is the single page they had been looking at with a seam down it.
+/// Choosing Fit width by hand fixed it, which is what said what the fault was.
+/// Fit modes cannot break this way, so the fallback only ever fires out of
+/// actual size.
+#[test]
+fn a_spread_too_wide_for_the_window_falls_back_to_fitting_it() {
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            settings: vec![
+                ("fit_mode".into(), "actual".into()),
+                ("zoom".into(), 1.75.into()),
+            ],
+            ..Options::default()
+        },
+    );
+    assert_eq!(reader.state().zoom, "175%", "actual size, as the file says");
+
+    // `s` is the spread key: one page across, or a cover spread.
+    reader.press("ArrowRight");
+    reader.press("s");
+
+    let state = reader.state();
+    assert_eq!(state.zoom, "Fit width", "the fit gave way: {state:?}");
+    assert_eq!(state.notice, "Fit width", "and said so");
+
+    let window = reader.harness.layout_rect(".viewer").width;
+    let rects: Vec<_> = reader
+        .harness
+        .query_all(".page")
+        .iter()
+        .map(|node| reader.harness.layout_rect_of(*node))
+        .collect();
+    assert!(rects.len() >= 2, "a pair is mounted: {rects:?}");
+    for rect in &rects {
+        assert!(
+            rect.x >= -1.0 && rect.x + rect.width <= window + 1.0,
+            "both pages are inside the window: {rect:?} in {window}",
+        );
+    }
+}
+
+/// And the way back is not the same journey. A single page as wide as the
+/// reader's zoom makes it is the zoom's doing, not the spread's, so going back
+/// to one across leaves the fit where it is rather than deciding for them
+/// twice.
+#[test]
+fn going_back_to_one_page_across_leaves_the_fit_alone() {
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            settings: vec![
+                ("fit_mode".into(), "actual".into()),
+                ("zoom".into(), 6.0.into()),
+            ],
+            ..Options::default()
+        },
+    );
+    assert_eq!(reader.state().zoom, "600%");
+    reader.press("ArrowRight");
+    reader.press("s");
+    assert_eq!(reader.state().zoom, "Fit width", "two across fits the pair");
+
+    // Back to one, and the fit stays: nothing about one page across says the
+    // reader wants their 600% again, and putting it back would be a second
+    // decision made for them.
+    reader.press("s");
+    assert_eq!(reader.state().zoom, "Fit width");
+}

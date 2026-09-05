@@ -75,13 +75,25 @@ pub fn Settings(viewer: Signal<Viewer>, frame: crate::app::Frame) -> Element {
                             }
                         }
                     }
-                    div { class: "window-pane",
-                        match pane {
-                            Pane::Reading => rsx! { Reading { viewer } },
-                            Pane::Appearance => rsx! { Appearance { viewer } },
-                            Pane::Window => rsx! { WindowPage { viewer, frame: frame.clone() } },
-                            Pane::Keyboard => rsx! { Keyboard { viewer } },
-                            Pane::About => rsx! { About { viewer } },
+                    // **A keyed list of one, so that changing the page changes
+                    // the element.** The pane scrolls — Reading is taller than
+                    // 600px and says so where `.window-pane` is styled — and a
+                    // scroll offset belongs to the node, not to what is in it.
+                    // With one node for all five pages, leaving a scrolled
+                    // Reading for About kept the 248px it had been scrolled by
+                    // and About, which is four short paragraphs, was entirely
+                    // above the top of the box: the reader saw an empty page. A
+                    // key here is the one way to say "a different node" — a key
+                    // on a lone child is not diffed.
+                    for page in [pane] {
+                        div { key: "{page.label()}", class: "window-pane",
+                            match page {
+                                Pane::Reading => rsx! { Reading { viewer } },
+                                Pane::Appearance => rsx! { Appearance { viewer } },
+                                Pane::Window => rsx! { WindowPage { viewer, frame: frame.clone() } },
+                                Pane::Keyboard => rsx! { Keyboard { viewer } },
+                                Pane::About => rsx! { About { viewer } },
+                            }
                         }
                     }
                 }
@@ -439,15 +451,24 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
             // that shows a colour the renderer cannot read is the picker
             // lying about the page. See `AGENTS.md`.
             let colours = crate::palette::resolve(theme, true);
-            (
-                index,
-                theme.name.clone(),
+            // **A theme that leaves the document alone leaves its links alone
+            // too**, so the card shows what such a page really looks like
+            // rather than the theme's own three colours — `themeCard`'s own
+            // branch and its own two fallbacks.
+            let card = if colours.recolor {
                 [
                     crate::palette::hex(colours.background),
                     crate::palette::hex(colours.text),
-                    crate::palette::hex(colours.accent),
-                ],
-            )
+                    crate::palette::hex(colours.link),
+                ]
+            } else {
+                [
+                    "#ffffff".to_string(),
+                    "#2f3237".to_string(),
+                    "#1a5fb4".to_string(),
+                ]
+            };
+            (index, theme.name.clone(), card)
         })
         .collect();
     let dark = held.store.dark_now();
@@ -494,11 +515,19 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
                         class: if index == chosen { "theme-card on" } else { "theme-card" },
                         "aria-pressed": if index == chosen { "true" } else { "false" },
                         onclick: move |_| viewer.write().set_theme(index),
+                        // **A page, not a palette.** Two bars of colour said
+                        // what a theme was made of; the app's card says what
+                        // reading under it looks like — a word of body text and
+                        // a link, in the ink each would really be drawn in. The
+                        // link is the half that was missing entirely: nothing
+                        // in this window showed a theme's link colour, which is
+                        // the one colour a reader picks a theme for and cannot
+                        // otherwise see until they meet a link.
                         div {
                             class: "theme-swatch",
-                            style: "background: {colours[0]};",
-                            span { class: "swatch-ink", style: "background: {colours[1]};" }
-                            span { class: "swatch-accent", style: "background: {colours[2]};" }
+                            style: "background: {colours[0]}; color: {colours[1]};",
+                            span { class: "swatch-body", "Aa" }
+                            span { class: "swatch-link", style: "color: {colours[2]};", "Link" }
                         }
                         span { class: "theme-name", "{name}" }
                     }
@@ -879,8 +908,7 @@ fn About(viewer: Signal<Viewer>) -> Element {
     rsx! {
         h2 { class: "pane-title", "HyloPDF" }
         p { class: "pane-lede", "A calm place to read." }
-        Note { text: "This is the Dioxus Native experiment: the same reader, drawn by Blitz and pdfium rather than by a webview and pdf.js." }
-        Note { text: "Your settings and your themes are plain text. Nothing is stored anywhere else, and nothing leaves this computer." }
+        Note { text: "Your settings and themes are stored in plain text on this computer and not sent anywhere else." }
         div { class: "keys",
             span { class: "key-what", "Settings and keys" }
             span { class: "key-chord", "{config}" }

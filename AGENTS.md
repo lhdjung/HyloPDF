@@ -1224,6 +1224,48 @@ for rendering (`search.ts` and `sidebar.ts` use it only through a
 Keep both of those true and this stays a decision that can be made later — the
 prototype needed no change to either.
 
+## The Dioxus Native port, which is meant to take over
+
+The renderer question above was answered *inside* Tauri. The framework question
+was asked separately, in `experiments/dioxus-reader`: the whole reader rewritten
+against **Dioxus Native** — Blitz laying out real HTML and CSS with no webview
+— and it is at parity. `experiments/PROGRESS.md` is the record; what belongs
+here is the part that decides whether it ships.
+
+**It builds and its suite passes on macOS, Linux and Windows**, and
+`experiments/dioxus-reader` bundles a `.dmg`, a `.deb`, an AppImage and an NSIS
+installer through **`cargo-packager`** — the bundler `tauri-bundler` is a fork
+of, reading `[package.metadata.packager]` in place of `tauri.conf.json`. Both
+jobs are in `.github/workflows/experiment.yml`; the bundle one is on dispatch,
+because it is four release builds of an `lto = true` crate. The macOS bundle has
+been mounted and run: 20MB, opens a document, no webview.
+
+Three things that took finding, and would be found again the same way:
+
+- **pdfium is not in the binary and the four formats disagree about where it
+  goes**: `Contents/Frameworks` in a `.app` (where a signed dylib has to be),
+  `/usr/lib/HyloPDF` beside `/usr/bin/HyloPDF` in a `.deb`, the executable's own
+  directory in an `.msi`. `library_dir()` in `pdfium.rs` stats all three, after
+  `HYLO_PDFIUM`.
+- **`tests/parity/app-inventory.json` is a *macOS* measurement.** It came out of
+  this app in WebKit, where `ui-sans-serif` is SF Pro; Segoe UI sets the same
+  words a few per cent narrower and DejaVu Sans several per cent wider. A fixed
+  pixel allowance cannot survive that, so off macOS it is proportional. Anything
+  compared against that fixture has to think about the typeface first.
+- **Blitz shrinks a flex item past its own padding, and does not hit-test what
+  overflows a parent.** Together: the document's name went to 0px where WebKit
+  floors the app's `.doc-title` at 16px, and at 16px it is painted but
+  unclickable. Nineteenth entry in the port's upstream list.
+
+**Signing is not what is blocking it, because nothing here has ever been
+signed.** The Tauri releases ship unquarantined only on the machine that made
+them; the README already tells a reader about SmartScreen's "Run anyway", and
+macOS wants *Privacy & Security → Open Anyway*. The port's bundles are unsigned
+in exactly the same way and read the same `APPLE_*` variables if certificates
+ever arrive. What is genuinely still missing before the switchover: **Windows is
+one process per launch** (the single-instance socket wants a named pipe), and
+`release.yml` still drives `tauri build`.
+
 ## Where Rust ends and TypeScript begins
 
 The renderer question answers a more general one, and the rule it leaves is

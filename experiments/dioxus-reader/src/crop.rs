@@ -86,7 +86,7 @@ pub fn ink_box(bgra: &[u8], width: u32, height: u32) -> Option<Crop> {
     let mut found = false;
     for y in 0..height {
         let row = &bgra[y * width * 4..(y + 1) * width * 4];
-        for (x, pixel) in row.chunks_exact(4).enumerate() {
+        for (x, pixel) in row.as_chunks::<4>().0.iter().enumerate() {
             if pixel[0] > INK && pixel[1] > INK && pixel[2] > INK {
                 continue;
             }

@@ -130,7 +130,7 @@ impl Tables {
 /// shader is measured against.
 pub fn recolor_cpu(pixels: &mut [u8], text: Rgb, bg: Rgb, keep_colour: bool) {
     let tables = Tables::new(text, bg, keep_colour);
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         let (r, g, b) = (pixel[0] as u32, pixel[1] as u32, pixel[2] as u32);
         let level = ((r * 77 + g * 151 + b * 28 + 128) >> 8) as usize;
         let ramp = tables.ramp[level];

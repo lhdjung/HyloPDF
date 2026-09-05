@@ -469,7 +469,9 @@ pub fn flat(quads: &[Rect], height: f64) -> Vec<f64> {
 /// still knows where on the page it goes.
 pub fn unflat(quads: &[f64], height: f64) -> Vec<Rect> {
     quads
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|run| {
             let xs = [run[0], run[2], run[4], run[6]];
             let ys = [run[1], run[3], run[5], run[7]];

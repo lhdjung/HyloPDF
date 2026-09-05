@@ -344,7 +344,7 @@ impl PageWidget {
                 // the reference ramp reads — the swizzle the GPU path gets for
                 // free by uploading as `Bgra8Unorm`.
                 let mut rgba = bitmap.bgra.to_vec();
-                for pixel in rgba.chunks_exact_mut(4) {
+                for pixel in rgba.as_chunks_mut::<4>().0 {
                     pixel.swap(0, 2);
                 }
                 if theme.recolor {

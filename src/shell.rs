@@ -706,6 +706,13 @@ impl ApplicationHandler for Shell {
         // frames into every run, and the trail back to here is not short. So
         // the first call is the one that resumes; after it, a new window
         // resumes itself in `open`.
+        // The Finder's `openURLs` goes to winit's delegate, and winit sets that
+        // when the loop starts rather than when the shell is built — so this
+        // is the first moment there is anything to add the method to. It arms
+        // once; the second call is a no-op. See `openfiles.rs`.
+        #[cfg(target_os = "macos")]
+        crate::openfiles::install(self.windows.remote());
+
         self.drain(event_loop);
         if !self.started {
             self.inner.can_create_surfaces(event_loop);

@@ -20,14 +20,12 @@
 //! branch is where the port would go, not what it would look like.
 //!
 //! **What this cannot reach is Apple Events**, which is how macOS tells an
-//! app that is *already running* to open a document. `RunEvent::Opened` in the
-//! app is that, and it needs an `NSApplicationDelegate` — and, before any of
-//! that, an application bundle with an `Info.plist` declaring that this
-//! program opens PDFs. This experiment is a binary run from a terminal, so
-//! there is nothing for the Finder to send an event to. Every other route a
-//! document arrives by — a second `cargo run -- paper.pdf`, `open -a` on a
-//! bundle, "Open with" on Linux — is a launch with an argument, and a launch
-//! with an argument comes through here.
+//! application that is *already running* to open a document — and that is
+//! `openfiles.rs`'s job now that there is a bundle for the Finder to send one
+//! to. It ends in the same place: `Remote::request`, the door this serves.
+//! Every other route a document arrives by — a second `cargo run -- paper.pdf`,
+//! a cold launch from the Finder, "Open with" on Linux — is a launch with an
+//! argument, and a launch with an argument comes through here.
 
 use std::path::{Path, PathBuf};
 

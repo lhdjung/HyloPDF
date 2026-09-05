@@ -47,6 +47,9 @@ pub mod keymap;
 pub mod layout;
 pub mod markup;
 pub mod nav;
+/// Documents double-clicked in the Finder, which arrive as an Apple Event.
+#[cfg(target_os = "macos")]
+pub mod openfiles;
 pub mod page;
 pub mod palette;
 pub mod pdfium;

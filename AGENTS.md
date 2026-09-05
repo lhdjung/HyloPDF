@@ -1132,7 +1132,14 @@ part that decides how it ships.
   floors `.doc-title` at 16px, and at 16px it is painted but unclickable.
   Nineteenth entry in the port's upstream list.
 
-What is still missing, and neither is about signing: **Windows is one process
+**A document double-clicked in the Finder is an Apple Event, not an argument**,
+and `openfiles.rs` is the whole of that: `'aevt'`/`'odoc'` taken directly off
+`NSAppleEventManager`, because AppKit's own handler forwards to a delegate and
+winit sets none — `[NSApp delegate]` is nil for the life of the process. Until
+it was written, opening a PDF from the Finder gave a start screen and "HyloPDF
+cannot open files in the PDF document format".
+
+What is still missing, and none of it is about signing: **Windows is one process
 per launch** — the single-instance socket wants a named pipe, and there is no
 std type for one — and there is no underline, strike-out or squiggly markup,
 which the retired app did not have either.

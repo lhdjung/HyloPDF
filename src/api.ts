@@ -391,12 +391,79 @@ export async function closeReading(): Promise<void> {
     numbers for `Vec<u8>` on the other side to read. */
 export async function writeDocument(path: string, bytes: Uint8Array): Promise<void> {
   if (!hasBackend) {
-    const name = browserFiles.get(path)?.name ?? path;
+    const existing = browserFiles.get(path);
+    // Kept so `revertWrite` below has something to go back to — one level,
+    // a second write in a row replaces it rather than stacking, which is the
+    // same one-undo shape the real backend's byte offsets give for free.
+    if (existing) browserFileHistory.set(path, existing);
+    // Kept forever, and only from the first write — the browser twin of
+    // `.hylopdf-original` — so `originalDocument` below has a pristine copy
+    // to rebuild from no matter how many writes came after it.
+    if (existing && !browserOriginalFiles.has(path)) browserOriginalFiles.set(path, existing);
+    const name = existing?.name ?? path;
     browserFiles.set(path, new File([bytes as BlobPart], name, { type: "application/pdf" }));
     for (const handler of browserDocumentChangedHandlers) handler(path);
     return;
   }
   await invoke("write_document", { path, bytes: Array.from(bytes) });
+}
+
+/** The version of each open document that `writeDocument`'s browser fallback
+    last replaced — see the comment there. */
+const browserFileHistory = new Map<string, File>();
+
+/** The version of each open document from before this app ever wrote into it
+    — the browser twin of `.hylopdf-original`, set once and never touched
+    again. See `originalDocument`. */
+const browserOriginalFiles = new Map<string, File>();
+
+/** Undo the most recent `writeDocument` into this path, by going back to what
+    was there before it rather than editing what is there now — see
+    `revert_write` in lib.rs for why that is the only shape of "remove" this
+    app can offer against pdf.js's own `saveDocument()`. `expectedLength` and
+    `revertTo` name the write being undone; a mismatch on either side, on the
+    real backend or here, means something else touched the file since (a
+    second highlight, a recompile) and the offsets no longer point at the
+    boundary the caller thinks they do. */
+export async function revertWrite(
+  path: string,
+  expectedLength: number,
+  revertTo: number,
+): Promise<void> {
+  if (!hasBackend) {
+    const current = browserFiles.get(path);
+    const previous = browserFileHistory.get(path);
+    if (!current || current.size !== expectedLength || !previous || previous.size !== revertTo) {
+      throw new Error("This document has changed since, so that mark can no longer be undone.");
+    }
+    browserFileHistory.delete(path);
+    browserFiles.set(path, previous);
+    for (const handler of browserDocumentChangedHandlers) handler(path);
+    return;
+  }
+  await invoke("revert_write", { path, expectedLength, atLength: revertTo });
+}
+
+/** The document as it stood before this app ever wrote into it — see
+    `original_document` in lib.rs for why `App.removeHighlight` needs this:
+    an existing `/Highlight` cannot be edited or deleted through
+    `saveDocument()`, so removing one this app wrote (at any point, not only
+    right after writing it) means starting again from here and replaying
+    every highlight still wanted as a fresh write. Rejects when nothing has
+    ever been written into this document — there is then nothing of this
+    app's own in it to remove either. */
+export async function originalDocument(path: string): Promise<Uint8Array> {
+  if (!hasBackend) {
+    const original = browserOriginalFiles.get(path);
+    if (!original) {
+      throw new Error("This document has never been marked, so there is nothing to rebuild from.");
+    }
+    return new Uint8Array(await original.arrayBuffer());
+  }
+  // A plain JSON array, like `write_document`'s own `bytes` argument — this
+  // is asked for rarely enough (once per removal, not once a scroll) that the
+  // raw-body trick `read_range`'s response uses is not worth the asymmetry.
+  return Uint8Array.from(await invoke<number[]>("original_document", { path }));
 }
 
 /** Whether markup can be written into this document at all, asked once when

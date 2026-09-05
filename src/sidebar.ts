@@ -355,21 +355,31 @@ export class Sidebar {
    * The document's own coloured markup, below the marks — see
    * `markup-assessment.md`, step 6.
    *
-   * There is no way to remove a highlight from here: `saveDocument()` cannot
-   * edit or delete an annotation already in the file, so a "remove" button could
-   * only take the entry out of the journal — which the next `syncMarkup` would
-   * put straight back. A button that undoes itself on the next launch is worse
-   * than no button.
+   * Every row can be removed, this app's own highlights and nothing else:
+   * `saveDocument()` cannot edit or delete an annotation already in the file
+   * (see the corrections above step 6 in `markup-assessment.md`), so
+   * `App.removeMarkup` does not ask it to — it rebuilds the document from
+   * `.hylopdf-original`, the copy from before this app ever wrote into it,
+   * and replays every highlight this app still wants back in, this one
+   * excepted. Real removal, not a journal entry the next open would put
+   * straight back. Markup that predates this app's own writes — drawn by
+   * another program, or already in the file when it was first opened here —
+   * has no such backup to leave out of, and the button says so rather than
+   * pretending to have removed it.
    *
-   * "Put N back" is the mirror image: it *writes*, which is the direction
-   * `saveDocument()` can go, and what it writes is markup the journal still has
-   * and the file has lost. See `App.restoreMarkup`.
+   * `App.undoLastWrite` is the faster, narrower cousin of the same idea: a
+   * "remove" here goes through the same rebuild-and-write machinery as
+   * `App.restoreMarkup`, so both are one more write `App.undoLastWrite` can
+   * take back if it was the most recent thing done to the file — but the
+   * button on a row here works on any highlight, at any time, not only the
+   * last one.
    */
   showHighlights(
     highlights: Highlight[],
     onPick: (highlight: Highlight) => void,
     onCopyAll: () => void,
     lost: { count: number; put: () => void } | null = null,
+    onRemove: (highlight: Highlight) => void,
   ): void {
     this.highlightsEl?.remove();
     this.highlightsEl = null;
@@ -429,7 +439,14 @@ export class Sidebar {
       go.title = aside ? `${where} — kept in HyloPDF, not in the document` : where;
       go.addEventListener("click", () => onPick(highlight));
 
-      row.append(go);
+      const drop = document.createElement("button");
+      drop.className = "mark-drop";
+      drop.setAttribute("aria-label", `Remove this highlight`);
+      drop.title = "Remove";
+      drop.dataset.icon = "trash";
+      drop.addEventListener("click", () => onRemove(highlight));
+
+      row.append(go, drop);
       box.append(row);
     }
 

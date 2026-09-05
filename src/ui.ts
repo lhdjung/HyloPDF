@@ -767,7 +767,11 @@ let noticeTimer = 0;
  * The line itself keeps the same quiet surface either way: a whole panel
  * turning green over a copied file name would be a lot of colour for very
  * little news. */
-export function notice(message: string, kind: "plain" | "done" = "plain"): void {
+export function notice(
+  message: string,
+  kind: "plain" | "done" = "plain",
+  action?: { label: string; onSelect: () => void },
+): void {
   const element = document.getElementById("notice");
   if (!element) return;
   // Unhidden first, then filled. It is a live region, and a `hidden` one is
@@ -783,7 +787,27 @@ export function notice(message: string, kind: "plain" | "done" = "plain"): void 
   }
   element.append(message);
   window.clearTimeout(noticeTimer);
-  noticeTimer = window.setTimeout(() => {
-    element.hidden = true;
-  }, 4200);
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "notice-action";
+    button.textContent = action.label;
+    // Chosen or not, this notice is done saying what it came to say —
+    // clicking through to the action should not leave a stale "Undo" sitting
+    // over whatever it just did.
+    button.addEventListener("click", () => {
+      element.hidden = true;
+      action.onSelect();
+    });
+    element.append(button);
+    // Longer than the plain default: choosing a colour and then changing
+    // one's mind takes a moment neither reading nor doing needs.
+    noticeTimer = window.setTimeout(() => {
+      element.hidden = true;
+    }, 8000);
+  } else {
+    noticeTimer = window.setTimeout(() => {
+      element.hidden = true;
+    }, 4200);
+  }
 }

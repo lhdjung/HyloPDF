@@ -41,6 +41,9 @@ const paths: Record<string, string> = {
     '<path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="7" rx="1.6"/><path d="M7 14h10v6H7z"/>',
   // A ribbon marker: a rectangle with a notch cut out of the bottom.
   mark: '<path d="M7 4h10v16l-5-4-5 4z"/>',
+  // A highlighter pen, nib down against the stroke it just laid.
+  highlight:
+    '<path d="M8.5 15.5l6-6 3 3-6 6H8.5z"/><path d="M14.5 9.5l2.7-2.7a1.9 1.9 0 0 1 2.7 2.7l-2.7 2.7"/><path d="M5 19.5h6"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/>',
   moon: '<path d="M20 13.4A8.2 8.2 0 0 1 10.6 4a8.2 8.2 0 1 0 9.4 9.4z"/>',
   // A cog, not a second sun: the old one was a circle with eight rays around

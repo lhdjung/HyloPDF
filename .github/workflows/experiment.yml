@@ -150,3 +150,79 @@ jobs:
       - name: The spike still compiles
         if: matrix.os == 'ubuntu-latest'
         run: cargo check --manifest-path experiments/dioxus-spike/Cargo.toml --bins
+
+  # Whether the reader can be *shipped*, which is the one question the suite
+  # above cannot ask: the app leaves through `tauri build`, and this binary has
+  # no Tauri around it. `cargo-packager` is the bundler Tauri's is a fork of,
+  # driven by `[package.metadata.packager]` in the crate — the same fields
+  # `tauri.conf.json` carries, minus the front end to build first.
+  #
+  # On dispatch only. It is a release build of a crate whose release profile is
+  # `lto = true` and `codegen-units = 1`, four times over, and nothing about it
+  # changes between pushes.
+  bundle:
+    name: The bundle (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            pdfium: pdfium-mac-arm64.tgz
+            formats: dmg
+          - os: ubuntu-22.04
+            pdfium: pdfium-linux-x64.tgz
+            formats: deb,appimage
+          - os: windows-latest
+            pdfium: pdfium-win-x64.tgz
+            formats: nsis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: experiments/dioxus-reader
+          key: bundle-${{ matrix.os }}
+
+      - name: What fontconfig and an AppImage need
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev fonts-dejavu-core patchelf
+
+      # Where `resources` and `frameworks` in the crate's packager metadata
+      # look, and where `pdfium.rs` will not: the bundle puts it beside the
+      # executable and the binary finds it there.
+      - name: pdfium
+        shell: bash
+        run: |
+          mkdir -p pdfium
+          curl -sSfL -o pdfium.tgz \
+            "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_TAG/${{ matrix.pdfium }}"
+          tar xzf pdfium.tgz -C pdfium
+
+      - name: cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: The bundle
+        shell: bash
+        env:
+          # linuxdeploy is an AppImage itself and a runner has no FUSE to mount
+          # it with; unpacking is the supported way round that, and the same
+          # line release.yml already carries.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          cargo build --release --manifest-path experiments/dioxus-reader/Cargo.toml
+          cargo packager --release --formats ${{ matrix.formats }} \
+            --manifest-path experiments/dioxus-reader/Cargo.toml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.os }}
+          path: |
+            experiments/dioxus-reader/target/release/*.dmg
+            experiments/dioxus-reader/target/release/*.deb
+            experiments/dioxus-reader/target/release/*.AppImage
+            experiments/dioxus-reader/target/release/*setup.exe
+          if-no-files-found: error

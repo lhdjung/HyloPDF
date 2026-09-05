@@ -7,6 +7,7 @@
 //! costs nothing once dropped, so there is no page cache to keep here — what
 //! is cached is the texture, one layer up, where the memory actually is.
 
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -49,12 +50,30 @@ pub(crate) fn pdfium() -> Result<&'static Pdfium, String> {
     Ok(instance)
 }
 
-/// Where `libpdfium` is. In the experiment it is vendored beside the spike; in
-/// a bundled app it would sit beside the executable. Nothing is fetched at
-/// runtime, which is the promise the pdf.js assets make today.
+/// Where `libpdfium` is: `HYLO_PDFIUM` if it is set, then wherever the bundle
+/// this binary was installed from put it, then the copy vendored beside the
+/// spike. Nothing is fetched at runtime, which is the promise the pdf.js assets
+/// make today.
+///
+/// Three places rather than one because the four bundle formats disagree: a
+/// `.app` keeps a signed dylib in `Contents/Frameworks`, an `.msi` keeps the
+/// DLL beside the `.exe`, and a `.deb` splits them — `/usr/bin/HyloPDF` and
+/// `/usr/lib/HyloPDF/`. They are stat'd in order rather than picked by `cfg`,
+/// because the ones that are not there cost nothing.
 fn library_dir() -> String {
     if let Ok(dir) = std::env::var("HYLO_PDFIUM") {
         return dir;
+    }
+    let name = Pdfium::pdfium_platform_library_name();
+    if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
+        let beside = [
+            dir.join("../Frameworks"),
+            dir.join("../lib/HyloPDF"),
+            dir,
+        ];
+        if let Some(found) = beside.iter().find(|dir| dir.join(&name).exists()) {
+            return found.to_string_lossy().into_owned();
+        }
     }
     format!("{}/../dioxus-spike/vendor/lib", env!("CARGO_MANIFEST_DIR"))
 }

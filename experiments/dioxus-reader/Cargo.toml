@@ -140,3 +140,47 @@ dioxus = { version = "0.7", default-features = false, features = ["macro", "sign
 # and it is already in the tree under winit, so it costs nothing to build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+
+# What the Dock and the task manager show, which is the binary's own name and
+# not the bundle's around it — the same reason `src-tauri/Cargo.toml` names its
+# target `HyloPDF` rather than taking the crate's.
+[[bin]]
+name = "HyloPDF"
+path = "src/main.rs"
+
+# The bundles, through `cargo-packager` — the same bundler Tauri's is a fork of,
+# without the app around it. It reads the fields `tauri.conf.json` reads, so
+# every value below is that file's value; what it does not have is a front end
+# to build first, which is the whole difference. The signing variables are the
+# bundler's own and are the ones `release.yml` already sets.
+[package.metadata.packager]
+product-name = "HyloPDF"
+identifier = "app.hylopdf"
+category = "Productivity"
+description = "A calm PDF reader"
+long-description = "HyloPDF is a calm, fast PDF reader: no clutter, easy dark mode, flexible themes."
+license-file = "../../LICENSE"
+copyright = "Copyright © 2026 Lukas Jung and the HyloPDF contributors"
+icons = [
+    "../../src-tauri/icons/32x32.png",
+    "../../src-tauri/icons/128x128.png",
+    "../../src-tauri/icons/128x128@2x.png",
+    "../../src-tauri/icons/icon.icns",
+    "../../src-tauri/icons/icon.ico",
+]
+
+# pdfium is a shared library and is not in this repository; CI downloads it to
+# `pdfium/` beside the checkout and `pdfium.rs` looks for it beside the
+# executable. On macOS that means `Contents/Frameworks`, where a signed dylib
+# has to live for notarisation; everywhere else it is the executable's own
+# directory, which is what `resources` gives.
+resources = ["../../pdfium/lib/*.so", "../../pdfium/bin/*.dll"]
+
+[[package.metadata.packager.file-associations]]
+extensions = ["pdf"]
+name = "PDF document"
+mime-type = "application/pdf"
+role = "Viewer"
+
+[package.metadata.packager.macos]
+frameworks = ["../../pdfium/lib/libpdfium.dylib"]

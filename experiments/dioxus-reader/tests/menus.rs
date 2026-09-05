@@ -17,7 +17,20 @@ use dioxus_reader::fixture;
 use dioxus_reader::harness::{Options, Reader};
 
 fn reader() -> Reader {
-    Reader::open(&fixture::contents_pdf())
+    // **1280, not the harness's 1100.** The Document menu hangs off the
+    // document's *name*, and the name is on `.bar-left` — the side that gives
+    // way. At 1100 there is no bar left to give it: it is squeezed to its
+    // floor and, on a machine whose `ui-sans-serif` is wider than SF Pro,
+    // outside its own group, where Blitz does not hit-test it. 1280 is the
+    // width the app's own inventory was taken at, and there is room in it on
+    // all three platforms.
+    Reader::open_with(
+        &fixture::contents_pdf(),
+        Options {
+            width: 1280,
+            ..Options::default()
+        },
+    )
 }
 
 /// One at a time, and every way out of one.

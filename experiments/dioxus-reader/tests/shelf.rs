@@ -30,6 +30,12 @@ fn reader_at(path: &str, dir: &Path) -> Reader {
         path,
         Options {
             config: dir.to_path_buf(),
+            // 1280 rather than the harness's 1100: the Document menu hangs
+            // off the document's name, which at 1100 is squeezed to its floor
+            // on `.bar-left` — and on a machine whose `ui-sans-serif` is wider
+            // than SF Pro, out of its own group, where Blitz does not
+            // hit-test it. See `tests/menus.rs`.
+            width: 1280,
             ..Options::default()
         },
     )

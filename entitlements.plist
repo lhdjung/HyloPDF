@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- **One entitlement, and pdfium is the whole reason for it.**
+
+     cargo-packager signs the application with `--options runtime`, always and
+     without asking: the hardened runtime is what notarisation requires. The
+     hardened runtime also turns on *library validation*, which will not load a
+     library whose Team ID differs from the process's — and an ad-hoc signature
+     has no Team ID at all, so `libpdfium.dylib` in `Contents/Frameworks` is
+     refused with "mapping process and mapped file (non-platform) have
+     different Team IDs". The reader then opens, shows its start screen, and
+     says it cannot open any document.
+
+     Apple's own exception for exactly this case is below. It stays true when
+     there is a real Developer ID: pdfium is somebody else's build and will
+     never carry our team.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

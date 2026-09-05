@@ -1180,6 +1180,26 @@ after a release. It is also why the `notes` job exists at all: GitHub collapses
 the assets list, so a release whose body is prose looks like it has nothing to
 download.
 
+**Two macOS signing traps, and both showed up as the app being broken rather
+than as anything about signatures.**
+
+*A bundle whose seal claims resources it does not have.* An unsigned `.app`
+whose inner binary carries the linker's own ad-hoc signature is worse than one
+with no signature anywhere: `codesign --verify` fails, and Gatekeeper reads that
+as tampering — refusing to open it with no *Open Anyway* offered in *Privacy &
+Security* at all. `signing-identity = "-"` in `Cargo.toml` seals the whole
+bundle and a reader gets the ordinary unknown-developer path.
+
+*A hardened runtime that will not load its own pdfium.* cargo-packager signs
+with `--options runtime` unconditionally, and the hardened runtime validates
+libraries by Team ID — which an ad-hoc signature does not have. So
+`Contents/Frameworks/libpdfium.dylib` was refused, and the reader opened,
+showed its start screen and said it could not open any document.
+`entitlements.plist` is Apple's own exception for this,
+`com.apple.security.cs.disable-library-validation`, and it stays true if there
+is ever a real certificate: pdfium is somebody else's build and will never carry
+our team.
+
 **The macOS bundle is ad-hoc signed, and that is not a contradiction.** An
 unsigned `.app` whose inner binary carries the linker's own ad-hoc signature is
 worse than one with no signature anywhere: the seal claims resources the bundle

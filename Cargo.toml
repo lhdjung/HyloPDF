@@ -199,3 +199,8 @@ frameworks = ["pdfium/lib/libpdfium.dylib"]
 # icon, and the pdfium in `Frameworks` — inside out, the way Apple asks. A real
 # Developer ID would go here instead, if there ever is one.
 signing-identity = "-"
+
+# What lets the signed application load the pdfium beside it: the bundler signs
+# with `--options runtime`, and the hardened runtime validates libraries by Team
+# ID, which an ad-hoc signature does not have. The file says the rest.
+entitlements = "entitlements.plist"

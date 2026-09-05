@@ -1251,17 +1251,20 @@ so the notes come from the whole history.
 
 ### What comes out
 
-Attached to the release, named for the version:
+Attached to the release, under names with no version in them — see the note
+above on why:
 
 | platform | files |
 | -------- | ----- |
-| macOS | `HyloPDF_0.1.0_aarch64.dmg`, `HyloPDF_0.1.0_x64.dmg` |
-| Linux | `HyloPDF_0.1.0_amd64.deb`, `HyloPDF-0.1.0-1.x86_64.rpm`, `HyloPDF_0.1.0_amd64.AppImage` |
-| Windows | `HyloPDF_0.1.0_x64_en-US.msi`, `HyloPDF_0.1.0_x64-setup.exe` |
+| macOS | `HyloPDF-macos-arm64.dmg`, `HyloPDF-macos-x64.dmg` |
+| Linux | `HyloPDF-linux-x86_64.AppImage`, `HyloPDF-linux-amd64.deb`, `HyloPDF-linux-x86_64.rpm` |
+| Windows | `HyloPDF-windows-setup.exe`, `HyloPDF-windows.msi` |
 
-Release notes are generated from the commits since the last release, so they
-are as good as the commit messages are. Edit them on the releases page
-afterwards if they are not.
+The notes open with a three-line download list written by `bundle.yml`, one
+line per platform, because GitHub collapses the assets list and a reader who
+has never heard of CI should not have to expand it. Under that, for a numbered
+release, are notes generated from the commits since the last one — as good as
+the commit messages are, and editable on the releases page afterwards.
 
 ### When it goes wrong
 

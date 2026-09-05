@@ -14,8 +14,8 @@ Download and run — no store, no package manager, nothing to build:
 | | |
 |---|---|
 | **macOS** | [Apple silicon](../../releases/latest/download/HyloPDF-macos-arm64.dmg) · [Intel](../../releases/latest/download/HyloPDF-macos-x64.dmg) |
-| **Linux** | [AppImage](../../releases/latest/download/HyloPDF-linux-x86_64.AppImage) · [.deb](../../releases/latest/download/HyloPDF-linux-amd64.deb) |
-| **Windows** | [Installer](../../releases/latest/download/HyloPDF-windows-setup.exe) |
+| **Linux** | [AppImage](../../releases/latest/download/HyloPDF-linux-x86_64.AppImage) · [.deb](../../releases/latest/download/HyloPDF-linux-amd64.deb) · [.rpm](../../releases/latest/download/HyloPDF-linux-x86_64.rpm) |
+| **Windows** | [Installer](../../releases/latest/download/HyloPDF-windows-setup.exe) · [.msi](../../releases/latest/download/HyloPDF-windows.msi) |
 
 Those links always point at the newest build; [every release](../../releases)
 is listed if you want a particular one.

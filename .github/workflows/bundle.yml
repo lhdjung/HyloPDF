@@ -60,7 +60,7 @@ jobs:
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             arch: x86_64
-            formats: deb,appimage
+            formats: deb,appimage,rpm
             pdfium: pdfium-linux-x64.tgz
           # NSIS and not WiX: `-setup.exe` is what a person downloads and runs,
           # and an `.msi` is for deploying to a hundred machines at once, which
@@ -131,8 +131,10 @@ jobs:
           cd "target/${{ matrix.target }}/release"
           for f in *.dmg;       do mv "$f" "HyloPDF-macos-${{ matrix.arch }}.dmg"; done
           for f in *.deb;       do mv "$f" "HyloPDF-linux-amd64.deb"; done
+          for f in *.rpm;       do mv "$f" "HyloPDF-linux-x86_64.rpm"; done
           for f in *.AppImage;  do mv "$f" "HyloPDF-linux-x86_64.AppImage"; done
           for f in *setup.exe;  do mv "$f" "HyloPDF-windows-setup.exe"; done
+          for f in *.msi;       do mv "$f" "HyloPDF-windows.msi"; done
           ls -lh HyloPDF-*
 
       # `--clobber` rather than a plain upload, because a re-run lands on a
@@ -164,21 +166,22 @@ jobs:
           set -euo pipefail
           body=$(gh release view "$TAG" --json body --jq .body)
           # A re-run must not stack a second copy of the table on the first.
-          if printf '%s' "$body" | grep -q '^## Download'; then
+          if printf '%s' "$body" | grep -q '^### Download'; then
             echo "The notes already carry the links."
             exit 0
           fi
           dl="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG"
+          # A list rather than a table, and one line per platform: somebody who
+          # has never heard of CI should be able to find their download in the
+          # first two seconds, without reading the word "asset".
           {
-            echo "## Download"
+            echo "### Download"
             echo
-            echo "| | |"
-            echo "|---|---|"
-            echo "| **macOS** | [Apple silicon]($dl/HyloPDF-macos-arm64.dmg) · [Intel]($dl/HyloPDF-macos-x64.dmg) |"
-            echo "| **Linux** | [AppImage]($dl/HyloPDF-linux-x86_64.AppImage) · [.deb]($dl/HyloPDF-linux-amd64.deb) |"
-            echo "| **Windows** | [Installer]($dl/HyloPDF-windows-setup.exe) |"
+            echo "- [macOS]($dl/HyloPDF-macos-arm64.dmg) — Apple silicon, or [Intel]($dl/HyloPDF-macos-x64.dmg)"
+            echo "- [Windows]($dl/HyloPDF-windows-setup.exe) — or an [.msi]($dl/HyloPDF-windows.msi)"
+            echo "- [Linux]($dl/HyloPDF-linux-x86_64.AppImage) — an AppImage, or [.deb]($dl/HyloPDF-linux-amd64.deb) · [.rpm]($dl/HyloPDF-linux-x86_64.rpm)"
             echo
-            echo "None of these is signed by a certificate your system has heard of, so each is refused on first launch. On macOS, open *System Settings → Privacy & Security* and click *Open Anyway*; on Windows, click *More info* → *Run anyway*."
+            echo "Neither the macOS app nor the Windows installer is signed by a certificate your system has heard of, so both are refused on first launch. On macOS, open *System Settings → Privacy & Security* and click *Open Anyway*; on Windows, click *More info* → *Run anyway*."
             echo
             printf '%s\n' "$body"
           } > notes.md

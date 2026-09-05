@@ -164,6 +164,91 @@ jobs:
           for f in *.msi;       do mv "$f" "HyloPDF-windows.msi"; done
           ls -lh HyloPDF-*
 
+      # **The check that would have caught every packaging fault this project
+      # has had, and none of them was visible to `cargo test`.** An unsealed
+      # bundle macOS refused to open, a hardened runtime that would not load
+      # the pdfium beside it, a `.deb` that puts its library somewhere the
+      # binary does not look: each of those is a package that installs and then
+      # cannot open a document, and each was found by a person double-clicking
+      # a PDF.
+      #
+      # So: install what was just built, the way somebody would, and open a
+      # document with it. `--quit` exits after five seconds, and the line it
+      # prints — `reader: 5 pages in …` — comes out *before any window*, which
+      # is what makes this runnable on a machine with no screen and no GPU. It
+      # is deliberately not an exit-code check: a headless runner is not a
+      # desktop, and a window that fails to come up here says nothing about one
+      # that comes up there. What it does say is that the installed files can
+      # find each other.
+      - name: It installs, and it opens a document
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          set -euo pipefail
+          node tests/fixtures/make-pdf.mjs smoke.pdf 5
+          document="$PWD/smoke.pdf"
+          config="$PWD/smoke-config"
+          # Bash on the Windows runner says `/d/a/HyloPDF/…`, and a Rust `Path`
+          # cannot open that.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            document=$(cygpath -w "$document")
+            config=$(cygpath -w "$config")
+          fi
+          export HYLOPDF_CONFIG="$config"
+
+          # Opens the document, or says what came out instead.
+          opens() {
+            echo "--- $1"
+            "$@" --quit 5 "$document" > smoke.log 2>&1 || true
+            cat smoke.log
+            grep -q "reader: 5 pages" smoke.log
+          }
+
+          cd "target/${{ matrix.target }}/release"
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin)
+              hdiutil attach -readonly -nobrowse -noverify \
+                -mountpoint /tmp/hylo HyloPDF-macos-arm64.dmg
+              # Both of these are a fault this project shipped: a bundle whose
+              # seal claims resources it has not sealed is refused by Gatekeeper
+              # with no "Open Anyway" at all, and without the entitlement the
+              # hardened runtime will not load `libpdfium.dylib`.
+              codesign --verify --deep --strict /tmp/hylo/HyloPDF.app
+              codesign -d --entitlements - /tmp/hylo/HyloPDF.app 2>&1 \
+                | grep -q disable-library-validation
+              cp -R /tmp/hylo/HyloPDF.app /tmp/HyloPDF.app
+              hdiutil detach /tmp/hylo
+              opens /tmp/HyloPDF.app/Contents/MacOS/HyloPDF
+              ;;
+            x86_64-apple-darwin)
+              # Cross-compiled, and an Apple silicon runner has no Rosetta to
+              # run it with. The signature is still this build's own.
+              echo "an Intel build cannot be run on this runner; not smoke tested"
+              ;;
+            x86_64-unknown-linux-gnu)
+              sudo apt-get install -y ./HyloPDF-linux-amd64.deb
+              # `/usr/bin/HyloPDF` and `/usr/lib/HyloPDF/libpdfium.so` are two
+              # different directories, which is the whole reason `library_dir()`
+              # stats three of them.
+              opens /usr/bin/HyloPDF
+              chmod +x HyloPDF-linux-x86_64.AppImage
+              opens ./HyloPDF-linux-x86_64.AppImage
+              ;;
+            x86_64-pc-windows-msvc)
+              # `/S` is NSIS's silent install and `/D=` its install directory,
+              # which has to come last and unquoted. Naming it is what makes the
+              # next line able to find what was installed.
+              ./HyloPDF-windows-setup.exe /S /D=C:\hylo
+              # The installer returns before it has finished writing.
+              for _ in $(seq 1 30); do
+                [ -f /c/hylo/HyloPDF.exe ] && break
+                sleep 1
+              done
+              opens /c/hylo/HyloPDF.exe
+              ;;
+          esac
+
       # `--clobber` rather than a plain upload, because a re-run lands on a
       # release that already has the asset.
       - name: Publish

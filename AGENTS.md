@@ -1173,7 +1173,16 @@ after a release. It is also why the `notes` job exists at all: GitHub collapses
 the assets list, so a release whose body is prose looks like it has nothing to
 download.
 
-**Nothing has ever been signed.** The Tauri releases were not, and neither are
+**The macOS bundle is ad-hoc signed, and that is not a contradiction.** An
+unsigned `.app` whose inner binary carries the linker's own ad-hoc signature is
+worse than one with no signature anywhere: the seal claims resources the bundle
+has not sealed, `codesign --verify` fails, and Gatekeeper treats it as
+tampered-with — refusing to open it with no *Open Anyway* in *Privacy &
+Security* at all. `signing-identity = "-"` in `Cargo.toml` is what makes
+cargo-packager seal the whole bundle, and a reader then gets the ordinary
+unknown-developer path. It is not a certificate and it is not notarisation.
+
+**Nothing has ever been signed by a certificate.** The Tauri releases were not, and neither are
 these: on macOS the first launch wants *Privacy & Security → Open Anyway* and
 Windows SmartScreen wants "More info" → "Run anyway", which is what the README
 tells a reader. The `APPLE_*` variables are still promoted into the environment

@@ -188,3 +188,14 @@ role = "viewer"
 
 [package.metadata.packager.macos]
 frameworks = ["pdfium/lib/libpdfium.dylib"]
+
+# **Ad-hoc, which is not the same as unsigned — it is the difference between an
+# app macOS offers to open anyway and one it refuses outright.** The linker
+# gives the binary inside the bundle an ad-hoc signature of its own, and the
+# bundle around it then had none: `codesign --verify` said "code has no
+# resources but signature indicates they must be present", Gatekeeper read that
+# as tampering rather than as an unknown developer, and *Open Anyway* was not
+# offered at all. `-` makes cargo-packager seal the bundle — Info.plist, the
+# icon, and the pdfium in `Frameworks` — inside out, the way Apple asks. A real
+# Developer ID would go here instead, if there ever is one.
+signing-identity = "-"

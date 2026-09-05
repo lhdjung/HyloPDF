@@ -14,21 +14,31 @@ Every [release](../../releases) has an installer for each platform:
 | | |
 |---|---|
 | macOS | `HyloPDF_<version>_aarch64.dmg` (Apple silicon) or `_x64.dmg` (Intel) |
-| Linux | a `.deb`, an `.rpm`, or an AppImage |
+| Linux | a `.deb` or an AppImage |
 | Windows | an `.msi`, or `-setup.exe` |
 
 The builds are not signed yet, so the first launch on macOS needs a right-click → Open, or a nudge in System Settings → Privacy & Security.
 
 Windows SmartScreen will want "More info" → "Run anyway".
 
-## Dev install
+## Dev build
+
+The whole app is Rust: [Dioxus] Native, with [Blitz] laying out real HTML and
+CSS instead of a webview. Building it needs the Rust toolchain, Node for one
+fixture generator, and `libfontconfig1-dev` on Linux or the Xcode command line
+tools on macOS. pdfium is a shared library and is not in this repository —
+point `HYLO_PDFIUM` at a directory holding one from
+[pdfium-binaries](https://github.com/bblanchon/pdfium-binaries).
 
 ```sh
-npm install
-npm run tauri dev      # the app, with the interface hot-reloading
-npm test               # the whole interface, headlessly
-npm run tauri build    # installers, in src-tauri/target/release
+cargo run                            # the app
+cargo test                           # the whole interface, headlessly
+cargo install cargo-packager --locked
+cargo packager --release             # installers, in target/release
 ```
+
+[Dioxus]: https://dioxuslabs.com
+[Blitz]: https://github.com/DioxusLabs/blitz
 
 ## AI usage
 The code was written by Claude Opus 5, but I had a strong vision for the UI and kept complaining to Claude until I liked the implementation.

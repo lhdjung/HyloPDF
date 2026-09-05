@@ -3,7 +3,8 @@
 Note: everything down to the horizontal rule describes what the project SHOULD be like. Below it, "Architecture of the built app" describes what it currently is.
 
 ## General
-HyloPDF is a PDF reader written in Rust with Tauri. Cross-plattform, ergonomic, with a calm UI, and efficient: fast with no lags, little memory and CPU consumption, and a small binary.
+HyloPDF is a PDF reader written in Rust, drawn by Dioxus Native rather than
+by a webview. Cross-plattform, ergonomic, with a calm UI, and efficient: fast with no lags, little memory and CPU consumption, and a small binary.
 
 Importantly, all settings are preserved throughout sessions, and all of them are independent of each other: changing one setting does not change any other setting.
 
@@ -51,60 +52,57 @@ stands, so that a change can be made without reading every file first.
 
 ## Shape
 
-A Tauri 2 desktop app. Rust owns the disk and the window; a TypeScript frontend
-owns everything the reader sees. Pages are drawn by **pdf.js** (`pdfjs-dist`)
-onto plain canvases. There is no framework and no state library — the interface
-is built with `document.createElement`, and one `App` object holds the state.
+**One Rust binary.** [Dioxus] Native draws the interface — [Blitz] laying out
+real HTML and CSS with Stylo, Parley and Taffy, composited by `vello-hybrid` —
+and pages are rasterised by **pdfium** through `pdfium-render`. No webview, no
+JavaScript, no framework beyond Dioxus's own signals.
+
+[Dioxus]: https://dioxuslabs.com
+[Blitz]: https://github.com/DioxusLabs/blitz
 
 ```
-src-tauri/          Rust: settings, themes, reading history, the window
-  src/lib.rs        every #[tauri::command], the windows, file associations
-  src/settings.rs   settings.toml — one flat table, one key written at a time
-  src/theme.rs      one TOML file per theme, built-ins installed on first run
-  src/keys.rs       keys.toml — the reader's keyboard, read but not interpreted
-  src/library.rs    library.toml — where you were, what was open in each window,
-                    what you marked
-  src/watch.rs      the themes directory and the open document, watched
-  build.rs          the shipped theme table, generated from themes/ and checked
-  themes/*.toml     the fourteen packaged themes, embedded with include_str!
-  keys.toml         the commented template a new install gets, include_str!
-
-tests/              node --test; `npm test` starts a dev server for them
-  search.test.mjs   text folding and where a match lands
-  recolor.test.mjs  the two recolouring paths, in WebKit
-  theme.test.mjs    a theme's five colours, and reading a colour at all
-  reader.test.mjs   the whole interface, through the harness
-  sidebar.test.mjs  the thumbnail column: drawn lazily, and given back
-  settings-window.test.mjs  the theme editor and its draft
-  password.test.mjs an encrypted document: asking, refusing, and giving up
-  seams.test.mjs    the two seams the architecture rests on, by grep
-  settings.test.mjs the settings table, against its two other copies
-  labels.test.mjs   a book that numbers its own pages i, ii, iii, then 1
-  appearance.test.mjs  following the machine's light and dark
-  trim.test.mjs     margins measured off a sample and taken away
-  spread.test.mjs   two pages side by side, and the cover on its own
-  marks.test.mjs    a pin in a page, and the same pin taken out
-  notes.test.mjs    the notes a document already carries, made readable
-  markup.test.mjs   marking a passage, the file it lands in, and the edges
-  document.test.mjs what a document says about itself
-  notext.test.mjs   a scan with nothing in it to search
-  keys.test.mjs     chords, the keymap, the shipped template, and a rebound key
-  helpers.mjs       compiling a .ts module to reach what it does not export
-  fixtures/         PDFs are generated, not committed
-
-src/                TypeScript: the interface
-  main.ts           the App object: state, menus, keyboard, wiring
-  keys.ts           every action, its default chords, and event → chord
-  viewer.ts         layout, rendering, scrolling, links   ← the heart of it
-  themes.ts         theme → CSS variables, and the page recolouring itself
-  search.ts         the full-document index, the fold, and match stepping
-  sidebar.ts        contents, marks, thumbnails, search results
-  settings.ts       the settings window
-  ui.ts             menus, switches, the modal window, the notice line
-  api.ts            the only file that talks to Rust
-  icons.ts          the hand-drawn icon set
-  styles.css        all of it; textlayer.css is pdf.js's own selection layer
+src/
+  app.rs          the Viewer: state, menus, keyboard, every window   ← the heart
+  keymap.rs       every action, its default chords, and event → chord
+  layout.rs       where each page sits, and what is on screen
+  page.rs         the page widget: pdfium into a texture, or into ImageData
+  pdfium.rs       the one pdfium instance, behind the one lock it needs
+  gpu.rs          the shader that recolours, selects and draws links
+  recolor.rs      the same recolouring on the CPU — the reference, and the
+                  half the screenshot tests read
+  styles.rs       all of the CSS, as one string
+  icons.rs        the hand-drawn icon set
+  store.rs        the library: where you were, what was open, what you marked
+  markup.rs       highlights written into the document, and taken back out
+  search.rs       the full-document index, the fold, and match stepping
+  sidebar.rs      contents, marks, thumbnails, search results
+  sign.rs         a drawn signature as the specification's own /Ink annotation
+  prefs.rs        the Settings window and the theme editor
+  shell.rs        the window, the menus and the cascade
+  windows.rs      what a second window is, and what closing one means
+  single.rs       one process per user, over a Unix socket
+  harness.rs      the reader driven with no window and no screen
+  theme.rs settings.rs keys.rs library.rs watch.rs
+                  came over from the Tauri app unchanged; see `lib.rs`
+themes/*.toml     the fourteen packaged themes, embedded with include_str!
+keys.toml         the commented template a new install gets, include_str!
+icons/            what the bundler puts on the three platforms
+build.rs          the shipped theme table, generated from themes/ and checked
+tests/            `cargo test`; one test file per thing the reader does
+  parity/         what the retired app's interface measured, frozen as the spec
+  fixtures/       PDFs written in Rust, except `make-pdf.mjs` — the 400-page
+                  book, which is Node and is the only Node left
+experiments/      the port's own record: PROGRESS.md, the assessments, and the
+                  four Phase 0 spikes, which still compile
 ```
+
+**This app was a Tauri 2 app with a TypeScript frontend and pdf.js until the
+port took over**, and several sections below were written about that one. Their
+*rules* hold — the viewer's layout, the marks, the keyboard, the traps — but
+where they name `viewer.ts`, `main.ts` or `themes.ts`, the file to open now is
+`layout.rs` with `page.rs`, `app.rs`, and `theme.rs` with `styles.rs`.
+`experiments/PROGRESS.md` is the port's own account of what moved and what it
+found.
 
 ## What lives where
 
@@ -916,151 +914,34 @@ needs to know the other exists. See "The keyboard" above.
 
 ## Testing the interface without taking the screen
 
-**`npm test` is the first thing to run and the first thing to add to.** It
-starts a dev server if one is not already up, generates the four-hundred-page
-fixture if it is not there, and runs everything in `tests/`. Some of the files
-compile a module in memory to reach what it does not export — see
-`tests/helpers.mjs` — which is how the text folding and both recolouring paths
-get tested without widening a module's public surface to suit its tests.
+**`cargo test` is the first thing to run and the first thing to add to.** The
+whole interface answers to it: `harness.rs` builds the reader's DOM, resolves
+style and layout against a stated viewport, delivers real pointer and key
+events, and draws pages through `vello_cpu` — no GPU, no window, no compositor,
+which is why the suite runs on three platforms for the price of a runner. Ten
+tests take about a quarter of a second. The excuse not to write one is gone.
 
-**A dev server left running is not the app the tests import.** Vite serves a
-hot-reloaded module as `/src/settings.ts?t=<stamp>`, and a second URL is a
-second instance with its own module-scope state — so a test importing the file
-by name gets a fresh copy whose flags nothing has ever set. It passes on a
-server started for the run and fails on one that was open while somebody edited
-the file, which is the worst way round. `settings-window.test.mjs` takes the
-URL off the page's own resource list instead.
+Three things about it are worth knowing before adding to it.
 
-**`npm run check` is two type checks, not one.** `tsconfig.json` covers
-`src/**` with `types: []`, because the app runs in a webview and has no
-business seeing `process` or `Buffer`. `tsconfig.node.json` covers the harness,
-the tests and the build scripts with `checkJs` and Node's globals. They were
-one file, listing the Node side under an `include` that `tsc` silently ignored
-for want of `allowJs`; add a script and put it in the second one.
+**The CPU path is real code, not a test fixture.** A widget that draws through
+wgpu needs its `Software` half kept working, or the screenshot tests quietly
+stop covering what the reader actually sees.
 
-**Three of the tests read source rather than running it.** `seams.test.mjs`
-greps for the two seams the architecture rests on — `api.ts` as the only door
-into Rust, `viewer.ts` as the only file importing pdf.js rather than its types
-— and for dependencies that ship, and it reads every shipped theme for the
-`order` that decides where it is listed. `settings.test.mjs` parses the
-defaults out of `settings.rs` and checks them against `fallbackDefaults` and
-the `Settings` type in `api.ts`, which is the drift no type checker can see. These are cheap,
-they are exact, and they are the only reason those claims stay claims.
+**Wait for the condition, not for the clock.** Everything after a keystroke —
+recolouring, remounting a neighbourhood of pages, indexing four hundred of them
+— takes as long as the machine takes, and a CI runner is not this machine.
+`settle()` is the harness's answer; a fixed sleep is a test that passes here and
+fails there, in a different place each run.
 
-**CI runs `cargo test` too.** It did not, for eleven tests covering the
-settings write race and `whole()`.
+**Reading with it is still the only instrument that finds some things.** A page
+pinned to the left of a window with the rest unreachable, every undrawn page
+flashing white on a dark theme, a toolbar wearing one grey under fourteen
+themes: each was a *correct* answer, placed or coloured or timed in a way nobody
+would sit in front of. No test asks that question.
 
-**Drive the frontend headlessly. Do not synthesise input into the real app
-unless the change is genuinely native.** `scripts/ui-harness.mjs` opens the
-interface in Playwright's WebKit and gives you keys, wheel gestures, clicks and
-screenshots against it:
-
-```js
-import { openApp } from "./scripts/ui-harness.mjs";
-const app = await openApp({ pdf: "x.pdf", settings: { scroll_mode: "paged" } });
-await app.press("ArrowRight");
-console.log(await app.state());     // page, zoom, scroll, find bar, menus
-await app.close();
-```
-
-Needs `npm run dev` running first. **WebKit, not Chromium**, and the default for
-a reason: the app lives in a WKWebView, and the engines disagree about exactly
-the things this app leans on — blend modes on a composited canvas, pinch zoom,
-text layout. `{ engine: "chromium" }` is there for comparing the two.
-
-**Press `MOD`, never `Meta`.** The app takes its whole shortcut scheme from
-`navigator.platform` — `isMac` in `api.ts` — so the modifier is ⌘ on a Mac and
-Ctrl on the two platforms this is not developed on. A test that hard-codes
-`Meta` passes here and does nothing at all on CI, and the damage is quiet: the
-find bar simply never opens, and a toolbar hidden by one test is never brought
-back for the next four. The harness exports `MOD` for this, and
-`HYLOPDF_PLATFORM=other` runs the whole suite under the other scheme — it lies
-to `navigator.platform` too, so the app and the test agree about which machine
-they are on. `HYLOPDF_PLATFORM=other npm test` is the cheap way to find out
-what Linux will say, and it is worth running before touching a shortcut.
-
-**The harness can seed the keyboard as well as the settings.** `openApp({ keys:
-{ "next-page": ["n"] } })` writes the same table `keys.toml` would give,
-through the browser twin of `loadKeys` — so a rebound key can be pressed in a
-running app without a disk or a Rust side. `keys.test.mjs` does the rest
-against `keys.ts` directly, loading it twice with `isMac` true and false,
-because `mod` is the one thing in a chord that means something different on
-each platform.
-
-**The harness can pretend the machine is dark.** `openApp({ appearance:
-"dark" })` sets the context's colour scheme and `app.setAppearance("light")`
-changes it mid-run, which is what the app follows unless the reader has said
-otherwise. It defaults to light, so a test that wants a dark theme regardless
-has to say `follow_system_theme: false` — one already did not, and took the
-theme editor's test down with it.
-
-**Two things about full screen cannot be tested here at all.** It is the
-window's, not the page's; and once a browser is in it, Escape belongs to the
-browser — the key never reaches the page. So "Escape leaves full screen" and
-everything hanging off it is a real-app check, and the tests that touch
-presenting press the switch again instead.
-
-**`HYLOPDF_NO_BLEND=1` reads the whole app down the pixel fallback.** It refuses
-the non-separable blend modes the way an engine without them does — silently,
-by keeping the property's previous value — so `canBlend()` says no and every
-recolour goes through `recolorByPixel`. `recolor.test.mjs` tests that function
-against the blend chain; this is the only way to test *reading* under it, which
-is the shape Linux may actually be in. It is also a good deal slower, which
-makes it the switch to reach for when a test is suspected of waiting on a fixed
-number of milliseconds.
-
-**Wait for the condition, not for the clock.** Everything this app does after a
-keystroke — recolouring a canvas, remounting a neighbourhood of pages, indexing
-four hundred of them, relaying out for the sidebar — takes as long as the
-machine takes. Locally a theme edit repaints in about 90ms, 170ms down the pixel
-fallback; on a CI runner it went past the 800ms a test had slept for. Three
-consecutive CI runs failed in three different places on the same cause, each
-one passing on the run that found the next.
-
-So fixed waits in `reader.test.mjs` are for *ordering* — something that has to
-happen before the next step can be taken — and anything waiting for a *result*
-polls for the result. The polls all share a shape: `waitForFunction` with a
-generous timeout, `.catch(() => {})`, and then the original assertion, so a
-thing that never arrives is reported as the state it is stuck in rather than as
-a timeout, and the message stays the one worth reading.
-
-Two things learned doing it. Waiting for work to *finish* is not the same as
-waiting for the answer: between a query changing and the search starting, the
-find bar still holds the last count, so a wait for "not scanning any more"
-returns on the previous answer — wait for what the step expects instead. And a
-test that has no wait of its own may be living on the one before it: "pages are
-drawn" only ever passed because the test above it slept 1.5 seconds, and it
-started failing the moment that sleep became a condition that is met sooner.
-
-The suite got faster: 36s of sleeping down to about 11s of waiting.
-
-Settings are seeded through the `localStorage` fallback in `api.ts`, so the
-whole browser path is exercised: no Rust, no window, no traffic lights. Reading
-a document goes through the same range-based path as the real app — the
-fallback slices a `File` where Rust seeks a handle — so the transport is
-exercised here too.
-
-Anything that is really about the *window* — dragging it, full screen, the
-title-bar buttons, the peek handle clearing the system bars — has to be checked
-in the real app, and there is no way to do that quietly. **Nothing here has
-ever run on WebKitGTK**; CI builds on Linux, which catches a build break but
-not a rendering one. The recolouring is the part most likely to differ, which
-is why it has a fallback and a test rather than a note saying it should be
-fine.
-
-**The real app can only be driven from the foreground.** Synthetic keys and
-clicks go to whichever process is frontmost, so testing takes the machine away
-from whoever is using it. `CGEventPostToPid` looks like a way out and is not:
-posting to the app's pid works for keystrokes only while its window is still
-key — a few seconds after it was last in front — and never for clicks or scroll
-(tested: two clicks and a scroll burst, nothing moved). Window-targeted
-screenshots *do* work in the background, `screencapture -l <windowid>`, and are
-cleaner than a full-screen grab. Take the window id from
-`CGWindowListCopyWindowInfo` filtered by pid; a window on another Space or in
-full screen cannot be captured at all.
-
-So: say plainly when you are about to drive the real app, and say when you have
-stopped.
+What the suite cannot cover is the window itself — the shell, the cascade, full
+screen, the Dock menu, the socket. `windows.rs` states those rules in one place
+precisely so that the part which can be tested is.
 
 ## The renderer is the replaceable part, and it was tried
 
@@ -1224,153 +1105,72 @@ for rendering (`search.ts` and `sidebar.ts` use it only through a
 Keep both of those true and this stays a decision that can be made later — the
 prototype needed no change to either.
 
-## The Dioxus Native port, which is meant to take over
+## The port that took over, and what shipping it turned up
 
 The renderer question above was answered *inside* Tauri. The framework question
 was asked separately, in `experiments/dioxus-reader`: the whole reader rewritten
-against **Dioxus Native** — Blitz laying out real HTML and CSS with no webview
-— and it is at parity. `experiments/PROGRESS.md` is the record; what belongs
-here is the part that decides whether it ships.
+against Dioxus Native, Blitz laying out real HTML and CSS with no webview. It
+reached parity, it passes on all three platforms, and **it is now the app** —
+this repository has no TypeScript, no webview and no Tauri in it.
+`experiments/PROGRESS.md` is the port's own record; what belongs here is the
+part that decides how it ships.
 
-**It builds and its suite passes on macOS, Linux and Windows**, and
-`experiments/dioxus-reader` bundles a `.dmg`, a `.deb`, an AppImage and an NSIS
-installer through **`cargo-packager`** — the bundler `tauri-bundler` is a fork
-of, reading `[package.metadata.packager]` in place of `tauri.conf.json`. Both
-jobs are in `.github/workflows/experiment.yml`; the bundle one is on dispatch,
-because it is four release builds of an `lto = true` crate. The macOS bundle has
-been mounted and run: 20MB, opens a document, no webview.
-
-Three things that took finding, and would be found again the same way:
-
-- **pdfium is not in the binary and the four formats disagree about where it
-  goes**: `Contents/Frameworks` in a `.app` (where a signed dylib has to be),
+- **pdfium is not in the binary, and the formats disagree about where it goes**:
+  `Contents/Frameworks` in a `.app` (where a signed dylib has to be),
   `/usr/lib/HyloPDF` beside `/usr/bin/HyloPDF` in a `.deb`, the executable's own
   directory in an `.msi`. `library_dir()` in `pdfium.rs` stats all three, after
   `HYLO_PDFIUM`.
-- **`tests/parity/app-inventory.json` is a *macOS* measurement.** It came out of
-  this app in WebKit, where `ui-sans-serif` is SF Pro; Segoe UI sets the same
-  words a few per cent narrower and DejaVu Sans several per cent wider. A fixed
-  pixel allowance cannot survive that, so off macOS it is proportional. Anything
-  compared against that fixture has to think about the typeface first.
+- **`tests/parity/app-inventory.json` is a *macOS* measurement**, taken from the
+  retired app in WebKit where `ui-sans-serif` is SF Pro. Segoe UI sets the same
+  words a few per cent narrower and DejaVu Sans several per cent wider, so a
+  fixed pixel allowance cannot survive the other two runners; off macOS it is
+  proportional. Anything compared against that fixture has to think about the
+  typeface first. The app it measured is gone, so those numbers are the spec
+  now rather than a comparison.
 - **Blitz shrinks a flex item past its own padding, and does not hit-test what
   overflows a parent.** Together: the document's name went to 0px where WebKit
-  floors the app's `.doc-title` at 16px, and at 16px it is painted but
-  unclickable. Nineteenth entry in the port's upstream list.
+  floors `.doc-title` at 16px, and at 16px it is painted but unclickable.
+  Nineteenth entry in the port's upstream list.
 
-**Signing is not what is blocking it, because nothing here has ever been
-signed.** The Tauri releases ship unquarantined only on the machine that made
-them; the README already tells a reader about SmartScreen's "Run anyway", and
-macOS wants *Privacy & Security → Open Anyway*. The port's bundles are unsigned
-in exactly the same way and read the same `APPLE_*` variables if certificates
-ever arrive. What is genuinely still missing before the switchover: **Windows is
-one process per launch** (the single-instance socket wants a named pipe), and
-`release.yml` still drives `tauri build`.
-
-## Where Rust ends and TypeScript begins
-
-The renderer question answers a more general one, and the rule it leaves is
-worth stating plainly: **work belongs in Rust when its inputs and outputs are
-small next to the work itself, and in TypeScript when it touches pixels or the
-DOM.** Pixels and the DOM live in the web content process, and nothing reaches
-them without crossing a boundary that costs about a millisecond a megabyte.
-Everything in `api.ts` already obeys that rule — settings, themes, the library,
-the file picker, ranges of a file, the traffic lights — which is why the door
-is as narrow as it is.
-
-There is a second constraint and it catches most proposals before the first
-one does: **every door in `api.ts` has a browser twin.** The harness runs the
-whole interface with no Rust behind it, which is how reading, search,
-recolouring and the password window get tested without taking anybody's screen.
-Move something into Rust and you either write it twice or lose the test — and
-pure computation, which is what looks most tempting to move, is exactly what
-the tests reach for.
-
-So, the candidates, and what happens to them:
-
-*The search index, the fold and the match stepping.* The shape of the traffic
-is right — a query in, a few offsets out — and the text would only have to
-cross once, a megabyte or two a book. It still fails. `fold` is the most
-tested function in the app, the browser path needs a matcher of its own
-regardless, and the JavaScript is not the weak version: NFKD a character at a
-time with an origin map back to the unfolded text is what the Rust would also
-have to do. Nothing is bought.
-
-*Recolouring.* Already measured on the branch, and the canvas wins before the
-pixels even move: 1.5-5.6ms for the blend chain against 13-17ms scalar in Rust,
-2.8-3.5ms across all the cores. Then the page would have to come back. Keeping
-a page's colours costs rather more than the chain does — tens of milliseconds,
-on the rows that have colour on them — so this is the one line above that a
-change has moved. It has not moved the answer: the work is a page in and the
-same page out, and the page is the thing that cannot cross.
-
-*The shades `applyTheme` derives.* Five colours in and fifteen out is a perfect
-shape, and it is also forty lines of arithmetic that would need a twin. The
-door costs more than the work.
-
-*Layout, the LRU, the binary searches over `boxes[]`.* Microseconds, on numbers
-that are already in the page.
-
-What passes the rule is not moved work but new work, and all of it is about the
-disk:
-
-*Watching the themes directory.* Themes are files, and the brief wants them
-hand-written and LLM-written; today an edit is seen on the next run. `notify`
-in Rust, a path out over the bridge, `applyTheme` again — the payload is a
-filename and the effect is that a theme can be written with the app open beside
-it. The clearest win on this list, and the same watcher answers the document
-recompiled by LaTeX under the reader's feet.
-
-*Keybindings as a file.* Built — see "The keyboard" above. The split came out
-one notch away from what this line predicted: Rust reads the file and rejects
-the shapes TOML can describe and the frontend cannot use, and the frontend
-owns the action names and the grammar of a chord, because it is the side that
-has to turn a keystroke into one and would need the whole grammar anyway.
-Validating in Rust as well would have meant the same parser written twice.
-
-*Whatever comes next that has to be remembered* — annotations, a thumbnail
-cache, per-document settings, export. These belong beside `library.rs` for the
-same reason it does, and each is a new door rather than a moved one. Four have
-been built since this was written and all four went that way: what was open
-last, in each window (`set_open_document`), the name a document gives itself
-(`set_document_title`), the pages the reader has marked (`toggle_mark`), and
-handing a document to a program that prints (`print_document`). Every one of
-them is a filename or a page number crossing the bridge, which is the rule
-above doing its job.
-
-More Rust is not itself the goal; the brief asks for small, fast and calm, and
-the seam that serves those is the one the app already has — Rust owns what is
-on the disk and what the window does, TypeScript owns what is on the screen.
-The renderer measurement is the strongest evidence for it: the largest piece of
-work that could move to Rust is the one that most clearly should not.
+What is still missing, and neither is about signing: **Windows is one process
+per launch** — the single-instance socket wants a named pipe, and there is no
+std type for one — and there is no underline, strike-out or squiggly markup,
+which the retired app did not have either.
 
 ## Running it
 
 ```
-npm run tauri dev              # the app, with vite behind it
-npm run tauri dev -- -- FILE   # …opened on a document
-npm run dev                    # the interface alone, in a browser
-npm run check                  # tsc, over src/ and over the Node side
-npm test                       # node --test, with a dev server started for it
-npm run tauri build            # .app and .dmg
-npm run set-version 0.1.0      # the five files that carry the version number
+cargo run                          # the app
+cargo run -- FILE                  # …opened on a document
+cargo test                         # the whole interface, headlessly
+cargo clippy --all-targets -- -D warnings
+cargo packager --release           # the installers, into target/release
 ```
 
-Three workflows, and the split is deliberate. `checks.yml` is the types and
-both test suites, and it is a *reusable* workflow rather than a job, because
-two things need it — a push and a release — and a second copy would drift.
-`ci.yml` runs it on every push to main and then bundles on all three platforms,
-which is the only way the engines this is not developed on get exercised at
-all; it throws the bundles away. `release.yml` is the only thing that names a
-version, and it runs only when you press the button.
+There is deliberately no `cargo fmt --check`: the keymap is one row per action
+so that it can be read down, and rustfmt explodes it.
 
-Signing is the one thing CI cannot do without secrets, and naming the variables
-the Tauri bundler reads is not the way to leave the door open for them: the
+pdfium is a shared library and is not in this repository. `HYLO_PDFIUM` names
+the directory holding it; without that, `pdfium.rs` looks inside the bundle and
+then at the copy vendored with the Phase 0 spike.
+
+Three workflows, and the split is deliberate. `checks.yml` is the suite on
+macOS, Linux and Windows, and it is a *reusable* workflow rather than a job,
+because two things need it — a push and a release — and a second copy would
+drift. `ci.yml` runs it on every push to main and every pull request, and
+carries a dispatch-only bundle job for when the packaging itself changes.
+`release.yml` is the only thing that names a version, and it runs only when you
+press the button.
+
+**Nothing has ever been signed.** The Tauri releases were not, and neither are
+these: on macOS the first launch wants *Privacy & Security → Open Anyway* and
+Windows SmartScreen wants "More info" → "Run anyway", which is what the README
+tells a reader. The `APPLE_*` variables are still promoted into the environment
+by a macOS-only step, under other names until they carry something — because a
 bundler goes by whether `APPLE_CERTIFICATE` is *present*, and a secret the
 repository does not have arrives as an empty string rather than as nothing at
-all, so the macOS job compiled and then died at `security import` on every
-push. They come in under other names now, and a macOS-only step promotes the
-ones that carry something. An unsigned macOS build is quarantined anywhere but
-the machine that made it.
+all, which used to kill the macOS job at `security import` having compiled
+perfectly.
 
 ## The licence
 
@@ -1477,25 +1277,21 @@ The workflow does nothing you cannot do by hand, which is the way to debug a
 bundling problem without waiting on CI:
 
 ```sh
-npm run set-version 0.1.0
-npm run tauri build                      # host platform, every bundle it makes
-npm run tauri build -- --target x86_64-apple-darwin --bundles dmg
+cargo install cargo-packager --locked
+cargo build --release
+cargo packager --release                         # every format for this host
+cargo packager --release --formats dmg
 ```
 
-Installers land in `src-tauri/target/<target>/release/bundle/<kind>/`, or
-`src-tauri/target/release/bundle/` when no `--target` was given. Put the
-version back with `npm run set-version` before committing anything, or let the
-release workflow do the bump for real.
+Installers land in `target/release/`, or `target/<target>/release/` when
+`--target` was given. `cargo-packager` reads `[package.metadata.packager]` in
+`Cargo.toml` — the fields `tauri.conf.json` used to hold — and the bundle needs
+pdfium in `pdfium/` beside the checkout, which is where `resources` and
+`frameworks` point.
 
-Keep in mind: the version lives in five places and a script writes all five.
-`scripts/set-version.mjs` does `package.json`, `package-lock.json`,
-`tauri.conf.json`, `Cargo.toml` and `Cargo.lock`. It edits by pattern, and a
-pattern that stops matching does not fail — it silently declines to change
-anything, which would tag 0.2.0 and build 0.1.0, and the first sign of it would
-be the file name on the releases page. `tests/version.test.mjs` is the gate:
-the five agree today, and all five patterns still find something to change,
-round-tripped on a copy in the temp directory rather than on the files vite is
-watching.
+The version lives in two files now, `Cargo.toml` and `Cargo.lock`, and the tag
+job in `release.yml` writes both. It was five under Tauri, with a script and a
+test to keep them agreeing.
 
 ### The runner images are a decision, not a default
 
@@ -1514,18 +1310,11 @@ label is the wrong fix when it goes: it silently narrows the set of machines
 the release runs on. Build in a container of the oldest glibc worth supporting
 instead.
 
-`scripts/sync-pdfjs.mjs` copies pdf.js's cmaps, standard fonts, ICC profiles and
-wasm decoders into `public/pdfjs` before every dev run and build. Nothing is
-fetched at runtime, and the app works offline.
+The icon has a source, and it is `icons/app-icon.svg`: `app-icon.png` was once
+the only copy of the design, so the first change to it began by measuring the
+old bitmap back into numbers. Everything under `icons/` is generated from the
+SVG and nothing there is edited by hand.
 
-`scripts/make-icon.mjs` is the icon's source, and it is a script because there
-was no source: `src-tauri/app-icon.png` was the only copy of the design, so the
-first change to it began by measuring the old bitmap back into numbers. It
-writes `src-tauri/app-icon.svg` beside the PNG and renders it through WebKit at
-4× — the engine the app draws in anyway, and it dithers a gradient, which costs
-more in PNG than it does in fidelity. `npm run tauri icon` expands the result
-into the thirty-odd files the three platforms want; nothing under
-`src-tauri/icons/` is edited by hand.
 ## What a critical read turned up
 
 A pass over the whole tree looking for what was wrong rather than for what was

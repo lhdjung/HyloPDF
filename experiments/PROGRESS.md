@@ -1,5 +1,10 @@
 # The Dioxus Native experiment: where it stands
 
+> **The experiment ended and the reader took over.** `experiments/dioxus-reader`
+> is now the repository root, the crate is `hylopdf`, and the Tauri app it was
+> measured against is gone. Paths below are as they were while it was being
+> built; the reader's files are at `src/`, its tests at `tests/`.
+
 `brief.md` is the ask, `dioxus-assessment.md` is the plan, and this is what
 building it found. It is the only status file.
 

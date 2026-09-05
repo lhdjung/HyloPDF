@@ -1,7 +1,12 @@
-# The two cheap jobs — types and tests, on both sides of the bridge — as a
-# workflow of their own so that CI and a release run exactly the same ones. A
-# release that skips them is a release nobody checked, and a second copy of
-# them here would be a copy that drifts.
+# The suite, on the three platforms it ships to, as a workflow of its own so
+# that CI and a release run exactly the same one. A release that skips them is
+# a release nobody checked, and a second copy here would be a copy that drifts.
+#
+# Nothing in it needs a GPU, a screen or a compositor: the reader builds a
+# `DioxusDocument`, resolves style and layout against a stated viewport, and
+# draws pages through pdfium into `ImageData` on the CPU. What it cannot cover
+# is the window — the shell, the cascade, full screen, the Dock menu, the
+# socket; `src/windows.rs` is what makes that a small hole.
 
 name: Checks
 
@@ -10,57 +15,107 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # The pdfium build this is measured against. Written the way the download URL
+  # wants it — the tag is `chromium/8021` and the slash is a path separator to
+  # GitHub unless it is escaped.
+  PDFIUM_TAG: "chromium%2F8021"
 
 jobs:
-  frontend:
-    name: Interface
-    runs-on: ubuntu-latest
+  reader:
+    name: The reader (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Neither platform's answer is worth losing because another one failed.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            pdfium: pdfium-mac-arm64.tgz
+            # Where the archive keeps the library, which is not the same on all
+            # three: Windows puts the DLL in `bin/` and its import library in
+            # `lib/`, and `Pdfium::pdfium_platform_library_name_at_path` wants
+            # the directory holding the thing that is actually loaded.
+            lib: lib
+          - os: ubuntu-latest
+            pdfium: pdfium-linux-x64.tgz
+            lib: lib
+          - os: windows-latest
+            pdfium: pdfium-win-x64.tgz
+            lib: bin
     steps:
       - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          # Two workspaces, two lockfiles: the spike is one of its own and is
+          # checked at the end of this job.
+          workspaces: |
+            .
+            experiments/dioxus-spike
+
+      # fontique reads the system's fonts through fontconfig on Linux, and
+      # `yeslogic-fontconfig-sys` looks for it with pkg-config at build time —
+      # so without the development package the build fails long before any test
+      # runs, with a panic out of a build script. `RUST_FONTCONFIG_DLOPEN=1` is
+      # that crate's own escape from needing it and is not one here: it changes
+      # the crate's API surface enough that `fontique` no longer compiles
+      # against it. The fonts themselves matter for a different reason: the
+      # toolbar is drawn in whatever `ui-sans-serif` resolves to, and a runner
+      # with no fonts at all lays out a document of empty boxes.
+      - name: What fontconfig needs, and something to draw with
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev fonts-dejavu-core
+
+      # `Reader::book()` is the 400-page fixture every memory and timing number
+      # in `experiments/PROGRESS.md` was taken on, generated rather than
+      # committed. The generator needs Node and nothing else: no `npm ci`, no
+      # dependencies, one file that writes bytes.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Types
-        run: npm run check
-      - name: Browsers for the interface tests
-        run: npx playwright install --with-deps webkit
-      - name: Tests
-        run: npm test
-      - name: Tests, down the pixel fallback
-        # Reads the whole app through recolorByPixel rather than the blend
-        # chain, which is the shape an engine without the non-separable
-        # blend modes is actually in — Linux, plausibly, and untested here
-        # otherwise: recolor.test.mjs covers the fallback function itself,
-        # but nothing had read the app through it.
-        run: HYLOPDF_NO_BLEND=1 npm test
-      - name: Build
-        run: npm run build
+      - name: The fixture
+        run: node tests/fixtures/make-pdf.mjs tests/fixtures/book.pdf 400
 
-  rust:
-    name: Rust
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-      - name: System libraries
+      # pdfium is a shared library and is not in this repository — `pdfium.rs`
+      # finds it beside the executable in a bundle and through `HYLO_PDFIUM`
+      # here. Every path below is relative and the one absolute path is
+      # GitHub's own, because bash on the Windows runner reports `RUNNER_TEMP`
+      # as a Windows path with backslashes in it and cargo's environment wants
+      # something a Rust `Path` can open.
+      - name: pdfium
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf libxdo-dev
-      - name: Formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          mkdir -p pdfium
+          curl -sSfL -o pdfium.tgz \
+            "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_TAG/${{ matrix.pdfium }}"
+          tar xzf pdfium.tgz -C pdfium
+          echo "HYLO_PDFIUM=${{ github.workspace }}/pdfium/${{ matrix.lib }}" >> "$GITHUB_ENV"
+
+      # Clippy on one runner rather than three: it is the same source and the
+      # same lints, and the two things that actually differ between platforms —
+      # `cfg(unix)` in `single.rs` and `cfg(target_os = "macos")` in `dock.rs`
+      # and `stats.rs` — are compiled by the test build on each of them anyway.
+      #
+      # There is deliberately no `cargo fmt --check`. The keymap is one row per
+      # action so that it can be read down, the macro above it is one line per
+      # arm, and rustfmt explodes both.
       - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      # What these cover is concurrency and file-system timing — two settings
-      # written at once, and a document caught halfway through being written by
-      # a compiler. Both break quietly and neither reproduces on demand, so a
-      # machine has to be the one asking.
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo clippy --all-targets -- -D warnings
+
       - name: Tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test
+
+      # Phase 0's four spikes are answers rather than tests — they open windows
+      # and measure things — so there is nothing here to run. Checking that they
+      # still compile is what keeps the pinned Blitz revision honest for them
+      # too.
+      - name: The spike still compiles
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo check --manifest-path experiments/dioxus-spike/Cargo.toml --bins

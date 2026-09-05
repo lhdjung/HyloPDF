@@ -396,6 +396,13 @@ mod through_the_reader {
     }
 
     fn open_the_window(reader: &mut Reader) {
+        // **Widened for the click and given straight back.** The window opens
+        // off the Document menu, and that menu hangs off the document's name,
+        // which has no room in a 1100px bar — see `tests/menus.rs`. Everything
+        // below is measured at 1100, where the pad and the page are the sizes
+        // these tests were written against, so the bar is borrowed rather than
+        // kept.
+        reader.resize(1280, 800);
         reader.click(".chip.title");
         let items = reader.text_all(".menu.document .menu-item");
         let at = items
@@ -403,6 +410,7 @@ mod through_the_reader {
             .position(|label| label.starts_with("Sign"))
             .expect("the Document menu offers signing");
         reader.click_nth(".menu.document .menu-item", at);
+        reader.resize(1100, 800);
     }
 
     /// **A document that is already signed says so, in the window that is

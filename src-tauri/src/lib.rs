@@ -684,8 +684,9 @@ async fn original_document(
         return Err("That is not the document that is open.".into());
     }
     let backup = original_backup_path(Path::new(&path));
-    std::fs::read(&backup)
-        .map_err(|_| "This document has never been marked, so there is nothing to rebuild from.".to_string())
+    std::fs::read(&backup).map_err(|_| {
+        "This document has never been marked, so there is nothing to rebuild from.".to_string()
+    })
 }
 
 /// What standing this app has to write markup into a document — asked before

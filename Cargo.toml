@@ -200,7 +200,16 @@ frameworks = ["pdfium/lib/libpdfium.dylib"]
 # Developer ID would go here instead, if there ever is one.
 signing-identity = "-"
 
-# What lets the signed application load the pdfium beside it: the bundler signs
-# with `--options runtime`, and the hardened runtime validates libraries by Team
-# ID, which an ad-hoc signature does not have. The file says the rest.
+# **What lets the signed application load the pdfium beside it.** The bundler
+# signs with `--options runtime` and nothing turns that off; the hardened
+# runtime validates libraries by Team ID, and an ad-hoc signature has none, so
+# `Contents/Frameworks/libpdfium.dylib` was refused and every document with it —
+# "mapping process and mapped file (non-platform) have different Team IDs". The
+# entitlement is Apple's own exception for exactly this, and it stays true if
+# there is ever a real certificate: pdfium is somebody else's build and will
+# never carry our team.
+#
+# **Nothing may be commented in that file.** `codesign` hands it to AMFI, whose
+# parser is not an XML parser: an ordinary `<!-- -->` fails the build with
+# "AMFIUnserializeXML: syntax error". The explanation lives here instead.
 entitlements = "entitlements.plist"

@@ -722,6 +722,23 @@ silently rendering black on white. Nothing may show a theme's colour without
 going through this: a swatch that hands its raw string to CSS shows a colour
 the renderer cannot read, which is the picker lying about the page.
 
+**`use_effect`'s closure is replaced on every render, so nothing it captures
+survives one.** `use_effect` hands what it is given to `use_callback`, which
+"replaces the inner callback with the new callback" every time the hook runs —
+so an effect that remembers what it saw last time in a `let mut` captured by
+`move` compares against the initial value for ever. Three effects in `app.rs`
+did, and the pill's also *wrote* the viewer, which dirtied the component that
+had just run it: a render, a style pass, a layout and a full paint per frame
+for as long as the window was open. **The app sat at 100% of a core with
+nobody touching it**, and there was nothing on screen to say so — the frames
+were identical. The same run of `--measure 20` costs 24,083 paints before and
+82 after, on the same pages and the same memory. What an effect remembers goes
+in a `use_hook` beside it (a `Cell` or a `RefCell`), never in the closure, and
+`tests/settle.rs` is the assertion — `stats::RENDERS` stops climbing when
+nothing is happening. Nothing else in the suite would have noticed:
+`Reader::settle` pumps a fixed three times and every assertion after it passes
+either way.
+
 **A press lands on a custom widget; a click never comes out of one.** Blitz
 hit-tests the `object` a page or a thumbnail is drawn into and delivers the
 press — which is how a sweep over a page begins — and then makes no `click` of

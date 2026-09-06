@@ -15,6 +15,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub static PAINTS: AtomicU64 = AtomicU64::new(0);
 /// Pages drawn by the renderer, which should settle at one per mounted page.
 pub static DRAWN: AtomicU64 = AtomicU64::new(0);
+/// Every render of the reader's own component.
+///
+/// The number to look at is whether it *stops*. A component that dirties
+/// itself as it renders costs a full style, layout and paint pass per frame
+/// for as long as the window is open — 100% of a core with nobody touching
+/// the app, and nothing on screen to say so. `tests/cost.rs` asserts it
+/// settles; see the note there.
+pub static RENDERS: AtomicU64 = AtomicU64::new(0);
 /// Pages recoloured without being drawn again — what a theme change costs.
 pub static REPAINTED: AtomicU64 = AtomicU64::new(0);
 /// Microseconds, because a page is single milliseconds and an average of

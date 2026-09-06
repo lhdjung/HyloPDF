@@ -38,7 +38,7 @@
 //! does in all but the last step. What is lost is the scrollbar and the
 //! platform's fling.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -964,6 +964,8 @@ pub struct Viewer {
     /// one's clock.
     pill_up: bool,
     pill_token: u64,
+    /// Scrolls asked for. See [`Viewer::scroll_gesture`].
+    scrolls: u64,
     /// Whether the handle that gives the toolbar back is down. See
     /// [`Viewer::reach_for_toolbar`].
     peek: bool,
@@ -1256,6 +1258,7 @@ impl Viewer {
             said_rewrites: false,
             pill_up: false,
             pill_token: 0,
+            scrolls: 0,
             peek: false,
             borrowed_toolbar: false,
             sidebar_width: 252.0,
@@ -1835,6 +1838,16 @@ impl Viewer {
     }
 
     /// Which gesture is running, for the timer that ends it.
+    /// How many scrolls have been asked for, moved or not.
+    ///
+    /// What the page pill watches, beside the offset. A wheel at either end of
+    /// the document changes nothing and is still a gesture the reader made, and
+    /// the app it was ported from flashed the pill for it — `flashPill` hung
+    /// off the wheel handler rather than off the offset.
+    pub fn scroll_gesture(&self) -> u64 {
+        self.scrolls
+    }
+
     pub fn zoom_gesture(&self) -> Option<u64> {
         self.zoom_from.map(|_| self.zoom_token)
     }
@@ -4718,6 +4731,10 @@ impl Viewer {
 
     /// Move the document under the window. The one place `scroll_top` changes.
     pub fn scroll_to(&mut self, top: f64) -> bool {
+        // Counted before the clamp, because a wheel at the top of the document
+        // is still a scroll: the pill flashes for the gesture, not for the
+        // offset. See [`Viewer::scroll_gesture`].
+        self.scrolls = self.scrolls.wrapping_add(1);
         let to = top.clamp(0.0, self.layout.max_scroll());
         if (to - self.scroll_top).abs() < 0.01 {
             return false;
@@ -4847,6 +4864,7 @@ pub fn Reader(
     #[props(default)]
     asking: Option<String>,
 ) -> Element {
+    crate::stats::add(&crate::stats::RENDERS, 1);
     // The viewport, taken from the window rather than from the element:
     // `get_client_rect` panics inside the document borrow every handler
     // already holds. The chrome above and below is a number this file knows,
@@ -5192,6 +5210,21 @@ pub fn Reader(
     // Read so that the handle is plainly alive rather than plainly unused.
     let _ = watching.is_some();
 
+    // **What an effect remembers between runs lives in a hook, never in the
+    // closure.**
+    //
+    // The three effects below each compare what they see against what they saw
+    // last time, and each of them held that in a `let mut` captured by `move`.
+    // That is wrong, and it is not visibly wrong: `use_effect` hands its
+    // closure to `use_callback`, which *replaces the stored closure on every
+    // render* — so the capture is a fresh one every time and the comparison is
+    // always against the initial value. The notice's timer was therefore
+    // re-armed on every render, and the pill's effect, which also *writes* the
+    // viewer, dirtied the component it had just been run by: a render, a
+    // layout and a full paint per frame for as long as the window was open,
+    // 100% of a core with nobody touching the app. `tests/cost.rs` asserts the
+    // reader stops rendering, which is the only thing that would have said so.
+    //
     // **The notice puts itself away after four seconds.**
     //
     // A thread rather than a timer, because nothing in this reader is async
@@ -5203,13 +5236,13 @@ pub fn Reader(
     // about.
     {
         let notifying = notifying.clone();
-        let mut last = String::new();
+        let last = use_hook(|| Rc::new(RefCell::new(String::new())));
         use_effect(move || {
             let said = viewer.read().notice.clone();
-            if said == last {
+            if said == *last.borrow() {
                 return;
             }
-            last = said.clone();
+            *last.borrow_mut() = said.clone();
             if said.is_empty() {
                 return;
             }
@@ -5232,13 +5265,16 @@ pub fn Reader(
     // to remember to.
     {
         let notifying = notifying.clone();
-        let mut last = f64::NAN;
+        let last = use_hook(|| Rc::new(Cell::new((f64::NAN, u64::MAX))));
         use_effect(move || {
-            let now = viewer.read().scroll_top;
-            if now == last {
+            let now = {
+                let held = viewer.read();
+                (held.scroll_top, held.scroll_gesture())
+            };
+            if now == last.get() {
                 return;
             }
-            last = now;
+            last.set(now);
             let Some(token) = viewer.write().flash_pill() else {
                 return;
             };
@@ -5260,15 +5296,15 @@ pub fn Reader(
     // [`crate::page::Chosen::holding`] — and this puts them back sharp.
     {
         let notifying = notifying.clone();
-        let mut last = 0u64;
+        let last = use_hook(|| Rc::new(Cell::new(0u64)));
         use_effect(move || {
             let Some(token) = viewer.read().zoom_gesture() else {
                 return;
             };
-            if token == last {
+            if token == last.get() {
                 return;
             }
-            last = token;
+            last.set(token);
             crate::emit::after(
                 ZOOM_SETTLES,
                 notifying.clone(),

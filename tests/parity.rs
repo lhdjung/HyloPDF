@@ -712,17 +712,22 @@ fn what_the_app_says_over_a_page_is_said_here_too() {
     reader.settle();
     assert_eq!(one(&reader, ".toolbar-peek"), want("peek"), "the way back");
 
+    // The pill is what a scroll puts up, and it says the same "n of m" the
+    // toolbar does. The app's was taken at the top of the document; this one
+    // is read the same way, before anything has moved it — and with the
+    // toolbar still away, which is the only state the pill exists in:
+    // `flash_pill` answers nothing while the bar is on screen, because the bar
+    // already says which page this is.
+    reader.point_to(640.0, 300.0);
+    reader.settle();
+    reader.wheel(-10.0);
+    reader.settle();
+    assert_eq!(one(&reader, ".page-pill"), want("pill"), "the page pill");
+
     reader.press_chord("mod+t");
     reader.drag_over(true);
     assert_eq!(one(&reader, ".drop-hint"), want("drop"), "a dragged file");
     reader.drag_left();
-
-    // The pill is what a scroll puts up, and it says the same "n of m" the
-    // toolbar does. The app's was taken at the top of the document; this one
-    // is read the same way, before anything has moved it.
-    reader.wheel(-10.0);
-    reader.settle();
-    assert_eq!(one(&reader, ".page-pill"), want("pill"), "the page pill");
 }
 
 

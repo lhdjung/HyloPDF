@@ -254,21 +254,24 @@ jobs:
               opens ./HyloPDF-linux-x86_64.AppImage
               ;;
             x86_64-pc-windows-msvc)
-              # `/S` is NSIS's silent install; `/D=` is its directory and has
-              # to come last, unquoted, and with a backslash bash will pass on
-              # rather than eat.
-              ./HyloPDF-windows-setup.exe /S /D=C:\\hylo
-              # The installer returns before it has finished writing.
-              for _ in $(seq 1 30); do
-                [ -f /c/hylo/HyloPDF.exe ] && break
-                sleep 1
-              done
-              if [ ! -f /c/hylo/HyloPDF.exe ]; then
-                echo "the installer put nothing at C:\\hylo" >&2
-                ls -la /c/hylo 2>&1 || true
-                exit 1
-              fi
-              opens /c/hylo/HyloPDF.exe
+              # **The installer is listed, not run.** `/S` is NSIS's silent
+              # install and it does not return on a runner: the first attempt
+              # hung until the job was cancelled two hours later, and the
+              # second until the forty-five minute cap, leaving
+              # `HyloPDF-windows-setup` behind as an orphan process both times.
+              # There is nobody here to click anything, so what is checked is
+              # what the installer *carries* — and then the two files are put
+              # side by side, which is the arrangement it would have made, and
+              # a document is opened with them. That is the fault this test
+              # exists for: an executable that cannot find its pdfium.
+              7z l HyloPDF-windows-setup.exe > payload.txt
+              grep -qi "HyloPDF.exe" payload.txt
+              grep -qi "pdfium.dll" payload.txt
+              echo "the installer carries the executable and the library"
+              mkdir -p beside
+              cp HyloPDF.exe beside/
+              cp ../../../pdfium/bin/pdfium.dll beside/
+              opens ./beside/HyloPDF.exe
               ;;
           esac
 

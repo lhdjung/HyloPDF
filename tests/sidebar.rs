@@ -569,3 +569,22 @@ fn the_tabs_can_be_clicked_over_a_scrolled_column() {
     reader.click(".tab[data-tab='contents']");
     assert_eq!(reader.state().sidebar.as_deref(), Some("contents"));
 }
+
+/// **A thumbnail is a button, and the picture is most of it.** Pressing the
+/// page rather than the number under it is the gesture everybody makes, and it
+/// did nothing at all: the picture is a custom widget, and Blitz makes no click
+/// out of a press that lands on one. Scrolled first, because that is where a
+/// reader is by the time they pick a page.
+#[test]
+fn clicking_a_thumbnail_goes_to_its_page() {
+    let mut reader = book();
+    reader.press_chord("mod+b");
+    reader.click(".tab[data-tab='pages']");
+    reader.wheel_over(".panel.thumb-column", 900.0);
+    let picture = reader.harness.layout_rect(".thumb[data-thumb='4'] .thumb-picture");
+    reader.click_at(
+        picture.x + picture.width / 2.0,
+        picture.y + picture.height / 2.0,
+    );
+    assert_eq!(reader.state().page, 4, "the picture is the button");
+}

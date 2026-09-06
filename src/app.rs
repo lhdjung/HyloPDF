@@ -2287,7 +2287,19 @@ impl Viewer {
         let Some(draft) = self.editing.clone() else {
             return;
         };
-        let mut themes = self.store.themes().to_vec();
+        // **Without the draft that was previewed a keystroke ago.** A theme
+        // that is not yet on disk has no id, so the search below never finds
+        // the copy of it left by the last press of a key and appended another —
+        // and a reader naming a theme Brownie watched B, Br, Bro and four more
+        // pile up in the theme list, all of them the same unsaved theme. An id
+        // is what a saved theme has; nothing else belongs in that list.
+        let mut themes: Vec<crate::theme::Theme> = self
+            .store
+            .themes()
+            .iter()
+            .filter(|theme| !theme.id.trim().is_empty())
+            .cloned()
+            .collect();
         // The draft stands in for the theme it is a version of, or is added
         // to the end when it is a new one.
         match themes
@@ -2355,6 +2367,22 @@ impl Viewer {
         let dir = self.store.themes_dir().to_path_buf();
         match crate::theme::save(&dir, &draft) {
             Ok(saved) => {
+                // **A theme that moved takes its references with it.** The
+                // file is named for the theme, so renaming one renames the
+                // file — see `theme::save` — and the two remembered halves of
+                // the light/dark pair name themes by that id. Left alone, a
+                // renamed dark theme stops being the dark theme.
+                if saved.id != draft.id && !draft.id.trim().is_empty() {
+                    let moving: Vec<(String, serde_json::Value)> =
+                        ["theme", "light_theme", "dark_theme"]
+                            .into_iter()
+                            .filter(|key| self.store.text(key) == draft.id)
+                            .map(|key| (key.to_string(), serde_json::json!(saved.id)))
+                            .collect();
+                    if !moving.is_empty() {
+                        self.store.set(moving);
+                    }
+                }
                 self.editing = None;
                 self.reload_themes();
                 let at = self
@@ -3646,6 +3674,29 @@ impl Viewer {
         }
         let number: usize = wanted.parse().ok()?;
         (number >= 1 && number <= self.pages()).then_some(number)
+    }
+
+    /// What stands after "of" in the toolbar, which is the number of pages
+    /// unless the document numbers its own straight through.
+    ///
+    /// A journal offprint numbers its pages from where they fall in the issue,
+    /// so the first of eighteen is printed 2669 — and the count beside it, read
+    /// off the file rather than off the page, made that "2669 of 18". The two
+    /// halves have to be speaking about the same thing, and what the reader can
+    /// see is the number on the paper, so the count follows it: "2669 of 2686".
+    ///
+    /// **Only where the labels are one ascending run of numbers**, which is
+    /// what "numbers its own straight through" means and is the whole of the
+    /// case this is for. A book whose front matter is i, ii, iii before a body
+    /// that starts again at 1 has no last number to count to — its sixth page
+    /// is called 3 — so that one says how many pages there are, as before.
+    pub fn pages_text(&self) -> String {
+        let pages = self.pages();
+        if pages == 0 {
+            return "0".to_string();
+        }
+        straight_run(&self.label(1), &self.label(pages), pages)
+            .unwrap_or_else(|| pages.to_string())
     }
 
     /// What the field in the toolbar has in it.
@@ -5244,7 +5295,9 @@ pub fn Reader(
     let mounted = held.layout.mounted(held.scroll_top);
     let content_width = held.layout.content_width();
     let content_height = held.layout.content_height();
-    let pages = held.pages();
+    // What follows "of" in the toolbar, which is not always the number of
+    // pages. See [`Viewer::pages_text`].
+    let pages_text = held.pages_text();
     let notice = held.notice.clone();
     // Read once for the whole render rather than per page: six strings out of
     // the settings table, and the great majority of renders draw no popover
@@ -5317,8 +5370,8 @@ pub fn Reader(
     // What the button the Document menu hangs off is called: the document's
     // name, or the app's own "Open…" when there is none.
     // The shelf, read once for this render. It is a file on the disk, so it is
-    // read when the Document menu is open and not otherwise.
-    let recents = if held.menu == Some(Menu::Document) {
+    // read when the Open menu is open and not otherwise.
+    let recents = if held.menu == Some(Menu::Open) {
         held.recents()
     } else {
         Vec::new()
@@ -6392,7 +6445,7 @@ pub fn Reader(
                             "{page_field}"
                         }
                         }
-                        span { class: "of", "of {pages}" }
+                        span { class: "of", "of {pages_text}" }
                     }
                     button {
                         class: "chip page-next",
@@ -8268,5 +8321,38 @@ impl std::future::Future for Breathe {
         self.0 = true;
         cx.waker().wake_by_ref();
         std::task::Poll::Pending
+    }
+}
+
+/// The number the last page is printed with, when a document's labels are one
+/// ascending run of numbers — and nothing, when they are anything else.
+///
+/// See [`Viewer::pages_text`], which is the only caller and says why.
+fn straight_run(first: &str, last: &str, pages: usize) -> Option<String> {
+    let first: usize = first.parse().ok()?;
+    let last: usize = last.parse().ok()?;
+    (last == first + pages.checked_sub(1)?).then(|| last.to_string())
+}
+
+#[cfg(test)]
+mod counting {
+    use super::straight_run;
+
+    #[test]
+    fn the_count_follows_the_numbers_printed_on_the_pages() {
+        // An offprint: eighteen pages, printed 2669 to 2686.
+        assert_eq!(
+            straight_run("2669", "2686", 18).as_deref(),
+            Some("2686"),
+            "the pages are numbered straight through, from somewhere else"
+        );
+        // The ordinary document, which this changes nothing about.
+        assert_eq!(straight_run("1", "400", 400).as_deref(), Some("400"));
+        // Front matter in roman, then a body that starts again at 1: the
+        // sixth page is called 3, and there is no last number to count to.
+        assert_eq!(straight_run("i", "3", 6), None);
+        // And a document whose labels are numbers but skip: 12 pages that end
+        // at 30 are not a run.
+        assert_eq!(straight_run("1", "30", 12), None);
     }
 }

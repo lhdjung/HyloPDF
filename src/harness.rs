@@ -1186,7 +1186,11 @@ impl Reader {
     /// What is in a text field, which is not in the DOM as text: an input
     /// holds an editor, and the editor holds the string. Empty when there is
     /// no such field, which is how "the find bar is not up" reads.
-    fn field(&self, selector: &str) -> String {
+    ///
+    /// Public because a field is where several of these tests do their
+    /// reading — a colour is six digits in a box, and the box is the only
+    /// place that says what was typed.
+    pub fn field(&self, selector: &str) -> String {
         self.harness
             .query(selector)
             .and_then(|node| {

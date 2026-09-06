@@ -345,3 +345,32 @@ fn the_keyboard_knows_there_is_no_document() {
         reader.asks(),
     );
 }
+
+/// **The shelf is under the Open… menu too**, which is where a reader with a
+/// document already open can reach it: the start screen is behind that document
+/// and unreachable without first putting it down. The rows were written and
+/// never drawn — the list was read while the *Document* menu was open and shown
+/// under the Open menu, which are two different menus.
+#[test]
+fn the_open_menu_carries_the_shelf() {
+    let dir = scratch("open-menu");
+    let other = fixture::titled_pdf("A Paper With A Name");
+    {
+        let mut first = reader_at(&other, &dir);
+        first.press("j");
+    }
+    let mut reader = reader_at(&Reader::book(), &dir);
+
+    reader.click(".chip.open");
+    let rows = reader.harness.query_all("[data-item='recent']").len();
+    assert_eq!(rows, 1, "the document that was read before this one");
+    let listed = reader.text_all(".menu.open .menu-label");
+    assert!(
+        listed.iter().any(|name| name.contains("A Paper With A Name")),
+        "named on its own row: {listed:?}",
+    );
+
+    // And the row opens it, in this window.
+    reader.click("[data-item='recent']");
+    assert_eq!(reader.state().title, "A Paper With A Name");
+}

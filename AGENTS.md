@@ -722,6 +722,24 @@ silently rendering black on white. Nothing may show a theme's colour without
 going through this: a swatch that hands its raw string to CSS shows a colour
 the renderer cannot read, which is the picker lying about the page.
 
+**A press lands on a custom widget; a click never comes out of one.** Blitz
+hit-tests the `object` a page or a thumbnail is drawn into and delivers the
+press — which is how a sweep over a page begins — and then makes no `click` of
+it, so nothing around it hears one. A thumbnail was therefore clickable only
+on the number under it, eighteen pixels of a row three hundred tall, and it
+looked like a hit-testing bug rather than an event one. `pointer-events: none`
+on the widget is the whole fix: the press lands on the box around it and the
+click reaches the button. Anything wrapping a widget in something pressable
+wants the same line.
+
+**Nothing in this window scrolls the window.** A wheel Blitz cannot spend
+chains outward, and the last parent is the viewport, which scrolls whatever
+sticks out of the root — so a sideways swipe over the Settings window could
+carry the whole interface off to the left, cutting the nav column off at the
+edge. `.root` is `overflow: hidden` for that reason and `.window-pane` scrolls
+on one axis only. Everything here that scrolls has a box of its own that does
+it; the root is not one of them.
+
 **Do not tint the document with `mix-blend-mode`.** WebKit drops the blend
 against a composited canvas, and a dropped blend renders as a solid band across
 the line. Anything that has to change the colour of ink goes onto the canvas.

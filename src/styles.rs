@@ -185,7 +185,16 @@ body { margin: 0;
      button; Blitz's does not, so the rule is said here for the whole window.
      `#toolbar` and `#sidebar` carry it in the app for the same reason, one
      level down. See `blitz-button-select.md`. */
-  user-select: none; }
+  user-select: none;
+  /* **And the window itself does not scroll.** A wheel with nowhere to go
+     chains outward in Blitz — a pane that cannot move sideways hands the
+     gesture to its parent, and the last parent is the viewport, which scrolls
+     whatever sticks out of the root. So two fingers carried right over the
+     Settings window slid the whole interface left and cut the nav column off
+     at the edge, with nothing to carry it back but the same gesture the other
+     way. Everything in this app that scrolls has a box of its own that does
+     it; the root is not one of them. */
+  overflow: hidden; }
 
 /* …and on everything in it, because it does not inherit: Blitz reads the
    property off the node the press landed on, and a button under a root that
@@ -1398,9 +1407,13 @@ body { margin: 0;
 .nav-item.on { background: var(--accent-soft); color: var(--accent); }
 /* `scroll`, not `auto` — Blitz has no `auto`, which is the note at the top of
    this file. Reading is the longest page and does not fit in 600px. */
+/* And `hidden` across, which is the other half of "a sideways swipe carries
+   nothing away": nothing in this window is meant to be wider than the window,
+   so a page that turns out to be has a row that is too wide and not a page to
+   be scrolled sideways. See `.root`. */
 .window-pane {
   flex: 1 1 auto; min-width: 0; padding: 18px 26px 28px 26px;
-  overflow: scroll; scrollbar-width: thin;
+  overflow-x: hidden; overflow-y: scroll; scrollbar-width: thin;
 }
 /* `letter-spacing` is the app's own `-0.01em`, and it does a second job here:
    the 0.6px of tracking `body` stands in with is right for the 11-16px band
@@ -1437,11 +1450,32 @@ body { margin: 0;
   background: var(--paper); color: var(--text); font-size: 13.5px;
 }
 .text-field:focus { outline: none; border-color: var(--accent); }
-.color-field { display: flex; align-items: center; gap: 6px; }
+/* `position: relative`, because the grid of colours hangs off the swatch and
+   has to be over the field below rather than pushing it down the page. */
+.color-field { display: flex; align-items: center; gap: 6px; position: relative; }
 .color-swatch {
   width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--line);
+  padding: 0; cursor: pointer;
 }
 .color-hex { width: 96px; }
+/* **What the field says about six digits it cannot read**, which is the whole
+   of how a typed colour is allowed to be wrong for a moment: the text stays as
+   typed, wearing this, and Enter or leaving the field puts the theme's own
+   colour back. Nothing here corrects anybody mid-word. */
+.color-hex.unreadable { border-color: var(--negative); }
+/* Eight across, which is the grey row: the hues below it are four steps each,
+   so two hues to a row and the pale ones line up down the left. */
+.color-picker {
+  position: absolute; top: 32px; left: 0; z-index: 5;
+  display: grid; grid-template-columns: repeat(8, 22px); gap: 4px;
+  padding: 8px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.color-choice {
+  width: 22px; height: 22px; padding: 0; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line);
+}
+.color-choice.on { border: 2px solid var(--accent); }
 .chip.action {
   border: 1px solid var(--line); background: var(--surface); color: var(--text);
 }

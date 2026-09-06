@@ -592,12 +592,21 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
     let hex = crate::palette::hex;
     let fresh = draft.id.trim().is_empty();
 
+    // Enter, from any field in the editor: the theme is saved and the window
+    // goes. It is what Enter means in every other window with a form in it,
+    // and without it the only way out of the editor was the pointer.
+    let done = move |_| {
+        viewer.write().save_theme();
+        viewer.write().close_settings();
+    };
+
     rsx! {
         h3 { class: "pane-group", {if fresh { "New theme" } else { "Edit theme" }} }
         Field { label: "Name",
             TextField {
                 value: draft.name.clone(),
                 onchange: move |value| viewer.write().draft_set("name", value),
+                onsubmit: done,
             }
         }
         Field {
@@ -606,6 +615,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             ColorField {
                 value: hex(shown.text),
                 onchange: move |value| viewer.write().draft_set("text", value),
+                onsubmit: done,
             }
         }
         Field {
@@ -614,6 +624,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             ColorField {
                 value: hex(shown.background),
                 onchange: move |value| viewer.write().draft_set("background", value),
+                onsubmit: done,
             }
         }
         Field {
@@ -622,6 +633,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             ColorField {
                 value: hex(shown.accent),
                 onchange: move |value| viewer.write().draft_set("accent", value),
+                onsubmit: done,
             }
         }
         Field {
@@ -630,6 +642,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             ColorField {
                 value: hex(shown.link),
                 onchange: move |value| viewer.write().draft_set("link", value),
+                onsubmit: done,
             }
         }
         Field {
@@ -638,6 +651,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             ColorField {
                 value: hex(shown.selection_area),
                 onchange: move |value| viewer.write().draft_set("selection_area", value),
+                onsubmit: done,
             }
         }
         Field {
@@ -646,6 +660,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             ColorField {
                 value: hex(shown.selection_text),
                 onchange: move |value| viewer.write().draft_set("selection_text", value),
+                onsubmit: done,
             }
         }
         Field {
@@ -695,6 +710,15 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
 /// ⌘Z still mean what they mean in a field — and so that ⌘, still closes
 /// Settings from inside one.
 fn typing_is_not_a_shortcut(event: &KeyboardEvent) {
+    // **Escape is not typing, and is the way out of the window the field is
+    // in.** Stopped here it reached nothing at all, so a reader who had
+    // clicked into the theme's name — or into either field of the Sign window
+    // — had no key that closed what they were looking at. `Action::Dismiss`
+    // is what answers it, outward in the order the reader arrived; the
+    // stepper says the same thing by handling Escape itself.
+    if event.key() == Key::Escape {
+        return;
+    }
     let modified = event.modifiers().meta() || event.modifiers().ctrl() || event.modifiers().alt();
     if !modified {
         event.stop_propagation();
@@ -702,41 +726,161 @@ fn typing_is_not_a_shortcut(event: &KeyboardEvent) {
 }
 
 /// A line of text somebody types. The app's `ui.textField`.
+///
+/// `onsubmit` is Enter, and is what makes a field a way of finishing rather
+/// than only a way of typing: the theme editor saves on it. A field with none
+/// swallows Enter as it swallows every other plain key.
 #[component]
-pub(crate) fn TextField(value: String, onchange: EventHandler<String>) -> Element {
+pub(crate) fn TextField(
+    value: String,
+    onchange: EventHandler<String>,
+    #[props(default)] onsubmit: Option<EventHandler<()>>,
+) -> Element {
     rsx! {
         input {
             class: "text-field",
             r#type: "text",
             value: "{value}",
             oninput: move |event| onchange.call(event.value()),
-            onkeydown: |event: KeyboardEvent| typing_is_not_a_shortcut(&event),
+            onkeydown: move |event: KeyboardEvent| {
+                if finished(&event, onsubmit.as_ref()) {
+                    return;
+                }
+                typing_is_not_a_shortcut(&event);
+            },
         }
     }
 }
 
-/// A colour: what it looks like, and the six digits that say so.
+/// Enter, in a field that has somewhere to go with it.
+///
+/// True when the key was Enter and the handler was called, so that the caller
+/// stops there. Plain Enter only: ⌘Enter and the rest are nobody's here.
+fn finished(event: &KeyboardEvent, onsubmit: Option<&EventHandler<()>>) -> bool {
+    if event.key() != Key::Enter || !crate::keymap::plain(event.modifiers()) {
+        return false;
+    }
+    event.stop_propagation();
+    if let Some(onsubmit) = onsubmit {
+        onsubmit.call(());
+    }
+    true
+}
+
+/// The colours the picker offers, in the order they are laid out: eight
+/// greys, then ten hues in four steps each from pale to deep.
+///
+/// **A grid of colours somebody can point at**, because the field beside it
+/// asks for six hexadecimal digits and that is a question most readers cannot
+/// answer — the app had the system's own colour picker through
+/// `<input type="color">` and Blitz has no such input, so the way in has to be
+/// drawn here. Forty is enough to find something close and few enough to see
+/// at once; the field is still there for anyone who knows exactly what they
+/// want.
+const SWATCHES: &[&str] = &[
+    "#ffffff", "#f2f3f5", "#d9dce1", "#b4b9c1", "#868d99", "#575d68", "#2f3237", "#000000",
+    "#fde2e2", "#f2a2a2", "#d64545", "#8f2020", "#fdeada", "#f4bc80", "#d97a1c", "#8c4a0a",
+    "#fdf6d3", "#f0dd8a", "#c9a227", "#7d6410", "#e3f3dd", "#a8d99a", "#4f9e3f", "#2c5f22",
+    "#daf1ee", "#8fd3cb", "#2f9c8e", "#175c53", "#dcecfa", "#9ec9ee", "#2f7fc4", "#174d7a",
+    "#e2e2f7", "#a9a9e4", "#5a5ac0", "#333376", "#f2dcf3", "#d9a4dd", "#a44eb0", "#6b2f72",
+];
+
+/// A colour: what it looks like, the six digits that say so, and a grid of
+/// colours to point at instead.
+///
+/// **The field takes anything, and complains rather than correcting.** It used
+/// to show the theme's colour and pass on only what parsed, which meant every
+/// keystroke that did not parse was rewritten under the caret: a Backspace
+/// took a character out and the old value put it straight back, and typing
+/// over `#2f3237` was a fight. What is typed now stays typed — marked as
+/// unreadable while it is — and Enter or leaving the field puts the last
+/// readable colour back if what is in the box is not one. A colour that *does*
+/// parse is passed on as it is typed, so the window recolours under the hand.
 ///
 /// The hex field takes every notation the renderer reads rather than only the
 /// long one — a theme file may perfectly well say `#fff` — and what leaves
 /// here is always the six-digit form, because that is what is written back to
-/// the file. A value the renderer cannot read is simply not passed on, which
-/// is `readColor` returning null in the app.
+/// the file.
 #[component]
-fn ColorField(value: String, onchange: EventHandler<String>) -> Element {
+fn ColorField(
+    value: String,
+    onchange: EventHandler<String>,
+    #[props(default)] onsubmit: Option<EventHandler<()>>,
+) -> Element {
+    // What is in the box while it is being typed in, and nothing when it is
+    // not: the same shape as the stepper's, one field along, and for the same
+    // reason — Blitz's `set_text` moves no caret, so a value written back
+    // under the caret puts it at the front.
+    let mut typed = use_signal(|| None::<String>);
+    let mut picking = use_signal(|| false);
+    let showing = typed.read().clone().unwrap_or_else(|| value.clone());
+    let unreadable = crate::palette::read_colour(&showing).is_none();
+    // Leaving the field, whether by Enter or by pressing elsewhere: what is
+    // readable is kept, and what is not is dropped for what the theme has.
+    let mut settle = move || typed.set(None);
+
     rsx! {
         span { class: "color-field",
-            span { class: "color-swatch", style: "background: {value};" }
+            button {
+                class: "color-swatch",
+                "aria-label": "Choose a colour",
+                style: "background: {value};",
+                onclick: move |_| {
+                    let open = *picking.read();
+                    picking.set(!open);
+                },
+            }
             input {
-                class: "text-field color-hex",
+                class: if unreadable { "text-field color-hex unreadable" } else { "text-field color-hex" },
                 r#type: "text",
-                value: "{value}",
-                onkeydown: |event: KeyboardEvent| typing_is_not_a_shortcut(&event),
-                oninput: move |event| {
-                    if let Some(read) = crate::palette::read_colour(&event.value()) {
-                        onchange.call(crate::palette::hex(read));
+                value: "{showing}",
+                onkeydown: move |event: KeyboardEvent| {
+                    if !crate::keymap::plain(event.modifiers()) {
+                        return;
+                    }
+                    match event.key() {
+                        // Done with this field: the colour stands or the last
+                        // one comes back, and the editor around it hears the
+                        // Enter — which is what saves the theme.
+                        Key::Enter => {
+                            settle();
+                            event.stop_propagation();
+                            if let Some(onsubmit) = onsubmit.as_ref() {
+                                onsubmit.call(());
+                            }
+                        }
+                        // What was typed and is not a colour goes, and the
+                        // key carries on to the window — see
+                        // `typing_is_not_a_shortcut`.
+                        Key::Escape => settle(),
+                        _ => typing_is_not_a_shortcut(&event),
                     }
                 },
+                onblur: move |_| settle(),
+                oninput: move |event| {
+                    let text = event.value();
+                    if let Some(read) = crate::palette::read_colour(&text) {
+                        onchange.call(crate::palette::hex(read));
+                    }
+                    typed.set(Some(text));
+                },
+            }
+            if *picking.read() {
+                div { class: "color-picker", role: "listbox", "aria-label": "Colours",
+                    for swatch in SWATCHES.iter().copied() {
+                        button {
+                            key: "{swatch}",
+                            class: if swatch.eq_ignore_ascii_case(&value) { "color-choice on" } else { "color-choice" },
+                            "aria-label": "{swatch}",
+                            style: "background: {swatch};",
+                            onclick: move |_| {
+                                typed.set(None);
+                                picking.set(false);
+                                onchange.call(swatch.to_string());
+                            },
+                        }
+                    }
+                }
             }
         }
     }

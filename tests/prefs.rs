@@ -438,3 +438,146 @@ fn every_theme_card_shows_its_own_link_colour() {
         "and it says so",
     );
 }
+
+/// **Naming a theme is not making one per letter.** The draft is shown by
+/// standing it in the theme list, and a theme with no file has no id to be
+/// found by — so every keystroke appended another copy, and a reader typing
+/// "Brownie" watched B, Br, Bro and four more pile up in the Theme menu.
+#[test]
+fn naming_a_new_theme_leaves_one_theme_in_the_list() {
+    let mut reader = book();
+    reader.press_chord("mod+,");
+    reader.click_nth(".nav-item", 1);
+    reader.wheel_over(".window-pane", 600.0);
+    // "New theme…", the first of the buttons under the cards.
+    reader.click(".pane-actions button");
+    reader.click(".text-field");
+    reader.type_text("Brownie");
+    // Out of the window, which leaves the draft being worn: the Theme menu in
+    // the bar is where the pile showed.
+    reader.press("Escape");
+    reader.click(".chip.theme");
+    assert_eq!(
+        reader.harness.query_all(".menu.theme .swatch").len(),
+        theme::BUILT_IN.len() + 1,
+        "fourteen themes and the one being written, whatever it is called",
+    );
+}
+
+/// Into the theme editor, with a new theme in it.
+fn editing(reader: &mut Reader) {
+    reader.press_chord("mod+,");
+    reader.click_nth(".nav-item", 1);
+    reader.wheel_over(".window-pane", 600.0);
+    reader.click(".pane-actions button");
+}
+
+/// **A hex field holds what is typed, and complains rather than correcting.**
+/// It used to show the theme's colour and pass on only what parsed, so every
+/// keystroke that was not yet a colour was rewritten under the caret: a
+/// Backspace took a character out and the field put it straight back, which
+/// made editing six digits a fight.
+#[test]
+fn a_colour_can_be_typed_wrong_on_the_way_to_being_right() {
+    let mut reader = book();
+    editing(&mut reader);
+    let was = reader.attribute_all(".color-swatch", "style");
+    let full = reader.field(".color-hex");
+    assert_eq!(full.len(), 7, "six digits and a hash: {full}");
+
+    // A digit taken out is a colour no longer, and the box says so and keeps
+    // what is in it.
+    reader.click_nth(".color-hex", 0);
+    reader.press("End");
+    reader.press("Backspace");
+    let short = reader.field(".color-hex");
+    assert_eq!(short, full[..full.len() - 1], "the digit went: {short}");
+    assert!(
+        reader.harness.query(".color-hex.unreadable").is_some(),
+        "and five digits is not a colour",
+    );
+    assert_eq!(
+        reader.attribute_all(".color-swatch", "style"),
+        was,
+        "so nothing has changed colour",
+    );
+
+    // Typed back to six, and the theme wears it as it is typed.
+    reader.type_text("0");
+    assert_eq!(reader.field(".color-hex").len(), 7);
+    assert_ne!(
+        reader.attribute_all(".color-swatch", "style"),
+        was,
+        "a colour that reads is worn as soon as it does",
+    );
+}
+
+/// And what is left unreadable goes back to the colour the theme has, on the
+/// way out of the field.
+#[test]
+fn an_unreadable_colour_reverts_when_the_field_is_left() {
+    let mut reader = book();
+    editing(&mut reader);
+    let good = reader.field(".color-hex");
+
+    reader.click_nth(".color-hex", 0);
+    reader.type_text("nonsense");
+    assert!(
+        reader.harness.query(".color-hex.unreadable").is_some(),
+        "the field says it cannot read that",
+    );
+    // Away to the next field, which is what leaving one means.
+    reader.click_nth(".color-hex", 1);
+    assert_eq!(reader.field(".color-hex"), good, "the colour comes back");
+    assert!(reader.harness.query(".color-hex.unreadable").is_none());
+}
+
+/// **A grid of colours to point at**, because six hexadecimal digits is a
+/// question most readers cannot answer — and the app had the system's own
+/// picker through `<input type="color">`, which Blitz has not.
+#[test]
+fn a_colour_can_be_chosen_from_the_swatches() {
+    let mut reader = book();
+    editing(&mut reader);
+    assert!(reader.harness.query(".color-picker").is_none(), "shut to start with");
+
+    reader.click_nth(".color-swatch", 0);
+    assert!(reader.harness.query(".color-picker").is_some(), "the grid is down");
+    let choices = reader.harness.query_all(".color-choice").len();
+    assert!(choices > 20, "a grid worth pointing at: {choices}");
+
+    reader.click_nth(".color-choice", 2);
+    assert_eq!(
+        reader.field(".color-hex"),
+        "#d9dce1",
+        "the third swatch, which is what the field now says",
+    );
+    assert!(reader.harness.query(".color-picker").is_none(), "and the grid is away");
+}
+
+/// **Enter finishes the theme editor**: the theme is saved and the window goes,
+/// which is what Enter means in every window with a form in it. Before it, the
+/// only way out of the editor was the pointer.
+#[test]
+fn enter_saves_the_theme_and_closes_the_window() {
+    let mut reader = book();
+    editing(&mut reader);
+    reader.click(".text-field");
+    reader.type_text("!");
+
+    reader.press("Enter");
+    assert!(!open(&reader), "the window has gone");
+    assert!(
+        reader.state().notice.starts_with("Saved"),
+        "and it says what it did: {}",
+        reader.state().notice,
+    );
+    // Which means a file: the theme is in the list the next time the menu is
+    // opened, and it is the one being worn.
+    reader.click(".chip.theme");
+    let named = reader.text_all(".menu.theme .menu-label");
+    assert!(
+        named.iter().any(|name| name.ends_with('!')),
+        "the theme that was written is in the list: {named:?}",
+    );
+}

@@ -231,6 +231,20 @@ pub fn save(dir: &Path, theme: &Theme) -> Result<Theme, String> {
         // came back doubled instead of changed.
         theme.id.trim().to_string()
     };
+    // **A renamed theme is renamed on the disk too, where the app is the one
+    // that named the file.** Brownie renamed to Bay Brown left `brownie.toml`
+    // saying `name = "Bay Brown"`, which is a directory nobody can read: the
+    // file name is what a person sorts by, copies and hands to somebody else.
+    //
+    // *Where the app named it*, and that is the whole of the caution. A file
+    // called `My Theme.toml` was named by the person who wrote it, and this app
+    // does not rename somebody else's file — the same rule that stops it
+    // reverting a built-in edited in place. So the old file is only left behind
+    // when its stem is the slug of the name it had, which is what `save` writes
+    // and nothing else does.
+    let renamed = old_file_name(dir, &id)
+        .filter(|old| slugify(old) == id && slugify(&theme.name) != id)
+        .map(|_| unique_id(dir, &slugify(&theme.name)));
     if is_built_in(&id) {
         // Editing a built-in makes a copy rather than shadowing the original.
         id = unique_id(dir, &format!("{}-custom", slugify(&id)));
@@ -250,12 +264,35 @@ pub fn save(dir: &Path, theme: &Theme) -> Result<Theme, String> {
     };
     let body = toml::to_string_pretty(&stored).map_err(|e| e.to_string())?;
 
+    // The rename is a write of the new file and then a delete of the old, in
+    // that order: a machine that stops between them has both copies, which is
+    // a theme listed twice, and the other order has none at all.
+    if let Some(fresh) = &renamed {
+        let moved = path_for(dir, fresh)
+            .ok_or("A theme cannot be saved under that name — it is not a file name.")?;
+        atomic_write(&moved, body.as_bytes())?;
+        let _ = fs::remove_file(&path);
+        let mut saved = theme.clone();
+        saved.id = fresh.clone();
+        saved.built_in = false;
+        return Ok(saved);
+    }
+
     atomic_write(&path, body.as_bytes())?;
 
     let mut saved = theme.clone();
     saved.id = id;
     saved.built_in = false;
     Ok(saved)
+}
+
+/// What the theme in `id`'s file is *currently* called, or nothing when there
+/// is no such file. Read rather than remembered: the name in the draft is the
+/// new one by the time [`save`] is asked.
+fn old_file_name(dir: &Path, id: &str) -> Option<String> {
+    let path = path_for(dir, id)?;
+    let source = fs::read_to_string(path).ok()?;
+    parse(id, &source, false).map(|theme| theme.name)
 }
 
 pub fn delete(dir: &Path, id: &str) -> Result<(), String> {
@@ -459,5 +496,73 @@ mod tests {
             original,
             "the shipped file was written over"
         );
+    }
+
+    /// **A renamed theme renames its file**, where the app is the one that
+    /// named it: `brownie.toml` saying `name = "Bay Brown"` is a directory
+    /// nobody can read.
+    #[test]
+    fn renaming_a_theme_renames_the_file_the_app_named() {
+        let dir = scratch("rename");
+        let made = save(
+            &dir,
+            &Theme {
+                id: String::new(),
+                name: "Brownie".into(),
+                text: "#111111".into(),
+                background: "#eeeeee".into(),
+                accent: None,
+                link: None,
+                selection_area: None,
+                selection_text: None,
+                recolor: true,
+                built_in: false,
+            },
+        )
+        .expect("saved");
+        assert_eq!(made.id, "brownie");
+
+        let renamed = save(
+            &dir,
+            &Theme {
+                name: "Bay Brown".into(),
+                ..made
+            },
+        )
+        .expect("saved again");
+        assert_eq!(renamed.id, "bay-brown", "the id follows the name");
+        assert!(dir.join("bay-brown.toml").exists());
+        assert!(!dir.join("brownie.toml").exists(), "and the old file is gone");
+        let listed = load_all(&dir);
+        assert_eq!(
+            listed.iter().filter(|theme| !theme.built_in).count(),
+            1,
+            "one theme, not two: {listed:?}",
+        );
+    }
+
+    /// And a file somebody named themselves keeps its name, whatever the theme
+    /// inside it comes to be called. The same rule that stops this app
+    /// reverting a built-in edited in place: it does not own that file.
+    #[test]
+    fn renaming_leaves_a_hand_written_file_where_it_is() {
+        let dir = scratch("rename-hand");
+        hand_written(&dir, "My Theme.toml", "My Theme");
+        let mine = load_all(&dir)
+            .into_iter()
+            .find(|theme| theme.id == "My Theme")
+            .expect("listed");
+
+        let saved = save(
+            &dir,
+            &Theme {
+                name: "Something Else".into(),
+                ..mine
+            },
+        )
+        .expect("saved");
+        assert_eq!(saved.id, "My Theme", "the file keeps the name its author gave it");
+        assert!(dir.join("My Theme.toml").exists());
+        assert!(!dir.join("something-else.toml").exists());
     }
 }

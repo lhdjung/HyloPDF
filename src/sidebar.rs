@@ -630,7 +630,17 @@ fn Thumb(
                     // A widget laid out at 0×0 is a blank window with nothing
                     // to say why, which is what `display: block` costs to
                     // avoid. See `page.rs`.
-                    style: "display: block; width: {width}px; height: {height}px;",
+                    //
+                    // **And `pointer-events: none`, which is the whole of why
+                    // a thumbnail could be clicked at all.** A press does land
+                    // on a widget — that is how a sweep over a page begins —
+                    // but Blitz never turns one into a click, so the button
+                    // around the picture heard nothing and only the number
+                    // under it answered: a target eighteen pixels tall in a
+                    // row of three hundred. Made transparent to the pointer,
+                    // the press lands on `.thumb-picture` and the click
+                    // reaches the button, which is the whole row.
+                    style: "display: block; pointer-events: none; width: {width}px; height: {height}px;",
                 }
             }
             span { class: "thumb-number", "{number}" }

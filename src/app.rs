@@ -420,10 +420,21 @@ const NOTICE_LASTS: std::time::Duration = std::time::Duration::from_millis(4200)
 /// than a marker. See [`crate::render::Note`].
 const NOTE_EDGE: f64 = 14.0;
 
-/// How far down the window the peek handle stays once it is down. The app's
-/// own 110px: the handle sits lower in full screen and the hand has to travel
-/// to reach it, so it must not go away while it is being reached for.
-const PEEK_KEEP: f64 = 110.0;
+/// How far down the window the pointer counts as reaching for the toolbar.
+///
+/// **The handle's own band and everything above it, not the window's edge.**
+/// It was the top eight pixels — the strip macOS slides its own title bar and
+/// traffic lights over the moment a pointer arrives there, which put the one
+/// control that gives the toolbar back under the one thing the system puts in
+/// front of it. The handle sits lower now (see `.peek-line`), so the reach
+/// runs from the edge down past the foot of it: wherever the pointer is in
+/// that band it is either on the handle or on its way to it.
+const PEEK_REACH: f64 = 130.0;
+
+/// And how far down it stays once it is down. It must be below [`PEEK_REACH`]
+/// with room to spare: a handle that goes away as the hand arrives is worse
+/// than one that was never offered.
+const PEEK_KEEP: f64 = 180.0;
 
 /// How long the page pill stays up after a scroll. `flashPill` in `main.ts`.
 const PILL_LASTS: std::time::Duration = std::time::Duration::from_millis(1100);
@@ -1116,6 +1127,15 @@ pub struct Viewer {
     /// A mark is a thing on a page, so the way to take it off is on the page —
     /// a × on a row in a panel behind a tab is reachable and is not findable.
     pub mark_open: Option<(usize, Rect, MarkKey, String)>,
+    /// Which colour field of the theme editor has its picker down, named by
+    /// the theme key it writes — `None` when none of them has.
+    ///
+    /// Here rather than in the component, and for [`Viewer::markup_at`]'s
+    /// reason: a popover has to close on Escape, and Escape reaches the root's
+    /// handler whenever the pointer has left the focus anywhere that is not a
+    /// field — which is what pressing the swatch to open the picker does. Six
+    /// fields, so it is *which* rather than whether.
+    pub picking: Option<&'static str>,
     /// Where the last press landed, in the page's own space, so that letting
     /// go without having swept anywhere can ask what is under it.
     pressed_on: Option<(usize, f64, f64)>,
@@ -1301,6 +1321,7 @@ impl Viewer {
             said_standing: false,
             markup_at: None,
             mark_open: None,
+            picking: None,
             pressed_on: None,
             sweep_from: None,
             pressed: None,
@@ -1639,10 +1660,10 @@ impl Viewer {
                 .and_then(|chords| chords.first())
                 .map(|chord| crate::keymap::shown(chord, crate::keymap::this_machine()));
             self.notice = match key {
-                Some(key) => format!("Toolbar hidden, {key} brings it back"),
+                Some(key) => format!("Toolbar hidden.\n{key} brings it back"),
                 // Unbound, which `keys.toml` can do: an empty list unbinds.
                 // Then the sentence that names a key would be naming none.
-                None => "Toolbar hidden".to_string(),
+                None => "Toolbar hidden.".to_string(),
             };
         }
         self.refit();
@@ -1733,11 +1754,26 @@ impl Viewer {
     }
 
     pub fn close_settings(&mut self) -> bool {
+        self.picking = None;
         if let Some(pane) = self.pane.take() {
             self.pane_last = pane;
             return true;
         }
         false
+    }
+
+    /// The colour picker under one of the theme editor's swatches, opened or
+    /// put away. Pressing the swatch that opened it closes it, which is what
+    /// every other popover in this app does.
+    pub fn toggle_picker(&mut self, field: &'static str) {
+        self.picking = (self.picking != Some(field)).then_some(field);
+    }
+
+    /// Take it down. `false` when it was not down, which is what lets Escape
+    /// go on to the next thing it means — see [`Viewer::close_markup`], which
+    /// is the same shape for the same reason.
+    pub fn close_picker(&mut self) -> bool {
+        self.picking.take().is_some()
     }
 
     pub fn show_pane(&mut self, pane: Pane) {
@@ -2390,6 +2426,7 @@ impl Viewer {
     /// Put the draft down and go back to what was on before it.
     pub fn cancel_theme(&mut self) {
         self.editing = None;
+        self.picking = None;
         self.reload_themes();
     }
 
@@ -3601,16 +3638,15 @@ impl Viewer {
     /// was the key the notice names, which is a sentence that has to be read
     /// and remembered.
     ///
-    /// In full screen the top of the window is not reliably ours — reaching
-    /// for it slides the system's own bars over that band — so the handle
-    /// answers from further down and sits below them, which is the app's
-    /// reasoning and its two numbers.
+    /// The handle sits below the band the system reserves for itself rather
+    /// than at the very top, in full screen and out of it alike — see
+    /// [`PEEK_REACH`] — so there is one reach here and not two.
     pub fn reach_for_toolbar(&mut self, y: f64) {
         if self.toolbar_up() || self.presenting {
             self.peek = false;
             return;
         }
-        let reach = if self.full_screen { 46.0 } else { 8.0 };
+        let reach = PEEK_REACH;
         if y <= reach {
             self.peek = true;
         } else if y > PEEK_KEEP {
@@ -3627,7 +3663,7 @@ impl Viewer {
         if self.toolbar_up() || self.presenting {
             return self.peek;
         }
-        let reach = if self.full_screen { 46.0 } else { 8.0 };
+        let reach = PEEK_REACH;
         (y <= reach) != self.peek && (y <= reach || y > PEEK_KEEP)
     }
 
@@ -4954,6 +4990,33 @@ pub fn give_keyboard_back(doc: &mut blitz_dom::BaseDocument) {
     doc.set_focus_to(wants);
 }
 
+/// The reader's own root element, kept from the moment it mounts so that
+/// anything inside the window can hand the keyboard back to it.
+///
+/// **A component cannot take the focus for itself**: `set_focus_to` panics
+/// from inside the document borrow every handler is already holding, which is
+/// the whole of why [`KEYBOARD`] exists and why the root asks for the focus in
+/// its own `onmounted` rather than anywhere else. So it keeps the handle it
+/// asked with, and a field leaving on Escape spawns the same two lines against
+/// it.
+///
+/// Without this there was no way for Escape in a field to mean "out of this
+/// field" that did not also mean "out of this window": the key reached the
+/// root's handler and closed Settings from under somebody who was correcting
+/// six hexadecimal digits.
+pub type RootFocus = Signal<Option<std::rc::Rc<MountedData>>>;
+
+/// Hand the keyboard back to the reader's root. See [`RootFocus`].
+pub fn leave_field(root: RootFocus) {
+    let Some(node) = root.peek().clone() else {
+        return;
+    };
+    let task = node.set_focus(true);
+    spawn(async move {
+        let _ = task.await;
+    });
+}
+
 /// The whole window.
 ///
 #[component]
@@ -4970,6 +5033,10 @@ pub fn Reader(
     asking: Option<String>,
 ) -> Element {
     crate::stats::add(&crate::stats::RENDERS, 1);
+    // The root's own handle on itself, for everything below that has to give
+    // the keyboard back to it. Provided here so that the Settings window and
+    // the fields in it can reach it. See [`RootFocus`].
+    let mut root_focus: RootFocus = use_context_provider(|| Signal::new(None));
     // The viewport, taken from the window rather than from the element:
     // `get_client_rect` panics inside the document borrow every handler
     // already holds. The chrome above and below is a number this file knows,
@@ -5951,6 +6018,9 @@ pub fn Reader(
             // every key arrives here.
             onmounted: move |event| {
                 let node = event.data();
+                // And kept, for everything that has to give the keyboard back
+                // to it later. See [`RootFocus`].
+                root_focus.set(Some(node.clone()));
                 let task = node.set_focus(true);
                 spawn(async move {
                     let _ = task.await;
@@ -7234,10 +7304,13 @@ pub fn Reader(
             if !toolbar_on && !presenting && peeking {
                 div { class: "peek-line",
                     button {
-                        class: if full_screen { "toolbar-peek clear" } else { "toolbar-peek" },
+                        class: "toolbar-peek",
                         onclick: move |_| viewer.write().toggle_toolbar(),
                         Icon { name: "down", stroke: ink.clone() }
-                        "Show toolbar"
+                        // Two lines, like the notice above it: "Show toolbar"
+                        // on one line beside an icon is a wide, low box that
+                        // reads as a strip of chrome rather than as a button.
+                        "Show\ntoolbar"
                     }
                 }
             }
@@ -7264,15 +7337,12 @@ pub fn Reader(
             // why it outlives the toolbar. Presenting is the case where
             // nothing is on screen at all.
             if !presenting && !notice.is_empty() {
-                // Over the document and centred near its lower edge. Two
-                // elements rather than one because centring is the outer row's:
-                // a flex row does it with no transform, and a transform is not
-                // something to lean on in Blitz.
-                // …and with the bar away it goes to the corner the bar's own
-                // right-hand group was in. The message that says the toolbar
-                // is hidden is the one this state is full of, and it was
-                // being answered at the far end of the window from the menu
-                // it was asked from. See `.notice-line.tucked`.
+                // Over the document, in the top right corner — under the
+                // toolbar when there is one and up in its place when there is
+                // not, which is the whole of what `tucked` changes. Two
+                // elements rather than one because the placing is the outer
+                // row's: a flex row does it with no transform, and a transform
+                // is not something to lean on in Blitz. See `.notice-line`.
                 div { class: if toolbar_on { "notice-line" } else { "notice-line tucked" },
                     div { class: "notice", "{notice}" }
                 }
@@ -8399,6 +8469,14 @@ fn perform(
             // …and the one a mark clicked on puts up, which is the same kind
             // of thing in the same place. See [`Viewer::mark_open`].
             if viewer.write().close_mark() {
+                return;
+            }
+            // The theme editor's colour picker, which is the same kind of
+            // thing one line further in: a popover inside the Settings window,
+            // so Escape means it before it means the window around it. The
+            // fields below it answer Escape themselves — see
+            // `prefs::typing_is_not_a_shortcut` — and never reach here.
+            if viewer.write().close_picker() {
                 return;
             }
             // Settings next, and above everything below it: it is a window

@@ -736,7 +736,13 @@ fn what_the_app_says_over_a_page_is_said_here_too() {
     // button that is always there.
     reader.point_to(640.0, 3.0);
     reader.settle();
-    assert_eq!(one(&reader, ".toolbar-peek"), want("peek"), "the way back");
+    // The same words; the line they are broken over is this app's own, and the
+    // fixture records what the retired app *said* rather than how it wrapped.
+    assert_eq!(
+        one(&reader, ".toolbar-peek").replace('\n', " "),
+        want("peek"),
+        "the way back",
+    );
 
     // The pill is what a scroll puts up, and it says the same "n of m" the
     // toolbar does. The app's was taken at the top of the document; this one

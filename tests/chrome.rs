@@ -566,6 +566,59 @@ fn reaching_for_the_top_edge_gives_the_toolbar_back() {
     assert!(reader.state().toolbar, "and the bar is back");
 }
 
+/// **One keystroke, one place.** ⌘+ put its "171%" over the foot of the page
+/// with the toolbar up and in the top right corner without it, so the same key
+/// answered in two places depending on a setting. The corner is the one it
+/// belongs in: the zoom stepper is what lives there when the bar is up.
+#[test]
+fn the_notice_answers_in_the_same_corner_with_the_bar_and_without_it() {
+    let mut reader = book();
+    let height = reader.window().1 as f32;
+
+    reader.press_action(Action::ZoomIn);
+    let (_, top, _, _) = reader.box_of(".notice").expect("the zoom said so");
+    let right = reader.box_of(".notice").map(|(x, _, w, _)| x + w);
+    assert!(top < height / 2.0, "in the upper half of the window: {top}");
+
+    reader.press_chord("mod+t");
+    reader.press_action(Action::ZoomIn);
+    let (_, away_top, _, _) = reader.box_of(".notice").expect("and says so again");
+    assert_eq!(
+        reader.box_of(".notice").map(|(x, _, w, _)| x + w),
+        right,
+        "the same corner with the bar away",
+    );
+    assert!(
+        away_top < top,
+        "and up into the band the bar had: {away_top} against {top}",
+    );
+}
+
+/// **And the handle's own place is inside the reach**, which it was not: the
+/// band was the top eight pixels and the handle sits below the strip macOS
+/// slides its title bar over, so the pointer had to be put where the handle is
+/// not in order to see it — and moving to it was moving out of the band that
+/// offered it.
+#[test]
+fn the_handle_appears_where_the_handle_is() {
+    let mut reader = book();
+    reader.press_chord("mod+t");
+    reader.point_to(400.0, 3.0);
+    let (_, top, _, height) = reader
+        .box_of(".toolbar-peek")
+        .expect("the handle is on screen");
+
+    // Away, and then straight to where it was: the middle of the handle's own
+    // box is where a reader who has seen it once puts the pointer.
+    reader.point_to(400.0, 400.0);
+    assert!(reader.harness.query(".toolbar-peek").is_none(), "and away");
+    reader.point_to(400.0, top + height / 2.0);
+    assert!(
+        reader.harness.query(".toolbar-peek").is_some(),
+        "pointing at the handle brings the handle down",
+    );
+}
+
 /// It stays while it is being reached for — the hand has to travel to it —
 /// and goes when the pointer is plainly somewhere else.
 #[test]

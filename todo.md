@@ -14,30 +14,31 @@
 3. **⌘P's notice lands after focus has left** for the program that prints, so it
    is easy to miss.
 
+Short note: Dark Forest text color used to be #f7e0a2
+
 
 ## New issues
 
-*(4–11 done. What each came to is in the commit and in `AGENTS.md`.)*
+*(4–6 done. What each came to is in the commit and in the code.)*
 
-4. ~~The app doesn't currently have a scrollbar.~~ Drawn in `app.rs` and
-   `styles.rs`: 12px hard against the window's edge, the theme's `--faint` and
-   `--muted` under the hand, a thumb with a 34px floor so a 400-page book still
-   has something to catch. A press on the track jumps; a press on the thumb
-   drags.
-5. ~~"x of y" overlaid on the page.~~ It rides the scrollbar's thumb now, to
-   its left.
-6. ~~"Show page count while scrolling" should be off by default.~~ It is, and
-   the count still appears for as long as the bar is being dragged.
-7. ~~The "Toolbar hidden […]" message is at the foot of the page.~~ With the
-   bar away every notice goes to the top right, under where the bar's own
-   right-hand group was.
-8. ~~"Show toolbar" to the same place.~~ Done.
-9. ~~The recents carry a redundant icon and cut off hard.~~ The second icon is
-   gone from the Open menu's shelf, and both shelves fade their last 20px the
-   way the document's name in the toolbar does.
-10. ~~"New window" opens a tab in full screen.~~ Automatic tabbing is off, so
-    ⌘N is always a window; "New tab" is its own item under Open… and its own
-    (unbound, rebindable) action.
-11. ~~Can't jump between tabs.~~ ⌘1–⌘9 choose one, on macOS. Actual size and
-    fit page move to ⌥⌘1 and ⌥⌘2 there and keep ⌘1/⌘2 elsewhere. ⌘W closes the
-    current tab — it had been bound to nothing at all on a Mac.
+4. ~~"Show toolbar" and the "Toolbar hidden […]" message should swap places.~~
+   The notice takes the top of the window and the handle sits below it, on the
+   line the toolbar itself occupies — clear of the strip macOS slides its title
+   bar over. The reach that brings the handle down covers the handle's own box
+   now, not just the top eight pixels.
+5. ~~Split "Toolbar hidden […]" into two lines, and a full stop for the comma.~~
+   Done, and "Show toolbar" is two lines to match.
+6. ~~The theme editor's colour picker is forty swatches and nothing else.~~ A
+   saturation/value square and a hue strip above them, after QRnew's: markers
+   drawn as background layers, press and drag on both, the swatches kept as a
+   shortcut.
+
+And three things that fell out of those:
+
+- Escape is a ladder in the theme editor — the field, then the picker, then the
+  window — rather than closing the window from under somebody correcting six
+  digits.
+- Every notice goes to the top right corner now, with the toolbar and without
+  it, so ⌘+ answers in one place rather than two.
+- `ColorField` writes the draft itself, which took six duplicated handlers out
+  of the editor.

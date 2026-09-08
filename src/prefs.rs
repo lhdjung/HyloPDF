@@ -613,8 +613,9 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             label: "Text",
             note: "The colour the words are printed in.".to_string(),
             ColorField {
+                viewer,
+                field: "text",
                 value: hex(shown.text),
-                onchange: move |value| viewer.write().draft_set("text", value),
                 onsubmit: done,
             }
         }
@@ -622,8 +623,9 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             label: "Background",
             note: "The colour of the paper behind them.".to_string(),
             ColorField {
+                viewer,
+                field: "background",
                 value: hex(shown.background),
-                onchange: move |value| viewer.write().draft_set("background", value),
                 onsubmit: done,
             }
         }
@@ -631,8 +633,9 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             label: "Accent",
             note: "The current page, the ring around whatever has the keyboard, and anything else that needs to stand out.".to_string(),
             ColorField {
+                viewer,
+                field: "accent",
                 value: hex(shown.accent),
-                onchange: move |value| viewer.write().draft_set("accent", value),
                 onsubmit: done,
             }
         }
@@ -640,8 +643,9 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             label: "Links",
             note: "Links in the document take this colour, wherever the page is recoloured.".to_string(),
             ColorField {
+                viewer,
+                field: "link",
                 value: hex(shown.link),
-                onchange: move |value| viewer.write().draft_set("link", value),
                 onsubmit: done,
             }
         }
@@ -649,8 +653,9 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             label: "Selection area",
             note: "The colour behind text you have selected. Left alone it follows the accent.".to_string(),
             ColorField {
+                viewer,
+                field: "selection_area",
                 value: hex(shown.selection_area),
-                onchange: move |value| viewer.write().draft_set("selection_area", value),
                 onsubmit: done,
             }
         }
@@ -658,8 +663,9 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             label: "Selected text",
             note: "The words inside that area. Left alone they take the opposite of it.".to_string(),
             ColorField {
+                viewer,
+                field: "selection_text",
                 value: hex(shown.selection_text),
-                onchange: move |value| viewer.write().draft_set("selection_text", value),
                 onsubmit: done,
             }
         }
@@ -709,14 +715,22 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
 /// A key with a modifier is let through, deliberately, so that ⌘A, ⌘C, ⌘V and
 /// ⌘Z still mean what they mean in a field — and so that ⌘, still closes
 /// Settings from inside one.
-fn typing_is_not_a_shortcut(event: &KeyboardEvent) {
-    // **Escape is not typing, and is the way out of the window the field is
-    // in.** Stopped here it reached nothing at all, so a reader who had
-    // clicked into the theme's name — or into either field of the Sign window
-    // — had no key that closed what they were looking at. `Action::Dismiss`
-    // is what answers it, outward in the order the reader arrived; the
-    // stepper says the same thing by handling Escape itself.
+fn typing_is_not_a_shortcut(event: &KeyboardEvent, root: crate::app::RootFocus) {
+    // **Escape leaves the field, and that is all it does here.** It used to be
+    // let straight through, on the reasoning that Escape is the way out of the
+    // window the field is in — which it is, once there is nothing nearer to
+    // leave. A field is nearer. Typed into one it reached the root's handler
+    // and closed the window, so thinking better of six hexadecimal digits took
+    // the whole theme editor with it.
+    //
+    // So the keyboard goes back to the reader instead, which is what makes the
+    // *next* Escape mean the picker and the one after it mean the window —
+    // `Action::Dismiss` outward in the order the reader arrived at them, with
+    // the field as its innermost step. The stepper says the same thing by
+    // handling Escape itself.
     if event.key() == Key::Escape {
+        event.stop_propagation();
+        crate::app::leave_field(root);
         return;
     }
     let modified = event.modifiers().meta() || event.modifiers().ctrl() || event.modifiers().alt();
@@ -736,6 +750,7 @@ pub(crate) fn TextField(
     onchange: EventHandler<String>,
     #[props(default)] onsubmit: Option<EventHandler<()>>,
 ) -> Element {
+    let root: crate::app::RootFocus = use_context();
     rsx! {
         input {
             class: "text-field",
@@ -746,7 +761,7 @@ pub(crate) fn TextField(
                 if finished(&event, onsubmit.as_ref()) {
                     return;
                 }
-                typing_is_not_a_shortcut(&event);
+                typing_is_not_a_shortcut(&event, root);
             },
         }
     }
@@ -767,16 +782,13 @@ fn finished(event: &KeyboardEvent, onsubmit: Option<&EventHandler<()>>) -> bool 
     true
 }
 
-/// The colours the picker offers, in the order they are laid out: eight
-/// greys, then ten hues in four steps each from pale to deep.
+/// The colours the picker keeps ready to hand, in the order they are laid out:
+/// eight greys, then ten hues in four steps each from pale to deep.
 ///
-/// **A grid of colours somebody can point at**, because the field beside it
-/// asks for six hexadecimal digits and that is a question most readers cannot
-/// answer — the app had the system's own colour picker through
-/// `<input type="color">` and Blitz has no such input, so the way in has to be
-/// drawn here. Forty is enough to find something close and few enough to see
-/// at once; the field is still there for anyone who knows exactly what they
-/// want.
+/// **A shortcut, not the picker.** Forty colours is enough to land on something
+/// close in one press, and the square and the strip above them are how any
+/// other colour is reached. It used to be the whole of the way in, which made
+/// every colour outside the forty a question of six hexadecimal digits.
 const SWATCHES: &[&str] = &[
     "#ffffff", "#f2f3f5", "#d9dce1", "#b4b9c1", "#868d99", "#575d68", "#2f3237", "#000000",
     "#fde2e2", "#f2a2a2", "#d64545", "#8f2020", "#fdeada", "#f4bc80", "#d97a1c", "#8c4a0a",
@@ -784,6 +796,127 @@ const SWATCHES: &[&str] = &[
     "#daf1ee", "#8fd3cb", "#2f9c8e", "#175c53", "#dcecfa", "#9ec9ee", "#2f7fc4", "#174d7a",
     "#e2e2f7", "#a9a9e4", "#5a5ac0", "#333376", "#f2dcf3", "#d9a4dd", "#a44eb0", "#6b2f72",
 ];
+
+/// The saturation/value square and the hue strip, in CSS pixels.
+///
+/// Numbers rather than a measurement, because the measurement is not
+/// available: a pointer's position has to become a fraction of the box, and
+/// the box cannot be measured from inside an event handler. So the size is
+/// written here and nowhere else — inlined into the element's own `style`,
+/// exactly as the Sign window's pad is, because a box sized in the stylesheet
+/// and read in Rust is two numbers that have to agree and a handler that is
+/// wrong by their difference. Border-box sizes, which is what
+/// `element_coordinates` measures against. The width is the swatch grid's
+/// own: eight of 22 with 4 between them.
+const SQUARE_W: f64 = 204.0;
+const SQUARE_H: f64 = 116.0;
+const STRIP_H: f64 = 18.0;
+
+/// The three `background` lists that draw one position marker.
+///
+/// Kept together because they are only correct together: the images, their
+/// positions and their sizes are three parallel lists, and one layer is the
+/// same index in each.
+struct Marker {
+    image: String,
+    position: String,
+    size: String,
+}
+
+/// A marker on the square or the strip, as three stacked background layers —
+/// a dark outline, a white ring inside it, and the picked colour in the
+/// middle, so that it reads on a white corner and a black one alike.
+///
+/// **Background layers rather than child elements**, and that is the one
+/// non-obvious decision here: a child on top of the square is what the pointer
+/// hits, and Blitz measures element coordinates against the node that was hit
+/// — so the square's arithmetic would be reading offsets from the marker.
+///
+/// **Not a `radial-gradient`.** Blitz resolves a radial gradient's centre in
+/// CSS pixels and adds it to a rectangle already in device pixels, so on a 2×
+/// display the ring lands at half the offset. `background-position` and
+/// `background-size` are both scaled before use, and `linear-gradient(c, c)`
+/// is a flat fill, so a marker built from those is drawn where it was put at
+/// any scale.
+///
+/// The centre is held half a marker inside the box: a layer is clipped to its
+/// element, so an unclamped marker on a fully black or fully saturated colour
+/// would be a sliver against the edge — which is exactly when somebody is
+/// looking for it.
+fn marker(x: f64, y: f64, width: f64, height: f64, fill: crate::palette::Rgb) -> Marker {
+    /// Half the outermost square, which is how far in the centre is held.
+    const REACH: f64 = 8.0;
+
+    let x = x.clamp(REACH, width - REACH);
+    let y = y.clamp(REACH, height - REACH);
+    let fill = crate::palette::hex(fill);
+    let corner = |inset: f64| format!("{:.1}px {:.1}px", x - inset, y - inset);
+
+    Marker {
+        image: format!(
+            "linear-gradient({fill}, {fill}), \
+             linear-gradient(#ffffff, #ffffff), \
+             linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55))"
+        ),
+        position: format!("{}, {}, {}", corner(4.0), corner(6.0), corner(REACH)),
+        size: "8px 8px, 12px 12px, 16px 16px".to_string(),
+    }
+}
+
+/// A colour as the picker holds it: hue in degrees, the rest on 0…1.
+#[derive(Clone, Copy, PartialEq)]
+struct Hsv {
+    hue: f64,
+    saturation: f64,
+    value: f64,
+}
+
+fn to_hsv(rgb: crate::palette::Rgb) -> Hsv {
+    let (r, g, b) = (
+        f64::from(rgb[0]) / 255.0,
+        f64::from(rgb[1]) / 255.0,
+        f64::from(rgb[2]) / 255.0,
+    );
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let span = max - min;
+    let hue = if span == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / span) % 6.0)
+    } else if max == g {
+        60.0 * ((b - r) / span + 2.0)
+    } else {
+        60.0 * ((r - g) / span + 4.0)
+    };
+    Hsv {
+        hue: if hue < 0.0 { hue + 360.0 } else { hue },
+        saturation: if max == 0.0 { 0.0 } else { span / max },
+        value: max,
+    }
+}
+
+fn from_hsv(hsv: Hsv) -> crate::palette::Rgb {
+    let Hsv {
+        hue,
+        saturation,
+        value,
+    } = hsv;
+    let sector = hue.rem_euclid(360.0) / 60.0;
+    let span = value * saturation;
+    let middle = span * (1.0 - (sector % 2.0 - 1.0).abs());
+    let base = value - span;
+    let (r, g, b) = match sector as u32 {
+        0 => (span, middle, 0.0),
+        1 => (middle, span, 0.0),
+        2 => (0.0, span, middle),
+        3 => (0.0, middle, span),
+        4 => (middle, 0.0, span),
+        _ => (span, 0.0, middle),
+    };
+    let channel = |part: f64| ((part + base) * 255.0).round().clamp(0.0, 255.0) as u8;
+    [channel(r), channel(g), channel(b)]
+}
 
 /// A colour: what it looks like, the six digits that say so, and a grid of
 /// colours to point at instead.
@@ -803,21 +936,92 @@ const SWATCHES: &[&str] = &[
 /// the file.
 #[component]
 fn ColorField(
+    viewer: Signal<Viewer>,
+    /// The theme file's own name for this colour, which is both what a change
+    /// is written to and which picker is open. See [`Viewer::draft_set`] and
+    /// [`Viewer::picking`].
+    field: &'static str,
     value: String,
-    onchange: EventHandler<String>,
     #[props(default)] onsubmit: Option<EventHandler<()>>,
 ) -> Element {
+    let root: crate::app::RootFocus = use_context();
+    let open = viewer.read().picking == Some(field);
+    let mut change = move |hex: String| viewer.write().draft_set(field, hex);
     // What is in the box while it is being typed in, and nothing when it is
     // not: the same shape as the stepper's, one field along, and for the same
     // reason — Blitz's `set_text` moves no caret, so a value written back
     // under the caret puts it at the front.
     let mut typed = use_signal(|| None::<String>);
-    let mut picking = use_signal(|| false);
     let showing = typed.read().clone().unwrap_or_else(|| value.clone());
     let unreadable = crate::palette::read_colour(&showing).is_none();
     // Leaving the field, whether by Enter or by pressing elsewhere: what is
     // readable is kept, and what is not is dropped for what the theme has.
     let mut settle = move || typed.set(None);
+
+    // **Where the square and the strip are pointed, which is not simply read
+    // off the colour.** The round trip through hue, saturation and value is
+    // lossy exactly where a picker is used — a grey has no hue, black has
+    // neither hue nor saturation — so a square dragged into its own left edge
+    // would snap the strip to red and strand whoever was dragging it.
+    //
+    // So the picker remembers what it last wrote, and that stands wherever the
+    // colour cannot say. A colour arriving from anywhere else — the hex field,
+    // a swatch, another theme opened into the same fields — is told apart by
+    // not being what the remembered one would produce, and is read afresh.
+    let picked = crate::palette::read_colour(&value).unwrap_or([0, 0, 0]);
+    let mut kept = use_signal(|| to_hsv(picked));
+    let hsv = if from_hsv(*kept.peek()) == picked {
+        *kept.peek()
+    } else {
+        to_hsv(picked)
+    };
+    // A press takes hold and a release lets go; `peek` rather than a read,
+    // because a drag must not re-render the window on every move.
+    let mut dragging = use_signal(|| false);
+
+    let mut apply = move |next: Hsv| {
+        kept.set(next);
+        typed.set(None);
+        change(crate::palette::hex(from_hsv(next)));
+    };
+    let mut pick_square = move |event: MouseEvent| {
+        let on = event.element_coordinates();
+        apply(Hsv {
+            saturation: (on.x / SQUARE_W).clamp(0.0, 1.0),
+            value: 1.0 - (on.y / SQUARE_H).clamp(0.0, 1.0),
+            ..hsv
+        });
+    };
+    let mut pick_strip = move |event: MouseEvent| {
+        let on = event.element_coordinates();
+        apply(Hsv {
+            hue: (on.x / SQUARE_W).clamp(0.0, 1.0) * 360.0,
+            ..hsv
+        });
+    };
+
+    let square_mark = marker(
+        hsv.saturation * SQUARE_W,
+        (1.0 - hsv.value) * SQUARE_H,
+        SQUARE_W,
+        SQUARE_H,
+        picked,
+    );
+    // The hue itself, at full saturation and value: what the square washes
+    // white and black over, and what the strip's own marker is filled with.
+    let pure = from_hsv(Hsv {
+        hue: hsv.hue,
+        saturation: 1.0,
+        value: 1.0,
+    });
+    let strip_mark = marker(
+        hsv.hue / 360.0 * SQUARE_W,
+        STRIP_H / 2.0,
+        SQUARE_W,
+        STRIP_H,
+        pure,
+    );
+    let pure = crate::palette::hex(pure);
 
     rsx! {
         span { class: "color-field",
@@ -825,10 +1029,7 @@ fn ColorField(
                 class: "color-swatch",
                 "aria-label": "Choose a colour",
                 style: "background: {value};",
-                onclick: move |_| {
-                    let open = *picking.read();
-                    picking.set(!open);
-                },
+                onclick: move |_| viewer.write().toggle_picker(field),
             }
             input {
                 class: if unreadable { "text-field color-hex unreadable" } else { "text-field color-hex" },
@@ -850,34 +1051,95 @@ fn ColorField(
                             }
                         }
                         // What was typed and is not a colour goes, and the
-                        // key carries on to the window — see
+                        // key stops here: leaving the field is what Escape
+                        // means while the caret is in one. The picker below is
+                        // the next Escape's business — see
                         // `typing_is_not_a_shortcut`.
-                        Key::Escape => settle(),
-                        _ => typing_is_not_a_shortcut(&event),
+                        Key::Escape => {
+                            settle();
+                            typing_is_not_a_shortcut(&event, root);
+                        }
+                        _ => typing_is_not_a_shortcut(&event, root),
                     }
                 },
                 onblur: move |_| settle(),
                 oninput: move |event| {
                     let text = event.value();
                     if let Some(read) = crate::palette::read_colour(&text) {
-                        onchange.call(crate::palette::hex(read));
+                        change(crate::palette::hex(read));
                     }
                     typed.set(Some(text));
                 },
             }
-            if *picking.read() {
-                div { class: "color-picker", role: "listbox", "aria-label": "Colours",
-                    for swatch in SWATCHES.iter().copied() {
-                        button {
-                            key: "{swatch}",
-                            class: if swatch.eq_ignore_ascii_case(&value) { "color-choice on" } else { "color-choice" },
-                            "aria-label": "{swatch}",
-                            style: "background: {swatch};",
-                            onclick: move |_| {
-                                typed.set(None);
-                                picking.set(false);
-                                onchange.call(swatch.to_string());
-                            },
+            if open {
+                div { class: "color-picker",
+                    // **Four background layers**, which is what a saturation/
+                    // value square is with no `<canvas>` to draw one in: the
+                    // marker, black washed up from the foot, white washed in
+                    // from the left, and the hue itself as a gradient from one
+                    // colour to the same colour — a flat fill, written that way
+                    // so every layer is an image and the three lists line up
+                    // entry for entry.
+                    div {
+                        class: "color-square",
+                        "data-square": "true",
+                        style: "width: {SQUARE_W}px; height: {SQUARE_H}px; \
+                            background-image: {square_mark.image}, \
+                            linear-gradient(to top, #000000, rgba(0,0,0,0)), \
+                            linear-gradient(to right, #ffffff, rgba(255,255,255,0)), \
+                            linear-gradient({pure}, {pure}); \
+                            background-position: {square_mark.position}, 0px 0px, 0px 0px, 0px 0px; \
+                            background-size: {square_mark.size}, auto, auto, auto; \
+                            background-repeat: no-repeat;",
+                        onmousedown: move |event: MouseEvent| {
+                            event.stop_propagation();
+                            dragging.set(true);
+                            pick_square(event);
+                        },
+                        onmousemove: move |event: MouseEvent| {
+                            if *dragging.peek() {
+                                pick_square(event);
+                            }
+                        },
+                        onmouseup: move |_| dragging.set(false),
+                        onmouseleave: move |_| dragging.set(false),
+                    }
+                    div {
+                        class: "color-strip",
+                        "data-strip": "true",
+                        style: "width: {SQUARE_W}px; height: {STRIP_H}px; \
+                            background-image: {strip_mark.image}, \
+                            linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000); \
+                            background-position: {strip_mark.position}, 0px 0px; \
+                            background-size: {strip_mark.size}, auto; \
+                            background-repeat: no-repeat;",
+                        onmousedown: move |event: MouseEvent| {
+                            event.stop_propagation();
+                            dragging.set(true);
+                            pick_strip(event);
+                        },
+                        onmousemove: move |event: MouseEvent| {
+                            if *dragging.peek() {
+                                pick_strip(event);
+                            }
+                        },
+                        onmouseup: move |_| dragging.set(false),
+                        onmouseleave: move |_| dragging.set(false),
+                    }
+                    div { class: "color-grid", role: "listbox", "aria-label": "Colours",
+                        for swatch in SWATCHES.iter().copied() {
+                            button {
+                                key: "{swatch}",
+                                class: if swatch.eq_ignore_ascii_case(&value) { "color-choice on" } else { "color-choice" },
+                                "aria-label": "{swatch}",
+                                style: "background: {swatch};",
+                                onclick: move |_| {
+                                    viewer.write().close_picker();
+                                    if let Some(rgb) = crate::palette::read_colour(swatch) {
+                                        apply(to_hsv(rgb));
+                                    }
+                                },
+                            }
                         }
                     }
                 }

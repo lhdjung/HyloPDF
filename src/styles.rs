@@ -1160,63 +1160,76 @@ body { margin: 0;
    under it. This was a 30px row of the flex column, which cost the document
    that much whether or not there was anything to say and left the last thing
    said — usually a zoom percentage — along the bottom edge of the window for
-   the rest of the session.
+   the rest of the session. It takes no clicks, so a message over a page does
+   not swallow a press on the page.
 
-   The row is what centres the pill: `left: 50%` and a `translateX(-50%)` is
-   how the app does it, and a flex row that fills the width does the same with
-   no transform to trust. It takes no clicks, so a message over the foot of a
-   page does not swallow a press on the page. */
+   **Under the toolbar's right-hand end, always.** It was centred over the foot
+   of the page with the bar up and tucked into the top right corner without it,
+   so ⌘+ put the same "171%" in two different places depending on a setting.
+   The corner is the one the number belongs in: the zoom stepper is what lives
+   there when the bar is up, so the readout appears where its own control would
+   be rather than over the line somebody is reading. It is also not the pill's
+   corner — that rides the scrollbar at the foot — and two rounded chips in one
+   corner, one saying "171%" and one saying "84 of 400", is the one arrangement
+   worse than either.
+
+   Placed by a row rather than by `left: 50%` and a transform, which is how the
+   app did it and is not something to lean on in Blitz. 55px is the toolbar and
+   its hairline (`TOOLBAR` + `HAIRLINE` in `app.rs`) and eight of gap. */
 .notice-line {
-  position: absolute; left: 0; right: 0; bottom: 20px; z-index: 45;
-  display: flex; align-items: center; justify-content: center;
+  position: absolute; left: 0; right: 0; top: 55px; z-index: 45;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 16px;
   pointer-events: none;
 }
-/* **With the toolbar away, it answers where it was asked.** The bar is put
-   down from a menu at the top right, and the sentence saying so appeared at
-   the far corner of the window, over the foot of the page — read late if it
-   was read at all. So while there is no bar, the notice takes the corner the
-   bar's own right-hand group had, under the line the toolbar occupied and
-   clear of the handle that gives it back. */
+/* With the bar away there is nothing above it, so it comes up to the band the
+   bar occupied — above the handle that gives the bar back, which is hard
+   against nothing for a reason of its own. See `.peek-line`. */
 .notice-line.tucked {
-  top: 48px; bottom: auto; justify-content: flex-end; padding-right: 16px;
+  top: 8px;
 }
 /* A shadow, because this is the one thing in the reader that floats over the
    document with nothing behind it — `.notice` in the app carries one, and a
    pill with a hairline and no shadow reads as a shape drawn on the page
    rather than as something laid over it. `gap` is for the tick beside "Saved". */
+/* `pre-line` because one notice is two sentences and reads better as two
+   lines — "Toolbar hidden." and the key that brings it back. Every other
+   notice is one line and is unaffected. */
 .notice {
   display: flex; align-items: center; gap: 8px;
+  white-space: pre-line; text-align: center;
   max-width: 70%; padding: 9px 16px; border-radius: 999px;
   background: var(--surface); border: 1px solid var(--line);
   box-shadow: 0 6px 20px rgba(0,0,0,0.16);
   color: var(--text);
 }
 
-/* The handle that gives the toolbar back, centred along the top edge by a row
-   rather than by `left: 50%` and a transform — `.notice-line`'s reason again.
-   It is in the DOM only while it is being reached for (see
-   `Viewer::reach_for_toolbar`), which is what the app's `.visible` class does
-   with a transform it can animate and this cannot.
+/* The handle that gives the toolbar back, placed by a row rather than by
+   `left: 50%` and a transform — `.notice-line`'s reason again. It is in the
+   DOM only while it is being reached for (see `Viewer::reach_for_toolbar`),
+   which is what the app's `.visible` class does with a transform it can
+   animate and this cannot.
 
-   In full screen it sits clear of the system's own bars, which slide down
-   over exactly this band when the pointer reaches for it. */
-/* To the right rather than the middle, which is where the switch that put the
-   bar away is and where the notice about it now goes: everything the reader
-   has to do with a missing toolbar is in one corner. */
+   To the right rather than the middle, which is where the switch that put the
+   bar away is and where the notice about it goes: everything the reader has
+   to do with a missing toolbar is in one corner. */
+/* **Clear of the top edge, always.** It hung from the edge itself, which is
+   where macOS drops the title bar and the traffic lights the moment a pointer
+   goes up there — over the one control that gives the toolbar back. It sits
+   below the notice now, on the line the toolbar itself occupied, and is a
+   floating chip rather than a tab hanging off nothing. The 74px clears a
+   two-line notice at `top: 8px`. */
 .peek-line {
-  position: absolute; left: 0; right: 0; top: 0; z-index: 30;
+  position: absolute; left: 0; right: 0; top: 74px; z-index: 30;
   display: flex; align-items: flex-start; justify-content: flex-end;
   padding-right: 16px;
 }
 .toolbar-peek {
   display: flex; align-items: center; gap: 6px;
-  padding: 5px 13px 7px; border: 1px solid var(--line); border-top: 0;
-  border-radius: 0 0 11px 11px;
+  white-space: pre-line; text-align: left;
+  padding: 6px 13px; border: 1px solid var(--line); border-radius: 11px;
   background: var(--surface); box-shadow: 0 6px 18px rgba(0,0,0,0.16);
   color: var(--muted); font-size: 13.5px;
-}
-.toolbar-peek.clear {
-  margin-top: 38px; border-top: 1px solid var(--line); border-radius: 11px;
 }
 
 /* **The page pill**: where the reader is, said in the middle of the lower
@@ -1530,14 +1543,33 @@ body { margin: 0;
    typed, wearing this, and Enter or leaving the field puts the theme's own
    colour back. Nothing here corrects anybody mid-word. */
 .color-hex.unreadable { border-color: var(--negative); }
-/* Eight across, which is the grey row: the hues below it are four steps each,
-   so two hues to a row and the pale ones line up down the left. */
+/* The picker: a saturation/value square, a hue strip and the forty swatches,
+   in a column. It was the swatches alone, which made every colour outside the
+   forty a question of six hexadecimal digits — Blitz has no
+   `<input type="color">`, so the spectrum has to be drawn here.
+
+   Their two sizes are not here: they are written in `prefs.rs` and inlined
+   into the elements, because a pointer's position has to become a fraction of
+   a box that cannot be measured from inside a handler, and one number is
+   safer than two that have to agree. `background-origin` and `background-clip`
+   so that the layers line up with what the pointer is measured against, which
+   is the border box. */
 .color-picker {
   position: absolute; top: 32px; left: 0; z-index: 5;
-  display: grid; grid-template-columns: repeat(8, 22px); gap: 4px;
+  display: flex; flex-direction: column; gap: 8px;
   padding: 8px; border-radius: 10px;
   background: var(--surface); border: 1px solid var(--line);
 }
+.color-square, .color-strip {
+  border: 1px solid var(--line);
+  background-origin: border-box; background-clip: border-box;
+  cursor: crosshair;
+}
+.color-square { border-radius: 8px; }
+.color-strip { border-radius: 9px; }
+/* Eight across, which is the grey row: the hues below it are four steps each,
+   so two hues to a row and the pale ones line up down the left. */
+.color-grid { display: grid; grid-template-columns: repeat(8, 22px); gap: 4px; }
 .color-choice {
   width: 22px; height: 22px; padding: 0; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--line);

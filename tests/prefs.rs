@@ -455,7 +455,10 @@ fn naming_a_new_theme_leaves_one_theme_in_the_list() {
     reader.click(".text-field");
     reader.type_text("Brownie");
     // Out of the window, which leaves the draft being worn: the Theme menu in
-    // the bar is where the pile showed.
+    // the bar is where the pile showed. Twice, because Escape leaves the field
+    // before it leaves the window — see
+    // `escape_leaves_the_field_then_the_picker_then_the_window`.
+    reader.press("Escape");
     reader.press("Escape");
     reader.click(".chip.theme");
     assert_eq!(
@@ -580,5 +583,94 @@ fn enter_saves_the_theme_and_closes_the_window() {
     assert!(
         named.iter().any(|name| name.ends_with('!')),
         "the theme that was written is in the list: {named:?}",
+    );
+}
+
+/// **The square is how every other colour is reached.** The forty swatches are
+/// a shortcut; without a spectrum behind them, any colour outside the grid was
+/// a question of six hexadecimal digits — and Blitz has no
+/// `<input type="color">` to ask it with.
+///
+/// The corners are what this checks, because they are the only points whose
+/// answer does not depend on where the strip is: saturation runs out down the
+/// left-hand edge and value runs out along the foot, so the near corner is
+/// black and the one above it is white whatever hue is in use. The far corner
+/// is the hue at full strength, which is where the strip comes in.
+#[test]
+fn the_square_reaches_the_colours_the_swatches_do_not() {
+    fn channels(hex: &str) -> (u8, u8, u8) {
+        let at = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).expect("six digits: {hex}");
+        (at(1), at(3), at(5))
+    }
+    fn click_in(reader: &mut Reader, selector: &str, at: (f32, f32)) {
+        let (x, y, width, height) = reader.box_of(selector).expect("it is on screen");
+        reader.click_at(x + width * at.0, y + height * at.1);
+    }
+
+    let mut reader = book();
+    editing(&mut reader);
+    reader.click_nth(".color-swatch", 0);
+    assert!(
+        reader.harness.query(".color-square").is_some(),
+        "the square is down with the picker",
+    );
+
+    click_in(&mut reader, ".color-square", (0.01, 0.99));
+    let (r, g, b) = channels(&reader.field(".color-hex"));
+    assert!(r < 10 && g < 10 && b < 10, "the foot is black: {r} {g} {b}");
+
+    click_in(&mut reader, ".color-square", (0.01, 0.01));
+    let (r, g, b) = channels(&reader.field(".color-hex"));
+    assert!(
+        r > 245 && g > 245 && b > 245,
+        "and straight up from it is white: {r} {g} {b}",
+    );
+
+    // Half way along the strip is cyan, and the far corner of the square is
+    // whatever the strip says at full strength.
+    click_in(&mut reader, ".color-strip", (0.5, 0.5));
+    click_in(&mut reader, ".color-square", (0.99, 0.01));
+    let (r, g, b) = channels(&reader.field(".color-hex"));
+    assert!(
+        r < 10 && g > 240 && b > 240,
+        "the hue the strip was pointed at, at full strength: {r} {g} {b}",
+    );
+}
+
+/// **Escape is a ladder, and the window is its last rung.** A field is nearer
+/// than the picker under it and the picker is nearer than the window around
+/// them, so thinking better of six hexadecimal digits took the whole theme
+/// editor with it — the key went straight past both to `Action::Dismiss`.
+#[test]
+fn escape_leaves_the_field_then_the_picker_then_the_window() {
+    let mut reader = book();
+    editing(&mut reader);
+
+    // From inside a field: the caret is the innermost thing there is.
+    reader.click_nth(".color-hex", 0);
+    reader.press("Escape");
+    assert!(
+        reader.harness.query(".window-pane").is_some(),
+        "the editor is still up",
+    );
+
+    // Then the picker, which Escape reaches once no field holds the keyboard.
+    reader.click_nth(".color-swatch", 0);
+    assert!(reader.harness.query(".color-picker").is_some(), "the picker is down");
+    reader.press("Escape");
+    assert!(
+        reader.harness.query(".color-picker").is_none(),
+        "and Escape puts it away",
+    );
+    assert!(
+        reader.harness.query(".window-pane").is_some(),
+        "without taking the window with it",
+    );
+
+    // And then the window.
+    reader.press("Escape");
+    assert!(
+        reader.harness.query(".window-pane").is_none(),
+        "which is what Escape means with nothing nearer to leave",
     );
 }

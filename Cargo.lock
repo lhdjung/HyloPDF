@@ -1822,7 +1822,6 @@ name = "hylopdf"
 version = "0.1.0"
 dependencies = [
  "anyrender",
- "anyrender_vello",
  "anyrender_vello_cpu",
  "blitz-dom",
  "blitz-html",
@@ -1849,7 +1848,6 @@ dependencies = [
  "unicode-normalization",
  "webbrowser",
  "wgpu",
- "wgpu_context",
  "winit",
 ]
 

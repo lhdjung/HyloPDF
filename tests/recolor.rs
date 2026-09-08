@@ -11,7 +11,6 @@
 //! no window and no document, which is also the shape the Phase 2 harness
 //! wants.
 
-use anyrender_vello::wgpu;
 use hylopdf::gpu;
 use hylopdf::recolor::{duotone_cpu, recolor_cpu, Region, Rgb, REGIONS, SHADER};
 

@@ -60,8 +60,6 @@ blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71f
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
 blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e", default-features = false, features = ["custom-widget"] }
 anyrender = "0.13"
-anyrender_vello = "0.14"
-wgpu_context = "0.9"
 wgpu = "29"
 peniko = "0.6"
 winit = "=0.31.0-beta.2"
@@ -121,6 +119,10 @@ strip = true
 
 [dev-dependencies]
 pollster = "1.0.1"
+# `tests/recolor.rs` drives the recolouring shader on a real device. An
+# integration test does not inherit the library's dependencies, so it is named
+# again here.
+wgpu = "29"
 # `tests/keys.rs` reads the app's own `keys.toml` and checks the table against
 # it, which is the drift no type checker can see. An integration test does not
 # inherit the library's dependencies, so it is named again here.

@@ -4,15 +4,11 @@
 //! it from outside. That works and it says nothing about *which* of the three
 //! places that hold a page is holding it, which is the fault that let the
 //! thumbnail column leak for as long as it did. So the counters live in the
-//! code that allocates, and `--measure` prints them beside the process's own
-//! resident size.
+//! code that allocates, and `tests/cost.rs` reads them beside the process's
+//! own footprint.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Every call to `Widget::paint`, whether it drew anything or not. Under the
-/// old canvas API this was the frame counter and it never stopped climbing;
-/// the number to look at now is whether it stops.
-pub static PAINTS: AtomicU64 = AtomicU64::new(0);
 /// Pages drawn by the renderer, which should settle at one per mounted page.
 pub static DRAWN: AtomicU64 = AtomicU64::new(0);
 /// Every render of the reader's own component.
@@ -23,12 +19,6 @@ pub static DRAWN: AtomicU64 = AtomicU64::new(0);
 /// the app, and nothing on screen to say so. `tests/cost.rs` asserts it
 /// settles; see the note there.
 pub static RENDERS: AtomicU64 = AtomicU64::new(0);
-/// Pages recoloured without being drawn again — what a theme change costs.
-pub static REPAINTED: AtomicU64 = AtomicU64::new(0);
-/// Microseconds, because a page is single milliseconds and an average of
-/// milliseconds in integers is a lie.
-pub static DREW_US: AtomicU64 = AtomicU64::new(0);
-pub static UPLOADED_US: AtomicU64 = AtomicU64::new(0);
 /// Bytes of texture alive on the GPU, source and painted copies both.
 pub static RESIDENT: AtomicU64 = AtomicU64::new(0);
 /// Pages in the document right now — the mounting window, observed rather
@@ -61,36 +51,6 @@ pub fn set(counter: &AtomicU64, to: u64) {
 
 pub fn get(counter: &AtomicU64) -> u64 {
     counter.load(Ordering::Relaxed)
-}
-
-/// This process's resident size in megabytes.
-///
-/// Read from the platform rather than counted, because the counters above are
-/// exactly the numbers that cannot see a leak they do not know about — which
-/// is how the thumbnail column stayed invisible in the app's own accounting.
-///
-/// **This is not what a Mac means by memory, and Phase 1's table was wrong to
-/// stop here.** A GPU buffer is charged to the process's *physical footprint*
-/// and only partly to its resident size, so a renderer that allocates 173MB of
-/// scratch on the device moves this number by single megabytes. See
-/// [`footprint_mb`], which is what Activity Monitor shows and what the kernel
-/// charges against a memory limit.
-pub fn rss_mb() -> f64 {
-    #[cfg(unix)]
-    {
-        let pid = std::process::id();
-        if let Ok(out) = std::process::Command::new("ps")
-            .args(["-o", "rss=", "-p", &pid.to_string()])
-            .output()
-        {
-            if let Ok(text) = String::from_utf8(out.stdout) {
-                if let Ok(kb) = text.trim().parse::<f64>() {
-                    return kb / 1024.0;
-                }
-            }
-        }
-    }
-    0.0
 }
 
 /// This process's physical footprint and its peak, in megabytes.
@@ -198,26 +158,6 @@ fn read_status(status: &str) -> (f64, f64) {
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn footprint_mb() -> (f64, f64) {
     (0.0, 0.0)
-}
-
-/// One line describing where the session stands.
-pub fn line() -> String {
-    let drawn = get(&DRAWN).max(1);
-    let footprint = footprint_mb();
-    format!(
-        "{} mounted | {} drawn, {:.1}ms each, {:.1}ms uploading | {} recoloured in place | \
-         {:.0}MB of texture | {:.0}MB resident, {:.0}MB footprint (peak {:.0}MB) | {} paints",
-        get(&MOUNTED),
-        get(&DRAWN),
-        get(&DREW_US) as f64 / 1000.0 / drawn as f64,
-        get(&UPLOADED_US) as f64 / 1000.0 / drawn as f64,
-        get(&REPAINTED),
-        get(&RESIDENT) as f64 / 1e6,
-        rss_mb(),
-        footprint.0,
-        footprint.1,
-        get(&PAINTS),
-    )
 }
 
 #[cfg(test)]

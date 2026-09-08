@@ -16,9 +16,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Instant;
 
 use anyrender::{PaintScene, RenderContext, Scene};
 use blitz_dom::node::ComputedStyles;
@@ -336,7 +334,6 @@ impl PageWidget {
         }
 
         let mut pixels: Option<Vec<u8>> = None;
-        let began = Instant::now();
         let outcome = self
             .document
             .render(self.index, width, height, self.view, &mut |bitmap| {
@@ -363,7 +360,6 @@ impl PageWidget {
                 );
                 pixels = Some(rgba);
             });
-        let drew = began.elapsed();
         if let Err(err) = outcome {
             eprintln!("{err}");
             return None;
@@ -374,7 +370,6 @@ impl PageWidget {
             stats::sub(&stats::RESIDENT, (old.width as u64) * (old.height as u64) * 4);
         }
         stats::add(&stats::DRAWN, 1);
-        stats::add(&stats::DREW_US, drew.as_micros() as u64);
         stats::add(&stats::RESIDENT, (width as u64) * (height as u64) * 4);
         let pixels = Arc::new(pixels);
         self.software = Some(Software {
@@ -468,18 +463,13 @@ impl PageWidget {
         // The page is drawn into the renderer's own buffer and uploaded from
         // it, inside the borrow — which is why the upload happens in a closure
         // rather than after the call. See `render::Bitmap`.
-        let began = Instant::now();
         let mut uploaded_texture = None;
-        let mut uploaded = std::time::Duration::ZERO;
         let outcome = self
             .document
             .render(self.index, width, height, self.view, &mut |bitmap| {
-                let began = Instant::now();
                 uploaded_texture =
                     recolorer.upload(ctx, &bitmap, &theme, &self.links(&theme, width, height));
-                uploaded = began.elapsed();
             });
-        let drew = began.elapsed() - uploaded;
         if let Err(err) = outcome {
             eprintln!("{err}");
             return None;
@@ -494,8 +484,6 @@ impl PageWidget {
         }
 
         stats::add(&stats::DRAWN, 1);
-        stats::add(&stats::DREW_US, drew.as_micros() as u64);
-        stats::add(&stats::UPLOADED_US, uploaded.as_micros() as u64);
         stats::add(&stats::RESIDENT, texture.bytes());
         self.texture = Some(texture);
         if !selection.is_empty() {
@@ -565,7 +553,6 @@ impl Widget for PageWidget {
         height: u32,
         _scale: f64,
     ) -> Scene {
-        stats::PAINTS.fetch_add(1, Ordering::Relaxed);
 
         let mut scene = Scene::new();
         if self.device.is_none() && self.software.is_none() {

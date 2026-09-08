@@ -3,65 +3,34 @@
 //! ```text
 //! cargo run --release                          # what you were reading last
 //! cargo run --release -- ~/paper.pdf           # a document of your own
-//! cargo run --release -- --measure 60          # read it, and say what it cost
 //! ```
 //!
 //! With no path it opens whatever was open when the reader was last put down,
 //! and **the start screen** when there was nothing. `reopen_last_document =
 //! false` in `settings.toml` turns the restoring off, which is the app's own
-//! setting — and so does `--measure` or `--quit`, which additionally open
-//! `tests/fixtures/book.pdf` from the app beside it, because every number in
-//! `PROGRESS.md` was taken on that fixture and a measuring run that quietly
-//! used a different document, or none, would not be comparable with any of
-//! them. A path that is not there is said so plainly rather than being handed
-//! to pdfium, which reports it as a Debug-printed `io::Error`.
-//!
-//! `--measure N` scrolls through N screenfuls on its own and prints what the
-//! session cost — pages drawn, milliseconds each, texture resident, RSS. That
-//! is the table the whole proposal is judged on, and it is in the binary
-//! rather than in a script so that the numbers come from the thing being
-//! measured.
+//! setting. A path that is not there is said so plainly rather than being
+//! handed to pdfium, which reports it as a Debug-printed `io::Error`.
 
 use std::rc::Rc;
 use std::sync::Arc;
 
 use hylopdf::app::Config;
-use hylopdf::app::CHROME;
 use hylopdf::emit::{AppHandle, Emitter, Exchange};
 use hylopdf::session::Session;
-use hylopdf::shell::{Remote, Shell};
+use hylopdf::shell::Shell;
 use hylopdf::windows::Desk;
-use hylopdf::{render, stats, store, watch};
+use hylopdf::{render, store, watch};
 
 fn main() {
     // Before a document exists, which is what this has to be. See its own
     // comment, and `body` in `styles.rs` for what it buys.
     hylopdf::styles::use_variable_fonts();
     let args: Vec<String> = std::env::args().collect();
-    let flag = |name: &str, fallback: usize| -> usize {
-        args.iter()
-            .position(|arg| arg == name)
-            .and_then(|at| args.get(at + 1))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(fallback)
-    };
-    let measure = flag("--measure", 0);
-    // `--quit N` ends the run after N seconds, which is how the floor — a
-    // window with one page in it and nobody touching it — gets measured.
-    let quit_after = flag("--quit", 0);
-    // The window's size is a flag because the floor is the number this whole
-    // experiment is judged against, and a GPU renderer's buffers scale with
-    // the surface: "how much of the floor is the window" is answerable only by
-    // asking for two of them.
     // **The window's size is the app's setting, not a number in this file.**
     // It was 1100×900 and never remembered, and that is most of what a reader
-    // comparing the two sees as "everything is too small": the app opens at
+    // comparing the two saw as "everything is too small": the app opens at
     // 1280×860 *maximized* (`settings.rs`), so its toolbar has room for the
-    // document's name and this one squeezed the name to three letters. The
-    // flags still win, because they are what a measuring run asks with — the
-    // floor is measured at two sizes on purpose — and a run that quietly
-    // adopted whatever size somebody had left the window at would not be
-    // comparable with the table in `PROGRESS.md`.
+    // document's name and this one squeezed the name to three letters.
     let remembered = hylopdf::settings::load(&hylopdf::config::config_dir());
     let setting = |key: &str, fallback: f64| -> f64 {
         remembered
@@ -69,25 +38,12 @@ fn main() {
             .and_then(|value| value.as_f64())
             .unwrap_or(fallback)
     };
-    let given = |name: &str| args.iter().any(|arg| arg == name);
-    let window_width = if given("--width") {
-        flag("--width", 1100) as f64
-    } else {
-        setting("window_width", 1280.0)
-    };
-    let window_height = if given("--height") {
-        flag("--height", 900) as f64
-    } else {
-        setting("window_height", 860.0)
-    };
-    // A measuring run is never maximized: the whole point of `--width` is to
-    // ask what the floor costs at a named size.
-    let window_maximized = !given("--width")
-        && !given("--height")
-        && remembered
-            .get("window_maximized")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(true);
+    let window_width = setting("window_width", 1280.0);
+    let window_height = setting("window_height", 860.0);
+    let window_maximized = remembered
+        .get("window_maximized")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
     // `--theme N` is a place in the theme list, and the list is fourteen long
     // rather than two now: it is read out of the app's own `themes/` files,
     // through the app's own loader. Absent means whatever the last run wore.
@@ -105,29 +61,13 @@ fn main() {
         theme,
         ..Config::here()
     };
-    // A document named on the command line, else what was open last, else the
-    // fixture. `reopening` is where the pruning and the setting are asked —
-    // see `store::reopening`: a document that has been moved or deleted would
+    // A document named on the command line, else what was open last.
+    // `reopening` is where the pruning and the setting are asked — see
+    // `store::reopening`: a document that has been moved or deleted would
     // otherwise be reopened, and fail, on every launch for ever.
-    //
-    // **A measuring run does not restore**, and that is the one rule worth
-    // stating. `--measure` and `--quit` exist to produce the table this whole
-    // proposal is judged on, and every number in it was taken on the 400-page
-    // fixture; a machine that had read something else would quietly measure
-    // that instead and the columns would stop being comparable. Naming a path
-    // still measures whatever is named, which is the deliberate version of the
-    // same thing.
-    let measuring = measure > 0 || quit_after > 0;
     // One reader at a time, and a second launch hands its document to the one
-    // that is running rather than becoming a second one. A measuring run is
-    // exempt: the numbers are taken by launching this binary repeatedly, and
-    // a run that quietly handed its work to a reader somebody left open would
-    // measure nothing and say it had. See `single.rs`.
-    let door = if measuring {
-        hylopdf::single::Claim::Alone
-    } else {
-        hylopdf::single::claim(&config.dir, named.as_deref())
-    };
+    // that is running rather than becoming a second one. See `single.rs`.
+    let door = hylopdf::single::claim(&config.dir, named.as_deref());
     if matches!(door, hylopdf::single::Claim::Second) {
         // Quietly and successfully: the document is on its way to a window
         // that already exists, which is what was asked for.
@@ -137,30 +77,16 @@ fn main() {
     // One path per window that was open, in the order the windows were made.
     // A document named on the command line is the launch window's and nothing
     // is restored beside it, which is what naming one means.
-    let session: Vec<String> = match (&named, measuring) {
-        (Some(path), _) => vec![path.clone()],
-        (None, true) => Vec::new(),
-        (None, false) => store::reopening_all(&config.dir),
+    let session: Vec<String> = match &named {
+        Some(path) => vec![path.clone()],
+        None => store::reopening_all(&config.dir),
     };
-    // **Nothing to open is now the start screen rather than the fixture.**
-    // It was the fixture because there was nowhere else for a window with
-    // nothing in it to go — a launch on a machine that had never read
-    // anything opened a 400-page test document nobody asked for, which is a
-    // strange first impression for a reader to make. A measuring run is the
-    // exception and keeps the fixture, for the reason it is exempt from the
-    // restore above: every number in `PROGRESS.md` was taken on it, and a
-    // measuring run of an empty window would measure nothing and say it had.
-    let fixture = || {
-        format!(
-            "{}/tests/fixtures/book.pdf",
-            env!("CARGO_MANIFEST_DIR")
-        )
-    };
-    let path = match (session.first(), measuring) {
-        (Some(path), _) => Some(path.clone()),
-        (None, true) => Some(fixture()),
-        (None, false) => None,
-    };
+    // **Nothing to open is the start screen.** It was a 400-page test
+    // document, because there was nowhere else for a window with nothing in
+    // it to go — a launch on a machine that had never read anything opened a
+    // fixture nobody asked for, which is a strange first impression for a
+    // reader to make.
+    let path = session.first().cloned();
 
     // Opened once here for the message below and then dropped: the window
     // opens it again through `Session::window`, which is the one path a
@@ -169,28 +95,21 @@ fn main() {
     // window exists to say it in.
     match path.as_deref().map(render::open) {
         Some(Ok(document)) => println!(
-            "reader: {} pages in {}, opened in {:.0}ms | {:.0}MB resident before any window",
+            "reader: {} pages in {}, opened in {:.0}ms",
             document.pages(),
             path.as_deref().unwrap_or_default(),
             document.opened_in(),
-            stats::rss_mb(),
         ),
-        None => println!(
-            "reader: nothing to open — the start screen | {:.0}MB resident before any window",
-            stats::rss_mb(),
-        ),
+        None => println!("reader: nothing to open — the start screen"),
         // A locked document is not a launch that failed: the window comes up
         // and asks. See `Session::window_on`.
         Some(Err(render::Refusal::Locked)) => println!(
-            "reader: {} is locked — the window will ask for the password | {:.0}MB resident before any window",
+            "reader: {} is locked — the window will ask for the password",
             path.as_deref().unwrap_or_default(),
-            stats::rss_mb(),
         ),
         Some(Err(err)) => {
             eprintln!("{err}");
-            // The one mistake worth a second sentence, because the documented
-            // invocation used to be `-- book.pdf` and the fixture is not in
-            // the directory cargo is run from.
+            // The one mistake worth a second sentence.
             let named_missing = named.is_some()
                 && path
                     .as_deref()
@@ -371,86 +290,24 @@ fn main() {
     #[cfg(target_os = "macos")]
     hylopdf::openfiles::install(windows.remote());
 
-    if measure > 0 {
-        drive(windows.remote(), measure, window_height - CHROME);
-    }
-    if quit_after > 0 {
-        let remote = windows.remote();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(quit_after as u64));
-            println!("idle: {}", stats::line());
-            remote.quit();
-        });
-    }
-
     event_loop.run_app(shell).unwrap();
     // How big the window was when the reader put it down, which is how big it
-    // comes back. Written here rather than as it changes for the reason above,
-    // and not at all for a measuring run, whose size came from a flag.
-    if !measuring {
-        if let Some((width, height, maximized)) =
-            *geometry.lock().unwrap_or_else(|e| e.into_inner())
-        {
-            let _ = hylopdf::settings::set_many(
-                &config.dir,
-                vec![
-                    ("window_width".into(), serde_json::json!(width)),
-                    ("window_height".into(), serde_json::json!(height)),
-                    ("window_maximized".into(), serde_json::json!(maximized)),
-                ],
-            );
-        }
+    // comes back. Written here rather than as it changes, for the reason above.
+    if let Some((width, height, maximized)) = *geometry.lock().unwrap_or_else(|e| e.into_inner()) {
+        let _ = hylopdf::settings::set_many(
+            &config.dir,
+            vec![
+                ("window_width".into(), serde_json::json!(width)),
+                ("window_height".into(), serde_json::json!(height)),
+                ("window_maximized".into(), serde_json::json!(maximized)),
+            ],
+        );
     }
     // The socket goes with the process it stood for.
-    if !measuring {
-        hylopdf::single::release(&config.dir);
-    }
+    hylopdf::single::release(&config.dir);
     // Where the reader got to, if the scribe is still holding it. Everything
     // else this reader remembers is written as it changes; a position is
     // written when the scrolling stops, and quitting is the one way to stop
     // scrolling that does not wait. See `store::flush`.
     store::flush();
-    println!("reader: {}", stats::line());
-}
-
-/// Read the document without anybody sitting in front of it.
-///
-/// A thread that sends the window made-up wheel events — the same ones winit
-/// would send if somebody were pushing a trackpad — one screenful at a time,
-/// with enough of a pause between them for the pages to actually be drawn.
-/// Nothing is taken from the machine: the events go into the window through
-/// the shell, not through the system, so this runs with the window behind
-/// whatever the reader is doing.
-fn drive(remote: Remote, screens: usize, screen: f64) {
-    use winit::dpi::PhysicalPosition;
-    use winit::event::{DeviceId, MouseScrollDelta, TouchPhase, WindowEvent};
-
-    std::thread::spawn(move || {
-        let pause = std::time::Duration::from_millis(120);
-        // Where the pointer is decides which element a wheel is aimed at, and
-        // nothing has moved it yet: the middle of the window is over the
-        // document.
-        std::thread::sleep(std::time::Duration::from_millis(600));
-        remote.inject(WindowEvent::PointerMoved {
-            device_id: None,
-            position: PhysicalPosition::new(550.0, 500.0),
-            primary: true,
-            source: winit::event::PointerSource::Mouse,
-        });
-        std::thread::sleep(pause);
-
-        for screenful in 1..=screens {
-            remote.inject(WindowEvent::MouseWheel {
-                device_id: None as Option<DeviceId>,
-                delta: MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, -(screen * 0.9))),
-                phase: TouchPhase::Moved,
-            });
-            std::thread::sleep(pause);
-            if screenful % 10 == 0 {
-                println!("measure: {screenful} screens | {}", stats::line());
-            }
-        }
-        println!("measure: done | {}", stats::line());
-        remote.quit();
-    });
 }

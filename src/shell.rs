@@ -144,15 +144,6 @@ struct FullScreen(WindowId, bool);
 /// Ask every window to close and the app to end.
 struct Quit;
 
-/// A window event, made up rather than received.
-///
-/// `View::handle_winit_event` is public, so a synthetic wheel or key can be
-/// handed to a window exactly as winit would have handed it over — no OS
-/// involvement, nothing taken from whoever is using the machine, and it works
-/// with the window in the background — which is what the retired frontend
-/// needed Playwright and a dev server for.
-pub struct Inject(pub WindowEvent);
-
 impl Windows {
     pub fn open(&self, spec: WindowSpec) {
         self.queue.borrow_mut().push(spec);
@@ -197,12 +188,6 @@ impl Remote {
     pub fn show(&self, label: &str) {
         self.proxy
             .send_event(BlitzShellEvent::embedder_event(Show(label.to_string())));
-    }
-
-    /// Hand a made-up window event to whichever window is in front.
-    pub fn inject(&self, event: WindowEvent) {
-        self.proxy
-            .send_event(BlitzShellEvent::embedder_event(Inject(event)));
     }
 
     pub fn quit(&self) {
@@ -1036,12 +1021,6 @@ impl ApplicationHandler for Shell {
                         view.window.set_fullscreen(
                             on.then_some(winit::monitor::Fullscreen::Borderless(None)),
                         );
-                    }
-                    continue;
-                }
-                if let Some(injected) = payload.downcast_ref::<Inject>() {
-                    if let Some(view) = self.inner.windows.values_mut().next() {
-                        view.handle_winit_event(injected.0.clone());
                     }
                     continue;
                 }

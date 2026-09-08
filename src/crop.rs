@@ -189,8 +189,8 @@ pub fn refine(left: f64, top: f64, right: f64, bottom: f64) -> Option<Crop> {
     // cost of being wrong is a reader who cannot see the top line.
     crop.x = crop.x.min(MAX);
     crop.y = crop.y.min(MAX);
-    crop.width = crop.width.max(1.0 - MAX - crop.x).min(1.0 - crop.x);
-    crop.height = crop.height.max(1.0 - MAX - crop.y).min(1.0 - crop.y);
+    crop.width = crop.width.clamp(1.0 - MAX - crop.x, 1.0 - crop.x);
+    crop.height = crop.height.clamp(1.0 - MAX - crop.y, 1.0 - crop.y);
 
     // Nothing worth doing, either because the page has no margins or because
     // what came back is too small to be a page of anything.

@@ -7,8 +7,8 @@
 //! chord both live in `keys.ts`, because the frontend is what turns a
 //! keystroke into a chord and would need the whole grammar anyway. Splitting
 //! it here would mean writing the same parser twice and finding out about the
-//! disagreement from a bug report — which is the drift `build.rs` and
-//! `tests/settings.test.mjs` exist to prevent elsewhere.
+//! disagreement from a bug report — which is the drift `build.rs` exists to
+//! prevent elsewhere.
 //!
 //! So an action HyloPDF has never heard of, or a key it cannot read, is
 //! carried across as written and reported by the frontend. Everything this

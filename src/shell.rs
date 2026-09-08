@@ -149,9 +149,8 @@ struct Quit;
 /// `View::handle_winit_event` is public, so a synthetic wheel or key can be
 /// handed to a window exactly as winit would have handed it over — no OS
 /// involvement, nothing taken from whoever is using the machine, and it works
-/// with the window in the background. That is the whole of what
-/// `scripts/ui-harness.mjs` does through Playwright today, and it is the seed
-/// of what replaces it: `--measure` scrolls a document by sending wheels.
+/// with the window in the background — which is what the retired frontend
+/// needed Playwright and a dev server for.
 pub struct Inject(pub WindowEvent);
 
 impl Windows {

@@ -1,17 +1,10 @@
-//! The app's icon set, as it is in `src/icons.ts`.
+//! The app's icon set.
 //!
-//! **The paths are copied and the wrapper is not.** `icons.ts` is a table of
-//! path data with one function around it that writes an `<svg>`; the table is
-//! the drawing and is carried over character for character, because two
-//! drawings of the same 24px grid that drift apart is exactly the kind of copy
-//! `AGENTS.md` warns about — and there is no way to mount this file the way
-//! `theme.rs` and `settings.rs` are mounted, because it is TypeScript.
-//! `tests/icons.rs` reads `src/icons.ts` and checks the two tables against
-//! each other, which is what keeps the copy honest.
-//!
-//! Only the icons this reader's chrome actually uses are here. Adding one is
-//! adding its row from `icons.ts`; the test will say if a row has moved on the
-//! other side.
+//! **The paths are the drawing.** They came over from the retired frontend's
+//! `icons.ts` character for character — two drawings of the same 24px grid
+//! that drift apart being exactly the kind of copy `AGENTS.md` warns about —
+//! and this is the only copy now. Only the icons this reader's chrome
+//! actually uses are here.
 
 /// The shapes of one icon, as the inside of an `<svg viewBox="0 0 24 24">`.
 ///

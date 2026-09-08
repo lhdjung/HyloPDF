@@ -1,17 +1,16 @@
-//! Spike 3: the recolouring ramp, ported to Rust and to WGSL.
+//! The recolouring ramp on the CPU, which is the reference the shader is held
+//! against.
 //!
-//! `themes.ts` recolours a page by mapping *lightness* onto the theme — a
-//! pixel's luma says where on the ramp between the theme's ink and its paper
-//! it belongs, and a pixel that has a colour of its own is put there with that
-//! colour intact. It does that in two ways that must agree: a chain of canvas
-//! blend modes, and a walk over the pixels. `recolor.test.mjs` holds the two
-//! to within one level out of 255.
+//! Recolouring maps *lightness* onto the theme — a pixel's luma says where on
+//! the ramp between the theme's ink and its paper it belongs, and a pixel that
+//! has a colour of its own is put there with that colour intact. The retired
+//! frontend did it two ways that had to agree: a chain of canvas blend modes,
+//! and a walk over the pixels. On the GPU there is one way and it is neither:
+//! a shader over the page texture at composite time.
 //!
-//! On the GPU there is only one way, and it is neither of those: a shader over
-//! the page texture at composite time. So the question this spike answers is
-//! whether the shader can be held to the same tolerance against the same
-//! reference — and the reference is `recolorByPixel`, ported here line for
-//! line, rounding included.
+//! So this is the walk over the pixels, ported from `recolorByPixel` line for
+//! line, rounding included, and `tests/recolor.rs` holds the shader to within
+//! one level out of 255 of it.
 //!
 //! Two details of the port are load-bearing, because they are where a faithful
 //! translation and an obvious one differ.
@@ -221,8 +220,8 @@ pub fn duotone_cpu(pixels: &mut [u8], width: u32, height: u32, regions: &[Region
         let ramp = Tables::new(region.ink, region.paper, false).ramp;
         let left = region.area[0].max(0.0).floor() as u32;
         let top = region.area[1].max(0.0).floor() as u32;
-        let right = region.area[2].max(0.0).ceil().min(width as f32) as u32;
-        let bottom = region.area[3].max(0.0).ceil().min(height as f32) as u32;
+        let right = region.area[2].ceil().clamp(0.0, width as f32) as u32;
+        let bottom = region.area[3].ceil().clamp(0.0, height as f32) as u32;
         for y in top..bottom.min(height) {
             let row = (y as usize) * (width as usize) * 4;
             for x in left..right.min(width) {

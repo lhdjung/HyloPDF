@@ -20,7 +20,7 @@
 //! the bridge's serialisation surviving in a build with no bridge. It fires
 //! when somebody saves a theme file.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
@@ -131,7 +131,7 @@ impl std::future::Future for Next {
 /// mailbox nobody is reading, and the window's `Post` holds a `Waker` into a
 /// virtual DOM that no longer exists.
 #[derive(Clone, Default)]
-pub struct Exchange(Arc<Mutex<Vec<(String, Post)>>>);
+pub struct Exchange(Arc<Mutex<BTreeMap<String, Post>>>);
 
 impl Exchange {
     pub fn new() -> Exchange {
@@ -141,13 +141,12 @@ impl Exchange {
     /// A window, and the mailbox it reads.
     pub fn join(&self, label: &str, post: Post) {
         let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        held.retain(|(known, _)| known != label);
-        held.push((label.to_string(), post));
+        held.insert(label.to_string(), post);
     }
 
     pub fn leave(&self, label: &str) {
         let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        held.retain(|(known, _)| known != label);
+        held.remove(label);
     }
 
     /// Deliver: to the window named, or to every window when none is.
@@ -155,12 +154,8 @@ impl Exchange {
         let boxes: Vec<Post> = {
             let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
             match news.target.as_deref() {
-                Some(target) => held
-                    .iter()
-                    .filter(|(label, _)| label == target)
-                    .map(|(_, post)| post.clone())
-                    .collect(),
-                None => held.iter().map(|(_, post)| post.clone()).collect(),
+                Some(target) => held.get(target).cloned().into_iter().collect(),
+                None => held.values().cloned().collect(),
             }
         };
         // Outside the lock, for the reason `Post::send` is: a waker can run a

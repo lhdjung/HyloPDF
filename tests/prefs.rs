@@ -586,6 +586,13 @@ fn enter_saves_the_theme_and_closes_the_window() {
     );
 }
 
+/// A press at a fraction of the way across a box, which is how the square and
+/// the strip are asked for a colour.
+fn click_in(reader: &mut Reader, selector: &str, at: (f32, f32)) {
+    let (x, y, width, height) = reader.box_of(selector).expect("it is on screen");
+    reader.click_at(x + width * at.0, y + height * at.1);
+}
+
 /// **The square is how every other colour is reached.** The forty swatches are
 /// a shortcut; without a spectrum behind them, any colour outside the grid was
 /// a question of six hexadecimal digits — and Blitz has no
@@ -602,11 +609,6 @@ fn the_square_reaches_the_colours_the_swatches_do_not() {
         let at = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).expect("six digits: {hex}");
         (at(1), at(3), at(5))
     }
-    fn click_in(reader: &mut Reader, selector: &str, at: (f32, f32)) {
-        let (x, y, width, height) = reader.box_of(selector).expect("it is on screen");
-        reader.click_at(x + width * at.0, y + height * at.1);
-    }
-
     let mut reader = book();
     editing(&mut reader);
     reader.click_nth(".color-swatch", 0);
@@ -672,5 +674,42 @@ fn escape_leaves_the_field_then_the_picker_then_the_window() {
     assert!(
         reader.harness.query(".window-pane").is_none(),
         "which is what Escape means with nothing nearer to leave",
+    );
+}
+
+/// **Each colour field's picker is pointed at its own colour.** The square and
+/// the strip remember a hue, because the round trip through HSV cannot — a
+/// grey has no hue to read back — and a picker that carried the last field's
+/// hue into the next one would put the marker somewhere the colour is not.
+/// Which bites exactly where a picker is nicest to have: nudging a colour a
+/// little is impossible when the square starts in the wrong place.
+///
+/// Here the fields are separate components, and a hue that is remembered is
+/// dropped the moment it stops producing the colour the field holds. The
+/// far corner of the square is the hue at full strength, so it is the one
+/// point that says which hue the picker is on.
+#[test]
+fn a_second_field_does_not_inherit_the_first_ones_hue() {
+    let mut reader = book();
+    editing(&mut reader);
+
+    // The first field is dragged to cyan and put away.
+    reader.click_nth(".color-swatch", 0);
+    click_in(&mut reader, ".color-strip", (0.5, 0.5));
+    reader.click_nth(".color-swatch", 0);
+
+    // The second is given a blue off the grid — index 30, `#2f7fc4` — which
+    // closes the picker, and then asked for that hue at full strength.
+    reader.click_nth(".color-swatch", 1);
+    reader.click_nth(".color-choice", 30);
+    reader.click_nth(".color-swatch", 1);
+    click_in(&mut reader, ".color-square", (0.99, 0.01));
+
+    let hex = reader.attribute_all(".color-hex", "value")[1].clone();
+    let at = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).expect("six digits");
+    let (r, g, b) = (at(1), at(3), at(5));
+    assert!(
+        r < 10 && (110..170).contains(&g) && b > 245,
+        "the blue this field holds, not the cyan the last one was left on: {hex}",
     );
 }

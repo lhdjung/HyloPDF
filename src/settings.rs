@@ -76,9 +76,13 @@ pub fn defaults() -> Settings {
     // went down — a document the reader closed themselves is one they have
     // finished with, and reopening it would be the app arguing.
     s.insert("reopen_last_document".into(), json!(true));
-    // On by default: a page count shown briefly while scrolling is how a
-    // reader with the toolbar hidden still knows where they are.
-    s.insert("show_page_pill".into(), json!(true));
+    // **Off by default**, which it was not. A page count that appears of its
+    // own accord over the middle of the page is a message covering the thing
+    // it is describing — and what it was there for is answered by the
+    // scrollbar, which says where the reader is without saying anything. It
+    // still appears while the bar is being dragged, whatever this says: see
+    // `Viewer::pill_shown`.
+    s.insert("show_page_pill".into(), json!(false));
     // Search. Where a match is looked for is a way of reading, not a property
     // of a document, so these outlive the find bar they are set from and the
     // session they were set in.

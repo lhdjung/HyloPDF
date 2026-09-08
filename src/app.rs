@@ -35,8 +35,9 @@
 //! `scroll` and `get_client_rect` panic with "RefCell already borrowed" rather
 //! than failing. So the scroll offset is a number in this file, the wheel
 //! moves it, and the pages are placed against it — which is what `viewer.ts`
-//! does in all but the last step. What is lost is the scrollbar and the
-//! platform's fling.
+//! does in all but the last step. What is lost is the platform's fling, and
+//! the scrollbar, which is drawn here instead: [`Viewer::bar_thumb`] and the
+//! `.scrollbar` in the block below.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -378,6 +379,12 @@ pub const CHROME: f64 = TOOLBAR + HAIRLINE;
 /// How far one press of an arrow moves the page.
 const LINE: f64 = 60.0;
 
+/// How wide the scrollbar is, and the shortest its thumb is allowed to be.
+/// The width is in `styles.rs` as well, and has to be: the bar is drawn by
+/// CSS and positioned by arithmetic — the page count sits to its left.
+pub const BAR: f64 = 12.0;
+const MIN_THUMB: f64 = 34.0;
+
 /// What a screen keeps of itself when a screen is scrolled, so a paragraph
 /// read across the join is not lost. `scrollByViewport` in `viewer.ts` is the
 /// same number. Half a screen is half of *this* rather than half the window,
@@ -640,6 +647,15 @@ pub enum Ask {
     /// there is no such thing as a window with nothing in it. See
     /// [`crate::windows::Desk::hand_over`].
     NewWindow,
+    /// A *tab* of the window in front, which is macOS's own idea and is
+    /// nothing anywhere else. It is asked for by name because the system will
+    /// otherwise do it uninvited — see `tabs.rs` and `shell.rs`'s
+    /// `can_create_surfaces` — and a reader who pressed ⌘N wanted a window.
+    NewTab,
+    /// The nth tab of this window's group, brought forward. One-based: ⌘1 is
+    /// the first. A window that is not in a tab group has one tab, so this
+    /// costs nothing where there are none.
+    SelectTab(usize),
     /// This window, closed. On the last window that ends the app, which is
     /// how most people quit it.
     Close,
@@ -984,6 +1000,10 @@ pub struct Viewer {
     /// the DOM for. `None` outside a drag, which is most of the time and is
     /// what root's `onmousemove` checks before touching the signal at all.
     resize_from: Option<(f64, f64)>,
+    /// The pointer's `client_y` and the offset the document was at when the
+    /// scrollbar's thumb was picked up. `None` outside a drag, exactly as
+    /// `resize_from` is, and checked in the same place for the same reason.
+    bar_from: Option<(f64, f64)>,
     pub tab: Tab,
     /// Which toolbar menu is down, if any. `None` almost always.
     ///
@@ -1263,6 +1283,7 @@ impl Viewer {
             borrowed_toolbar: false,
             sidebar_width: 252.0,
             resize_from: None,
+            bar_from: None,
             tab: Tab::Contents,
             menu: None,
             pane: None,
@@ -3638,8 +3659,14 @@ impl Viewer {
         }
     }
 
+    /// **A hand on the scrollbar always gets the count, setting or no.** The
+    /// setting is about scrolling — a message that appears of its own accord
+    /// while somebody reads — and dragging a thumb through four hundred pages
+    /// is the one gesture with nothing else on screen to say where it has
+    /// arrived. That is why the setting is off by default now: what it was
+    /// there for is answered by the bar.
     pub fn pill_shown(&self) -> bool {
-        self.pill_up
+        self.pill_up || self.dragging_bar()
     }
 
     /// What the pill says: the page, and how many there are. A document that
@@ -4763,6 +4790,84 @@ impl Viewer {
         self.store.remember(self.layout.anchor(self.scroll_top));
     }
 
+    /* --------------------------------------------------------- the scrollbar
+
+    The one piece of the platform's scrolling this reader had to build for
+    itself. `overflow: scroll` is not what moves this document — see the note
+    at the top of this file — so there is no scrollbar to inherit, and a
+    reader nine hundred pages into a book had nothing on screen saying so.
+
+    It is drawn over the document rather than beside it: a column that took
+    twelve pixels of layout would move the page off centre every time a
+    document became long enough to need one. */
+
+    /// The thumb: where it starts and how tall it is, in the viewer's own
+    /// pixels. `None` when the document fits, which is when there is nothing
+    /// to draw.
+    ///
+    /// The floor is the whole of what makes it usable in a long book: the
+    /// honest height for one page of four hundred is two pixels, which is not
+    /// something a pointer can catch.
+    pub fn bar_thumb(&self) -> Option<(f64, f64)> {
+        let room = self.layout.max_scroll();
+        let track = self.layout.viewport.height;
+        if room <= 0.5 || track <= MIN_THUMB {
+            return None;
+        }
+        let content = self.layout.content_height().max(1.0);
+        let thumb = (track * track / content).clamp(MIN_THUMB, track);
+        let top = (self.scroll_top / room) * (track - thumb);
+        Some((top.clamp(0.0, track - thumb), thumb))
+    }
+
+    /// The bar was pressed at this `client_y`.
+    ///
+    /// One handler for both gestures the bar has: on the thumb it is a drag,
+    /// anywhere else it is a jump — the thumb comes to the pointer and the
+    /// drag begins from there, which is what every scrollbar built since the
+    /// mouse wheel does and is one branch rather than two handlers.
+    pub fn press_bar(&mut self, client_y: f64) {
+        let Some((top, thumb)) = self.bar_thumb() else {
+            return;
+        };
+        let y = client_y - self.chrome();
+        if !(top..top + thumb).contains(&y) {
+            let track = self.layout.viewport.height - thumb;
+            let room = self.layout.max_scroll();
+            if track > 0.0 {
+                self.scroll_to((y - thumb / 2.0) / track * room);
+            }
+        }
+        self.bar_from = Some((client_y, self.scroll_top));
+    }
+
+    /// The pointer has moved to `client_y`. A no-op outside a drag, which is
+    /// what lets this hang off the root's `onmousemove` — `drag_sidebar`'s
+    /// reason, and the same guard.
+    pub fn drag_bar(&mut self, client_y: f64) {
+        let Some((from, was)) = self.bar_from else {
+            return;
+        };
+        let Some((_, thumb)) = self.bar_thumb() else {
+            return;
+        };
+        let track = self.layout.viewport.height - thumb;
+        if track <= 0.0 {
+            return;
+        }
+        self.scroll_to(was + (client_y - from) * self.layout.max_scroll() / track);
+    }
+
+    pub fn drop_bar(&mut self) {
+        self.bar_from = None;
+    }
+
+    /// Whether the reader is on the bar right now. The page count follows it
+    /// while they are, whatever the setting says — see [`Viewer::pill_shown`].
+    pub fn dragging_bar(&self) -> bool {
+        self.bar_from.is_some()
+    }
+
     pub fn page_target(&self, page: usize) -> f64 {
         self.layout.scroll_target(Anchor {
             page: page.clamp(1, self.pages().max(1)),
@@ -5001,6 +5106,23 @@ pub fn Reader(
                 // app's 1200ms one is a nicety rather than the behaviour.
                 Press::Wait(prefix) => viewer.write().pending = prefix,
                 Press::Nothing => viewer.write().pending.clear(),
+                // **The one action that asks which key was pressed.** ⌘1
+                // through ⌘9 are nine chords on one action — see
+                // `keymap.rs` — so the digit is read off the event here
+                // rather than being nine arms of `perform`.
+                Press::Act(Action::GoToTab) => {
+                    viewer.write().pending.clear();
+                    if let Some(at) = event
+                        .key()
+                        .to_string()
+                        .chars()
+                        .next()
+                        .and_then(|digit| digit.to_digit(10))
+                        .filter(|digit| *digit > 0)
+                    {
+                        frame.ask(Ask::SelectTab(at as usize));
+                    }
+                }
                 Press::Act(action) => {
                     viewer.write().pending.clear();
                     // **An action about a document does nothing when there is
@@ -5397,6 +5519,14 @@ pub fn Reader(
     let peeking = held.peeking();
     let pill_up = held.pill_shown();
     let pill_text = held.pill_text();
+    // The scrollbar's thumb, and where the page count goes beside it. `None`
+    // is a document that fits, which has neither. See [`Viewer::bar_thumb`].
+    let thumb = held.bar_thumb();
+    let on_bar = held.dragging_bar();
+    // In the root's space rather than the viewer's, because that is what the
+    // pill is positioned against: the chrome above it, then the middle of the
+    // thumb, less half a pill.
+    let pill_y = thumb.map(|(top, height)| held.chrome() + top + height / 2.0 - 15.0);
     // Whether this window has a document in it, which decides two things: what
     // the toolbar carries, and whether the body is the document or the start
     // screen. See [`Viewer::empty`].
@@ -5881,14 +6011,22 @@ pub fn Reader(
                 }
             },
             onmousemove: move |event| {
-                let (resizing, sweeping, drawing) = {
+                let (resizing, sweeping, drawing, on_bar) = {
                     let held = viewer.read();
                     (
                         held.resize_from.is_some(),
                         held.sweeping(),
                         held.signing.as_ref().is_some_and(|pad| pad.drawing),
+                        held.dragging_bar(),
                     )
                 };
+                // The scrollbar, for `drag_sidebar`'s reason: a drag that
+                // began on the thumb has to go on being a drag when the
+                // pointer leaves it, and only the root hears about that.
+                if on_bar {
+                    viewer.write().drag_bar(event.client_coordinates().y);
+                    return;
+                }
                 // **A hand signing a name leaves the pad**, which is why this
                 // is here and not on the pad. The point is taken in the pad's
                 // own space, and a handler cannot ask an element where it is,
@@ -5924,6 +6062,9 @@ pub fn Reader(
                     let held = viewer.read();
                     (held.resize_from.is_some(), held.sweeping())
                 };
+                if viewer.read().dragging_bar() {
+                    viewer.write().drop_bar();
+                }
                 viewer.write().draw_done();
                 if resizing {
                     viewer.write().finish_resize_sidebar();
@@ -6051,6 +6192,30 @@ pub fn Reader(
                                     span { class: "menu-label", "New window" }
                                     span { class: "menu-key", "{key_new_window}" }
                                 }
+                                // **And the other half of what ⌘N used to do
+                                // by accident.** macOS turns a new window
+                                // into a tab of its own accord while the app
+                                // is full screen, which is a good thing to be
+                                // able to ask for and a bad thing to be given
+                                // — so it is switched off (see `tabs.rs`) and
+                                // said here instead. macOS alone has tabs, so
+                                // the item is there alone.
+                                if cfg!(target_os = "macos") {
+                                    button {
+                                        class: "menu-item",
+                                        "data-item": "new-tab",
+                                        onclick: {
+                                            let frame = frame.clone();
+                                            move |_| {
+                                                viewer.write().close_menu();
+                                                frame.ask(Ask::NewTab);
+                                            }
+                                        },
+                                        span { class: "menu-tick", "" }
+                                        Icon { name: "window", stroke: ink.clone() }
+                                        span { class: "menu-label", "New tab" }
+                                    }
+                                }
                                 // And the shelf, which is the same list the
                                 // start screen shows. It is here for the reader
                                 // who has a document open: the start screen is
@@ -6085,11 +6250,18 @@ pub fn Reader(
                                             // carries, so the section reads as
                                             // a shelf rather than as four more
                                             // commands.
+                                            // …and *only* there. It carried a
+                                            // second one in the icon slot
+                                            // every other item uses, so a
+                                            // shelf row was drawn twice: a
+                                            // faint sheet of paper and a
+                                            // bright one beside it, saying
+                                            // the same thing about the same
+                                            // file.
                                             span { class: "menu-tick",
                                                 Icon { name: "document", stroke: crate::palette::hex(wearing.faint()) }
                                             }
-                                            Icon { name: "document", stroke: ink.clone() }
-                                    span { class: "menu-label", "{entry.title}" }
+                                            span { class: "menu-label", "{entry.title}" }
                                             span { class: "menu-key", "p. {entry.page}" }
                                         }
                                     }
@@ -7025,6 +7197,32 @@ pub fn Reader(
                         }
                     }
                 }
+                // **The scrollbar, drawn over the document and hard against
+                // the window's edge.** It is the last child of `.viewer` and
+                // carries a `z-index` for the hit-testing reason every other
+                // layer in this window does — without it the press goes to
+                // the page underneath and begins a sweep.
+                //
+                // No margin on its right, and that is the requirement rather
+                // than a detail: a pointer thrown at the edge of the screen
+                // stops at the edge, and a bar an inch short of it is a bar
+                // that has to be aimed at.
+                if let Some((thumb_top, thumb_height)) = thumb {
+                    div {
+                        class: "scrollbar",
+                        // Left to bubble on purpose: a press here is still a
+                        // press somewhere a menu is not, and the root is what
+                        // puts one away.
+                        onmousedown: move |event| {
+                            viewer.write().press_bar(event.client_coordinates().y);
+                        },
+                        div {
+                            class: if on_bar { "bar-thumb held" } else { "bar-thumb" },
+                            "data-thumb": "{thumb_top as i64}:{thumb_height as i64}",
+                            style: "top: {thumb_top}px; height: {thumb_height}px;",
+                        }
+                    }
+                }
             }
             }
             }
@@ -7046,8 +7244,19 @@ pub fn Reader(
             // Where the reader is, while they scroll with the toolbar away.
             // `#page-pill` in the app, and the same two conditions on it —
             // see [`Viewer::flash_pill`].
+            // **Beside the scrollbar, not over the middle of the page.** It
+            // was centred along the lower edge, which is the one place it is
+            // both hard to read and in the way of what it is describing. The
+            // bar is where the reader's eye already is while they are moving,
+            // and the pill rides its thumb; with no bar — a document that
+            // fits — there is nothing to ride, so it keeps to the corner.
             if pill_up && !presenting {
-                div { class: "pill-line",
+                div {
+                    class: "pill-line",
+                    style: match pill_y {
+                        Some(y) => format!("top: {y}px; bottom: auto;"),
+                        None => String::new(),
+                    },
                     div { class: "page-pill", "{pill_text}" }
                 }
             }
@@ -7059,7 +7268,12 @@ pub fn Reader(
                 // elements rather than one because centring is the outer row's:
                 // a flex row does it with no transform, and a transform is not
                 // something to lean on in Blitz.
-                div { class: "notice-line",
+                // …and with the bar away it goes to the corner the bar's own
+                // right-hand group was in. The message that says the toolbar
+                // is hidden is the one this state is full of, and it was
+                // being answered at the far end of the window from the menu
+                // it was asked from. See `.notice-line.tucked`.
+                div { class: if toolbar_on { "notice-line" } else { "notice-line tucked" },
                     div { class: "notice", "{notice}" }
                 }
             }
@@ -8093,6 +8307,9 @@ fn perform(
     }
 
     match action {
+        // Handled where the keystroke is, because which tab was asked for is
+        // the digit that was pressed. See the key handler in `Reader`.
+        Action::GoToTab => {}
         Action::ScrollDown => by(viewer, LINE),
         Action::ScrollUp => by(viewer, -LINE),
         Action::HalfScreenDown => by(viewer, (screen - OVERLAP) / 2.0),
@@ -8290,6 +8507,7 @@ fn perform(
         // a key, there being no `open-new-window` in `keys.ts` either.
         Action::Open => pick.ask(Opening::Here),
         Action::NewWindow => frame.ask(Ask::NewWindow),
+        Action::NewTab => frame.ask(Ask::NewTab),
         Action::CloseWindow => frame.ask(Ask::Close),
         Action::Quit => frame.ask(Ask::Quit),
         Action::Toolbar => viewer.write().toggle_toolbar(),

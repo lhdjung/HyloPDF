@@ -67,6 +67,9 @@ pub mod stats;
 pub mod steady;
 pub mod store;
 pub mod styles;
+/// Window tabs, which are macOS's alone. See the module's own comment.
+#[cfg(target_os = "macos")]
+pub mod tabs;
 pub mod windows;
 
 // The app's own, unchanged. See the module comment above.

@@ -7,6 +7,7 @@
 //! placed, badly coloured, unreachable, or computed against a window that had
 //! stopped being the window.
 
+use hylopdf::keymap::Action;
 use hylopdf::fixture;
 use hylopdf::harness::{Options, Reader};
 use hylopdf::theme;
@@ -49,7 +50,7 @@ fn margins(reader: &Reader) -> (f32, f32) {
 #[test]
 fn a_page_narrower_than_the_window_stands_in_the_middle_of_it() {
     let mut reader = book();
-    reader.press_chord("mod+2");
+    reader.press_action(Action::FitPage);
     let (left, right) = margins(&reader);
     assert!(left > 10.0, "there is ground either side of it: {left}");
     assert!((left - right).abs() <= 1.0, "{left} against {right}");
@@ -58,7 +59,7 @@ fn a_page_narrower_than_the_window_stands_in_the_middle_of_it() {
 #[test]
 fn a_page_wider_than_the_window_is_centred_and_can_be_reached() {
     let mut reader = book();
-    reader.press_chord("mod+1");
+    reader.press_action(Action::ActualSize);
     // Five steps of the app's own ladder — 110, 125, 150, 175, 200 — which is
     // one more than it was here until `ZOOMS` got the three rungs it had been
     // missing. See `ZOOM_LADDER` in `main.ts`.
@@ -84,7 +85,7 @@ fn a_page_wider_than_the_window_is_centred_and_can_be_reached() {
 
     // Zooming back out to something that fits puts it back in the middle
     // rather than leaving it where the pan left it.
-    reader.press_chord("mod+2");
+    reader.press_action(Action::FitPage);
     let (left, right) = margins(&reader);
     assert!((left - right).abs() <= 1.0, "{left} against {right}");
 }
@@ -123,7 +124,7 @@ fn a_window_that_changes_size_lays_the_document_out_again() {
     );
 
     // And a mode with something to centre is centred in the window it has.
-    reader.press_chord("mod+2");
+    reader.press_action(Action::FitPage);
     let (left, right) = margins(&reader);
     assert!(left > 10.0, "there is ground either side of it: {left}");
     assert!((left - right).abs() <= 1.0, "{left} against {right}");
@@ -138,7 +139,7 @@ fn the_document_is_centred_beside_an_open_panel() {
     // the panel with its far edge a pixel over the window.
     let mut reader = book();
     reader.press_chord("mod+b");
-    reader.press_chord("mod+2");
+    reader.press_action(Action::FitPage);
     let (left, right) = margins(&reader);
     assert!((left - right).abs() <= 1.0, "{left} against {right}");
 
@@ -584,10 +585,17 @@ fn the_handle_stays_until_the_pointer_is_well_away() {
 /// **And where you are, while you scroll without a bar to say so.**
 /// `#page-pill` in the app, under the same two conditions: only with the
 /// toolbar away, because with it up the same number is already on screen, and
-/// only if the reader wants it.
+/// only if the reader wants it — which is now something they have to say, the
+/// setting having been turned off. See the two tests below this one.
 #[test]
 fn the_page_pill_says_where_you_are_when_the_toolbar_is_away() {
-    let mut reader = book();
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            settings: vec![("show_page_pill".into(), serde_json::json!(true))],
+            ..Options::default()
+        },
+    );
     reader.wheel(1_200.0);
     assert!(
         reader.harness.query(".page-pill").is_none(),
@@ -607,19 +615,119 @@ fn the_page_pill_says_where_you_are_when_the_toolbar_is_away() {
     );
 }
 
-/// …and not at all when it has been turned off.
+/// …and not at all otherwise, which is the default now: a count that appears
+/// of its own accord over the middle of the page covers the thing it is
+/// describing, and the scrollbar says the same without saying anything.
 #[test]
-fn the_pill_can_be_turned_off() {
-    let mut reader = Reader::open_with(
-        &Reader::book(),
-        Options {
-            settings: vec![("show_page_pill".into(), serde_json::json!(false))],
-            ..Options::default()
-        },
-    );
+fn the_pill_is_quiet_until_it_is_asked_for() {
+    let mut reader = book();
     reader.press_chord("mod+t");
     reader.wheel(1_200.0);
     assert!(reader.harness.query(".page-pill").is_none());
+}
+
+/// **The scrollbar, which this reader draws because it does not inherit one.**
+/// A thumb as tall as the window's share of the document, with a floor under
+/// it — the honest height for one page of four hundred is two pixels — and
+/// hard against the right-hand edge, because a pointer thrown at the side of
+/// the screen stops at the edge.
+#[test]
+fn the_scrollbar_says_how_far_into_the_book_you_are() {
+    let mut reader = book();
+    let bar = reader.harness.layout_rect(".scrollbar");
+    let viewer = reader.harness.layout_rect(".viewer");
+    assert!(
+        ((bar.x + bar.width) - (viewer.x + viewer.width)).abs() < 0.5,
+        "flush with the edge: bar ends at {}, window at {}",
+        bar.x + bar.width,
+        viewer.x + viewer.width,
+    );
+    assert!(
+        (10.0..=16.0).contains(&bar.width),
+        "neither a hairline nor a column: {}",
+        bar.width,
+    );
+
+    let top = reader.harness.layout_rect(".bar-thumb");
+    assert!(top.height >= 30.0, "catchable in a long book: {}", top.height);
+    assert!(top.y - bar.y < 1.0, "at the top of an unread book: {}", top.y);
+
+    reader.wheel(4_000.0);
+    let moved = reader.harness.layout_rect(".bar-thumb");
+    assert!(
+        moved.y > top.y,
+        "and it follows the reader down: {} against {}",
+        moved.y,
+        top.y,
+    );
+}
+
+/// A press on the track is a jump, and the count comes up beside it for as
+/// long as the hand is on it — whatever the setting above says, because this
+/// is the one gesture with nothing else on screen saying where it arrived.
+#[test]
+fn the_bar_can_be_dragged_and_says_where_it_has_got_to() {
+    let mut reader = book();
+    let before = reader.state().scroll;
+    let bar = reader.harness.layout_rect(".scrollbar");
+    let x = bar.x + bar.width / 2.0;
+    let low = bar.y + bar.height * 0.75;
+
+    reader.harness.mouse_down_at(x, low);
+    reader.settle();
+    assert!(
+        reader.state().scroll > before,
+        "the press alone carried the document: {} against {before}",
+        reader.state().scroll,
+    );
+    let jumped = reader.state().scroll;
+    assert!(
+        reader.harness.query(".page-pill").is_some(),
+        "and the count is up while the hand is on the bar",
+    );
+    // **And it rides the thumb.** Over the foot of the page it was covering
+    // the thing it described; beside the bar it is where the eye already is.
+    let pill = reader.harness.layout_rect(".page-pill");
+    let thumb = reader.harness.layout_rect(".bar-thumb");
+    assert!(
+        pill.x + pill.width <= bar.x,
+        "to the left of the bar: pill ends at {}, bar starts at {}",
+        pill.x + pill.width,
+        bar.x,
+    );
+    assert!(
+        ((pill.y + pill.height / 2.0) - (thumb.y + thumb.height / 2.0)).abs() < 6.0,
+        "level with the thumb: pill at {}, thumb at {}",
+        pill.y + pill.height / 2.0,
+        thumb.y + thumb.height / 2.0,
+    );
+
+    reader.harness.move_mouse_to(x, bar.y + 4.0);
+    reader.settle();
+    assert!(
+        reader.state().scroll < jumped,
+        "dragging back up goes back up: {} against {jumped}",
+        reader.state().scroll,
+    );
+
+    reader.harness.mouse_up_at(x, bar.y + 4.0);
+    reader.settle();
+    assert!(
+        reader.harness.query(".page-pill").is_none(),
+        "and it goes when the hand does",
+    );
+}
+
+/// A document short enough to fit has no bar, which is the point of asking
+/// `bar_thumb` rather than always drawing one: a track with a thumb the whole
+/// length of it says nothing and is one more thing on the page.
+#[test]
+fn a_document_that_fits_has_no_scrollbar() {
+    let path = std::env::temp_dir().join("hylopdf-chrome-fits.pdf");
+    fixture::draft(&path, 1);
+    let mut reader = Reader::open(path.to_str().expect("a path"));
+    reader.press_action(Action::FitPage);
+    assert!(reader.harness.query(".scrollbar").is_none());
 }
 
 /// **The name of what is open is readable, and it was twenty pixels wide.**

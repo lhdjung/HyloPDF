@@ -12,6 +12,7 @@
 //! harness's clipboard wrote down — see [`hylopdf::app::Clip`], which
 //! exists so that a test run does not empty anybody's real one.
 
+use hylopdf::keymap::Action;
 use hylopdf::fixture;
 use hylopdf::harness::{Options, Reader};
 use hylopdf::stats;
@@ -119,7 +120,7 @@ fn a_sweep_across_two_pages_selects_on_both() {
     // delivered. Three steps out is 50%, which is comfortable. (The document
     // area grew when the notice line stopped being a row of the window — see
     // `.notice-line` in `styles.rs` — and fit page grew with it.)
-    reader.press_chord("mod+2");
+    reader.press_action(Action::FitPage);
     for _ in 0..3 {
         reader.press_chord("mod+-");
     }

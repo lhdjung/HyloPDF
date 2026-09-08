@@ -385,6 +385,16 @@ body { margin: 0;
    rather than being cut at it. The app cuts it with an ellipsis, which is a
    thing this renderer has not got. */
 .menu-label { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+/* …and where the cut actually happens, which is the shelf and nowhere else:
+   a document's own name is the one label in these menus long enough to run
+   out of box, and it stopped mid-letter against the page number beside it.
+   The fade is what an ellipsis would be — `.chip.title.clipped`'s reason, one
+   paragraph of this sheet down — and it is unconditional here because the
+   label is a flex item that grows: a short name leaves the faded band on
+   empty ground. */
+.menu-item[data-item="recent"] .menu-label {
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
 /* The chord, read off the keymap rather than written here — see
    `Viewer::chord_for`. An aside and not the item, and the app's own shade for
    one — `--text-note`, which is only a little quieter than the label, because
@@ -704,6 +714,36 @@ body { margin: 0;
 .viewer {
   flex: 1 1 auto; overflow: hidden; background: var(--ground);
 }
+
+/* **The scrollbar, which this reader draws because it does not inherit one.**
+   The document is moved by arithmetic rather than by `overflow: scroll` (see
+   the note at the top of `app.rs`), so there is no platform bar to take — and
+   a nine-hundred-page book had nothing on screen saying how far into it the
+   reader was.
+
+   `top` and `bottom` rather than a height: the track is exactly as tall as
+   the viewer, and the one number that must not be restated is the one the
+   layout already knows.
+
+   `right: 0` with no margin is the requirement and not a detail. A pointer
+   thrown at the side of the screen stops at the edge, and a bar set in from
+   it is one that has to be aimed at — so the whole twelve pixels are live,
+   which is what the `z-index` is for: `.pages` is `.viewer`'s normal-flow
+   content, and Blitz only hit-tests a positioned node ahead of it when it
+   carries a non-zero one. See `.root`. */
+.scrollbar {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 12px; z-index: 6;
+}
+/* The theme's own quiet grey, which is what `--faint` is for, and it darkens
+   under the hand rather than on hover: a bar that changes as the pointer
+   passes over it is movement nobody asked for. Inset by two pixels so the
+   thumb is a shape on the edge rather than a stripe down it — the *track* is
+   still the full twelve, which is what a press lands on. */
+.bar-thumb {
+  position: absolute; left: 2px; right: 2px;
+  border-radius: 4px; background: var(--faint);
+}
+.bar-thumb.held { background: var(--muted); }
 
 /* `box-sizing` so that the panel is exactly as wide as it says it is. The
    hairline down its right is a border, and a content box put it *outside* the
@@ -1087,7 +1127,14 @@ body { margin: 0;
    0` on both this and the row above it, because a flex item's floor is its
    content and a long title would otherwise push the page number off the end
    rather than being cut. */
-.recent-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+/* The fade is `.menu-label`'s and for the same reason: cut hard, a long title
+   ends mid-letter against the page number in the next column, which reads as
+   a fault rather than as a name that did not fit. Unconditional because the
+   box grows — a short name fades over empty ground. */
+.recent-name {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
 /* Right-aligned and tabular, so a three-digit page lines up with a one-digit
    one. Quieter and a size smaller than the name: it is a page reference in
    the margin rather than part of the title. */
@@ -1124,6 +1171,15 @@ body { margin: 0;
   display: flex; align-items: center; justify-content: center;
   pointer-events: none;
 }
+/* **With the toolbar away, it answers where it was asked.** The bar is put
+   down from a menu at the top right, and the sentence saying so appeared at
+   the far corner of the window, over the foot of the page — read late if it
+   was read at all. So while there is no bar, the notice takes the corner the
+   bar's own right-hand group had, under the line the toolbar occupied and
+   clear of the handle that gives it back. */
+.notice-line.tucked {
+  top: 48px; bottom: auto; justify-content: flex-end; padding-right: 16px;
+}
 /* A shadow, because this is the one thing in the reader that floats over the
    document with nothing behind it — `.notice` in the app carries one, and a
    pill with a hairline and no shadow reads as a shape drawn on the page
@@ -1144,9 +1200,13 @@ body { margin: 0;
 
    In full screen it sits clear of the system's own bars, which slide down
    over exactly this band when the pointer reaches for it. */
+/* To the right rather than the middle, which is where the switch that put the
+   bar away is and where the notice about it now goes: everything the reader
+   has to do with a missing toolbar is in one corner. */
 .peek-line {
   position: absolute; left: 0; right: 0; top: 0; z-index: 30;
-  display: flex; align-items: flex-start; justify-content: center;
+  display: flex; align-items: flex-start; justify-content: flex-end;
+  padding-right: 16px;
 }
 .toolbar-peek {
   display: flex; align-items: center; gap: 6px;
@@ -1166,9 +1226,16 @@ body { margin: 0;
    `left: 50%` and a transform, for the reason `.notice-line` above is.
    `box-shadow` and no animation: the app fades it in over 160ms, and this
    file's rule is that nothing moves unless the reader moved it. */
+/* **It rides the scrollbar now.** Centred over the foot of the page it was
+   both hard to read and covering the thing it was describing; beside the bar
+   it is where the eye already is during the one gesture it exists for.
+   `app.rs` sets `top` to the middle of the thumb and this keeps the corner
+   for a document short enough to have no bar at all. The padding is the bar's
+   twelve pixels and a gap. */
 .pill-line {
   position: absolute; left: 0; right: 0; bottom: 20px; z-index: 20;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 20px;
   pointer-events: none;
 }
 .page-pill {

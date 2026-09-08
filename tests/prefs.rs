@@ -6,6 +6,7 @@
 //! window would be a second `Viewer` over a second `Store`, and the harness
 //! has no windows.
 
+use hylopdf::keymap::Action;
 use hylopdf::harness::{Options, Reader};
 use hylopdf::theme;
 
@@ -143,7 +144,7 @@ fn a_number_can_be_stepped_and_typed() {
     // Fit page first, so that there is more than one page in the window to
     // measure between: at fit width a page of this fixture is taller than the
     // window and only one is mounted.
-    reader.press_chord("mod+2");
+    reader.press_action(Action::FitPage);
     reader.press_chord("mod+,");
     // Measured off the pages rather than off the setting: the gap is a
     // distance on the screen, and the screen is where it has to appear.

@@ -17,15 +17,27 @@
 
 ## New issues
 
-All of 4-12 are done. What is worth knowing about them:
+*(4–11 done. What each came to is in the commit and in `AGENTS.md`.)*
 
-- **11 (the Settings window slides sideways)** is fixed by the mechanism
-  rather than by a reproduction: a wheel with nowhere to go chains outward in
-  Blitz and the last parent is the viewport, which scrolls whatever sticks out
-  of the root. `.root` and `.window-pane` no longer scroll sideways at all.
-  Nothing in the harness overflows the root, so there is no test — worth
-  checking by hand on the machine that showed it.
-- **12 (a renamed theme keeps its file name)**: yes, and it does now — but
-  only where the app named the file. `My Theme.toml` written by hand keeps its
-  name whatever the theme inside it comes to be called, which is the same rule
-  that stops this app reverting a built-in edited in place.
+4. ~~The app doesn't currently have a scrollbar.~~ Drawn in `app.rs` and
+   `styles.rs`: 12px hard against the window's edge, the theme's `--faint` and
+   `--muted` under the hand, a thumb with a 34px floor so a 400-page book still
+   has something to catch. A press on the track jumps; a press on the thumb
+   drags.
+5. ~~"x of y" overlaid on the page.~~ It rides the scrollbar's thumb now, to
+   its left.
+6. ~~"Show page count while scrolling" should be off by default.~~ It is, and
+   the count still appears for as long as the bar is being dragged.
+7. ~~The "Toolbar hidden […]" message is at the foot of the page.~~ With the
+   bar away every notice goes to the top right, under where the bar's own
+   right-hand group was.
+8. ~~"Show toolbar" to the same place.~~ Done.
+9. ~~The recents carry a redundant icon and cut off hard.~~ The second icon is
+   gone from the Open menu's shelf, and both shelves fade their last 20px the
+   way the document's name in the toolbar does.
+10. ~~"New window" opens a tab in full screen.~~ Automatic tabbing is off, so
+    ⌘N is always a window; "New tab" is its own item under Open… and its own
+    (unbound, rebindable) action.
+11. ~~Can't jump between tabs.~~ ⌘1–⌘9 choose one, on macOS. Actual size and
+    fit page move to ⌥⌘1 and ⌥⌘2 there and keep ⌘1/⌘2 elsewhere. ⌘W closes the
+    current tab — it had been bound to nothing at all on a Mac.

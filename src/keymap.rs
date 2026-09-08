@@ -68,10 +68,12 @@ actions! {
     // Documents
     Open => "open",
     NewWindow => "new-window",
+    NewTab => "new-tab",
     Print => "print",
     Settings => "settings",
     Help => "help",
     CloseWindow => "close-window",
+    GoToTab => "go-to-tab",
     Quit => "quit",
     Find => "find",
     FindNext => "find-next",
@@ -169,6 +171,9 @@ macro_rules! spec {
     ($id:expr, $label:literal, $group:expr, $keys:expr, other $other:expr) => {
         Spec { id: $id, label: $label, group: $group, needs_document: false, keys: &$keys, mac_keys: &[], other_keys: &$other }
     };
+    ($id:expr, $label:literal, $group:expr, $keys:expr, mac $mac:expr, other $other:expr) => {
+        Spec { id: $id, label: $label, group: $group, needs_document: false, keys: &$keys, mac_keys: &$mac, other_keys: &$other }
+    };
 }
 
 use Action as A;
@@ -186,10 +191,28 @@ use Group::{Documents as D, LookingAtIt as L, MovingAround as M};
 pub const ACTIONS: &[Spec] = &[
     spec!(A::Open, "Open a document", D, ["mod+o"]),
     spec!(A::NewWindow, "New window", D, ["mod+n"]),
+    // **Unbound, and in the table so that it can be bound.** A tab is macOS's
+    // and the key every Mac application uses for one is ⌘T, which this reader
+    // spends on the toolbar — so the gesture is the item under Open… and this
+    // row is what lets somebody who wants the key give it one. See `tabs.rs`.
+    spec!(A::NewTab, "New tab — macOS only", D, []),
     spec!(A::Print, "Print — handed to a program that prints", D, ["mod+p"]),
     spec!(A::Settings, "Settings", D, ["mod+,"]),
     spec!(A::Help, "This list", D, ["f1", "mod+/"]),
-    spec!(A::CloseWindow, "Close this window", D, [], other ["mod+w"]),
+    // **⌘W is ours on a Mac too, and it had been nobody's.** The app this was
+    // ported from left it to the menu bar Tauri installs; winit installs an
+    // application menu and no Window menu, so ⌘W reached nothing at all —
+    // which is also what closes a *tab*, there being no other way to shut
+    // one. ⌘Q is still the menu's, because that menu does have Quit in it.
+    spec!(A::CloseWindow, "Close this window", D, ["mod+w"]),
+    // **Nine chords, one action.** Which tab was asked for is the digit that
+    // was pressed, and the key handler in `app.rs` reads it off the event
+    // rather than off the action — nine near-identical entries here would be
+    // nine rows on the Keyboard page saying the same thing. Tabs are macOS's
+    // and exist nowhere else, which is why the keys are, and why ⌘1 and ⌘2
+    // still mean what they meant on the platforms with no tabs to go to.
+    spec!(A::GoToTab, "Go to a tab by number", D, [],
+        mac ["mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8", "mod+9"]),
     spec!(A::Quit, "Close HyloPDF", D, [], other ["mod+q"]),
     spec!(A::Find, "Search this document", D, ["mod+f"]),
     spec!(A::FindNext, "Next match", D, ["mod+g"]),
@@ -217,8 +240,12 @@ pub const ACTIONS: &[Spec] = &[
     spec!(A::ZoomIn, "Zoom in", L, ["mod++", "mod+="]),
     spec!(A::ZoomOut, "Zoom out", L, ["mod+-"]),
     spec!(A::FitWidth, "Fit the width of the window", L, ["mod+0"]),
-    spec!(A::ActualSize, "Actual size", L, ["mod+1"]),
-    spec!(A::FitPage, "Fit the whole page", L, ["mod+2"]),
+    // ⌘1 and ⌘2 belong to the tabs on a Mac, which is what a reader with four
+    // documents open in one window reaches for and is not what a zoom mode
+    // is: fit width, actual size and fit the page are three buttons in the
+    // toolbar and one of them is already on ⌘0.
+    spec!(A::ActualSize, "Actual size", L, [], mac ["mod+alt+1"], other ["mod+1"]),
+    spec!(A::FitPage, "Fit the whole page", L, [], mac ["mod+alt+2"], other ["mod+2"]),
     spec!(A::RotateRight, "Turn the page right", L, ["mod+r"]),
     spec!(A::RotateLeft, "Turn the page left", L, ["mod+l"]),
     spec!(A::Dark, "Dark mode", L, ["mod+d"]),

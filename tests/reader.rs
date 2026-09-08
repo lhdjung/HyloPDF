@@ -8,6 +8,7 @@
 //! test that reaches past the interface cannot tell you the interface is
 //! wired up.
 
+use hylopdf::keymap::Action;
 use hylopdf::harness::{Options, Reader};
 
 fn book() -> Reader {
@@ -107,7 +108,7 @@ fn fit_and_zoom_say_what_they_did() {
     let wide = reader.harness.layout_rect(".page");
     assert!((wide.width - 1100.0).abs() < 1.0, "fit width fills it: {wide:?}");
 
-    reader.press_chord("mod+2");
+    reader.press_action(Action::FitPage);
     assert_eq!(reader.state().zoom, "Fit page");
     let fitted = reader.harness.layout_rect(".page");
     let viewer = reader.harness.layout_rect(".viewer");

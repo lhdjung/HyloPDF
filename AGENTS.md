@@ -1174,6 +1174,19 @@ winit sets none — `[NSApp delegate]` is nil for the life of the process. Until
 it was written, opening a PDF from the Finder gave a start screen and "HyloPDF
 cannot open files in the PDF document format".
 
+**A window is a window, and a tab is asked for.** macOS turns a new window into
+a tab of the one in front while the app is full screen — that is
+`allowsAutomaticWindowTabbing`, on by default, against Apple's own default of
+*Prefer tabs when opening documents: In Full Screen* — so ⌘N gave a tab and
+there was no way to ask for the other thing. `shell.rs` turns it off once, at
+startup, and `tabs.rs` is the explicit half that still works with it off:
+`addTabbedWindow:ordered:`, which winit has no word for. So "New tab" is an
+item under Open… and an action with no key (⌘T is the toolbar's), ⌘1 through ⌘9
+choose a tab, and ⌘W closes one — which is also the first time ⌘W has done
+anything on a Mac in this port, winit's default menu having an application menu
+and no Window menu. The two zoom modes that used to hold ⌘1 and ⌘2 are ⌥⌘1 and
+⌥⌘2 there, and unchanged on the platforms with no tabs.
+
 What is still missing, and none of it is about signing: **Windows is one process
 per launch** — the single-instance socket wants a named pipe, and there is no
 std type for one — and there is no underline, strike-out or squiggly markup,

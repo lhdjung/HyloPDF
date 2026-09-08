@@ -40,14 +40,24 @@
 # Two documents at once means two windows. A window is a whole second reader,
 # and the settings, themes and reading history stay shared between them.
 # new-window = ["mod+n"]
+# A tab of the window in front, which macOS has and the other two do not. It
+# ships bound to nothing — the key every Mac application uses is ⌘T and the
+# toolbar has it — so this is the line to write if you want one.
+# new-tab = []
 # print = ["mod+p"]
 # settings = ["mod+,"]
 # help = ["f1", "mod+/"]
-# On a Mac both are empty and the menu bar answers ⌘W and ⌘Q; on Windows and
-# Linux there is no menu bar, so HyloPDF listens for them itself. Two of them,
-# because there is more than one window: ⌘W closes this one, ⌘Q closes them all.
-# close-window = []
+# Two of them, because there is more than one window: ⌘W closes this one — or
+# this tab, on a Mac, there being no other way to shut one — and ⌘Q closes them
+# all. ⌘Q is empty because the application menu macOS puts up already answers
+# it; on Windows and Linux there is no menu bar, so HyloPDF listens itself.
+# close-window = ["mod+w"]
 # quit = []
+# Window tabs are macOS's and exist nowhere else, so this is ⌘1 through ⌘9
+# there and nothing at all on Windows and Linux — which is why ⌘1 and ⌘2 still
+# mean actual size and fit the page on those two. Nine chords, one action: the
+# digit that was pressed is the tab that was asked for.
+# go-to-tab = []
 # find = ["mod+f"]
 # find-next = ["mod+g"]
 # find-previous = ["mod+shift+g"]
@@ -84,8 +94,10 @@
 # zoom-in = ["mod++", "mod+="]
 # zoom-out = ["mod+-"]
 # fit-width = ["mod+0"]
-# actual-size = ["mod+1"]
-# fit-page = ["mod+2"]
+# The two that moved: ⌘1 and ⌘2 belong to the window tabs on a Mac, so these
+# are ⌥⌘1 and ⌥⌘2 there and ⌘1 and ⌘2 everywhere else. See `go-to-tab` above.
+# actual-size = []
+# fit-page = []
 # rotate-right = ["mod+r"]
 # rotate-left = ["mod+l"]
 # dark = ["mod+d"]

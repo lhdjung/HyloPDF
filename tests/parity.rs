@@ -242,7 +242,19 @@ fn the_surfaces_are_the_size_of_the_app_s() {
 /// is a size somebody reads at.
 ///
 /// Adding a row here is a decision. Anything not in it is drift.
-const OURS: [(&str, &str); 2] = [("document", "Sign…"), ("view", "175%")];
+///
+/// The third is "New tab", and it is on this list rather than in the fixture
+/// because the app had nothing to put there: it ran in a webview, where a
+/// window is a window. Here macOS turns a new window into a tab of its own
+/// accord while the app is full screen, and turning that off — which is what
+/// ⌘N being a window requires — leaves the reader no way to ask for the tab
+/// they were being given. See `tabs.rs`. It is macOS's alone, so off that
+/// platform there is nothing to filter and the row simply is not drawn.
+const OURS: [(&str, &str); 3] = [
+    ("document", "Sign…"),
+    ("view", "175%"),
+    ("open", "New tab"),
+];
 
 #[test]
 fn every_menu_lists_what_the_app_s_lists() {
@@ -696,7 +708,21 @@ fn the_theme_editor_asks_the_app_s_questions() {
 /// one that matters most, because it names the only way back.
 #[test]
 fn what_the_app_says_over_a_page_is_said_here_too() {
-    let mut reader = reader();
+    // **The pill is asked for here**, which is the one place this test parts
+    // company with the fixture. The app showed it by default; this reader does
+    // not any more — a count that appears of its own accord over the middle of
+    // the page covers the thing it describes, and the scrollbar says the same
+    // without words. What it *says* when it is up is still the app's, which is
+    // what this test is about.
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            width: 1280,
+            height: 860,
+            settings: vec![("show_page_pill".into(), serde_json::json!(true))],
+            ..Default::default()
+        },
+    );
     let app = app();
     let overlay = &app["overlay"];
     let want = |key: &str| overlay[key].as_str().unwrap_or_default().to_string();

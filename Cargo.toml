@@ -141,6 +141,12 @@ dioxus = { version = "0.7", default-features = false, features = ["macro", "sign
 # and it is already in the tree under winit, so it costs nothing to build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+# And `src/tabs.rs`, for the same reason: winit can select a tab and count
+# them, and has no word for "put this window into that one's tab group" —
+# which is `addTabbedWindow:ordered:` and nothing else. The handle to send it
+# to comes out of the window as a raw one, which is already in the tree under
+# winit and blitz.
+raw-window-handle = "0.6"
 
 # What the Dock and the task manager show, which is the binary's own name and
 # not the bundle's around it — which is why the target is named rather than

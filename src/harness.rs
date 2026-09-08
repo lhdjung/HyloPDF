@@ -733,6 +733,24 @@ impl Reader {
     /// is testing is written in — and it keeps the platform out of the test:
     /// `mod` is ⌘ here and Ctrl on the machine CI runs on, exactly as it is
     /// for the reader. `MOD` in the app's harness exists for the same reason.
+    /// The key this machine actually binds to an action, pressed.
+    ///
+    /// A test that writes a chord out is a test *about the keyboard*; a test
+    /// about what a key does wants whatever the binding is here, and two of
+    /// them differ by platform — ⌘1 and ⌘2 belong to the window tabs on a Mac
+    /// and to the zoom modes everywhere else. See `keymap.rs`.
+    pub fn press_action(&mut self, action: crate::keymap::Action) {
+        let map = crate::keymap::Keymap::shipped(crate::keymap::this_machine());
+        let chord = map
+            .by_action
+            .get(&action)
+            .and_then(|chords| chords.first())
+            .cloned();
+        if let Some(chord) = chord {
+            self.press_chord(&chord);
+        }
+    }
+
     pub fn press_chord(&mut self, chord: &str) {
         let (key, code, modifiers) = spell_out(chord);
         self.press_coded(key, code, modifiers);

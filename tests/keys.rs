@@ -270,7 +270,11 @@ fn a_second_window_has_a_key_and_closing_one_is_not_quitting() {
     assert_eq!(shipped.action_for("mod+n"), Some(Action::NewWindow));
 
     let spec_of = |id: Action| ACTIONS.iter().find(|spec| spec.id == id).expect("in the table");
-    assert!(default_keys(spec_of(Action::CloseWindow), MAC).is_empty());
+    // **⌘W is the app's own on every platform.** It was left to the menu bar
+    // on a Mac, and winit installs an application menu with no Window menu in
+    // it, so the key reached nothing — which is also the only way to close a
+    // tab. ⌘Q is still the menu's: that one it does have.
+    assert_eq!(shipped.action_for("mod+w"), Some(Action::CloseWindow));
     assert!(default_keys(spec_of(Action::Quit), MAC).is_empty());
 
     let elsewhere = Keymap::shipped(PC);

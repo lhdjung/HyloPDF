@@ -62,6 +62,10 @@ pub struct WindowSpec {
     /// same fault is one of the questions this spike answers, so the position
     /// is set twice and the second time is reported.
     pub position: Option<Position>,
+    /// Whether this window is to join the front one's tab group rather than
+    /// stand beside it. macOS only, and asked for rather than inferred — see
+    /// `tabs.rs`.
+    pub tab: bool,
     pub vdom: VirtualDom,
 }
 
@@ -71,12 +75,18 @@ impl WindowSpec {
             label: label.into(),
             attributes,
             position: None,
+            tab: false,
             vdom,
         }
     }
 
     pub fn at(mut self, position: impl Into<Position>) -> Self {
         self.position = Some(position.into());
+        self
+    }
+
+    pub fn tabbed(mut self, tab: bool) -> Self {
+        self.tab = tab;
         self
     }
 }
@@ -99,7 +109,12 @@ struct Spawn;
 ///
 /// `None` means "a window, and you choose the document", which is what ⌘N is
 /// in a reader with no start screen — see [`crate::windows::Desk::hand_over`].
-struct Wanted(Option<String>);
+///
+/// The flag is whether it is to be a *tab* of the window in front rather than
+/// a window of its own. It is asked for by name and never guessed: macOS will
+/// tab a new window on its own — see `tabs.rs` — and this reader turns that
+/// off, because ⌘N is a window.
+struct Wanted(Option<String>, bool);
 
 /// This window, closed, from inside one of its own event handlers.
 struct CloseOne(WindowId);
@@ -116,6 +131,10 @@ struct Swapped(WindowId, String, String);
 /// open answers with, rather than opening a second copy of itself. See
 /// [`crate::windows::Handover::Front`].
 struct Show(String);
+
+/// The nth tab of this window's group, brought to the front. One-based, as
+/// ⌘1 is. macOS alone has tabs, so everywhere else this is a no-op.
+struct SelectTab(WindowId, usize);
 
 /// This window, in or out of full screen. Deferred for the reason above: the
 /// ask comes from a Dioxus handler, and on macOS the answer is an animation
@@ -147,7 +166,7 @@ impl Windows {
     /// a second launch of the app does through the single-instance socket.
     pub fn request(&self, path: Option<String>) {
         self.proxy
-            .send_event(BlitzShellEvent::embedder_event(Wanted(path)));
+            .send_event(BlitzShellEvent::embedder_event(Wanted(path, false)));
     }
 
     /// A handle that can cross threads, carrying only the proxy.
@@ -172,7 +191,7 @@ pub struct Remote {
 impl Remote {
     pub fn request(&self, path: Option<String>) {
         self.proxy
-            .send_event(BlitzShellEvent::embedder_event(Wanted(path)));
+            .send_event(BlitzShellEvent::embedder_event(Wanted(path, false)));
     }
 
     /// Bring a window forward by name.
@@ -490,6 +509,18 @@ impl Shell {
         self.windows.clone()
     }
 
+    /// The window with the keyboard, else any window at all. What "in front"
+    /// means to the cascade below and to a tab looking for the group it is
+    /// joining.
+    fn front(&self) -> Option<std::sync::Arc<dyn winit::window::Window>> {
+        self.inner
+            .windows
+            .values()
+            .find(|view| view.window.has_focus())
+            .or_else(|| self.inner.windows.values().next())
+            .map(|view| std::sync::Arc::clone(&view.window))
+    }
+
     /// One step down and across from the window in front, and on again while
     /// the spot is taken. `None` when there is no window to step off, which is
     /// the first one.
@@ -518,6 +549,9 @@ impl Shell {
     }
 
     fn open(&mut self, event_loop: &dyn ActiveEventLoop, spec: WindowSpec) {
+        // Which window a tab is joining, asked before this one is made.
+        #[cfg(target_os = "macos")]
+        let joining = if spec.tab { self.front() } else { None };
         // One renderer per window: `DioxusNativeWindowRenderer` is an
         // `Rc<RefCell<VelloWindowRenderer>>` over one surface, and a surface
         // belongs to one window. [`Steady`] is that renderer with the scene
@@ -583,7 +617,13 @@ impl Shell {
             let id = view.window_id();
             crate::app::Frame::new(move |ask| {
                 let event = match ask {
-                    crate::app::Ask::NewWindow => BlitzShellEvent::embedder_event(Wanted(None)),
+                    crate::app::Ask::NewWindow => {
+                        BlitzShellEvent::embedder_event(Wanted(None, false))
+                    }
+                    crate::app::Ask::NewTab => BlitzShellEvent::embedder_event(Wanted(None, true)),
+                    crate::app::Ask::SelectTab(at) => {
+                        BlitzShellEvent::embedder_event(SelectTab(id, at))
+                    }
                     crate::app::Ask::Close => BlitzShellEvent::embedder_event(CloseOne(id)),
                     crate::app::Ask::Quit => BlitzShellEvent::embedder_event(Quit),
                     crate::app::Ask::FullScreen(on) => {
@@ -594,7 +634,7 @@ impl Shell {
                     // use, so a document already open is brought forward
                     // rather than opened twice.
                     crate::app::Ask::NewWindowOn(path) => {
-                        BlitzShellEvent::embedder_event(Wanted(Some(path)))
+                        BlitzShellEvent::embedder_event(Wanted(Some(path), false))
                     }
                     crate::app::Ask::Showing { path, title } => {
                         BlitzShellEvent::embedder_event(Swapped(id, path, title))
@@ -624,7 +664,14 @@ impl Shell {
         // window is shown, because showing it on macOS moves it onto the
         // launch window's frame — here the window is made, placed and drawn
         // in one turn and nothing is seen in between.
-        let position = spec.position.or_else(|| self.next_spot());
+        // …unless it is a tab, which has no frame of its own to place: the
+        // window it joins owns the frame and the cascade would be a window
+        // stepping off itself.
+        let position = if spec.tab {
+            None
+        } else {
+            spec.position.or_else(|| self.next_spot())
+        };
         if let Some(position) = position {
             let before = view.window.outer_position().ok();
             view.window.set_outer_position(position);
@@ -642,6 +689,14 @@ impl Shell {
 
         let id = view.window_id();
         self.inner.windows.insert(id, view);
+        // The tab is joined once the window exists and before anything else
+        // happens to it. `joining` was read before it did, because "the
+        // window in front" stops meaning what it meant the moment there is a
+        // new one. See `tabs.rs`.
+        #[cfg(target_os = "macos")]
+        if let (Some(front), Some(view)) = (joining, self.inner.windows.get(&id)) {
+            crate::tabs::tab_onto(front.as_ref(), view.window.as_ref());
+        }
         if self.started {
             // A window made after the first `can_create_surfaces` has to be
             // resumed here; the renderer answers with `ResumeReady`, which
@@ -708,6 +763,20 @@ impl ApplicationHandler for Shell {
         // resumes itself in `open`.
         self.drain(event_loop);
         if !self.started {
+            // **⌘N is a window, and macOS had been making it a tab.**
+            // `allowsAutomaticWindowTabbing` is on by default, and Apple's own
+            // default for *Prefer tabs when opening documents* is "In Full
+            // Screen" — so a reader in full screen who asked for a second
+            // window got a second tab, with no way to ask for the other
+            // thing. Off, a tab is something asked for by name and nothing
+            // else; explicit tabbing goes on working, which is what `tabs.rs`
+            // uses. The call has to be made from inside the loop because that
+            // is where an `ActiveEventLoop` exists.
+            #[cfg(target_os = "macos")]
+            {
+                use winit::platform::macos::ActiveEventLoopExtMacOS;
+                event_loop.set_allows_automatic_window_tabbing(false);
+            }
             self.inner.can_create_surfaces(event_loop);
             self.started = true;
         }
@@ -903,7 +972,7 @@ impl ApplicationHandler for Shell {
                         let spec = factory(wanted.0.clone());
                         self.factory = Some(factory);
                         if let Some(spec) = spec {
-                            self.open(event_loop, spec);
+                            self.open(event_loop, spec.tabbed(wanted.1));
                         }
                     } else {
                         eprintln!("shell: asked for a window with no factory set");
@@ -948,6 +1017,19 @@ impl ApplicationHandler for Shell {
                     // than a second way of closing a window: everything that
                     // has to be given back is hung off `CloseRequested`.
                     self.window_event(event_loop, *id, WindowEvent::CloseRequested);
+                    continue;
+                }
+                if let Some(SelectTab(id, at)) = payload.downcast_ref::<SelectTab>() {
+                    // One-based coming in, because ⌘1 is the first tab, and
+                    // winit's own call is zero-based. Out of range is a no-op
+                    // there, which is the right answer for ⌘7 with three tabs.
+                    #[cfg(target_os = "macos")]
+                    if let Some(view) = self.inner.windows.get(id) {
+                        use winit::platform::macos::WindowExtMacOS;
+                        view.window.select_tab_at_index(at.saturating_sub(1));
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    let _ = (id, at);
                     continue;
                 }
                 if let Some(FullScreen(id, on)) = payload.downcast_ref::<FullScreen>() {

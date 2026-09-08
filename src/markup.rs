@@ -138,16 +138,6 @@ pub fn standing(path: &str, encrypted: bool) -> Standing {
     }
 }
 
-/// A door for the tests, which have to take the same lock every call into
-/// pdfium is taken behind and cannot reach it. Not for the reader.
-#[doc(hidden)]
-pub fn with_pdfium<T>(
-    work: impl FnOnce(&'static pdfium_render::prelude::Pdfium) -> T,
-) -> Option<T> {
-    let _library = crate::pdfium::library();
-    crate::pdfium::pdfium().ok().map(work)
-}
-
 /// Whether the document carries a signature, which a rewrite will break.
 ///
 /// **A signature field is not a signature.** `FPDF_GetSignatureCount` counts
@@ -186,7 +176,7 @@ pub fn add(
     if runs.iter().all(|(_, quads)| quads.is_empty()) {
         return Err("There is nothing there to mark.".into());
     }
-    let (red, green, blue) = read_color(color).ok_or("That is not a colour.")?;
+    let [red, green, blue] = crate::palette::read_colour(color).ok_or("That is not a colour.")?;
     edit(path, |document| {
         for (page, quads) in runs {
             if quads.is_empty() {
@@ -465,51 +455,3 @@ pub fn flat(quads: &[Rect], height: f64) -> Vec<f64> {
     out
 }
 
-/// The same numbers read back, which is how a mark the journal is holding
-/// still knows where on the page it goes.
-pub fn unflat(quads: &[f64], height: f64) -> Vec<Rect> {
-    quads
-        .as_chunks::<8>()
-        .0
-        .iter()
-        .map(|run| {
-            let xs = [run[0], run[2], run[4], run[6]];
-            let ys = [run[1], run[3], run[5], run[7]];
-            let left = xs.iter().cloned().fold(f64::MAX, f64::min);
-            let right = xs.iter().cloned().fold(f64::MIN, f64::max);
-            let bottom = ys.iter().cloned().fold(f64::MAX, f64::min);
-            let top = ys.iter().cloned().fold(f64::MIN, f64::max);
-            Rect {
-                left,
-                top: height - top,
-                width: right - left,
-                height: top - bottom,
-            }
-        })
-        .collect()
-}
-
-/// `#rgb`, `#rrggbb` and nothing else, which is `parseColor` in `themes.ts`
-/// and `crate::palette`'s rule as well: a colour the renderer cannot read
-/// must come back as nothing rather than as a plausible wrong answer.
-pub fn read_color(hex: &str) -> Option<(u8, u8, u8)> {
-    let body = hex.strip_prefix('#')?;
-    let digits: Vec<u8> = body
-        .chars()
-        .map(|c| c.to_digit(16).map(|d| d as u8))
-        .collect::<Option<Vec<u8>>>()?;
-    match digits.len() {
-        3 => Some((digits[0] * 17, digits[1] * 17, digits[2] * 17)),
-        6 | 8 => Some((
-            digits[0] * 16 + digits[1],
-            digits[2] * 16 + digits[3],
-            digits[4] * 16 + digits[5],
-        )),
-        _ => None,
-    }
-}
-
-/// The same colour written the way a file and a swatch both want it.
-pub fn write_color(colour: (u8, u8, u8)) -> String {
-    format!("#{:02x}{:02x}{:02x}", colour.0, colour.1, colour.2)
-}

@@ -3452,7 +3452,7 @@ impl Viewer {
     pub fn markup_colors(&self) -> Vec<String> {
         (1..=6)
             .map(|at| self.store.text(&format!("markup_color_{at}")))
-            .filter(|colour| crate::markup::read_color(colour).is_some())
+            .filter(|colour| crate::palette::read_colour(colour).is_some())
             .collect()
     }
 
@@ -4902,13 +4902,6 @@ impl Viewer {
     /// while they are, whatever the setting says — see [`Viewer::pill_shown`].
     pub fn dragging_bar(&self) -> bool {
         self.bar_from.is_some()
-    }
-
-    pub fn page_target(&self, page: usize) -> f64 {
-        self.layout.scroll_target(Anchor {
-            page: page.clamp(1, self.pages().max(1)),
-            offset: 0.0,
-        })
     }
 }
 
@@ -8012,8 +8005,7 @@ pub(crate) fn Scrawl(
 /// icon following its label through hover — has to be passed down.
 #[component]
 pub(crate) fn Icon(name: &'static str, #[props(default)] stroke: Option<String>) -> Element {
-    // A name nothing draws is nothing drawn, rather than a panic: the table is
-    // a copy of `icons.ts` and `tests/icons.rs` is what says the two agree.
+    // A name nothing draws is nothing drawn, rather than a panic.
     let Some(body) = crate::icons::path(name) else {
         return rsx! {};
     };

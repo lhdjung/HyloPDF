@@ -437,7 +437,7 @@ impl PageSource for Document {
                 let colour = highlight
                     .stroke_color()
                     .map(|colour| {
-                        crate::markup::write_color((colour.red(), colour.green(), colour.blue()))
+                        crate::palette::hex([colour.red(), colour.green(), colour.blue()])
                     })
                     .unwrap_or_else(|_| "#ffd60a".to_string());
                 marks.push(crate::markup::Mark {

@@ -144,19 +144,6 @@ fn the_document_as_it_arrived_is_kept_beside_it() {
 }
 
 #[test]
-fn a_colour_is_hex_and_nothing_else() {
-    assert_eq!(markup::read_color("#ffd60a"), Some((255, 214, 10)));
-    assert_eq!(markup::read_color("#fd0"), Some((255, 221, 0)));
-    // `parseColor` in `themes.ts` refuses the same three, and for the reason
-    // it gives: `parseInt` stops at the character it cannot read and hands
-    // back what it had, which is a plausible colour from a string that is not
-    // one — the worst of the three possible answers, because nobody notices.
-    assert_eq!(markup::read_color("#12345g"), None);
-    assert_eq!(markup::read_color("steelblue"), None);
-    assert_eq!(markup::read_color("#ffd60"), None);
-}
-
-#[test]
 fn the_mark_is_drawn_on_the_page() {
     // pdfium generates the appearance stream for a markup annotation that has
     // none — `GenerateHighlightAP` in `cpdf_generateap.cpp` — so a highlight

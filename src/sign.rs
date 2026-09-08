@@ -551,7 +551,7 @@ pub fn place(
     if signature.is_empty() {
         return Err("There is nothing drawn to sign with.".into());
     }
-    let (red, green, blue) = crate::markup::read_color(ink).ok_or("That is not a colour.")?;
+    let [red, green, blue] = crate::palette::read_colour(ink).ok_or("That is not a colour.")?;
     crate::markup::edit(path, |document| {
         ink_one(document, page, at, signature, (red, green, blue))
     })
@@ -676,7 +676,7 @@ pub fn place_text(path: &str, page: usize, at: Rect, line: &str, ink: &str) -> R
     if line.is_empty() {
         return Err("There is nothing typed to put on the page.".into());
     }
-    let (red, green, blue) = crate::markup::read_color(ink).ok_or("That is not a colour.")?;
+    let [red, green, blue] = crate::palette::read_colour(ink).ok_or("That is not a colour.")?;
     let line = line.to_string();
     crate::markup::edit(path, |document| {
         text_one(document, page, at, &line, (red, green, blue))

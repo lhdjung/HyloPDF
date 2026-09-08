@@ -120,12 +120,6 @@ impl View {
         rotation: 0,
         crop: None,
     };
-
-    /// Whether this asks for anything at all, which is what lets the renderer
-    /// keep its simplest path for the great majority of documents.
-    pub fn is_whole(&self) -> bool {
-        self.rotation == 0 && self.crop.is_none()
-    }
 }
 
 /// What sets a page off from the window when it is narrower than one. Fit
@@ -626,7 +620,7 @@ impl Layout {
         };
         let target = page.top + anchor.offset * page.height
             - if anchor.offset == 0.0 { page.above } else { 0.0 };
-        target.max(0.0).min(self.max_scroll())
+        target.clamp(0.0, self.max_scroll())
     }
 
     pub fn max_scroll(&self) -> f64 {

@@ -145,14 +145,6 @@ impl Desk {
         held.iter().map(|(_, path)| path.clone()).collect()
     }
 
-    /// What one window is showing.
-    pub fn document_of(&self, window: &str) -> Option<String> {
-        let held = self.0.showing.lock().unwrap_or_else(|e| e.into_inner());
-        held.iter()
-            .find(|(label, _)| label == window)
-            .map(|(_, path)| path.clone())
-    }
-
     pub fn count(&self) -> usize {
         self.0
             .showing

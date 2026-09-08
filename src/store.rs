@@ -720,11 +720,6 @@ impl Store {
         self.journal.clear();
     }
 
-    /// Whether this window has a document in it, as the library sees it.
-    pub fn showing_nothing(&self) -> bool {
-        self.file.is_empty()
-    }
-
     /// The last few documents read, most recent first, for the start screen
     /// and for the Open menu.
     ///

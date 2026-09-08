@@ -59,6 +59,35 @@ use crate::select::{Selection, Spot};
 use crate::sidebar::{Column, Sidebar, Tab};
 use crate::store::Store;
 
+/// A door out of this reader: one closure, held so a component can take it as
+/// a prop.
+///
+/// Dioxus compares props to decide whether to render and there is nothing in a
+/// closure to compare, so two of these are the same door when they are the
+/// same `Rc` — which is what a shell handing the same one down every render
+/// produces. Eight of them differed only in their name and in what they are
+/// handed; each still carries its own defaults and its own way of being
+/// called, in the `impl` block beneath it.
+macro_rules! door {
+    ($(#[$note:meta])* $name:ident ($($arg:ty),*) $(-> $ret:ty)?) => {
+        $(#[$note])*
+        #[derive(Clone)]
+        pub struct $name(Rc<dyn Fn($($arg),*) $(-> $ret)?>);
+
+        impl PartialEq for $name {
+            fn eq(&self, other: &Self) -> bool {
+                Rc::ptr_eq(&self.0, &other.0)
+            }
+        }
+
+        impl $name {
+            pub fn new(through: impl Fn($($arg),*) $(-> $ret)? + 'static) -> Self {
+                $name(Rc::new(through))
+            }
+        }
+    };
+}
+
 /// An open document, wrapped so that it can be a component's prop.
 ///
 /// Two handles to the same open document are the same document, and no two
@@ -73,30 +102,17 @@ impl PartialEq for Handle {
     }
 }
 
-/// What handing the document to something that prints does.
-///
-/// A context holding one closure, for the reason [`Away`] is one. The program
-/// is **named** rather than left to the system's default handler, because that
-/// default may well be this reader and handing a document to ourselves to
-/// print is a loop. A test must not be able to open Preview.
-/// What handing a document over came to: nothing, or a sentence for the
-/// notice line.
-type Handover = Rc<dyn Fn(&str) -> Result<(), String>>;
-
-#[derive(Clone)]
-pub struct Printer(Handover);
-
-impl PartialEq for Printer {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
+door!(
+    /// What handing the document to something that prints does. The program
+    /// is **named** rather than left to the system's default handler, because
+    /// that default may well be this reader and handing a document to
+    /// ourselves to print is a loop. A test must not be able to open Preview.
+    ///
+    /// The answer is nothing, or a sentence for the notice line.
+    Printer(&str) -> Result<(), String>
+);
 
 impl Printer {
-    pub fn new(print: impl Fn(&str) -> Result<(), String> + 'static) -> Self {
-        Printer(Rc::new(print))
-    }
-
     /// The default: the platform's own, exactly as the app names them.
     pub fn to_the_system() -> Self {
         Printer::new(|path| {
@@ -163,23 +179,14 @@ impl Printer {
     }
 }
 
-/// The document, shown where it lives — "Show in Finder", and its two other
-/// names on the two other platforms. A door beside [`Printer`] and for the
-/// same reason: it hands a path to a program outside this process.
-#[derive(Clone)]
-pub struct Reveal(Handover);
-
-impl PartialEq for Reveal {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
+door!(
+    /// The document, shown where it lives — "Show in Finder", and its two other
+    /// names on the two other platforms. A door beside [`Printer`] and for the
+    /// same reason: it hands a path to a program outside this process.
+    Reveal(&str) -> Result<(), String>
+);
 
 impl Reveal {
-    pub fn new(show: impl Fn(&str) -> Result<(), String> + 'static) -> Self {
-        Reveal(Rc::new(show))
-    }
-
     pub fn to_the_system() -> Self {
         Reveal::new(|path| {
             let file = std::path::PathBuf::from(path);
@@ -290,28 +297,19 @@ impl Config {
     }
 }
 
-/// How big the window is, asked of whatever knows: width and height in
-/// logical pixels, and the scale factor.
-///
-/// A number rather than `use_window()`, which consumes an `Arc<dyn
-/// winit::Window>` a headless test cannot provide. The shell answers it out of
-/// the real window and the harness out of its own viewport — and a component
-/// that reaches into winit is a component that knows what it is running
-/// under.
-#[derive(Clone)]
-pub struct Screen(Rc<dyn Fn() -> (f64, f64, f64)>);
-
-impl PartialEq for Screen {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
+door!(
+    /// How big the window is, asked of whatever knows: width and height in
+    /// logical pixels, and the scale factor.
+    ///
+    /// A number rather than `use_window()`, which consumes an `Arc<dyn
+    /// winit::Window>` a headless test cannot provide. The shell answers it out of
+    /// the real window and the harness out of its own viewport — and a component
+    /// that reaches into winit is a component that knows what it is running
+    /// under.
+    Screen() -> (f64, f64, f64)
+);
 
 impl Screen {
-    pub fn new(size: impl Fn() -> (f64, f64, f64) + 'static) -> Self {
-        Screen(Rc::new(size))
-    }
-
     /// A window of a fixed size, which is what a test has.
     pub fn fixed(width: f64, height: f64, scale: f64) -> Self {
         Screen::new(move || (width, height, scale))
@@ -322,27 +320,18 @@ impl Screen {
     }
 }
 
-/// Whether the machine is in dark mode, asked of whatever knows. [`Screen`]'s
-/// sibling, for the same reason.
-///
-/// `Option<bool>` where the app's `matchMedia` answers `bool`, because winit
-/// says `Option<Theme>` and the absence is real: a platform that does not
-/// report an appearance must leave the reader wearing what they chose rather
-/// than be read as "light". See [`crate::store::Store::outside`].
-#[derive(Clone)]
-pub struct Appearance(Rc<dyn Fn() -> Option<bool>>);
-
-impl PartialEq for Appearance {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
+door!(
+    /// Whether the machine is in dark mode, asked of whatever knows. [`Screen`]'s
+    /// sibling, for the same reason.
+    ///
+    /// `Option<bool>` where the app's `matchMedia` answers `bool`, because winit
+    /// says `Option<Theme>` and the absence is real: a platform that does not
+    /// report an appearance must leave the reader wearing what they chose rather
+    /// than be read as "light". See [`crate::store::Store::outside`].
+    Appearance() -> Option<bool>
+);
 
 impl Appearance {
-    pub fn new(dark: impl Fn() -> Option<bool> + 'static) -> Self {
-        Appearance(Rc::new(dark))
-    }
-
     /// A machine that will not say, which is what a shell that has not
     /// provided one leaves behind and what most tests want.
     pub fn unknown() -> Self {
@@ -455,28 +444,19 @@ const ZOOMS: [f64; 16] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 6.0,
 ];
 
-/// What opening a link outside the document does.
-///
-/// A context rather than a call, for the reason [`Screen`] is one.
-/// `webbrowser::open` is the default, so a shell providing nothing still opens
-/// links; a harness providing its own can watch where a link would have gone
-/// without a browser window arriving on somebody's screen mid-`cargo test`.
-/// A document's own links do not go through the DOM, so they need their own
-/// way out — `nav.rs` is the same door for an `<a href>` in the chrome.
-#[derive(Clone)]
-pub struct Away(Rc<dyn Fn(&str)>);
-
-impl PartialEq for Away {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
+door!(
+    /// What opening a link outside the document does.
+    ///
+    /// A context rather than a call, for the reason [`Screen`] is one.
+    /// `webbrowser::open` is the default, so a shell providing nothing still opens
+    /// links; a harness providing its own can watch where a link would have gone
+    /// without a browser window arriving on somebody's screen mid-`cargo test`.
+    /// A document's own links do not go through the DOM, so they need their own
+    /// way out — `nav.rs` is the same door for an `<a href>` in the chrome.
+    Away(&str)
+);
 
 impl Away {
-    pub fn new(open: impl Fn(&str) + 'static) -> Self {
-        Away(Rc::new(open))
-    }
-
     /// The default: hand the address to the system, with the same three
     /// schemes `nav.rs` allows and for the same reason — a `file:` or a
     /// `javascript:` in somebody's document is not a thing this app opens
@@ -499,29 +479,20 @@ impl Away {
     }
 }
 
-/// Where a copied passage goes.
-///
-/// A context holding one closure, for the reason [`Away`] is one: a suite that
-/// took the real clipboard would empty the clipboard of whoever is running
-/// `cargo test`.
-///
-/// **The app has no equivalent and needs none**: there the webview owns the
-/// selection, so it owns copying it. Here the selection is the reader's own
-/// ([`crate::select`]), so copying it is too.
-#[derive(Clone)]
-pub struct Clip(Rc<dyn Fn(&str)>);
-
-impl PartialEq for Clip {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
+door!(
+    /// Where a copied passage goes.
+    ///
+    /// A context holding one closure, for the reason [`Away`] is one: a suite that
+    /// took the real clipboard would empty the clipboard of whoever is running
+    /// `cargo test`.
+    ///
+    /// **The app has no equivalent and needs none**: there the webview owns the
+    /// selection, so it owns copying it. Here the selection is the reader's own
+    /// ([`crate::select`]), so copying it is too.
+    Clip(&str)
+);
 
 impl Clip {
-    pub fn new(put: impl Fn(&str) + 'static) -> Self {
-        Clip(Rc::new(put))
-    }
-
     /// The default: the system's clipboard, through the shell provider Blitz
     /// already hands every window. `None` for a shell that provided none,
     /// which says so once rather than silently copying nothing — a reader who
@@ -543,27 +514,28 @@ impl Clip {
     }
 }
 
-/// Which document the reader chose, when they were asked.
-///
-/// A context holding one closure, for the reason [`Clip`] is one: the thing it
-/// stands for is a modal window belonging to the operating system, and a test
-/// that opened one would sit there until somebody clicked it. `blitz-shell`
-/// already carries the picker — `open_file_dialog` on the shell provider,
-/// behind its `file-dialog` feature, which is `rfd` — so this is a door in the
-/// shell like the clipboard beside it rather than a dependency of its own.
-///
-/// **It asks and does not answer, and that is a crash rather than a taste.**
-/// `rfd` runs `NSOpenPanel` *modally*, which spins a nested run loop, which
-/// delivers events to winit while it is still inside `EventHandler::handle` —
-/// a click on a menu item is what got us here. That handler panics on
-/// re-entry, correctly. So the picker opens on a thread of its own, where
-/// `rfd` dispatches it back onto the main queue once the click has been
-/// handled, and the answer comes back as news in the mailbox like the document
-/// dropped on the window and the one handed over by a second launch.
-///
-/// A picker the reader closed sends nothing, which is what cancelling means.
-#[derive(Clone)]
-pub struct Pick(Rc<dyn Fn(Opening)>);
+door!(
+    /// Which document the reader chose, when they were asked.
+    ///
+    /// A context holding one closure, for the reason [`Clip`] is one: the thing it
+    /// stands for is a modal window belonging to the operating system, and a test
+    /// that opened one would sit there until somebody clicked it. `blitz-shell`
+    /// already carries the picker — `open_file_dialog` on the shell provider,
+    /// behind its `file-dialog` feature, which is `rfd` — so this is a door in the
+    /// shell like the clipboard beside it rather than a dependency of its own.
+    ///
+    /// **It asks and does not answer, and that is a crash rather than a taste.**
+    /// `rfd` runs `NSOpenPanel` *modally*, which spins a nested run loop, which
+    /// delivers events to winit while it is still inside `EventHandler::handle` —
+    /// a click on a menu item is what got us here. That handler panics on
+    /// re-entry, correctly. So the picker opens on a thread of its own, where
+    /// `rfd` dispatches it back onto the main queue once the click has been
+    /// handled, and the answer comes back as news in the mailbox like the document
+    /// dropped on the window and the one handed over by a second launch.
+    ///
+    /// A picker the reader closed sends nothing, which is what cancelling means.
+    Pick(Opening)
+);
 
 /// Which door a chosen document goes through: this window, or one of its own.
 ///
@@ -592,17 +564,7 @@ impl Opening {
     }
 }
 
-impl PartialEq for Pick {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
-
 impl Pick {
-    pub fn new(choose: impl Fn(Opening) + 'static) -> Self {
-        Pick(Rc::new(choose))
-    }
-
     /// The default: the system's own picker, filtered to PDFs, opened on a
     /// thread and answered into the mailbox.
     pub fn from_the_system(
@@ -691,20 +653,9 @@ pub enum Ask {
     FullScreen(bool),
 }
 
-#[derive(Clone)]
-pub struct Frame(Rc<dyn Fn(Ask)>);
-
-impl PartialEq for Frame {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
+door!(Frame(Ask));
 
 impl Frame {
-    pub fn new(ask: impl Fn(Ask) + 'static) -> Self {
-        Frame(Rc::new(ask))
-    }
-
     /// What a window with nobody listening does, which is say so once. A
     /// reader who presses ⌘N and gets silence has no way to tell a shortcut
     /// that did nothing from one that is not bound.

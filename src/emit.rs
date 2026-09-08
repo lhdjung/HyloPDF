@@ -1,45 +1,58 @@
-//! The three names `watch.rs` reaches for, supplied by this crate.
+//! Where news waits for the window it is about.
 //!
-//! **This module exists so that the app's `watch.rs` compiles here with no
-//! change at all.** That file opens with `use tauri::{AppHandle, Emitter};`,
-//! and the first segment of a `use` path is looked up in the extern prelude —
-//! so `extern crate self as tauri;` in `lib.rs` makes this crate answer to
-//! that name too, and [`AppHandle`] and [`Emitter`] are re-exported at its
-//! root.
+//! The watcher is a thread and each window's reader is a Dioxus task, so what
+//! is needed between them is not a channel but a way for a thread to say
+//! "poll me" to a task it cannot see. [`Post`] is one window's mailbox with a
+//! waker in it, [`Exchange`] is every window's by name, and [`News`] is what
+//! travels: an event, a payload, and either a target or everybody.
 //!
-//! (A module named `tauri` does not work: a `use` path on a bare identifier
-//! does not see the crate root's modules, only crates. The compiler suggests
-//! `crate::tauri`, which is the one thing that cannot be written here, because
-//! what is being avoided is editing the file.)
-//!
-//! The signatures are Tauri's, not ours, because that is the constraint: a
-//! shim taking a nicer argument is a shim the app's file does not compile
-//! against, which is the whole of what is being tested. The cost is
-//! [`Emitter::emit`]'s `S: Serialize` bound — a payload arrives as a
-//! `serde_json::Value` rather than the `Vec<Theme>` it started as, which is
-//! the bridge's serialisation surviving in a build with no bridge. It fires
-//! when somebody saves a theme file.
+//! **This was a shim around Tauri's `AppHandle` and `Emitter`**, so that the
+//! app's own `watch.rs` could be mounted here with its `use tauri::…` line
+//! untouched — `extern crate self as tauri` and all. Two `use` lines and two
+//! call sites were what that bought, against a trait, an `EventTarget`, an
+//! error type nothing read, and a `Serialize` bound that turned every payload
+//! into JSON in a build with no bridge to send JSON over.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-use serde::Serialize;
-
-/// What a window's frontend is told, and by whom.
+/// What a window is told, and by whom.
 ///
-/// The shape is the bridge's, kept deliberately: an event has a name, a
-/// payload, and either a target or everybody. `target` was carried and
-/// ignored while there was one window, on the grounds that `emit_to` naming
-/// one window is the whole reason `watch.rs` follows a document *per window*
-/// — and item 9 is where that stopped being theoretical. It is [`Exchange`]
-/// that reads it now: a recompiled paper reaches the window reading it and
-/// no other, and a saved theme reaches all of them.
+/// An event has a name, a payload, and either a target or everybody. The
+/// target is the whole difference between one window and several: a
+/// recompiled paper reaches the window reading it, and a saved theme reaches
+/// all of them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct News {
     pub event: String,
     pub target: Option<String>,
-    pub payload: serde_json::Value,
+    pub payload: Payload,
+}
+
+/// What comes with an event, which is one of six things.
+///
+/// It was a `serde_json::Value`, because the shim this module used to be had
+/// to satisfy Tauri's `S: Serialize` — the bridge's serialisation surviving
+/// in a build with no bridge. Nothing here crosses a process boundary, so
+/// these are the shapes themselves.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Payload {
+    /// The event is the whole of the message: a resize, an appearance change,
+    /// a drag that left.
+    #[default]
+    Nothing,
+    /// A path, or a sentence the notice line is holding.
+    Text(String),
+    /// What a timer was armed for, so that a stale one can be ignored.
+    Token(u64),
+    /// How far a pinch moved, as a fraction.
+    Amount(f64),
+    /// Whether a document over the window is one this reader would open.
+    Takeable(bool),
+    /// The themes as they now stand — the whole set, which is cheaper to send
+    /// than to ask for.
+    Themes(Vec<crate::theme::Theme>),
 }
 
 /// Where news waits until somebody reads it.
@@ -120,11 +133,9 @@ impl std::future::Future for Next {
 /// Every window's mailbox, by the name the window is known to `watch.rs` by.
 ///
 /// One process watches one themes directory and any number of documents, so
-/// there is one watcher and one [`AppHandle`] — and it has to reach a particular
-/// window, because `watch.rs` reports a rewritten document with `emit_to(label,
-/// …)` and the themes with `emit`. That is the whole difference between one
-/// window and several: a mailbox became a switchboard, and nothing in the app's
-/// file noticed.
+/// there is one watcher and it has to reach a particular window: `watch.rs`
+/// reports a rewritten document to the window reading it and the themes to
+/// everybody. That is what makes this a switchboard rather than a mailbox.
 ///
 /// A window joins when it is made and leaves when it is destroyed. Leaving
 /// matters: news for a window that has gone would otherwise pile up in a
@@ -163,83 +174,6 @@ impl Exchange {
         for post in boxes {
             post.send(news.clone());
         }
-    }
-}
-
-/// What `watch.rs` is handed, and the whole of what it does with it is emit.
-///
-/// Tauri's is a handle on the running application. Here it is a handle on the
-/// switchboard, which is the only part of an application that file ever
-/// reaches for.
-#[derive(Clone)]
-pub struct AppHandle(Exchange);
-
-impl AppHandle {
-    pub fn new(exchange: Exchange) -> AppHandle {
-        AppHandle(exchange)
-    }
-}
-
-/// Who an event is for. Tauri's `emit_to` takes `impl Into<EventTarget>` and
-/// `watch.rs` passes a `&str`, so that is the conversion this needs.
-pub struct EventTarget(String);
-
-impl From<&str> for EventTarget {
-    fn from(label: &str) -> EventTarget {
-        EventTarget(label.to_string())
-    }
-}
-
-impl From<String> for EventTarget {
-    fn from(label: String) -> EventTarget {
-        EventTarget(label)
-    }
-}
-
-/// A payload that could not be turned into JSON, which is the only way any of
-/// this fails. Nothing acts on it — `watch.rs` writes `let _ = app.emit(…)`,
-/// as it must, because there is nowhere on a watcher thread to report an
-/// error to.
-#[derive(Debug)]
-pub struct Undeliverable;
-
-pub type Result<T> = std::result::Result<T, Undeliverable>;
-
-/// Tauri's trait, with the two methods `watch.rs` calls.
-pub trait Emitter {
-    fn emit<S: Serialize + Clone>(&self, event: &str, payload: S) -> Result<()>;
-    fn emit_to<I: Into<EventTarget>, S: Serialize + Clone>(
-        &self,
-        target: I,
-        event: &str,
-        payload: S,
-    ) -> Result<()>;
-}
-
-impl Emitter for AppHandle {
-    fn emit<S: Serialize + Clone>(&self, event: &str, payload: S) -> Result<()> {
-        self.deliver(event, None, payload)
-    }
-
-    fn emit_to<I: Into<EventTarget>, S: Serialize + Clone>(
-        &self,
-        target: I,
-        event: &str,
-        payload: S,
-    ) -> Result<()> {
-        self.deliver(event, Some(target.into().0), payload)
-    }
-}
-
-impl AppHandle {
-    fn deliver<S: Serialize>(&self, event: &str, target: Option<String>, payload: S) -> Result<()> {
-        let payload = serde_json::to_value(payload).map_err(|_| Undeliverable)?;
-        self.0.post(News {
-            event: event.to_string(),
-            target,
-            payload,
-        });
-        Ok(())
     }
 }
 
@@ -337,7 +271,7 @@ mod tests {
         News {
             event: event.to_string(),
             target: target.map(str::to_string),
-            payload: serde_json::Value::Null,
+            payload: Payload::Nothing,
         }
     }
 

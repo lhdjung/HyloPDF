@@ -49,6 +49,7 @@ use dioxus::prelude::*;
 use dioxus_native::CustomWidgetAttr;
 use serde_json::json;
 
+use crate::emit::Payload;
 use crate::keymap::{Action, Keymap, Press};
 use crate::layout::{Anchor, Fit, Layout, Mode, Size, Spread};
 use crate::page::{Chosen, PageWidget};
@@ -594,7 +595,7 @@ impl Pick {
                     post.send(crate::emit::News {
                         event: opening.event().to_string(),
                         target: None,
-                        payload: serde_json::Value::String(path.to_string_lossy().into_owned()),
+                        payload: crate::emit::Payload::Text(path.to_string_lossy().into_owned()),
                     });
                 }
             });
@@ -5209,10 +5210,7 @@ pub fn Reader(
                     exchange.join(&config.window, post.clone());
                     exchange
                 });
-                let watching = Arc::new(crate::watch::start(
-                    crate::emit::AppHandle::new(exchange),
-                    themes,
-                ));
+                let watching = Arc::new(crate::watch::start(exchange, themes));
                 if !path.is_empty() {
                     watching.document(&config.window, Some(&path));
                 }
@@ -5232,31 +5230,32 @@ pub fn Reader(
                     // thread of its own. It clears the line only if the line
                     // still carries what it was started for.
                     "notice-timeout" => {
-                        let said = news.payload.as_str().unwrap_or_default();
-                        if viewer.read().notice == said {
-                            viewer.write().notice.clear();
+                        if let Payload::Text(said) = &news.payload {
+                            if viewer.read().notice == *said {
+                                viewer.write().notice.clear();
+                            }
                         }
                     }
                     // A second after the reader stopped scrolling, and only
                     // if nothing has scrolled since — see `Viewer::flash_pill`.
                     "pill-timeout" => {
-                        if let Some(token) = news.payload.as_u64() {
+                        if let Payload::Token(token) = news.payload {
                             viewer.write().unflash_pill(token);
                         }
                     }
                     // The fingers stopped moving. See [`Viewer::settle_zoom`].
                     "zoom-settled" => {
-                        if let Some(token) = news.payload.as_u64() {
+                        if let Payload::Token(token) = news.payload {
                             viewer.write().settle_zoom(token);
                         }
                     }
                     "themes-changed" => {
-                        if let Ok(themes) = serde_json::from_value(news.payload) {
+                        if let Payload::Themes(themes) = news.payload {
                             viewer.write().themes_changed(themes);
                         }
                     }
                     "document-changed" => {
-                        let path = news.payload.as_str().unwrap_or_default().to_string();
+                        let Payload::Text(path) = news.payload else { continue };
                         let restarted = viewer.write().document_changed(&path);
                         scan(restarted);
                     }
@@ -5265,7 +5264,12 @@ pub fn Reader(
                     // a hint that says "drop to open" over a folder is a
                     // promise nothing keeps.
                     "drag-over" => {
-                        let takeable = news.payload.as_bool().unwrap_or(true);
+                        // A shell that said nothing about it means yes, which
+                        // is what the hint promised before there was an answer.
+                        let takeable = match news.payload {
+                            Payload::Takeable(takeable) => takeable,
+                            _ => true,
+                        };
                         viewer.write().dragging = Some(takeable);
                     }
                     "drag-left" => viewer.write().dragging = None,
@@ -5283,7 +5287,7 @@ pub fn Reader(
                     // bookkeeping afterwards is ⌘O's, because this is ⌘O with
                     // somebody else choosing the file.
                     "open-document" => {
-                        let path = news.payload.as_str().unwrap_or_default().to_string();
+                        let Payload::Text(path) = news.payload else { continue };
                         viewer.write().dragging = None;
                         if !path.is_empty() && viewer.write().open_here(&path) {
                             let title = viewer.read().store.title().to_string();
@@ -5296,7 +5300,7 @@ pub fn Reader(
                     // See `Pick` — a picker cannot answer where it was asked,
                     // so which door it was is carried in the event's name.
                     "open-document-beside" => {
-                        let path = news.payload.as_str().unwrap_or_default().to_string();
+                        let Payload::Text(path) = news.payload else { continue };
                         if !path.is_empty() {
                             opening.ask(Ask::NewWindowOn(path));
                         }
@@ -5319,7 +5323,7 @@ pub fn Reader(
                     // gesture's whole scale is the product of them and each
                     // one is a proportion to zoom by. See `Viewer::zoom_by`.
                     "pinched" => {
-                        if let Some(delta) = news.payload.as_f64() {
+                        if let Payload::Amount(delta) = news.payload {
                             viewer.write().zoom_by(1.0 + delta);
                         }
                     }
@@ -5385,7 +5389,7 @@ pub fn Reader(
                 crate::emit::News {
                     event: "notice-timeout".into(),
                     target: None,
-                    payload: serde_json::Value::String(said),
+                    payload: Payload::Text(said),
                 },
             );
         });
@@ -5417,7 +5421,7 @@ pub fn Reader(
                 crate::emit::News {
                     event: "pill-timeout".into(),
                     target: None,
-                    payload: serde_json::Value::from(token),
+                    payload: Payload::Token(token),
                 },
             );
         });
@@ -5444,7 +5448,7 @@ pub fn Reader(
                 crate::emit::News {
                     event: "zoom-settled".into(),
                     target: None,
-                    payload: serde_json::Value::from(token),
+                    payload: Payload::Token(token),
                 },
             );
         });

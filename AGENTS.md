@@ -82,8 +82,9 @@ src/
   windows.rs      what a second window is, and what closing one means
   single.rs       one process per user, over a Unix socket
   harness.rs      the reader driven with no window and no screen
+  emit.rs         news, and the mailbox each window reads it out of
   theme.rs settings.rs keys.rs library.rs watch.rs
-                  came over from the Tauri app unchanged; see `lib.rs`
+                  came over from the Tauri app; see `lib.rs`
 themes/*.toml     the fourteen packaged themes, embedded with include_str!
 keys.toml         the commented template a new install gets, include_str!
 icons/            what the bundler puts on the three platforms

@@ -40,8 +40,8 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 use notify::{EventKind, RecursiveMode, Watcher};
-use tauri::{AppHandle, Emitter};
 
+use crate::emit::{Exchange, News, Payload};
 use crate::theme;
 
 /// How long the file system has to be quiet before a burst counts as one
@@ -127,7 +127,7 @@ struct Followed {
 /// A watcher that cannot be created, or a directory that cannot be watched, is
 /// not worth a message: the app then behaves exactly as it did before any of
 /// this, which is to notice at the next launch.
-pub fn start(app: AppHandle, themes: PathBuf) -> Watching {
+pub fn start(exchange: Exchange, themes: PathBuf) -> Watching {
     let (sender, receiver) = mpsc::channel();
     let events = sender.clone();
 
@@ -144,13 +144,13 @@ pub fn start(app: AppHandle, themes: PathBuf) -> Watching {
         });
         let Ok(mut watcher) = watcher else { return };
         let _ = watcher.watch(&themes, RecursiveMode::NonRecursive);
-        run(app, themes, receiver, &mut watcher);
+        run(exchange, themes, receiver, &mut watcher);
     });
 
     Watching(Mutex::new(sender))
 }
 
-fn run(app: AppHandle, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mut dyn Watcher) {
+fn run(exchange: Exchange, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mut dyn Watcher) {
     // What the frontend already has. Compared against, never emitted blindly.
     let mut known = theme::load_all(&themes);
     // Keyed by window label. Two windows may well be reading two documents in
@@ -188,7 +188,11 @@ fn run(app: AppHandle, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mu
             let current = theme::load_all(&themes);
             if current != known {
                 known = current;
-                let _ = app.emit("themes-changed", &known);
+                exchange.post(News {
+                    event: "themes-changed".into(),
+                    target: None,
+                    payload: Payload::Themes(known.clone()),
+                });
             }
         }
 
@@ -201,7 +205,11 @@ fn run(app: AppHandle, themes: PathBuf, receiver: Receiver<Signal>, watcher: &mu
                 // To that window and no other. A broadcast would tell every
                 // window that *its* document had been rewritten, and each
                 // would reopen the one it is holding for no reason.
-                let _ = app.emit_to(window.as_str(), "document-changed", path);
+                exchange.post(News {
+                    event: "document-changed".into(),
+                    target: Some(window.clone()),
+                    payload: Payload::Text(path),
+                });
             }
         }
     }

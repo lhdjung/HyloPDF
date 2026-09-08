@@ -15,7 +15,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use hylopdf::app::Config;
-use hylopdf::emit::{AppHandle, Emitter, Exchange};
+use hylopdf::emit::{Exchange, News, Payload};
 use hylopdf::session::Session;
 use hylopdf::shell::Shell;
 use hylopdf::windows::Desk;
@@ -145,7 +145,7 @@ fn main() {
     let desk = Desk::new();
     let exchange = Exchange::new();
     let watching = Arc::new(watch::start(
-        AppHandle::new(exchange.clone()),
+        exchange.clone(),
         hylopdf::config::themes_dir(),
     ));
     let session_maker = Rc::new(Session {
@@ -208,10 +208,14 @@ fn main() {
         // `Shell::on_resized`. It goes down the mailbox rather than into the
         // window because a component is the only thing that can read the
         // signal, and news is how a component is reached.
-        let handle = AppHandle::new(exchange.clone());
+        let exchange = exchange.clone();
         let geometry = geometry.clone();
         shell.on_resized(move |label, width, height, maximized| {
-            let _ = handle.emit_to(label, "window-resized", ());
+            exchange.post(News {
+                event: "window-resized".into(),
+                target: Some(label.to_string()),
+                payload: Payload::Nothing,
+            });
             // **Geometry belongs to the launch window**, which is the app's
             // own rule and the app's own reason: there is one remembered size
             // and there are several windows, and letting whichever moved last
@@ -229,9 +233,13 @@ fn main() {
         // Two fingers on the trackpad, which macOS reports as a gesture rather
         // than as a modified wheel — so an application that listens only for
         // ⌃-wheel does not zoom at all. See `Shell::on_pinch`.
-        let handle = AppHandle::new(exchange.clone());
+        let exchange = exchange.clone();
         shell.on_pinch(move |label, delta| {
-            let _ = handle.emit_to(label, "pinched", delta);
+            exchange.post(News {
+                event: "pinched".into(),
+                target: Some(label.to_string()),
+                payload: Payload::Amount(delta),
+            });
         });
     }
     {
@@ -239,9 +247,13 @@ fn main() {
         // for the same reason — the event says only that there is a new
         // answer, and the reader asks the window for it. See
         // `Shell::on_theme`.
-        let handle = AppHandle::new(exchange.clone());
+        let exchange = exchange.clone();
         shell.on_theme(move |label| {
-            let _ = handle.emit_to(label, "appearance-changed", ());
+            exchange.post(News {
+                event: "appearance-changed".into(),
+                target: Some(label.to_string()),
+                payload: Payload::Nothing,
+            });
         });
     }
     {
@@ -250,20 +262,19 @@ fn main() {
         // file through the same `open_here` that ⌘O uses — so all this does is
         // carry winit's word down the mailbox, which is the shape of every
         // other line in this block.
-        let handle = AppHandle::new(exchange.clone());
+        let exchange = exchange.clone();
         shell.on_drop(move |label, drag| {
-            let _ = match drag {
-                hylopdf::shell::Drag::Over(takeable) => {
-                    handle.emit_to(label, "drag-over", takeable)
-                }
-                hylopdf::shell::Drag::Left => handle.emit_to(label, "drag-left", ()),
-                hylopdf::shell::Drag::Refused => {
-                    handle.emit_to(label, "drag-refused", ())
-                }
-                hylopdf::shell::Drag::Drop(path) => {
-                    handle.emit_to(label, "open-document", path)
-                }
+            let (event, payload) = match drag {
+                hylopdf::shell::Drag::Over(t) => ("drag-over", Payload::Takeable(t)),
+                hylopdf::shell::Drag::Left => ("drag-left", Payload::Nothing),
+                hylopdf::shell::Drag::Refused => ("drag-refused", Payload::Nothing),
+                hylopdf::shell::Drag::Drop(path) => ("open-document", Payload::Text(path)),
             };
+            exchange.post(News {
+                event: event.into(),
+                target: Some(label.to_string()),
+                payload,
+            });
         });
     }
     {

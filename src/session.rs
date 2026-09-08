@@ -220,7 +220,7 @@ impl Session {
                 self.exchange.post(crate::emit::News {
                     event: "open-document".into(),
                     target: Some(label.clone()),
-                    payload: serde_json::Value::String(path.to_string()),
+                    payload: crate::emit::Payload::Text(path.to_string()),
                 });
                 self.remote.show(&label);
                 None

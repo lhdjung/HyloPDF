@@ -51,6 +51,7 @@ use peniko::kurbo::Rect;
 use peniko::{Color, Fill};
 
 use crate::app::{Away, Config, Handle, Reader as ReaderComponent, ReaderProps, Screen};
+use crate::emit::Payload;
 use crate::page::Chosen;
 use crate::palette;
 use crate::render::{self, PageSource};
@@ -294,7 +295,7 @@ impl Reader {
         self.deliver(crate::emit::News {
             event: "pinched".into(),
             target: None,
-            payload: serde_json::Value::from(delta),
+            payload: Payload::Amount(delta),
         });
     }
 
@@ -309,7 +310,7 @@ impl Reader {
         self.deliver(crate::emit::News {
             event: "drag-over".into(),
             target: None,
-            payload: serde_json::Value::Bool(takeable),
+            payload: Payload::Takeable(takeable),
         });
     }
 
@@ -318,7 +319,7 @@ impl Reader {
         self.deliver(crate::emit::News {
             event: "drag-left".into(),
             target: None,
-            payload: serde_json::Value::Null,
+            payload: Payload::Nothing,
         });
     }
 
@@ -327,7 +328,7 @@ impl Reader {
         self.deliver(crate::emit::News {
             event: "drag-refused".into(),
             target: None,
-            payload: serde_json::Value::Null,
+            payload: Payload::Nothing,
         });
     }
 
@@ -337,7 +338,7 @@ impl Reader {
         self.deliver(crate::emit::News {
             event: "open-document".into(),
             target: None,
-            payload: serde_json::Value::String(path.to_string()),
+            payload: Payload::Text(path.to_string()),
         });
     }
 
@@ -346,7 +347,7 @@ impl Reader {
         self.deliver(crate::emit::News {
             event: "themes-changed".into(),
             target: None,
-            payload: serde_json::to_value(themes).expect("themes are serialisable"),
+            payload: Payload::Themes(themes.to_vec()),
         });
     }
 
@@ -366,7 +367,7 @@ impl Reader {
         self.deliver(crate::emit::News {
             event: "window-resized".into(),
             target: Some(crate::windows::MAIN.into()),
-            payload: serde_json::Value::Null,
+            payload: Payload::Nothing,
         });
     }
 
@@ -382,7 +383,7 @@ impl Reader {
         self.deliver(crate::emit::News {
             event: "appearance-changed".into(),
             target: Some(crate::windows::MAIN.into()),
-            payload: serde_json::Value::Null,
+            payload: Payload::Nothing,
         });
     }
 
@@ -391,7 +392,7 @@ impl Reader {
         self.deliver(crate::emit::News {
             event: "document-changed".into(),
             target: Some(crate::windows::MAIN.into()),
-            payload: serde_json::Value::String(path.to_string()),
+            payload: Payload::Text(path.to_string()),
         });
     }
 
@@ -588,7 +589,7 @@ impl Reader {
                         crate::app::Opening::Beside => "open-document-beside".into(),
                     },
                     target: None,
-                    payload: serde_json::Value::String(path),
+                    payload: Payload::Text(path),
                 });
             }));
         });

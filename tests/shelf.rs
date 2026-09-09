@@ -366,7 +366,9 @@ fn the_open_menu_carries_the_shelf() {
     assert_eq!(rows, 1, "the document that was read before this one");
     let listed = reader.text_all(".menu.open .menu-label");
     assert!(
-        listed.iter().any(|name| name.contains("A Paper With A Name")),
+        listed
+            .iter()
+            .any(|name| name.contains("A Paper With A Name")),
         "named on its own row: {listed:?}",
     );
 

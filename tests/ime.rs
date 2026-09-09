@@ -66,7 +66,10 @@ fn a_composed_word_that_is_in_the_document_is_found() {
     let state = reader.state();
     assert_eq!(state.query, "résumé");
     assert_eq!(state.find.as_deref(), Some("1 of 1"));
-    assert_eq!(state.page, 5, "and the reader is taken to the page it is on");
+    assert_eq!(
+        state.page, 5,
+        "and the reader is taken to the page it is on"
+    );
 }
 
 /// **A preedit is not a query.** What is in the candidate window is a guess

@@ -48,9 +48,15 @@ fn press(key: &str, code: &str, modifiers: Modifiers) -> Vec<String> {
 
 #[test]
 fn a_chord_is_spelled_one_way_however_it_was_written() {
-    assert_eq!(parse_chord("Shift+Mod+F", MAC).as_deref(), Some("mod+shift+f"));
+    assert_eq!(
+        parse_chord("Shift+Mod+F", MAC).as_deref(),
+        Some("mod+shift+f")
+    );
     assert_eq!(parse_chord("cmd+alt+g", MAC).as_deref(), Some("mod+alt+g"));
-    assert_eq!(parse_chord("option+ArrowLeft", MAC).as_deref(), Some("alt+left"));
+    assert_eq!(
+        parse_chord("option+ArrowLeft", MAC).as_deref(),
+        Some("alt+left")
+    );
     assert_eq!(parse_chord("ESC", MAC).as_deref(), Some("escape"));
     assert_eq!(parse_chord("Plus", MAC).as_deref(), Some("+"));
     // `+` is a key as well as a separator, which is why a chord is peeled from
@@ -115,10 +121,7 @@ fn the_modifiers_a_platform_does_not_use_match_nothing() {
     // The Windows key is not bound to anything, and reading it as no modifier
     // at all would turn ⊞J into a scroll.
     assert!(press_on(PC, "j", "KeyJ", Modifiers::META).is_empty());
-    assert_eq!(
-        press_on(PC, "j", "KeyJ", Modifiers::CONTROL),
-        vec!["mod+j"]
-    );
+    assert_eq!(press_on(PC, "j", "KeyJ", Modifiers::CONTROL), vec!["mod+j"]);
 }
 
 /* --------------------------------------------------------------- keymaps */
@@ -226,7 +229,10 @@ fn a_pending_prefix_is_continued_dropped_or_used_on_its_own() {
     );
     // A chord that continues nothing is not a mistake: it is a reader
     // changing their mind, so it is tried on its own.
-    assert_eq!(map.resolve(&chord("j"), "g"), Press::Act(Action::ScrollDown));
+    assert_eq!(
+        map.resolve(&chord("j"), "g"),
+        Press::Act(Action::ScrollDown)
+    );
     assert_eq!(map.resolve(&chord("z"), "g"), Press::Nothing);
     // A modifier on its own must not clear what is waiting.
     assert_eq!(
@@ -269,7 +275,12 @@ fn a_second_window_has_a_key_and_closing_one_is_not_quitting() {
     assert_eq!(shipped.problems, Vec::<String>::new());
     assert_eq!(shipped.action_for("mod+n"), Some(Action::NewWindow));
 
-    let spec_of = |id: Action| ACTIONS.iter().find(|spec| spec.id == id).expect("in the table");
+    let spec_of = |id: Action| {
+        ACTIONS
+            .iter()
+            .find(|spec| spec.id == id)
+            .expect("in the table")
+    };
     // **⌘W is the app's own on every platform.** It was left to the menu bar
     // on a Mac, and winit installs an application menu with no Window menu in
     // it, so the key reached nothing — which is also the only way to close a
@@ -295,11 +306,8 @@ fn a_second_window_has_a_key_and_closing_one_is_not_quitting() {
 /// not in the app's file, and they had better not be.
 #[test]
 fn the_shipped_keys_toml_shows_the_keys_the_app_actually_ships_with() {
-    let body = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/keys.toml"
-    ))
-    .expect("the app's keys.toml");
+    let body = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/keys.toml"))
+        .expect("the app's keys.toml");
 
     // Every commented-out binding, uncommented and read as the TOML it is.
     let mut uncommented = String::new();
@@ -445,10 +453,7 @@ fn the_keys_a_vim_shaped_reader_reaches_for() {
     reader.press(" ");
     let whole = reader.state().scroll - start;
     assert!(half > 0.0, "d did not move");
-    assert!(
-        (whole - half * 2.0).abs() < 3.0,
-        "{half} then {whole}"
-    );
+    assert!((whole - half * 2.0).abs() < 3.0, "{half} then {whole}");
 }
 
 /// **Every action in the table answers**, which used to be the interesting
@@ -475,7 +480,6 @@ fn every_action_in_the_table_answers() {
     // is where the pair, the machine and the switch are.
     reader.press_chord("mod+d");
     assert_eq!(reader.state().theme, "Hylo Dark");
-
 }
 
 /// **Command arrives in either bit, and reading only one of them was the

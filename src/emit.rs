@@ -221,7 +221,11 @@ pub fn after(delay: std::time::Duration, post: Post, news: News) {
                 while due.is_empty() {
                     due = ticking.ring.wait(due).unwrap_or_else(|e| e.into_inner());
                 }
-                let soonest = due.iter().map(|(at, _, _)| *at).min().unwrap_or_else(Instant::now);
+                let soonest = due
+                    .iter()
+                    .map(|(at, _, _)| *at)
+                    .min()
+                    .unwrap_or_else(Instant::now);
                 let now = Instant::now();
                 if soonest > now {
                     let (waited, _) = ticking

@@ -96,18 +96,15 @@ impl Signature {
     /// The box the strokes actually occupy: left, top, right, bottom. `None`
     /// for a signature with no points in it at all.
     fn bounds(&self) -> Option<(f64, f64, f64, f64)> {
-        self.strokes
-            .iter()
-            .flatten()
-            .fold(None, |bounds, point| {
-                let (x, y) = (point[0], point[1]);
-                Some(match bounds {
-                    None => (x, y, x, y),
-                    Some((left, top, right, bottom)) => {
-                        (left.min(x), top.min(y), right.max(x), bottom.max(y))
-                    }
-                })
+        self.strokes.iter().flatten().fold(None, |bounds, point| {
+            let (x, y) = (point[0], point[1]);
+            Some(match bounds {
+                None => (x, y, x, y),
+                Some((left, top, right, bottom)) => {
+                    (left.min(x), top.min(y), right.max(x), bottom.max(y))
+                }
             })
+        })
     }
 
     /// How wide it is against its height, which is what decides the box it is
@@ -163,12 +160,7 @@ impl Signature {
                 .map(|stroke| {
                     stroke
                         .iter()
-                        .map(|point| {
-                            [
-                                (point[0] - left) / scale,
-                                (point[1] - top) / scale + middle,
-                            ]
-                        })
+                        .map(|point| [(point[0] - left) / scale, (point[1] - top) / scale + middle])
                         .collect()
                 })
                 .collect(),
@@ -300,11 +292,21 @@ pub fn forget(config: &std::path::Path, id: &str) -> Result<(), String> {
 fn mint(config: &std::path::Path, name: &str) -> String {
     let stem: String = name
         .chars()
-        .map(|ch| if ch.is_alphanumeric() { ch.to_ascii_lowercase() } else { '-' })
+        .map(|ch| {
+            if ch.is_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .trim_matches('-')
         .to_string();
-    let stem = if stem.is_empty() { "signature".to_string() } else { stem };
+    let stem = if stem.is_empty() {
+        "signature".to_string()
+    } else {
+        stem
+    };
     let taken = |id: &str| dir(config).join(format!("{id}.toml")).exists();
     if !taken(&stem) {
         return stem;
@@ -444,21 +446,34 @@ pub fn seals(path: &str) -> Vec<Seal> {
             filled: !signature.bytes().is_empty(),
             when: in_words(&signature.signing_date().unwrap_or_default()),
             reason: signature.reason().unwrap_or_default(),
-            locks: signature.modification_detection_permission().ok().map(|level| {
-                use pdfium_render::prelude::PdfSignatureModificationDetectionPermission as Mdp;
-                match level {
-                    Mdp::Mdp1 => 1,
-                    Mdp::Mdp2 => 2,
-                    Mdp::Mdp3 => 3,
-                }
-            }),
+            locks: signature
+                .modification_detection_permission()
+                .ok()
+                .map(|level| {
+                    use pdfium_render::prelude::PdfSignatureModificationDetectionPermission as Mdp;
+                    match level {
+                        Mdp::Mdp1 => 1,
+                        Mdp::Mdp2 => 2,
+                        Mdp::Mdp3 => 3,
+                    }
+                }),
         })
         .collect()
 }
 
 const MONTHS: [&str; 12] = [
-    "January", "February", "March", "April", "May", "June", "July", "August", "September",
-    "October", "November", "December",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
 ];
 
 /// A PDF date in words: `D:20240314093000+01'00'` becomes `14 March 2024`.
@@ -469,9 +484,12 @@ const MONTHS: [&str; 12] = [
 /// one written down; showing the string as written is neither.
 pub fn in_words(raw: &str) -> String {
     let digits = raw.strip_prefix("D:").unwrap_or(raw);
-    let number = |from: usize, to: usize| digits.get(from..to).and_then(|s| s.parse::<usize>().ok());
+    let number =
+        |from: usize, to: usize| digits.get(from..to).and_then(|s| s.parse::<usize>().ok());
     match (number(0, 4), number(4, 6), number(6, 8)) {
-        (Some(year), Some(month), Some(day)) if (1..=12).contains(&month) && (1..=31).contains(&day) => {
+        (Some(year), Some(month), Some(day))
+            if (1..=12).contains(&month) && (1..=31).contains(&day) =>
+        {
             format!("{day} {} {year}", MONTHS[month - 1])
         }
         _ => raw.to_string(),
@@ -501,7 +519,11 @@ fn civil(days: i64) -> (i64, u32, u32) {
     // Shifted so that the era begins on 1 March, which is what makes the leap
     // day the last day of the year and the whole thing branchless.
     let shifted = days + 719_468;
-    let era = if shifted >= 0 { shifted } else { shifted - 146_096 } / 146_097;
+    let era = if shifted >= 0 {
+        shifted
+    } else {
+        shifted - 146_096
+    } / 146_097;
     let day_of_era = shifted - era * 146_097;
     let year_of_era =
         (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
@@ -599,7 +621,9 @@ fn ink_one(
 
     let mut paths = Vec::new();
     for stroke in &signature.strokes {
-        let Some(first) = stroke.first() else { continue };
+        let Some(first) = stroke.first() else {
+            continue;
+        };
         let (x, y) = onto(first);
         let mut path = PdfPagePathObject::new(
             document,
@@ -704,9 +728,13 @@ fn text_one(
     // second borrow begins. A token is a handle and not a borrow, which is why
     // this works at all.
     let font = document.fonts_mut().helvetica();
-    let mut object =
-        pdfium_render::prelude::PdfPageTextObject::new(document, line, font, PdfPoints::new(size as f32))
-            .map_err(|e| format!("the text could not be set: {e}"))?;
+    let mut object = pdfium_render::prelude::PdfPageTextObject::new(
+        document,
+        line,
+        font,
+        PdfPoints::new(size as f32),
+    )
+    .map_err(|e| format!("the text could not be set: {e}"))?;
     object
         .set_fill_color(PdfColor::new(red, green, blue, 255))
         .map_err(|e| format!("the text could not be coloured: {e}"))?;
@@ -716,7 +744,10 @@ fn text_one(
     // the difference nobody would see.
     let baseline = page_height - at.top - size * 0.8;
     object
-        .translate(PdfPoints::new(at.left as f32), PdfPoints::new(baseline as f32))
+        .translate(
+            PdfPoints::new(at.left as f32),
+            PdfPoints::new(baseline as f32),
+        )
         .map_err(|e| format!("the text could not be placed: {e}"))?;
     // Asked of the object rather than guessed from the character count,
     // because Helvetica is proportional and a date is mostly digits and spaces.

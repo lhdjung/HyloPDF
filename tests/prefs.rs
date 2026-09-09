@@ -6,8 +6,8 @@
 //! window would be a second `Viewer` over a second `Store`, and the harness
 //! has no windows.
 
-use hylopdf::keymap::Action;
 use hylopdf::harness::{Options, Reader};
+use hylopdf::keymap::Action;
 use hylopdf::theme;
 
 fn book() -> Reader {
@@ -110,7 +110,10 @@ fn a_switch_changes_the_reader_and_is_written_down() {
     let config = reader.config.clone();
     let mut beside = Reader::open_with(
         &Reader::book(),
-        Options { config, ..Options::default() },
+        Options {
+            config,
+            ..Options::default()
+        },
     );
     beside.press_chord("mod+,");
     assert_eq!(
@@ -132,7 +135,10 @@ fn a_row_of_choices_changes_what_is_in_force() {
     // the pages in the DOM are what says it happened.
     assert_eq!(reader.state().mounted, vec![1]);
     assert_eq!(
-        reader.harness.attr(".segmented .segment", "aria-pressed").as_deref(),
+        reader
+            .harness
+            .attr(".segmented .segment", "aria-pressed")
+            .as_deref(),
         Some("false"),
         "and the one that was in force stands down",
     );
@@ -212,7 +218,11 @@ fn a_theme_is_chosen_from_its_own_swatch() {
     reader.click_nth(".nav-item", 1);
 
     let cards = reader.harness.query_all(".theme-card").len();
-    assert_eq!(cards, theme::BUILT_IN.len(), "every shipped theme is listed");
+    assert_eq!(
+        cards,
+        theme::BUILT_IN.len(),
+        "every shipped theme is listed"
+    );
 
     // The second card, which is the dark one the Hylo family opens with.
     reader.click_nth(".theme-card", 1);
@@ -288,7 +298,10 @@ fn a_dark_machine_is_read_in_the_dark_from_the_first_frame() {
     // white page on the way in. There is no frame here in which it is light.
     let reader = Reader::open_with(
         &Reader::book(),
-        Options { appearance: Some(true), ..Options::default() },
+        Options {
+            appearance: Some(true),
+            ..Options::default()
+        },
     );
     assert_eq!(reader.state().theme, "Hylo Dark");
 }
@@ -297,7 +310,10 @@ fn a_dark_machine_is_read_in_the_dark_from_the_first_frame() {
 fn the_machine_changing_its_mind_is_followed_and_then_is_not() {
     let mut reader = Reader::open_with(
         &Reader::book(),
-        Options { appearance: Some(false), ..Options::default() },
+        Options {
+            appearance: Some(false),
+            ..Options::default()
+        },
     );
     assert_eq!(reader.state().theme, "Hylo Light");
 
@@ -338,7 +354,11 @@ fn following_can_be_switched_back_on_and_takes_effect_at_once() {
             ..Options::default()
         },
     );
-    assert_eq!(reader.state().theme, "Hylo Light", "not following, so not moved");
+    assert_eq!(
+        reader.state().theme,
+        "Hylo Light",
+        "not following, so not moved"
+    );
 
     appearance(&mut reader);
     assert!(!switched(&reader, "Follow the system"));
@@ -376,7 +396,9 @@ fn a_machine_that_will_not_say_leaves_the_reader_alone() {
     assert!(switched(&reader, "Follow the system"));
     let notes = reader.text_all(".field-note");
     assert!(
-        notes.iter().any(|note| note.contains("does not report an appearance")),
+        notes
+            .iter()
+            .any(|note| note.contains("does not report an appearance")),
         "{notes:?}"
     );
 }
@@ -409,7 +431,10 @@ fn a_page_opened_after_a_scrolled_one_starts_at_the_top() {
         "and About is where a page starts",
     );
     assert!(
-        reader.harness.text_content(".window-pane").contains("A calm place to read"),
+        reader
+            .harness
+            .text_content(".window-pane")
+            .contains("A calm place to read"),
         "with what is on it on screen",
     );
 }
@@ -543,10 +568,16 @@ fn an_unreadable_colour_reverts_when_the_field_is_left() {
 fn a_colour_can_be_chosen_from_the_swatches() {
     let mut reader = book();
     editing(&mut reader);
-    assert!(reader.harness.query(".color-picker").is_none(), "shut to start with");
+    assert!(
+        reader.harness.query(".color-picker").is_none(),
+        "shut to start with"
+    );
 
     reader.click_nth(".color-swatch", 0);
-    assert!(reader.harness.query(".color-picker").is_some(), "the grid is down");
+    assert!(
+        reader.harness.query(".color-picker").is_some(),
+        "the grid is down"
+    );
     let choices = reader.harness.query_all(".color-choice").len();
     assert!(choices > 20, "a grid worth pointing at: {choices}");
 
@@ -556,7 +587,10 @@ fn a_colour_can_be_chosen_from_the_swatches() {
         "#d9dce1",
         "the third swatch, which is what the field now says",
     );
-    assert!(reader.harness.query(".color-picker").is_none(), "and the grid is away");
+    assert!(
+        reader.harness.query(".color-picker").is_none(),
+        "and the grid is away"
+    );
 }
 
 /// **Enter finishes the theme editor**: the theme is saved and the window goes,
@@ -658,7 +692,10 @@ fn escape_leaves_the_field_then_the_picker_then_the_window() {
 
     // Then the picker, which Escape reaches once no field holds the keyboard.
     reader.click_nth(".color-swatch", 0);
-    assert!(reader.harness.query(".color-picker").is_some(), "the picker is down");
+    assert!(
+        reader.harness.query(".color-picker").is_some(),
+        "the picker is down"
+    );
     reader.press("Escape");
     assert!(
         reader.harness.query(".color-picker").is_none(),

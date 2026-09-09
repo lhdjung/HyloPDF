@@ -25,9 +25,9 @@ use std::rc::Rc;
 use anyrender::{RenderContext, ResourceId};
 use dioxus_native::DeviceHandle;
 
+use crate::palette::Palette;
 use crate::recolor::{Region, Rgb, REGIONS, SHADER};
 use crate::render::Bitmap;
-use crate::palette::Palette;
 
 /// One rectangle of a page painted through a ramp of its own: a link, or a line
 /// the reader has swept over.
@@ -149,17 +149,16 @@ impl Recolorer {
                 label: Some("recolor"),
                 source: wgpu::ShaderSource::Wgsl(SHADER.into()),
             });
-        let pipeline =
-            device
-                .device
-                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("recolor"),
-                    layout: None,
-                    module: &module,
-                    entry_point: Some("recolor"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                });
+        let pipeline = device
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("recolor"),
+                layout: None,
+                module: &module,
+                entry_point: Some("recolor"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
         let over = device
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -468,7 +467,9 @@ impl Recolorer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        self.device.queue.write_buffer(&how_many, 0, as_bytes(&count));
+        self.device
+            .queue
+            .write_buffer(&how_many, 0, as_bytes(&count));
 
         let table = table_of(runs);
         let places = self.device.device.create_buffer(&wgpu::BufferDescriptor {
@@ -653,10 +654,7 @@ fn minus(run: Run, over: &Run) -> Vec<Run> {
         // Where it reads from moves with it, because `from` is the *page* for a
         // link and is set again from the grid for a selection.
         on: [x, y],
-        from: [
-            run.from[0] + (x - left),
-            run.from[1] + (y - top),
-        ],
+        from: [run.from[0] + (x - left), run.from[1] + (y - top)],
         ink: run.ink,
         paper: run.paper,
     };
@@ -667,7 +665,12 @@ fn minus(run: Run, over: &Run) -> Vec<Run> {
         out.push(piece(left, top, right - left, middle_top - top));
     }
     if over_left > left {
-        out.push(piece(left, middle_top, over_left - left, middle_bottom - middle_top));
+        out.push(piece(
+            left,
+            middle_top,
+            over_left - left,
+            middle_bottom - middle_top,
+        ));
     }
     if over_right < right {
         out.push(piece(
@@ -678,7 +681,12 @@ fn minus(run: Run, over: &Run) -> Vec<Run> {
         ));
     }
     if middle_bottom < bottom {
-        out.push(piece(left, middle_bottom, right - left, bottom - middle_bottom));
+        out.push(piece(
+            left,
+            middle_bottom,
+            right - left,
+            bottom - middle_bottom,
+        ));
     }
     out.retain(|run| run.span[2] > 0 && run.span[3] > 0);
     out

@@ -221,7 +221,10 @@ fn the_message_names_whatever_key_the_reader_bound() {
     // Windows and Linux. What is being tested is that the *rebound* key is the
     // one named, not the default.
     let want = hylopdf::keymap::describe_binding("shift+b", cfg!(target_os = "macos"));
-    assert!(notice.contains(&want), "notice was {notice:?}, wanted {want:?}");
+    assert!(
+        notice.contains(&want),
+        "notice was {notice:?}, wanted {want:?}"
+    );
 }
 
 /// And it is a setting, so a reader who reads without one gets none next time.

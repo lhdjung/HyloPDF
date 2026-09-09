@@ -147,7 +147,8 @@ struct Quit;
 impl Windows {
     pub fn open(&self, spec: WindowSpec) {
         self.queue.borrow_mut().push(spec);
-        self.proxy.send_event(BlitzShellEvent::embedder_event(Spawn));
+        self.proxy
+            .send_event(BlitzShellEvent::embedder_event(Spawn));
     }
 
     /// Ask the shell's own factory for the next window, on this document.
@@ -422,7 +423,8 @@ impl Shell {
         if !editing {
             return;
         }
-        if let Some(ask) = ImeEnableRequest::new(ImeCapabilities::new(), ImeRequestData::default()) {
+        if let Some(ask) = ImeEnableRequest::new(ImeCapabilities::new(), ImeRequestData::default())
+        {
             // `Err(AlreadyEnabled)` is the ordinary answer from the second
             // keystroke onwards, and is nothing to report.
             let _ = view.window.request_ime_update(ImeRequest::Enable(ask));
@@ -575,11 +577,7 @@ impl Shell {
             crate::app::Screen::new(move || {
                 let size = window.surface_size();
                 let scale = window.scale_factor();
-                (
-                    size.width as f64 / scale,
-                    size.height as f64 / scale,
-                    scale,
-                )
+                (size.width as f64 / scale, size.height as f64 / scale, scale)
             })
         };
         // What this window can be asked to do. Every one of them goes back
@@ -715,7 +713,8 @@ impl winit::platform::macos::ApplicationHandlerExtMacOS for Shell {
         window_id: WindowId,
         action: &str,
     ) {
-        self.inner.standard_key_binding(event_loop, window_id, action);
+        self.inner
+            .standard_key_binding(event_loop, window_id, action);
     }
 }
 

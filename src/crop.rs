@@ -57,10 +57,7 @@ pub fn sample(pages: usize) -> Vec<usize> {
         return Vec::new();
     }
     let step = ((pages - 1) / SAMPLE.max(1).saturating_sub(1).max(1)).max(1);
-    let mut chosen: Vec<usize> = (0..pages)
-        .step_by(step)
-        .take(SAMPLE)
-        .collect();
+    let mut chosen: Vec<usize> = (0..pages).step_by(step).take(SAMPLE).collect();
     if !chosen.contains(&(pages - 1)) {
         chosen.push(pages - 1);
     }
@@ -301,7 +298,10 @@ mod tests {
         // And one turn puts what was at the bottom on the left, which is what
         // turning a page clockwise does to a rectangle on it.
         let once = crop.turned();
-        assert!((once.x - (1.0 - crop.y - crop.height)).abs() < 1e-9, "{once:?}");
+        assert!(
+            (once.x - (1.0 - crop.y - crop.height)).abs() < 1e-9,
+            "{once:?}"
+        );
         assert_eq!(once.width, crop.height);
     }
 
@@ -316,7 +316,10 @@ mod tests {
             let mut sorted = chosen.clone();
             sorted.dedup();
             assert_eq!(sorted, chosen, "{pages} pages");
-            assert!(chosen.windows(2).all(|pair| pair[0] < pair[1]), "{chosen:?}");
+            assert!(
+                chosen.windows(2).all(|pair| pair[0] < pair[1]),
+                "{chosen:?}"
+            );
         }
     }
 }

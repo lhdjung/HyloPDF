@@ -89,7 +89,10 @@ fn a_pad_nobody_drew_on_is_refused() {
         name: "Nobody".to_string(),
         ..Default::default()
     };
-    assert!(sign::save(&config, &nothing).is_err(), "there is nothing to keep");
+    assert!(
+        sign::save(&config, &nothing).is_err(),
+        "there is nothing to keep"
+    );
     assert!(sign::load_all(&config).is_empty());
 }
 
@@ -156,7 +159,11 @@ fn a_wide_name_keeps_its_shape() {
     let ys: Vec<f64> = trimmed.strokes[0].iter().map(|point| point[1]).collect();
     let hi = |v: &[f64]| v.iter().cloned().fold(f64::MIN, f64::max);
     assert_eq!(hi(&ys), 1.0, "one unit tall, which is the unit");
-    assert_eq!(hi(&xs), 8.0, "and eight units wide, because that is its shape");
+    assert_eq!(
+        hi(&xs),
+        8.0,
+        "and eight units wide, because that is its shape"
+    );
     assert_eq!(trimmed.aspect(), 8.0);
     // And the shape is the same before and after, which is the property that
     // matters — the numbers above are one instance of it.
@@ -250,7 +257,12 @@ fn a_signature_can_be_taken_off_again() {
     sign::place(
         file,
         1,
-        Rect { left: 80.0, top: 600.0, width: 0.0, height: 40.0 },
+        Rect {
+            left: 80.0,
+            top: 600.0,
+            width: 0.0,
+            height: 40.0,
+        },
         &scrawl().trimmed(),
         sign::INK,
     )
@@ -260,7 +272,10 @@ fn a_signature_can_be_taken_off_again() {
 
     hylopdf::markup::remove(file, placed[0].page, placed[0].index).expect("taken off");
     assert!(
-        render::open(file).expect("reopened again").signatures().is_empty(),
+        render::open(file)
+            .expect("reopened again")
+            .signatures()
+            .is_empty(),
         "and it is gone from the file",
     );
 }
@@ -277,7 +292,12 @@ fn a_second_signature_joins_the_first() {
         sign::place(
             file,
             1,
-            Rect { left: 80.0, top, width: 0.0, height: 40.0 },
+            Rect {
+                left: 80.0,
+                top,
+                width: 0.0,
+                height: 40.0,
+            },
             &mark,
             sign::INK,
         )
@@ -303,7 +323,12 @@ fn the_document_as_it_arrived_is_kept_beside_it() {
     sign::place(
         file,
         1,
-        Rect { left: 80.0, top: 600.0, width: 0.0, height: 40.0 },
+        Rect {
+            left: 80.0,
+            top: 600.0,
+            width: 0.0,
+            height: 40.0,
+        },
         &scrawl().trimmed(),
         sign::INK,
     )
@@ -317,7 +342,12 @@ fn the_document_as_it_arrived_is_kept_beside_it() {
     sign::place(
         file,
         1,
-        Rect { left: 80.0, top: 500.0, width: 0.0, height: 40.0 },
+        Rect {
+            left: 80.0,
+            top: 500.0,
+            width: 0.0,
+            height: 40.0,
+        },
         &scrawl().trimmed(),
         sign::INK,
     )
@@ -363,8 +393,8 @@ mod through_the_reader {
     /// A reader over a document of its own, with a config directory of its
     /// own — signing writes to both.
     fn reader(name: &str) -> (Reader, std::path::PathBuf) {
-        let dir = std::env::temp_dir()
-            .join(format!("hylopdf-signui-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("hylopdf-signui-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a directory");
         let pdf = dir.join("doc.pdf");
@@ -422,19 +452,26 @@ mod through_the_reader {
     /// green tick should meet them before they meet the pad.
     #[test]
     fn the_window_says_what_the_document_is_already_signed_with() {
-        let dir = std::env::temp_dir()
-            .join(format!("hylopdf-signui-{}-seal", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("hylopdf-signui-{}-seal", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a directory");
         let pdf = dir.join("doc.pdf");
         std::fs::copy(hylopdf::fixture::signed_pdf(), &pdf).expect("a signed copy");
         let mut reader = Reader::open_with(
             pdf.to_str().expect("a path"),
-            Options { width: 1100, height: 800, config: dir.clone(), ..Default::default() },
+            Options {
+                width: 1100,
+                height: 800,
+                config: dir.clone(),
+                ..Default::default()
+            },
         );
 
         open_the_window(&mut reader);
-        assert_eq!(reader.text_all(".sign-seal .sign-name"), vec!["Signed".to_string()]);
+        assert_eq!(
+            reader.text_all(".sign-seal .sign-name"),
+            vec!["Signed".to_string()]
+        );
         assert_eq!(
             reader.text_all(".sign-seal .sign-where"),
             vec!["signed 14 March 2024 · I agree to the terms".to_string()],
@@ -545,10 +582,7 @@ mod through_the_reader {
         // The wave is drawn across 84% of a 440pt pad and down 60% of a 150pt
         // one, so it is about four times as wide as it is tall. Two, because
         // what is being caught is a signature that came back square.
-        assert!(
-            at.width / at.height > 2.0,
-            "the shape was lost: {at:?}",
-        );
+        assert!(at.width / at.height > 2.0, "the shape was lost: {at:?}",);
     }
 
     /// Escape puts a signature down rather than signing something with it.
@@ -686,7 +720,12 @@ mod through_the_reader {
 fn a_line_of_text_is_drawn_on_the_page() {
     let path = scratch("typed");
     let file = path.to_str().expect("a path");
-    let at = Rect { left: 100.0, top: 300.0, width: 0.0, height: sign::LINE_HEIGHT };
+    let at = Rect {
+        left: 100.0,
+        top: 300.0,
+        width: 0.0,
+        height: sign::LINE_HEIGHT,
+    };
 
     let dark = |file: &str| {
         let document = render::open(file).expect("opens");
@@ -694,16 +733,22 @@ fn a_line_of_text_is_drawn_on_the_page() {
         let (width, height) = (size.width.round() as u32, size.height.round() as u32);
         let mut counted = 0u32;
         document
-            .render(0, width, height, hylopdf::layout::View::WHOLE, &mut |bitmap| {
-                for y in 290..312u32 {
-                    for x in 95..260u32 {
-                        let at = ((y * bitmap.width + x) * 4) as usize;
-                        if bitmap.bgra[at + 2] < 200 {
-                            counted += 1;
+            .render(
+                0,
+                width,
+                height,
+                hylopdf::layout::View::WHOLE,
+                &mut |bitmap| {
+                    for y in 290..312u32 {
+                        for x in 95..260u32 {
+                            let at = ((y * bitmap.width + x) * 4) as usize;
+                            if bitmap.bgra[at + 2] < 200 {
+                                counted += 1;
+                            }
                         }
                     }
-                }
-            })
+                },
+            )
             .expect("the page draws");
         counted
     };
@@ -722,7 +767,12 @@ fn a_line_of_text_is_listed_and_comes_off_again() {
     sign::place_text(
         file,
         2,
-        Rect { left: 72.0, top: 400.0, width: 0.0, height: sign::LINE_HEIGHT },
+        Rect {
+            left: 72.0,
+            top: 400.0,
+            width: 0.0,
+            height: sign::LINE_HEIGHT,
+        },
         "Reading, 14 March 2024",
         sign::INK,
     )
@@ -735,7 +785,10 @@ fn a_line_of_text_is_listed_and_comes_off_again() {
     assert_eq!(placed[0].by, "Reading, 14 March 2024");
 
     hylopdf::markup::remove(file, placed[0].page, placed[0].index).expect("taken off");
-    assert!(render::open(file).expect("reopened again").signatures().is_empty());
+    assert!(render::open(file)
+        .expect("reopened again")
+        .signatures()
+        .is_empty());
 }
 
 /// A hand and a line on one page are two annotations and two rows, and each
@@ -747,7 +800,12 @@ fn a_signature_and_a_date_sit_side_by_side() {
     sign::place(
         file,
         1,
-        Rect { left: 80.0, top: 600.0, width: 0.0, height: 40.0 },
+        Rect {
+            left: 80.0,
+            top: 600.0,
+            width: 0.0,
+            height: 40.0,
+        },
         &scrawl().trimmed(),
         sign::INK,
     )
@@ -755,7 +813,12 @@ fn a_signature_and_a_date_sit_side_by_side() {
     sign::place_text(
         file,
         1,
-        Rect { left: 300.0, top: 610.0, width: 0.0, height: sign::LINE_HEIGHT },
+        Rect {
+            left: 300.0,
+            top: 610.0,
+            width: 0.0,
+            height: sign::LINE_HEIGHT,
+        },
         &sign::today(),
         sign::INK,
     )
@@ -774,7 +837,12 @@ fn a_signature_and_a_date_sit_side_by_side() {
 fn nothing_typed_is_not_placed() {
     let path = scratch("blank-line");
     let file = path.to_str().expect("a path");
-    let at = Rect { left: 100.0, top: 300.0, width: 0.0, height: sign::LINE_HEIGHT };
+    let at = Rect {
+        left: 100.0,
+        top: 300.0,
+        width: 0.0,
+        height: sign::LINE_HEIGHT,
+    };
     assert!(sign::place_text(file, 1, at, "   ", sign::INK).is_err());
     assert!(render::open(file).expect("opens").signatures().is_empty());
 }
@@ -786,7 +854,9 @@ fn today_is_a_date_a_person_would_write() {
     let today = sign::today();
     let parts: Vec<&str> = today.split(' ').collect();
     assert_eq!(parts.len(), 3, "day, month and year: {today}");
-    assert!(parts[0].parse::<u32>().is_ok_and(|day| (1..=31).contains(&day)));
+    assert!(parts[0]
+        .parse::<u32>()
+        .is_ok_and(|day| (1..=31).contains(&day)));
     assert!(parts[1].chars().all(|c| c.is_alphabetic()));
     assert!(parts[2].parse::<i64>().is_ok_and(|year| year >= 2024));
 }
@@ -821,7 +891,10 @@ fn a_signed_document_says_what_signing_it_costs() {
 
     let standing = sign::standing(path.to_str().expect("a path"), false);
     assert!(standing.into_file, "it can still be signed with ink");
-    assert!(standing.rewrites, "and doing so costs it the signature it carries");
+    assert!(
+        standing.rewrites,
+        "and doing so costs it the signature it carries"
+    );
     assert!(
         sign::BREAKS_A_SIGNATURE.contains("stop verifying"),
         "and the sentence says so in words, not in mechanism",
@@ -866,7 +939,10 @@ fn a_signature_says_when_and_why() {
     assert!(seals[0].filled);
     assert_eq!(seals[0].when, "14 March 2024");
     assert_eq!(seals[0].reason, "I agree to the terms");
-    assert_eq!(seals[0].says(), "signed 14 March 2024 · I agree to the terms");
+    assert_eq!(
+        seals[0].says(),
+        "signed 14 March 2024 · I agree to the terms"
+    );
 }
 
 /// A PDF date is written for a machine and read by a person, and a date that

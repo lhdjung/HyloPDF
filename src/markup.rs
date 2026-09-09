@@ -454,4 +454,3 @@ pub fn flat(quads: &[Rect], height: f64) -> Vec<f64> {
     }
     out
 }
-

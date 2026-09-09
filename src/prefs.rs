@@ -110,7 +110,11 @@ pub fn Settings(viewer: Signal<Viewer>, frame: crate::app::Frame) -> Element {
 /// switch in that window says what it is for in a sentence, which is most of
 /// why the window reads as calm rather than as a form.
 #[component]
-pub(crate) fn Field(label: String, #[props(default)] note: Option<String>, children: Element) -> Element {
+pub(crate) fn Field(
+    label: String,
+    #[props(default)] note: Option<String>,
+    children: Element,
+) -> Element {
     rsx! {
         div { class: "field",
             div { class: "field-head",
@@ -141,7 +145,11 @@ pub(crate) fn Toggle(on: bool, onchange: EventHandler<bool>) -> Element {
 
 /// A row of choices, one of which is in force. `ui.segmented`.
 #[component]
-fn Segmented(options: Vec<(String, String)>, chosen: String, onchange: EventHandler<String>) -> Element {
+fn Segmented(
+    options: Vec<(String, String)>,
+    chosen: String,
+    onchange: EventHandler<String>,
+) -> Element {
     rsx! {
         div { class: "segmented",
             for (value, label) in options {

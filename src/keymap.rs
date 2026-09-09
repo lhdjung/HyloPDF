@@ -160,19 +160,59 @@ pub struct Spec {
 /// A table entry, with the two lists that are usually empty defaulted away.
 macro_rules! spec {
     ($id:expr, $label:literal, $group:expr, $keys:expr) => {
-        Spec { id: $id, label: $label, group: $group, needs_document: false, keys: &$keys, mac_keys: &[], other_keys: &[] }
+        Spec {
+            id: $id,
+            label: $label,
+            group: $group,
+            needs_document: false,
+            keys: &$keys,
+            mac_keys: &[],
+            other_keys: &[],
+        }
     };
     ($id:expr, $label:literal, $group:expr, $keys:expr, doc) => {
-        Spec { id: $id, label: $label, group: $group, needs_document: true, keys: &$keys, mac_keys: &[], other_keys: &[] }
+        Spec {
+            id: $id,
+            label: $label,
+            group: $group,
+            needs_document: true,
+            keys: &$keys,
+            mac_keys: &[],
+            other_keys: &[],
+        }
     };
     ($id:expr, $label:literal, $group:expr, $keys:expr, mac $mac:expr) => {
-        Spec { id: $id, label: $label, group: $group, needs_document: false, keys: &$keys, mac_keys: &$mac, other_keys: &[] }
+        Spec {
+            id: $id,
+            label: $label,
+            group: $group,
+            needs_document: false,
+            keys: &$keys,
+            mac_keys: &$mac,
+            other_keys: &[],
+        }
     };
     ($id:expr, $label:literal, $group:expr, $keys:expr, other $other:expr) => {
-        Spec { id: $id, label: $label, group: $group, needs_document: false, keys: &$keys, mac_keys: &[], other_keys: &$other }
+        Spec {
+            id: $id,
+            label: $label,
+            group: $group,
+            needs_document: false,
+            keys: &$keys,
+            mac_keys: &[],
+            other_keys: &$other,
+        }
     };
     ($id:expr, $label:literal, $group:expr, $keys:expr, mac $mac:expr, other $other:expr) => {
-        Spec { id: $id, label: $label, group: $group, needs_document: false, keys: &$keys, mac_keys: &$mac, other_keys: &$other }
+        Spec {
+            id: $id,
+            label: $label,
+            group: $group,
+            needs_document: false,
+            keys: &$keys,
+            mac_keys: &$mac,
+            other_keys: &$other,
+        }
     };
 }
 
@@ -196,7 +236,12 @@ pub const ACTIONS: &[Spec] = &[
     // spends on the toolbar — so the gesture is the item under Open… and this
     // row is what lets somebody who wants the key give it one. See `tabs.rs`.
     spec!(A::NewTab, "New tab — macOS only", D, []),
-    spec!(A::Print, "Print — handed to a program that prints", D, ["mod+p"]),
+    spec!(
+        A::Print,
+        "Print — handed to a program that prints",
+        D,
+        ["mod+p"]
+    ),
     spec!(A::Settings, "Settings", D, ["mod+,"]),
     spec!(A::Help, "This list", D, ["f1", "mod+/"]),
     // **⌘W is ours on a Mac too, and it had been nobody's.** The app this was
@@ -213,30 +258,78 @@ pub const ACTIONS: &[Spec] = &[
     // still mean what they meant on the platforms with no tabs to go to.
     spec!(A::GoToTab, "Go to a tab by number", D, [],
         mac ["mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8", "mod+9"]),
-    spec!(A::Quit, "Close HyloPDF", D, [], other ["mod+q"]),
+    spec!(A::Quit, "Close HyloPDF", D, [], other["mod+q"]),
     spec!(A::Find, "Search this document", D, ["mod+f"]),
     spec!(A::FindNext, "Next match", D, ["mod+g"]),
     spec!(A::FindPrevious, "Previous match", D, ["mod+shift+g"]),
-    spec!(A::SelectPage, "Select the text of this page", D, ["mod+a"], doc),
-    spec!(A::CopyQuote, "Copy selection, with its page number", D, ["mod+shift+c"]),
-    spec!(A::Mark, "Mark this page, or take the mark off", D, ["mod+shift+b"]),
-    spec!(A::Markup, "Mark the selection — opens the colour popover", D, ["mod+shift+h"], doc),
-    spec!(A::Dismiss, "Close the search bar, leave full screen, stop presenting", D, ["escape"]),
-
+    spec!(
+        A::SelectPage,
+        "Select the text of this page",
+        D,
+        ["mod+a"],
+        doc
+    ),
+    spec!(
+        A::CopyQuote,
+        "Copy selection, with its page number",
+        D,
+        ["mod+shift+c"]
+    ),
+    spec!(
+        A::Mark,
+        "Mark this page, or take the mark off",
+        D,
+        ["mod+shift+b"]
+    ),
+    spec!(
+        A::Markup,
+        "Mark the selection — opens the colour popover",
+        D,
+        ["mod+shift+h"],
+        doc
+    ),
+    spec!(
+        A::Dismiss,
+        "Close the search bar, leave full screen, stop presenting",
+        D,
+        ["escape"]
+    ),
     spec!(A::NextPage, "Next page", M, ["right", "l"], doc),
     spec!(A::PreviousPage, "Previous page", M, ["left", "h"], doc),
     spec!(A::ScrollDown, "A little down", M, ["down", "j"], doc),
     spec!(A::ScrollUp, "A little up", M, ["up", "k"], doc),
     spec!(A::HalfScreenDown, "Half a screen down", M, ["d"], doc),
     spec!(A::HalfScreenUp, "Half a screen up", M, ["u"], doc),
-    spec!(A::ScreenDown, "Down a screen", M, ["space", "pagedown"], doc),
-    spec!(A::ScreenUp, "Up a screen", M, ["shift+space", "pageup"], doc),
+    spec!(
+        A::ScreenDown,
+        "Down a screen",
+        M,
+        ["space", "pagedown"],
+        doc
+    ),
+    spec!(
+        A::ScreenUp,
+        "Up a screen",
+        M,
+        ["shift+space", "pageup"],
+        doc
+    ),
     spec!(A::FirstPage, "First page", M, ["home", "g g"], doc),
     spec!(A::LastPage, "Last page", M, ["end", "shift+g"], doc),
-    spec!(A::GoToPage, "Go to page: type the number, press Enter", M, ["mod+alt+g", "p"], doc),
-    spec!(A::Back, "Back to where you jumped from", M, ["mod+[", "alt+left"]),
+    spec!(
+        A::GoToPage,
+        "Go to page: type the number, press Enter",
+        M,
+        ["mod+alt+g", "p"],
+        doc
+    ),
+    spec!(
+        A::Back,
+        "Back to where you jumped from",
+        M,
+        ["mod+[", "alt+left"]
+    ),
     spec!(A::Forward, "Forward again", M, ["mod+]", "alt+right"]),
-
     spec!(A::ZoomIn, "Zoom in", L, ["mod++", "mod+="]),
     spec!(A::ZoomOut, "Zoom out", L, ["mod+-"]),
     spec!(A::FitWidth, "Fit the width of the window", L, ["mod+0"]),
@@ -244,15 +337,40 @@ pub const ACTIONS: &[Spec] = &[
     // documents open in one window reaches for and is not what a zoom mode
     // is: fit width, actual size and fit the page are three buttons in the
     // toolbar and one of them is already on ⌘0.
-    spec!(A::ActualSize, "Actual size", L, [], mac ["mod+alt+1"], other ["mod+1"]),
-    spec!(A::FitPage, "Fit the whole page", L, [], mac ["mod+alt+2"], other ["mod+2"]),
+    spec!(
+        A::ActualSize,
+        "Actual size",
+        L,
+        [],
+        mac["mod+alt+1"],
+        other["mod+1"]
+    ),
+    spec!(
+        A::FitPage,
+        "Fit the whole page",
+        L,
+        [],
+        mac["mod+alt+2"],
+        other["mod+2"]
+    ),
     spec!(A::RotateRight, "Turn the page right", L, ["mod+r"]),
     spec!(A::RotateLeft, "Turn the page left", L, ["mod+l"]),
     spec!(A::Dark, "Dark mode", L, ["mod+d"]),
     spec!(A::Sidebar, "Contents sidebar", L, ["mod+b"]),
     spec!(A::Toolbar, "Toolbar", L, ["mod+t"]),
-    spec!(A::Fullscreen, "Full screen", L, ["f11", "mod+shift+f"], mac ["mod+ctrl+f"]),
-    spec!(A::Present, "Presenting — full screen, nothing else on it", L, ["mod+shift+p"]),
+    spec!(
+        A::Fullscreen,
+        "Full screen",
+        L,
+        ["f11", "mod+shift+f"],
+        mac["mod+ctrl+f"]
+    ),
+    spec!(
+        A::Present,
+        "Presenting — full screen, nothing else on it",
+        L,
+        ["mod+shift+p"]
+    ),
 ];
 
 /// The three actions this experiment has and the app does not, kept in a list
@@ -299,7 +417,9 @@ pub fn label(action: Action) -> &'static str {
 
 /// Whether this action needs a document open.
 pub fn needs_document(action: Action) -> bool {
-    spec_of(action).map(|spec| spec.needs_document).unwrap_or(false)
+    spec_of(action)
+        .map(|spec| spec.needs_document)
+        .unwrap_or(false)
 }
 
 /// What kind of machine this is, asked once. Every function here takes the
@@ -691,7 +811,10 @@ impl Keymap {
             let Some(given) = overrides.get(spec.id.as_str()) else {
                 by_action.insert(
                     spec.id,
-                    default_keys(spec, mac).into_iter().map(String::from).collect(),
+                    default_keys(spec, mac)
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
                 );
                 continue;
             };

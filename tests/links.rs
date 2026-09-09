@@ -58,10 +58,7 @@ fn a_link_is_a_node_where_the_document_says_it_is() {
     );
     // And it starts where the page's own left margin does, which is the same
     // 72 points the text is set at.
-    let page = reader
-        .harness
-        .query(".page")
-        .expect("a page is mounted");
+    let page = reader.harness.query(".page").expect("a page is mounted");
     let page_rect = reader.harness.layout_rect_of(page);
     let scale = page_rect.width / 612.0;
     assert!(
@@ -106,7 +103,11 @@ fn follow(reader: &mut Reader, where_to: &str) {
 #[test]
 fn following_a_link_goes_where_the_destination_says() {
     let mut reader = linked();
-    assert_eq!(reader.state().label, "i", "the first page, as it is printed");
+    assert_eq!(
+        reader.state().label,
+        "i",
+        "the first page, as it is printed"
+    );
 
     // The second link on page one: `/Dest [page five /XYZ null 400 null]`.
     follow(&mut reader, "Page 5 of this document");
@@ -125,7 +126,9 @@ fn following_a_link_goes_where_the_destination_says() {
         .iter()
         .position(|&page| page == 5)
         .expect("page five is mounted after jumping to it");
-    let page = reader.harness.layout_rect_of(reader.harness.query_all(".page")[at]);
+    let page = reader
+        .harness
+        .layout_rect_of(reader.harness.query_all(".page")[at]);
     let viewer = reader
         .harness
         .layout_rect_of(reader.harness.query(".viewer").expect("the document area"));
@@ -235,7 +238,11 @@ fn scrolling_is_not_a_jump() {
 fn a_document_numbers_its_own_pages() {
     let mut reader = linked();
     assert_eq!(reader.state().label, "i");
-    assert_eq!(reader.state().pages, 6, "six pages, whatever they are called");
+    assert_eq!(
+        reader.state().pages,
+        6,
+        "six pages, whatever they are called"
+    );
 
     // Down to the body, which starts again at 1.
     for _ in 0..3 {
@@ -331,7 +338,10 @@ fn typing_in_the_field_does_not_drive_the_document() {
     );
     // The keyboard comes back with it.
     reader.press("j");
-    assert!(reader.state().scroll > before, "the reader has its keys back");
+    assert!(
+        reader.state().scroll > before,
+        "the reader has its keys back"
+    );
 }
 
 #[test]
@@ -354,10 +364,7 @@ fn the_field_is_a_jump() {
 fn a_document_that_numbers_its_pages_1_to_n_says_nothing() {
     // The commoner case by a long way, and the one the app drops the list
     // for: `state().page` is the position, and it is also the label.
-    let reader = Reader::open_with(
-        &fixture::contents_pdf(),
-        Options::default(),
-    );
+    let reader = Reader::open_with(&fixture::contents_pdf(), Options::default());
     assert_eq!(reader.state().page, 1);
     assert_eq!(reader.state().label, "1");
     assert!(

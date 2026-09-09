@@ -518,7 +518,10 @@ impl Store {
         }
         self.set(moving);
         self.complaint = self.unreadable();
-        Worn { name, stopped_following: overruling }
+        Worn {
+            name,
+            stopped_following: overruling,
+        }
     }
 
     /// What the machine says about light and dark, and `None` where it will
@@ -561,7 +564,11 @@ impl Store {
         self.themes
             .iter()
             .position(|theme| theme.id == wanted && self.is_dark(theme) == dark)
-            .or_else(|| self.themes.iter().position(|theme| self.is_dark(theme) == dark))
+            .or_else(|| {
+                self.themes
+                    .iter()
+                    .position(|theme| self.is_dark(theme) == dark)
+            })
     }
 
     /// Which theme the machine's own light or dark asks for, if any.

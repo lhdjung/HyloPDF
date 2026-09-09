@@ -8,8 +8,8 @@
 //! test that reaches past the interface cannot tell you the interface is
 //! wired up.
 
-use hylopdf::keymap::Action;
 use hylopdf::harness::{Options, Reader};
+use hylopdf::keymap::Action;
 
 fn book() -> Reader {
     Reader::open(&Reader::book())
@@ -106,7 +106,10 @@ fn only_the_pages_near_the_viewport_are_in_the_document() {
 fn fit_and_zoom_say_what_they_did() {
     let mut reader = book();
     let wide = reader.harness.layout_rect(".page");
-    assert!((wide.width - 1100.0).abs() < 1.0, "fit width fills it: {wide:?}");
+    assert!(
+        (wide.width - 1100.0).abs() < 1.0,
+        "fit width fills it: {wide:?}"
+    );
 
     reader.press_action(Action::FitPage);
     assert_eq!(reader.state().zoom, "Fit page");
@@ -201,10 +204,7 @@ fn spreads_put_two_pages_side_by_side() {
     reader.press("ArrowRight");
     reader.press("s");
     let state = reader.state();
-    assert!(
-        state.mounted.len() >= 2,
-        "a spread holds a pair: {state:?}"
-    );
+    assert!(state.mounted.len() >= 2, "a spread holds a pair: {state:?}");
     let pages = reader.harness.query_all(".page");
     let rects: Vec<_> = pages
         .iter()

@@ -28,11 +28,11 @@ use peniko::{Blob, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Ima
 use blitz_traits::shell::ShellProvider;
 
 use crate::gpu::{PageTexture, Recolorer};
-use crate::recolor::Region;
 use crate::layout::{View, MAX_PIXELS};
+use crate::palette::Palette;
+use crate::recolor::Region;
 use crate::render::PageSource;
 use crate::stats;
-use crate::palette::Palette;
 
 /// What a page has painted *into* it rather than drawn over it.
 ///
@@ -102,7 +102,11 @@ impl Chosen {
     }
 
     pub fn ramped(&self, index: usize) -> Ramped {
-        self.ramped.borrow().get(&index).cloned().unwrap_or_default()
+        self.ramped
+            .borrow()
+            .get(&index)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn get(&self) -> Palette {
@@ -264,8 +268,6 @@ impl PageWidget {
         )
     }
 
-
-
     /// The links on this page, as regions of the drawn page.
     ///
     /// **Links are tinted under every theme**, including the ones that leave
@@ -367,7 +369,10 @@ impl PageWidget {
         let pixels = pixels?;
 
         if let Some(old) = self.software.take() {
-            stats::sub(&stats::RESIDENT, (old.width as u64) * (old.height as u64) * 4);
+            stats::sub(
+                &stats::RESIDENT,
+                (old.width as u64) * (old.height as u64) * 4,
+            );
         }
         stats::add(&stats::DRAWN, 1);
         stats::add(&stats::RESIDENT, (width as u64) * (height as u64) * 4);
@@ -532,7 +537,10 @@ impl Widget for PageWidget {
             stats::sub(&stats::RESIDENT, texture.bytes());
         }
         if let Some(page) = self.software.take() {
-            stats::sub(&stats::RESIDENT, (page.width as u64) * (page.height as u64) * 4);
+            stats::sub(
+                &stats::RESIDENT,
+                (page.width as u64) * (page.height as u64) * 4,
+            );
         }
         self.device = None;
         self.recolorer = None;
@@ -553,7 +561,6 @@ impl Widget for PageWidget {
         height: u32,
         _scale: f64,
     ) -> Scene {
-
         let mut scene = Scene::new();
         if self.device.is_none() && self.software.is_none() {
             // `complete_resume` calls this for every widget in the document
@@ -637,10 +644,7 @@ impl Widget for PageWidget {
                 sampler: ImageSampler::default(),
             }),
             None,
-            &Rect::from_origin_size(
-                (0.0, 0.0),
-                (texture.width as f64, texture.height as f64),
-            ),
+            &Rect::from_origin_size((0.0, 0.0), (texture.width as f64, texture.height as f64)),
         );
         scene
     }
@@ -654,7 +658,10 @@ impl Drop for PageWidget {
             stats::sub(&stats::RESIDENT, texture.bytes());
         }
         if let Some(page) = self.software.take() {
-            stats::sub(&stats::RESIDENT, (page.width as u64) * (page.height as u64) * 4);
+            stats::sub(
+                &stats::RESIDENT,
+                (page.width as u64) * (page.height as u64) * 4,
+            );
         }
         stats::sub(&stats::MOUNTED, 1);
     }

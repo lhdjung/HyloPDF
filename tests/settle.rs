@@ -31,7 +31,8 @@ fn the_reader_stops_rendering_when_nothing_is_happening() {
     }
     let after = stats::get(&stats::RENDERS);
     assert_eq!(
-        before, after,
+        before,
+        after,
         "the reader rendered {} more times with nothing happening",
         after - before
     );

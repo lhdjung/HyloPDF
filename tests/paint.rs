@@ -25,8 +25,7 @@ fn hylo_dark() -> (usize, palette::Palette) {
         .iter()
         .position(|(id, _)| *id == theme::DEFAULT_DARK)
         .expect("Hylo Dark ships");
-    let parsed: theme::Theme =
-        toml::from_str(theme::BUILT_IN[index].1).expect("Hylo Dark parses");
+    let parsed: theme::Theme = toml::from_str(theme::BUILT_IN[index].1).expect("Hylo Dark parses");
     (index, palette::resolve(&parsed, true))
 }
 
@@ -123,10 +122,7 @@ fn the_ink_survives_the_theme() {
     let shot = reader.screenshot();
     let band = (page.0, page.1 + 100, page.2, page.1 + 200);
     let paper = shot.mean((page.0, page.3 - 100, page.2, page.3));
-    let ink = shot.unlike(
-        [paper[0] as u8, paper[1] as u8, paper[2] as u8],
-        band,
-    );
+    let ink = shot.unlike([paper[0] as u8, paper[1] as u8, paper[2] as u8], band);
     assert!(
         ink > 0.01,
         "the letters are still there, in the other colour: {ink:.4}"

@@ -37,7 +37,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use crate::render::{Rect, PageText};
+use crate::render::{PageText, Rect};
 
 /// Where a search gives up.
 ///
@@ -269,12 +269,7 @@ impl Search {
         if self.capped {
             return;
         }
-        let mut hits = locate(
-            &indexed.fold,
-            &self.needle,
-            page,
-            self.options.whole_words,
-        );
+        let mut hits = locate(&indexed.fold, &self.needle, page, self.options.whole_words);
         if hits.is_empty() {
             return;
         }
@@ -305,7 +300,11 @@ impl Search {
         self.matches = self.found.values().flatten().copied().collect();
         self.at = standing
             .and_then(|hit| self.matches.iter().position(|&other| other == hit))
-            .or(if self.matches.is_empty() { None } else { Some(0) });
+            .or(if self.matches.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
         if self.queue.is_empty() {
             self.scanning = false;
         }
@@ -600,7 +599,10 @@ mod tests {
         assert_eq!(folded("typo\u{00ad}graphy"), "typography");
         assert_eq!(folded("a\u{200b}b"), "ab");
         assert_eq!(folded("MiXeD"), "mixed");
-        assert_eq!(fold(&chars("MiXeD"), true).text.iter().collect::<String>(), "MiXeD");
+        assert_eq!(
+            fold(&chars("MiXeD"), true).text.iter().collect::<String>(),
+            "MiXeD"
+        );
     }
 
     /// Everything above the basic plane goes through whole — which in
@@ -636,7 +638,14 @@ mod tests {
     fn a_match_ending_inside_a_ligature_covers_it() {
         let page = fold(&chars("aﬁb"), false);
         let hits = locate(&page, &chars("af"), 1, false);
-        assert_eq!(hits, vec![Hit { page: 1, from: 0, to: 2 }]);
+        assert_eq!(
+            hits,
+            vec![Hit {
+                page: 1,
+                from: 0,
+                to: 2
+            }]
+        );
     }
 
     #[test]
@@ -714,7 +723,11 @@ mod tests {
         assert!(!state.textless);
         // The list is in page order…
         assert_eq!(
-            search.matches().iter().map(|hit| hit.page).collect::<Vec<_>>(),
+            search
+                .matches()
+                .iter()
+                .map(|hit| hit.page)
+                .collect::<Vec<_>>(),
             vec![1, 3, 3]
         );
         // …and the reader is on the first match at or after the page they
@@ -834,8 +847,18 @@ mod tests {
         let text = PageText {
             chars: chars("ab"),
             boxes: vec![
-                Rect { left: 500.0, top: 100.0, width: 10.0, height: 12.0 },
-                Rect { left: 20.0, top: 130.0, width: 10.0, height: 12.0 },
+                Rect {
+                    left: 500.0,
+                    top: 100.0,
+                    width: 10.0,
+                    height: 12.0,
+                },
+                Rect {
+                    left: 20.0,
+                    top: 130.0,
+                    width: 10.0,
+                    height: 12.0,
+                },
             ],
         };
         assert_eq!(text.quads(0, 2).len(), 2);

@@ -581,7 +581,9 @@ fn clicking_a_thumbnail_goes_to_its_page() {
     reader.press_chord("mod+b");
     reader.click(".tab[data-tab='pages']");
     reader.wheel_over(".panel.thumb-column", 900.0);
-    let picture = reader.harness.layout_rect(".thumb[data-thumb='4'] .thumb-picture");
+    let picture = reader
+        .harness
+        .layout_rect(".thumb[data-thumb='4'] .thumb-picture");
     reader.click_at(
         picture.x + picture.width / 2.0,
         picture.y + picture.height / 2.0,

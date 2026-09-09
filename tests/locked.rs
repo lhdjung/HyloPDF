@@ -24,7 +24,10 @@ fn the_digest_the_key_is_derived_with_is_md5() {
         ("a", "0cc175b9c0f1b6a831c399e269772661"),
         ("abc", "900150983cd24fb0d6963f7d28e17f72"),
         ("message digest", "f96b697d7cb7938d525a2f31aaf161d0"),
-        ("abcdefghijklmnopqrstuvwxyz", "c3fcd3d76192e4007dfb496cca67e13b"),
+        (
+            "abcdefghijklmnopqrstuvwxyz",
+            "c3fcd3d76192e4007dfb496cca67e13b",
+        ),
         (
             "12345678901234567890123456789012345678901234567890123456789012345678901234567890",
             "57edf4a22be3c955ac49da2e2107b67a",
@@ -162,7 +165,10 @@ fn not_now_leaves_the_reader_where_they_were() {
         reader.harness.query(".ask-window").is_none(),
         "the question is withdrawn",
     );
-    assert!(reader.state().empty, "and the window is the empty one again");
+    assert!(
+        reader.state().empty,
+        "and the window is the empty one again"
+    );
 }
 
 /// Escape does the same, from inside the field — which is where the reader
@@ -200,11 +206,7 @@ fn a_reader_who_declines_keeps_the_document_they_had() {
     );
 
     reader.click("[data-item='not-now']");
-    assert_eq!(
-        reader.state().pages,
-        was,
-        "and still is, after declining",
-    );
+    assert_eq!(reader.state().pages, was, "and still is, after declining",);
 }
 
 /// And answering it swaps the document, which is ⌘O's own path — the same

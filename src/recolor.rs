@@ -155,8 +155,7 @@ pub fn recolor_cpu(pixels: &mut [u8], text: Rgb, bg: Rgb, keep_colour: bool) {
         let foot = tables.mapped[level] as f32 - (high - low) as f32 * scale / 2.0;
         for (channel, value) in [r, g, b].into_iter().enumerate() {
             let base = ramp[channel] as f32;
-            pixel[channel] =
-                clamped(base + (foot + (value - low) as f32 * scale - base) * keep);
+            pixel[channel] = clamped(base + (foot + (value - low) as f32 * scale - base) * keep);
         }
     }
 }

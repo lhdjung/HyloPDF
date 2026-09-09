@@ -532,7 +532,10 @@ mod tests {
         .expect("saved again");
         assert_eq!(renamed.id, "bay-brown", "the id follows the name");
         assert!(dir.join("bay-brown.toml").exists());
-        assert!(!dir.join("brownie.toml").exists(), "and the old file is gone");
+        assert!(
+            !dir.join("brownie.toml").exists(),
+            "and the old file is gone"
+        );
         let listed = load_all(&dir);
         assert_eq!(
             listed.iter().filter(|theme| !theme.built_in).count(),
@@ -561,7 +564,10 @@ mod tests {
             },
         )
         .expect("saved");
-        assert_eq!(saved.id, "My Theme", "the file keeps the name its author gave it");
+        assert_eq!(
+            saved.id, "My Theme",
+            "the file keeps the name its author gave it"
+        );
         assert!(dir.join("My Theme.toml").exists());
         assert!(!dir.join("something-else.toml").exists());
     }

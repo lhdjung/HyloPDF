@@ -416,15 +416,16 @@ impl Layout {
         // are the same kind of fact as a page's size and this is where the
         // layout is allowed to know about them; everything downstream works
         // in these.
-        let sizes: Vec<Size> = (0..self.sizes.len()).map(|index| self.effective(index)).collect();
+        let sizes: Vec<Size> = (0..self.sizes.len())
+            .map(|index| self.effective(index))
+            .collect();
 
         // The gap between two pages of a spread is a distance on the screen,
         // like the gap between rows — it is not part of the page and does not
         // grow with the zoom. So it comes off the room available before the
         // scale is worked out, rather than being scaled along with the paper.
         let gaps_in = |row: &[usize]| (row.len() as f64 - 1.0) * self.gap;
-        let paper_width =
-            |row: &[usize]| row.iter().map(|&index| sizes[index].width).sum::<f64>();
+        let paper_width = |row: &[usize]| row.iter().map(|&index| sizes[index].width).sum::<f64>();
         let row_height = |row: &[usize]| {
             row.iter()
                 .map(|&index| sizes[index].height)
@@ -490,11 +491,11 @@ impl Layout {
     }
 
     /* Both searches below assume `boxes` runs in order down the page and has
-       no holes, which is true in continuous mode and is why neither is used
-       in paged mode — there, one page is laid out and the rest of the array
-       is empty. A hole stops the search where `viewer.ts` breaks out of the
-       same loop, so a caller that reaches one anyway gets an answer rather
-       than a panic. */
+    no holes, which is true in continuous mode and is why neither is used
+    in paged mode — there, one page is laid out and the rest of the array
+    is empty. A hole stops the search where `viewer.ts` breaks out of the
+    same loop, so a caller that reaches one anyway gets an answer rather
+    than a panic. */
 
     /// The first page whose bottom edge is at or below `y`.
     pub fn first_box_ending_after(&self, y: f64) -> usize {
@@ -503,7 +504,9 @@ impl Layout {
         let mut found = self.boxes.len();
         while low <= high {
             let middle = ((low + high) / 2) as usize;
-            let Some(page) = self.boxes[middle] else { break };
+            let Some(page) = self.boxes[middle] else {
+                break;
+            };
             if page.top + page.height >= y {
                 found = middle;
                 high = middle as isize - 1;
@@ -521,7 +524,9 @@ impl Layout {
         let mut found = 0usize;
         while low <= high {
             let middle = ((low + high) / 2) as usize;
-            let Some(page) = self.boxes[middle] else { break };
+            let Some(page) = self.boxes[middle] else {
+                break;
+            };
             if page.top <= y {
                 found = middle;
                 low = middle as isize + 1;
@@ -546,7 +551,8 @@ impl Layout {
         // nothing to search for.
         if self.mode == Mode::Paged {
             let index = self.current.clamp(1, self.sizes.len()) - 1;
-            return self.row_of(index)
+            return self
+                .row_of(index)
                 .into_iter()
                 .filter(|&index| self.boxes[index].is_some())
                 .collect();
@@ -619,7 +625,11 @@ impl Layout {
             return 0.0;
         };
         let target = page.top + anchor.offset * page.height
-            - if anchor.offset == 0.0 { page.above } else { 0.0 };
+            - if anchor.offset == 0.0 {
+                page.above
+            } else {
+                0.0
+            };
         target.clamp(0.0, self.max_scroll())
     }
 
@@ -846,7 +856,10 @@ mod tests {
         layout.relayout();
         let page = layout.box_of(0).unwrap();
         assert!(page.height <= 700.0 - PAD_Y * 2.0 + 0.5, "{page:?}");
-        assert!(page.left >= PAD_X, "a fitted page keeps its margin: {page:?}");
+        assert!(
+            page.left >= PAD_X,
+            "a fitted page keeps its margin: {page:?}"
+        );
     }
 
     #[test]
@@ -863,10 +876,7 @@ mod tests {
     fn landing_on_a_page_lands_on_the_space_above_it() {
         let layout = reader(5);
         for page in 1..=5 {
-            let top = layout.scroll_target(Anchor {
-                page,
-                offset: 0.0,
-            });
+            let top = layout.scroll_target(Anchor { page, offset: 0.0 });
             let index = page - 1;
             let want = (layout.box_of(index).unwrap().top - layout.box_of(index).unwrap().above)
                 .min(layout.max_scroll());
@@ -882,9 +892,7 @@ mod tests {
             let scanned = layout
                 .boxes()
                 .iter()
-                .position(|page| {
-                    page.is_some_and(|page| page.top + page.height >= y)
-                })
+                .position(|page| page.is_some_and(|page| page.top + page.height >= y))
                 .unwrap_or(layout.pages());
             assert_eq!(first, scanned, "first ending after {y}");
 
@@ -957,7 +965,10 @@ mod tests {
         let mut layout = reader(6);
         layout.spread = Spread::Cover;
         layout.relayout();
-        assert_eq!(layout.rows(), vec![vec![0], vec![1, 2], vec![3, 4], vec![5]]);
+        assert_eq!(
+            layout.rows(),
+            vec![vec![0], vec![1, 2], vec![3, 4], vec![5]]
+        );
         // Two pages side by side share a top exactly, which is the case
         // `above` and `page_at` are both careful about.
         assert_eq!(layout.box_of(1).unwrap().top, layout.box_of(2).unwrap().top);
@@ -991,7 +1002,13 @@ mod tests {
         layout.relayout();
         assert_eq!(layout.rotation, 0);
         assert_eq!(layout.box_of(0).unwrap(), upright);
-        assert_eq!(layout.size_of(0), Size { width: 612.0, height: 792.0 });
+        assert_eq!(
+            layout.size_of(0),
+            Size {
+                width: 612.0,
+                height: 792.0
+            }
+        );
     }
 
     #[test]

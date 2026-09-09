@@ -883,13 +883,20 @@ fn build_signed(filled: bool) -> Vec<u8> {
     ));
     let page_ids: Vec<usize> = (0..2).map(|_| pdf.reserve()).collect();
     for (index, &id) in page_ids.iter().enumerate() {
-        let stream = format!("BT /F1 12 Tf 54 720 Td (Page {}. Sign here.) Tj ET", index + 1);
+        let stream = format!(
+            "BT /F1 12 Tf 54 720 Td (Page {}. Sign here.) Tj ET",
+            index + 1
+        );
         let content = pdf.add(format!(
             "<< /Length {} >>\nstream\n{}\nendstream",
             stream.len(),
             stream
         ));
-        let annots = if index == 0 { format!(" /Annots [{field} 0 R]") } else { String::new() };
+        let annots = if index == 0 {
+            format!(" /Annots [{field} 0 R]")
+        } else {
+            String::new()
+        };
         pdf.put(
             id,
             format!(
@@ -902,7 +909,11 @@ fn build_signed(filled: bool) -> Vec<u8> {
         tree,
         format!(
             "<< /Type /Pages /Count 2 /Kids [{}] >>",
-            page_ids.iter().map(|id| format!("{id} 0 R")).collect::<Vec<_>>().join(" "),
+            page_ids
+                .iter()
+                .map(|id| format!("{id} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" "),
         ),
     );
     pdf.put(
@@ -939,7 +950,10 @@ fn build_locked() -> Vec<u8> {
     // The owner password is the user password here. A document may perfectly
     // well have two, and nothing this reader does distinguishes them: pdfium
     // takes one string and tries it as both.
-    let owner = rc4(&md5(&padded(LOCKED_PASSWORD))[..5], &padded(LOCKED_PASSWORD));
+    let owner = rc4(
+        &md5(&padded(LOCKED_PASSWORD))[..5],
+        &padded(LOCKED_PASSWORD),
+    );
     let key = encryption_key(LOCKED_PASSWORD, &owner, &id);
     let user = rc4(&key, &PAD);
 
@@ -1086,7 +1100,12 @@ fn md5(input: &[u8]) -> [u8; 16] {
     let mut hash: [u32; 4] = [0x6745_2301, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476];
     for chunk in message.chunks(64) {
         let words: [u32; 16] = std::array::from_fn(|i| {
-            u32::from_le_bytes([chunk[i * 4], chunk[i * 4 + 1], chunk[i * 4 + 2], chunk[i * 4 + 3]])
+            u32::from_le_bytes([
+                chunk[i * 4],
+                chunk[i * 4 + 1],
+                chunk[i * 4 + 2],
+                chunk[i * 4 + 3],
+            ])
         });
         let [mut a, mut b, mut c, mut d] = hash;
         for round in 0..64 {

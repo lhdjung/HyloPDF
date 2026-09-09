@@ -139,7 +139,10 @@ fn a_match_on_another_page_turns_to_it() {
     reader.scan_out();
     reader.settle();
     let state = reader.state();
-    assert!(state.page > 1, "the reader was taken to the match: {state:?}");
+    assert!(
+        state.page > 1,
+        "the reader was taken to the match: {state:?}"
+    );
     assert_eq!(
         state.mounted,
         vec![state.page],
@@ -156,8 +159,26 @@ fn the_mode_is_a_setting_and_nothing_else_can_reach_it() {
     // press the whole of it.
     let mut reader = paged();
     for chord in [
-        "s", "t", "j", "k", "d", "u", "h", "l", "g", "G", "p", "mod+0", "mod+1", "mod+2",
-        "mod+b", "mod+r", "mod+l", "mod+shift+p", "mod+shift+f", "escape",
+        "s",
+        "t",
+        "j",
+        "k",
+        "d",
+        "u",
+        "h",
+        "l",
+        "g",
+        "G",
+        "p",
+        "mod+0",
+        "mod+1",
+        "mod+2",
+        "mod+b",
+        "mod+r",
+        "mod+l",
+        "mod+shift+p",
+        "mod+shift+f",
+        "escape",
     ] {
         reader.press_chord(chord);
         reader.settle();

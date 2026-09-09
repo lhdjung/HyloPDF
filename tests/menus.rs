@@ -398,7 +398,10 @@ fn a_settings_row_keeps_its_label_and_its_note_each_on_one_line() {
     // so it is the height of one line to measure the rest against.
     let line = reader.harness.layout_rect(".menu.settings .menu-row-label");
     let height = line.height;
-    for selector in [".menu.settings .menu-row-label", ".menu.settings .menu-row-note"] {
+    for selector in [
+        ".menu.settings .menu-row-label",
+        ".menu.settings .menu-row-note",
+    ] {
         for node in reader.harness.query_all(selector) {
             let rect = reader.harness.layout_rect_of(node);
             assert!(

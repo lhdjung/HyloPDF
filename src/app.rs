@@ -2801,10 +2801,7 @@ impl Viewer {
         if self.empty() {
             return false;
         }
-        let standing = crate::sign::standing(
-            self.document.path(),
-            self.document.encrypted(),
-        );
+        let standing = crate::sign::standing(self.document.path(), self.document.encrypted());
         if !standing.into_file {
             self.notice = format!("{} — so it cannot be signed.", standing.refused);
             return false;
@@ -3723,8 +3720,7 @@ impl Viewer {
         if pages == 0 {
             return "0".to_string();
         }
-        straight_run(&self.label(1), &self.label(pages), pages)
-            .unwrap_or_else(|| pages.to_string())
+        straight_run(&self.label(1), &self.label(pages), pages).unwrap_or_else(|| pages.to_string())
     }
 
     /// What the field in the toolbar has in it.
@@ -5255,7 +5251,9 @@ pub fn Reader(
                         }
                     }
                     "document-changed" => {
-                        let Payload::Text(path) = news.payload else { continue };
+                        let Payload::Text(path) = news.payload else {
+                            continue;
+                        };
                         let restarted = viewer.write().document_changed(&path);
                         scan(restarted);
                     }
@@ -5287,7 +5285,9 @@ pub fn Reader(
                     // bookkeeping afterwards is ⌘O's, because this is ⌘O with
                     // somebody else choosing the file.
                     "open-document" => {
-                        let Payload::Text(path) = news.payload else { continue };
+                        let Payload::Text(path) = news.payload else {
+                            continue;
+                        };
                         viewer.write().dragging = None;
                         if !path.is_empty() && viewer.write().open_here(&path) {
                             let title = viewer.read().store.title().to_string();
@@ -5300,7 +5300,9 @@ pub fn Reader(
                     // See `Pick` — a picker cannot answer where it was asked,
                     // so which door it was is carried in the event's name.
                     "open-document-beside" => {
-                        let Payload::Text(path) = news.payload else { continue };
+                        let Payload::Text(path) = news.payload else {
+                            continue;
+                        };
                         if !path.is_empty() {
                             opening.ask(Ask::NewWindowOn(path));
                         }
@@ -5520,7 +5522,11 @@ pub fn Reader(
     };
     // What the document already carries in the *other* sense of the word. Read
     // only while the window is open, because it opens the file to find out.
-    let seals = if signing.is_some() { held.seals() } else { Vec::new() };
+    let seals = if signing.is_some() {
+        held.seals()
+    } else {
+        Vec::new()
+    };
     // Whether a signature is looking for somewhere to go, which changes what
     // a click on a page means and what the pointer looks like over one.
     let placing = held.placing.is_some();
@@ -5649,7 +5655,8 @@ pub fn Reader(
     // and paid as left padding, which is the one thing Blitz does honour — so a
     // one-digit field is centred and a four-digit one, which is already fitted,
     // is unchanged.
-    let page_pad = 6.0 + ((page_box - 14.0 - 9.1 * page_field.chars().count() as f64) / 2.0).max(0.0);
+    let page_pad =
+        6.0 + ((page_box - 14.0 - 9.1 * page_field.chars().count() as f64) / 2.0).max(0.0);
     // What an icon is drawn in, and why it is a string rather than a class.
     // An inline `<svg>` here is handed to usvg with no cascade behind it — see
     // [`Icon`] — so the shade a chip's label resolves to has to be passed down

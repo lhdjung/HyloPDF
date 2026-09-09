@@ -12,9 +12,9 @@
 //! harness's clipboard wrote down — see [`hylopdf::app::Clip`], which
 //! exists so that a test run does not empty anybody's real one.
 
-use hylopdf::keymap::Action;
 use hylopdf::fixture;
 use hylopdf::harness::{Options, Reader};
+use hylopdf::keymap::Action;
 use hylopdf::stats;
 
 /// Six pages, one line of type near the top of each. `PROSE` says what they

@@ -65,12 +65,11 @@ fn library_dir() -> String {
         return dir;
     }
     let name = Pdfium::pdfium_platform_library_name();
-    if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
-        let beside = [
-            dir.join("../Frameworks"),
-            dir.join("../lib/HyloPDF"),
-            dir,
-        ];
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    {
+        let beside = [dir.join("../Frameworks"), dir.join("../lib/HyloPDF"), dir];
         if let Some(found) = beside.iter().find(|dir| dir.join(&name).exists()) {
             return found.to_string_lossy().into_owned();
         }
@@ -490,7 +489,13 @@ impl PageSource for Document {
                 if at.width <= 0.0 || at.height <= 0.0 {
                     continue;
                 }
-                found.push(crate::sign::Placed { kind, page: number + 1, index, at, by });
+                found.push(crate::sign::Placed {
+                    kind,
+                    page: number + 1,
+                    index,
+                    at,
+                    by,
+                });
             }
         }
         found
@@ -898,8 +903,18 @@ fn page_size(size: &Size) -> String {
 /// value nobody can parse is still a value somebody put there.
 fn readable_date(raw: &str) -> String {
     const MONTHS: [&str; 12] = [
-        "January", "February", "March", "April", "May", "June", "July", "August",
-        "September", "October", "November", "December",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ];
     let digits = raw.strip_prefix("D:").unwrap_or(raw);
     if digits.len() < 8 || !digits[..8].bytes().all(|b| b.is_ascii_digit()) {

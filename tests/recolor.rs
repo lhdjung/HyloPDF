@@ -306,7 +306,12 @@ fn run_shader(pixels: &[u8], text: Rgb, bg: Rgb, keep_colour: bool) -> Option<Ve
 
     let slice = readback.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).ok()?;
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        })
+        .ok()?;
     let view = slice.get_mapped_range();
     let mut out = Vec::with_capacity((width * height * 4) as usize);
     for row in 0..height {
@@ -325,7 +330,6 @@ fn bytemuck_cast(values: &[f32]) -> &[u8] {
         std::slice::from_raw_parts(values.as_ptr() as *const u8, std::mem::size_of_val(values))
     }
 }
-
 
 /// The regions pass on the GPU: the page in, the page out, the runs stacked
 /// into a dispatch grid of their own.
@@ -365,7 +369,9 @@ fn run_regions(pixels: &[u8], width: u32, height: u32, regions: &[Region]) -> Op
         view_formats: &[],
     };
     let source = device.create_texture(&describe(
-        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+        wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC,
     ));
     let target = device.create_texture(&describe(
         wgpu::TextureUsages::STORAGE_BINDING

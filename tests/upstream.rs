@@ -311,10 +311,7 @@ fn a_custom_widget_never_sees_a_click() {
 #[ignore = "aborts the process rather than failing"]
 fn pdfium_is_not_thread_safe() {
     use hylopdf::render;
-    let path = format!(
-        "{}/tests/fixtures/book.pdf",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let path = format!("{}/tests/fixtures/book.pdf", env!("CARGO_MANIFEST_DIR"));
     let threads: Vec<_> = (0..4)
         .map(|_| {
             let path = path.clone();
@@ -322,7 +319,13 @@ fn pdfium_is_not_thread_safe() {
                 let document = render::open(&path).unwrap();
                 for page in 0..4 {
                     document
-                        .render(page, 400, 500, hylopdf::layout::View::WHOLE, &mut |_bitmap| {})
+                        .render(
+                            page,
+                            400,
+                            500,
+                            hylopdf::layout::View::WHOLE,
+                            &mut |_bitmap| {},
+                        )
                         .unwrap();
                 }
             })
@@ -389,10 +392,7 @@ fn a_custom_property_on_the_root_leaves_settled_text_as_it_was() {
 
     /// The strongest colour anywhere in a node's box: the pixel furthest from
     /// white, which for a page of letters on white is the middle of a stroke.
-    fn ink(
-        harness: &mut Harness<dioxus_native::DioxusDocument>,
-        selector: &str,
-    ) -> (u8, u8, u8) {
+    fn ink(harness: &mut Harness<dioxus_native::DioxusDocument>, selector: &str) -> (u8, u8, u8) {
         use anyrender::PaintScene as _;
         let rect = harness.layout_rect(selector);
         let (width, height) = (800u32, 600u32);

@@ -7,9 +7,9 @@
 //! placed, badly coloured, unreachable, or computed against a window that had
 //! stopped being the window.
 
-use hylopdf::keymap::Action;
 use hylopdf::fixture;
 use hylopdf::harness::{Options, Reader};
+use hylopdf::keymap::Action;
 use hylopdf::theme;
 
 fn book() -> Reader {
@@ -702,8 +702,16 @@ fn the_scrollbar_says_how_far_into_the_book_you_are() {
     );
 
     let top = reader.harness.layout_rect(".bar-thumb");
-    assert!(top.height >= 30.0, "catchable in a long book: {}", top.height);
-    assert!(top.y - bar.y < 1.0, "at the top of an unread book: {}", top.y);
+    assert!(
+        top.height >= 30.0,
+        "catchable in a long book: {}",
+        top.height
+    );
+    assert!(
+        top.y - bar.y < 1.0,
+        "at the top of an unread book: {}",
+        top.y
+    );
 
     reader.wheel(4_000.0);
     let moved = reader.harness.layout_rect(".bar-thumb");
@@ -975,10 +983,8 @@ fn the_cross_on_close_reddens_under_the_pointer() {
     // The theme's own negative, resolved the way `paint.rs` resolves a shipped
     // theme — `themes.ts`'s `RED_DARK`, since the reader opens on Hylo Light
     // unless it is told otherwise.
-    let parsed: theme::Theme = toml::from_str(
-        theme::BUILT_IN[shipped(theme::DEFAULT_LIGHT)].1,
-    )
-    .expect("Hylo Light parses");
+    let parsed: theme::Theme = toml::from_str(theme::BUILT_IN[shipped(theme::DEFAULT_LIGHT)].1)
+        .expect("Hylo Light parses");
     let red = hylopdf::palette::resolve(&parsed, false).negative();
     assert_eq!(
         hot[0],
@@ -1018,7 +1024,13 @@ fn the_number_stays_in_the_middle_of_a_box_wider_than_it() {
         style
             .split("padding-left:")
             .nth(1)
-            .and_then(|rest| rest.trim().trim_end_matches(&[';', 'x', 'p'][..]).trim().parse().ok())
+            .and_then(|rest| {
+                rest.trim()
+                    .trim_end_matches(&[';', 'x', 'p'][..])
+                    .trim()
+                    .parse()
+                    .ok()
+            })
             .unwrap_or_else(|| panic!("no padding in {style:?}"))
     }
 
@@ -1033,7 +1045,10 @@ fn the_number_stays_in_the_middle_of_a_box_wider_than_it() {
     // rather than a special case for short numbers.
     reader.type_text("1250");
     let four = padding(&reader);
-    assert!((four - 6.0).abs() < 0.5, "a fitted number is not moved: {four}");
+    assert!(
+        (four - 6.0).abs() < 0.5,
+        "a fitted number is not moved: {four}"
+    );
 }
 
 /// **The go-to-page key borrows a toolbar that is not there.**

@@ -43,7 +43,10 @@ fn write_built_in_table() {
     println!("cargo:rerun-if-changed=build.rs");
 
     let mut themes: Vec<(i64, String)> = Vec::new();
-    for entry in fs::read_dir(&dir).expect("the app's themes directory").flatten() {
+    for entry in fs::read_dir(&dir)
+        .expect("the app's themes directory")
+        .flatten()
+    {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("toml") {
             continue;

@@ -250,11 +250,7 @@ fn the_surfaces_are_the_size_of_the_app_s() {
 /// ⌘N being a window requires — leaves the reader no way to ask for the tab
 /// they were being given. See `tabs.rs`. It is macOS's alone, so off that
 /// platform there is nothing to filter and the row simply is not drawn.
-const OURS: [(&str, &str); 3] = [
-    ("document", "Sign…"),
-    ("view", "175%"),
-    ("open", "New tab"),
-];
+const OURS: [(&str, &str); 3] = [("document", "Sign…"), ("view", "175%"), ("open", "New tab")];
 
 #[test]
 fn every_menu_lists_what_the_app_s_lists() {
@@ -463,7 +459,13 @@ fn the_start_screen_reads_like_the_app_s() {
     let app = app();
     let start = &app["start"];
     let want = |key: &str| start[key].as_str().unwrap_or_default().to_string();
-    let one = |selector: &str| reader.text_all(selector).first().cloned().unwrap_or_default();
+    let one = |selector: &str| {
+        reader
+            .text_all(selector)
+            .first()
+            .cloned()
+            .unwrap_or_default()
+    };
 
     assert_eq!(one(".start-name"), want("name"), "the name");
     assert_eq!(one(".start-sub"), want("sub"), "the line under it");
@@ -727,7 +729,11 @@ fn what_the_app_says_over_a_page_is_said_here_too() {
     let overlay = &app["overlay"];
     let want = |key: &str| overlay[key].as_str().unwrap_or_default().to_string();
     let one = |reader: &Reader, selector: &str| {
-        reader.text_all(selector).first().cloned().unwrap_or_default()
+        reader
+            .text_all(selector)
+            .first()
+            .cloned()
+            .unwrap_or_default()
     };
 
     reader.press_chord("mod+t");
@@ -761,7 +767,6 @@ fn what_the_app_says_over_a_page_is_said_here_too() {
     assert_eq!(one(&reader, ".drop-hint"), want("drop"), "a dragged file");
     reader.drag_left();
 }
-
 
 /// **The two large areas of the interface, by the colour actually on them.**
 ///
@@ -838,7 +843,9 @@ fn the_recolouring_is_the_app_s() {
             &mut got,
             colour(ramp["text"].as_str().expect("ink")),
             colour(ramp["bg"].as_str().expect("paper")),
-            ramp["keepColour"].as_bool().expect("whether colour is kept"),
+            ramp["keepColour"]
+                .as_bool()
+                .expect("whether colour is kept"),
         );
 
         let (worst, at) = want.iter().zip(&got).enumerate().fold(

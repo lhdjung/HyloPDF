@@ -116,9 +116,7 @@ fn main() {
                     .as_deref()
                     .is_some_and(|path| !std::path::Path::new(path).exists());
             if named_missing {
-                eprintln!(
-                    "Run it with no path at all to open whatever you were reading last."
-                );
+                eprintln!("Run it with no path at all to open whatever you were reading last.");
             }
             std::process::exit(1);
         }

@@ -113,7 +113,10 @@ fn trimming_changes_the_shape_of_the_page_and_putting_them_back_restores_it() {
         (trimmed / want - 1.0).abs() < 0.02,
         "trimmed to {trimmed}, expected about {want}"
     );
-    assert!(trimmed > whole, "this document's margins are wider than tall");
+    assert!(
+        trimmed > whole,
+        "this document's margins are wider than tall"
+    );
     assert!(trimming(&mut reader), "the switch is on");
     assert!(
         reader.state().notice.contains("trimmed"),
@@ -234,7 +237,10 @@ fn a_link_follows_the_page_it_is_drawn_on() {
     // has to turn with the page it is over.
     let mut reader = Reader::open(&fixture::links_pdf());
     let before = reader.harness.layout_rect(".link");
-    assert!(before.width > before.height, "the link is a wide, short box");
+    assert!(
+        before.width > before.height,
+        "the link is a wide, short box"
+    );
 
     reader.press_chord("mod+r");
     reader.settle();

@@ -91,8 +91,10 @@ icons/            what the bundler puts on the three platforms
 build.rs          the shipped theme table, generated from themes/ and checked
 tests/            `cargo test`; one test file per thing the reader does
   parity/         what the retired app's interface measured, frozen as the spec
-  fixtures/       PDFs written in Rust, except `make-pdf.mjs` — the 400-page
-                  book, which is Node and is the only Node left
+  fixtures/       nothing committed; every PDF is written in Rust by
+                  `fixture.rs`, the 400-page book included. No Node anywhere
+examples/         `fixture.rs`, which writes one of those PDFs from the
+                  command line — the packaging job's smoke document
 experiments/      the port's own record: PROGRESS.md, the assessments, and the
                   four Phase 0 spikes, which still compile
 ```
@@ -480,11 +482,14 @@ not help, and neither does setting it just before `show`. `Placements` holds
 where each window is meant to go and `place` puts it there immediately after
 `show`, in the same turn of the main thread, so nothing is seen in between.
 
-**`library.open` is a list, one path per window.** A launch puts back every
-window that was open, the first through `bootstrap` and the rest through
-`ready`. It is read from `OpenDocuments`, which is what each window says it is
-showing, and a window closing takes its entry out — a document put down does
-not come back.
+**`library.open` is a list, one path per window, and a launch opens one of
+them.** The list is what each window says it is showing, and a window closing
+takes its entry out — a document put down does not come back. But restoring
+*every* window cascaded them from the top left, so the window in front — the
+one the reader would actually look at — came up clipped at the bottom and the
+right. So a launch is one maximized window on the document with the latest
+`opened_at`: `store::reopening`. The order of the list is the order the windows
+were made, which is the wrong end of the question.
 
 *Except that a window going means two things, and `Exiting` is what tells them
 apart.* Closed by the reader it is a document they have finished with; closed

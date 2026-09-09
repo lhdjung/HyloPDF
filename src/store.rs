@@ -293,25 +293,35 @@ pub struct Recent {
 /// because two sides that each assume the other checked it are two sides that
 /// disagree about whether the window has anything in it.
 pub fn reopening(dir: &Path) -> Option<String> {
-    reopening_all(dir).into_iter().next()
-}
-
-/// The whole of it: one path per window that was open, in the order the
-/// windows were made.
-///
-/// `library.open` has been a list since the app had two windows, and this is
-/// where that stops being a list of one. The first is the launch window's and
-/// the rest are windows of their own — see `main.rs`.
-pub fn reopening_all(dir: &Path) -> Vec<String> {
     let settings = settings::load(dir);
     let wanted = settings
         .get("reopen_last_document")
         .and_then(Value::as_bool)
         .unwrap_or(true);
     if !wanted {
-        return Vec::new();
+        return None;
     }
-    library::prune(&library::load(dir)).open
+    // **One window, on the document read most recently.** `library.open` is a
+    // list because there were several windows and every one of them came back;
+    // a cascade of five windows, the last of them off the bottom-right corner
+    // of the screen, is not what anybody meant by "pick up where I left off".
+    // The list is still written and still pruned — it is what says which of
+    // several documents was actually open — but only one of them is opened,
+    // and `opened_at` is what says which. Order in the list is the order the
+    // windows were *made*, which is the wrong end of it.
+    let library = library::prune(&library::load(dir));
+    library
+        .open
+        .iter()
+        .max_by_key(|path| {
+            library
+                .files
+                .iter()
+                .find(|entry| &&entry.path == path)
+                .map(|entry| entry.opened_at)
+                .unwrap_or(i64::MIN)
+        })
+        .cloned()
 }
 
 /// What wearing a theme did, beyond putting it on.

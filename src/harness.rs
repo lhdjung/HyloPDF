@@ -453,14 +453,17 @@ impl Reader {
         Self::open_with(path, Options::default())
     }
 
-    /// The fixture the app's own test suite generates: 400 pages of plain
-    /// text. It is the document every memory number in `PROGRESS.md` was taken
-    /// on, which is the reason to reach for it here too.
+    /// Four hundred pages of plain text: the document every memory number in
+    /// `PROGRESS.md` was taken on, which is the reason to reach for it here
+    /// too.
+    ///
+    /// Written by [`crate::fixture::book_pdf`] on first use rather than found
+    /// at `tests/fixtures/book.pdf`. It was found there, put there by a Node
+    /// script and a step in two workflows — and when the script went with the
+    /// port, both workflows went on calling it and every bundle job failed on
+    /// a missing module. `cargo test` needs cargo and nothing else.
     pub fn book() -> String {
-        format!(
-            "{}/tests/fixtures/book.pdf",
-            env!("CARGO_MANIFEST_DIR")
-        )
+        crate::fixture::book_pdf()
     }
 
     /// A window with nothing in it — the start screen, as ⌘N gives it and as

@@ -74,19 +74,20 @@ fn main() {
         return;
     }
 
-    // One path per window that was open, in the order the windows were made.
-    // A document named on the command line is the launch window's and nothing
-    // is restored beside it, which is what naming one means.
-    let session: Vec<String> = match &named {
-        Some(path) => vec![path.clone()],
-        None => store::reopening_all(&config.dir),
+    // **One window, whatever the last session had open.** Restoring every
+    // window that was open cascaded them from the top left, so the one in
+    // front — the one the reader would actually look at — came up clipped at
+    // the bottom and the right. One window, on the document read most
+    // recently, maximized: see `store::reopening`.
+    let path = match &named {
+        Some(path) => Some(path.clone()),
+        None => store::reopening(&config.dir),
     };
     // **Nothing to open is the start screen.** It was a 400-page test
     // document, because there was nowhere else for a window with nothing in
     // it to go — a launch on a machine that had never read anything opened a
     // fixture nobody asked for, which is a strange first impression for a
     // reader to make.
-    let path = session.first().cloned();
 
     // Opened once here for the message below and then dropped: the window
     // opens it again through `Session::window`, which is the one path a
@@ -159,8 +160,7 @@ fn main() {
         remote: windows.remote(),
     });
 
-    // The launch window, and then the rest of the last session beside it.
-    // They are queued rather than made: a window can only be built from
+    // The launch window. It is queued rather than made: a window can only be built from
     // inside a winit callback, and `can_create_surfaces` is the first one.
     // Each is placed as it is made, so the second cascades off the first —
     // the app has to remember the spots instead, because showing a window on
@@ -171,11 +171,6 @@ fn main() {
     };
     if let Some(spec) = launch {
         windows.open(spec);
-    }
-    for beside in session.iter().skip(1) {
-        if let Some(spec) = session_maker.window(beside) {
-            windows.open(spec);
-        }
     }
 
     // Where a window comes from when one is asked for by path alone: the Dock

@@ -202,3 +202,25 @@ fn a_document_that_is_gone_is_not_reopened() {
     assert_eq!(store::reopening(&dir), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// **A launch is one window, on the document read most recently.** `open` is
+/// still a list — two windows put two paths in it — and the order of that list
+/// is the order the *windows* were made, which says nothing about which
+/// document the reader was actually in. `opened_at` does.
+#[test]
+fn a_session_of_two_windows_comes_back_as_the_document_read_last() {
+    use hylopdf::library;
+
+    let dir = scratch("two-windows");
+    std::fs::create_dir_all(&dir).expect("scratch");
+    let first = fixture::titled_pdf("The One Opened First");
+    let second = fixture::titled_pdf("The One Opened Second");
+
+    library::touch(&dir, &first, "first", 100).expect("first");
+    library::touch(&dir, &second, "second", 200).expect("second");
+    // The window on `first` was made first, so it is first in the list.
+    library::set_open(&dir, &[first.clone(), second.clone()]).expect("set open");
+
+    assert_eq!(store::reopening(&dir).as_deref(), Some(second.as_str()));
+    let _ = std::fs::remove_dir_all(&dir);
+}

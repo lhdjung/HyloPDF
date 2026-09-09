@@ -190,7 +190,10 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
           set -euo pipefail
-          node tests/fixtures/make-pdf.mjs smoke.pdf 5
+          # Five pages, written by the suite's own fixture writer through
+          # `examples/fixture.rs`. It was a Node script until the script went
+          # with the port and this line went on calling it.
+          cargo run --example fixture -- smoke.pdf 5
           document="$PWD/smoke.pdf"
           config="$PWD/smoke-config"
           # Bash on the Windows runner says `/d/a/HyloPDF/…`, and a Rust `Path`

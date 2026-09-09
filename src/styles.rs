@@ -377,9 +377,6 @@ body { margin: 0;
    Fourteen, which is `.popover-item .check`'s own width and the width of the
    drawing that goes in it. */
 .menu-tick { flex: 0 0 14px; color: var(--accent); }
-/* …and a drawing where a shelf row has one, which needs the two extra
-   pixels an icon is wider than a tick. */
-.menu-tick .icon { width: 16px; height: 16px; margin-left: -2px; }
 /* `min-width: 0` and `overflow` are what `max-width` on the menu needs: a
    theme somebody named at length would otherwise push the menu past its cap
    rather than being cut at it. The app cuts it with an ellipsis, which is a

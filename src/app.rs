@@ -6173,7 +6173,6 @@ pub fn Reader(
                                             pick.ask(Opening::Here);
                                         }
                                     },
-                                    span { class: "menu-tick", "" }
                                     Icon { name: "folder", stroke: ink.clone() }
                                     span { class: "menu-label", "Open document…" }
                                     span { class: "menu-key", "{key_open}" }
@@ -6192,7 +6191,6 @@ pub fn Reader(
                                             pick.ask(Opening::Beside);
                                         }
                                     },
-                                    span { class: "menu-tick", "" }
                                     Icon { name: "window", stroke: ink.clone() }
                                     span { class: "menu-label", "Open document in new window…" }
                                 }
@@ -6205,7 +6203,6 @@ pub fn Reader(
                                             frame.ask(Ask::NewWindow);
                                         }
                                     },
-                                    span { class: "menu-tick", "" }
                                     Icon { name: "window", stroke: ink.clone() }
                                     span { class: "menu-label", "New window" }
                                     span { class: "menu-key", "{key_new_window}" }
@@ -6229,7 +6226,6 @@ pub fn Reader(
                                                 frame.ask(Ask::NewTab);
                                             }
                                         },
-                                        span { class: "menu-tick", "" }
                                         Icon { name: "window", stroke: ink.clone() }
                                         span { class: "menu-label", "New tab" }
                                     }
@@ -6263,22 +6259,17 @@ pub fn Reader(
                                                     }
                                                 }
                                             },
-                                            // A drawing rather than the empty
-                                            // tick column every other item
-                                            // carries, so the section reads as
-                                            // a shelf rather than as four more
-                                            // commands.
-                                            // …and *only* there. It carried a
-                                            // second one in the icon slot
-                                            // every other item uses, so a
-                                            // shelf row was drawn twice: a
-                                            // faint sheet of paper and a
-                                            // bright one beside it, saying
-                                            // the same thing about the same
-                                            // file.
-                                            span { class: "menu-tick",
-                                                Icon { name: "document", stroke: crate::palette::hex(wearing.faint()) }
-                                            }
+                                            // A drawing, quieter than the
+                                            // ones above the rule, so the
+                                            // section reads as a shelf rather
+                                            // than as four more commands. One
+                                            // drawing and not two: it used to
+                                            // sit in a tick column of its own
+                                            // beside a second icon, which drew
+                                            // a faint sheet of paper and a
+                                            // bright one saying the same thing
+                                            // about the same file.
+                                            Icon { name: "document", stroke: crate::palette::hex(wearing.faint()) }
                                             span { class: "menu-label", "{entry.title}" }
                                             span { class: "menu-key", "p. {entry.page}" }
                                         }
@@ -6407,7 +6398,6 @@ pub fn Reader(
                                             }
                                         }
                                     },
-                                    span { class: "menu-tick", "" }
                                     Icon { name: "folder", stroke: ink.clone() }
                                     span { class: "menu-label", "Show in {crate::app::file_manager_name()}" }
                                 }
@@ -6424,9 +6414,9 @@ pub fn Reader(
                                         let page = viewer.read().page();
                                         viewer.write().mark_page(page);
                                     },
-                                    span { class: "menu-tick", {if marked { "✓" } else { "" }} }
                                     Icon { name: "mark", stroke: ink.clone() }
                                     span { class: "menu-label", "Mark this page" }
+                                    span { class: "menu-tick", {if marked { "✓" } else { "" }} }
                                     span { class: "menu-key", "{key_mark}" }
                                 }
                                 // **The one item in this menu the app has no
@@ -6438,7 +6428,6 @@ pub fn Reader(
                                     class: "menu-item",
                                     "data-item": "sign",
                                     onclick: move |_| { viewer.write().open_signing(); },
-                                    span { class: "menu-tick", "" }
                                     Icon { name: "sign", stroke: ink.clone() }
                                     span { class: "menu-label", "Sign…" }
                                 }
@@ -6460,7 +6449,6 @@ pub fn Reader(
                                             }
                                         }
                                     },
-                                    span { class: "menu-tick", "" }
                                     Icon { name: "print", stroke: ink.clone() }
                                     span { class: "menu-label", "Print…" }
                                     span { class: "menu-key", "{key_print}" }
@@ -6481,7 +6469,6 @@ pub fn Reader(
                                             viewer.write().notice = "Name copied.".into();
                                         }
                                     },
-                                    span { class: "menu-tick", "" }
                                     Icon { name: "copy", stroke: ink.clone() }
                                     span { class: "menu-label", "Copy name" }
                                 }
@@ -6497,7 +6484,6 @@ pub fn Reader(
                                             viewer.write().notice = "Path copied.".into();
                                         }
                                     },
-                                    span { class: "menu-tick", "" }
                                     Icon { name: "copy", stroke: ink.clone() }
                                     span { class: "menu-label", "Copy path" }
                                 }
@@ -6513,7 +6499,6 @@ pub fn Reader(
                                         viewer.write().close_menu();
                                         viewer.write().open_details();
                                     },
-                                    span { class: "menu-tick", "" }
                                     Icon { name: "info", stroke: ink.clone() }
                                     span { class: "menu-label", "Information" }
                                 }

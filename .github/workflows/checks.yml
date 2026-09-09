@@ -72,15 +72,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev fonts-dejavu-core
 
-      # `Reader::book()` is the 400-page fixture every memory and timing number
-      # in `experiments/PROGRESS.md` was taken on, generated rather than
-      # committed. The generator needs Node and nothing else: no `npm ci`, no
-      # dependencies, one file that writes bytes.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: The fixture
-        run: node tests/fixtures/make-pdf.mjs tests/fixtures/book.pdf 400
+      # No step writes `Reader::book()`. The 400-page fixture is written by
+      # `fixture::book_pdf` on first use, which is the rule the rest of the
+      # suite already follows: `cargo test` needs cargo and nothing else.
 
       # pdfium is a shared library and is not in this repository — `pdfium.rs`
       # finds it beside the executable in a bundle and through `HYLO_PDFIUM`

@@ -674,9 +674,10 @@ impl Widget for PageWidget {
                 (page.width as u64) * (page.height as u64) * 4,
             );
         }
-        self.device = None;
+        if let Some(device) = self.device.take() {
+            Recolorer::forget(&device);
+        }
         self.recolorer = None;
-        Recolorer::forget();
     }
 
     /// A page is not an animation — except for the single frame between

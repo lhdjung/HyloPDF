@@ -119,29 +119,46 @@ pub struct Recolorer {
 }
 
 thread_local! {
-    /// One pipeline per process, because there is one device per process. A
-    /// widget asks for it when it first has a device to build it against.
-    static SHARED: std::cell::RefCell<Option<Rc<Recolorer>>> = const { std::cell::RefCell::new(None) };
+    /// One pipeline per window, because there is a device per window rather
+    /// than per process: each window's renderer builds a `WGPUContext` of its
+    /// own, and so an instance, an adapter and a device of its own. This was
+    /// one slot, on the theory that there was one device, and a second window
+    /// then drew its first page through the first window's pipeline — a
+    /// texture made on one device handed to another's scene, which is not a
+    /// blank page but a dead process. Open a window with ⌘N and a document in
+    /// it and that was the crash.
+    ///
+    /// **The key is the instance and not the device**, which is the half that
+    /// took the longest to see: `wgpu::Device` compares by its id, and an id
+    /// is an index into the registry of the instance that made it, so two
+    /// windows' two devices are both `Id(0,1)` and compare *equal*. A cache
+    /// keyed on the device is not keyed on anything. An `Instance` compares by
+    /// the address of the `Global` behind it and is genuinely one per window.
+    ///
+    /// A list rather than a map because it holds one entry per window.
+    static SHARED: std::cell::RefCell<Vec<(wgpu::Instance, Rc<Recolorer>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 impl Recolorer {
     pub fn shared(device: &DeviceHandle) -> Rc<Recolorer> {
         SHARED.with(|held| {
             let mut held = held.borrow_mut();
-            if let Some(existing) = held.as_ref() {
+            if let Some((_, existing)) = held.iter().find(|(by, _)| *by == device.instance) {
                 return Rc::clone(existing);
             }
             let made = Rc::new(Recolorer::new(device.clone()));
-            *held = Some(Rc::clone(&made));
+            held.push((device.instance.clone(), Rc::clone(&made)));
             made
         })
     }
 
     /// A renderer going away takes every pipeline built against its device
     /// with it. `destroy_surfaces` is where a widget hears about that, and
-    /// this is the shared half of what it has to forget.
-    pub fn forget() {
-        SHARED.with(|held| *held.borrow_mut() = None);
+    /// this is the shared half of what it has to forget — that window's entry,
+    /// not every window's.
+    pub fn forget(device: &DeviceHandle) {
+        SHARED.with(|held| held.borrow_mut().retain(|(by, _)| *by != device.instance));
     }
 
     fn new(device: DeviceHandle) -> Self {

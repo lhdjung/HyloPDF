@@ -763,6 +763,20 @@ edge. `.root` is `overflow: hidden` for that reason and `.window-pane` scrolls
 on one axis only. Everything here that scrolls has a box of its own that does
 it; the root is not one of them.
 
+**A wgpu device is not a key, and a window is not a process.** Each window's
+renderer builds a `WGPUContext` of its own, so each window has its own
+instance, adapter and device. `wgpu::Device` compares by its *id*, and an id is
+an index into the registry of the instance that made it — so two windows' two
+devices are both `Id(0,1)` and compare equal. The recolouring pipelines were
+cached on that, so a second window drew its first page through the first
+window's pipeline: a texture made on one device, registered in another's
+bindings, which wgpu-core reports from inside the next frame as
+`TextureView[Id(4,6)] is no longer alive`. The app dies the moment a second
+window shows a document. `Recolorer::shared` keys on the `wgpu::Instance`
+instead, which compares by the address of the `Global` behind it and is
+genuinely one per window. Anything else that caches per device wants the same
+key.
+
 **Do not tint the document with `mix-blend-mode`.** WebKit drops the blend
 against a composited canvas, and a dropped blend renders as a solid band across
 the line. Anything that has to change the colour of ink goes onto the canvas.

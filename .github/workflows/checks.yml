@@ -21,8 +21,11 @@ env:
   PDFIUM_TAG: "chromium%2F8021"
 
 jobs:
-  reader:
-    name: The reader (${{ matrix.os }})
+  suite:
+    # The workflow is "Checks" and the job is the platform it ran on, so a
+    # failure reads as "checks / ubuntu-latest" — which is the whole of what
+    # anybody wants from the name.
+    name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       # Neither platform's answer is worth losing because another one failed.

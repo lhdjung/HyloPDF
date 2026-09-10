@@ -496,8 +496,10 @@ impl Shell {
     }
 
     /// The window with the keyboard, else any window at all. What "in front"
-    /// means to the cascade below and to a tab looking for the group it is
-    /// joining.
+    /// means to a tab looking for the group it is joining — which is macOS
+    /// alone, hence the gate; the cascade below asks the same question of the
+    /// corners rather than of the window.
+    #[cfg(target_os = "macos")]
     fn front(&self) -> Option<std::sync::Arc<dyn winit::window::Window>> {
         self.inner
             .windows

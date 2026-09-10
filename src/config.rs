@@ -56,9 +56,16 @@ pub fn absolute(path: &str) -> String {
 ///
 /// **The app's own, under its bundle identifier.** The port wrote to
 /// `HyloPDF-dioxus` while it was an experiment; a machine that still has that
-/// directory has it moved into place, once. Anything already under the bundle
-/// id then is a leftover of the retired dev build, which had no users, and is
-/// cleared to make room.
+/// directory has it moved into place, once.
+///
+/// **Warning: `app.hylopdf` is not a leftover of a dev build.** It is the
+/// directory the *shipped Tauri app* wrote from its first release on (the
+/// `identifier` in its `tauri.conf.json`), holding `library.toml` with every
+/// bookmark and highlight, `keys.toml` and any theme the reader made. The
+/// `remove_dir_all` below fires only when both directories exist — a machine
+/// that ran the experiment beside the installed app — and there it wipes that
+/// data rather than merging it. The formats are the same modules, so the
+/// safer move is to leave an existing `app.hylopdf` alone and not rename.
 ///
 /// `HYLOPDF_CONFIG` overrides it, which is what the tests use and what makes
 /// a run reproducible.

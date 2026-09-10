@@ -119,6 +119,13 @@ extern "C" fn open_file(
 /// the app's own quit is asked for instead, which closes every window through
 /// the door a window closes through and returns from the event loop the
 /// ordinary way.
+///
+/// **Warning: `NSTerminateCancel` is also the answer to a log-out and a
+/// shutdown**, which arrive through the same selector, and to those it means
+/// "this app refuses" — the system aborts the log-out and names the app, even
+/// though the app then quits on its own. The right answer there is
+/// `NSTerminateLater` (2) with `replyToApplicationShouldTerminate:` once the
+/// writes are done, or the writes done here and `NSTerminateNow` (1).
 extern "C" fn should_terminate(_this: *mut AnyObject, _cmd: Sel, _app: *mut AnyObject) -> usize {
     const NS_TERMINATE_CANCEL: usize = 0;
     if let Some(shell) = SHELL.get() {

@@ -240,6 +240,9 @@ type Job = Box<dyn FnOnce() + Send>;
 /// pdfium lock and a second thread would only queue on it. Jobs run in the
 /// order they were mounted.
 // ponytail: FIFO; nearest-to-the-middle first if a fast scroll feels late.
+// Warning: nothing in `cargo test` reaches this thread. The harness has no
+// device, so its pages go through `ensure_software`, which draws synchronously
+// — the pending/cancel/redraw dance below is checked only by running the app.
 fn render_thread(job: Job) {
     static QUEUE: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
     let queue = QUEUE.get_or_init(|| {

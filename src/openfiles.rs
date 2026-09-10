@@ -20,8 +20,9 @@
 //! is replaced by AppKit's own handler. So the object below is set as the
 //! application's delegate before the event loop starts, and AppKit's own
 //! machinery delivers the queued event to it at the moment it is meant to.
-//! Nothing is displaced: winit sets no delegate, and this one answers two
-//! selectors and no others.
+//! Nothing is displaced: winit sets no delegate, and this one answers three
+//! selectors and no others — the two that open a document, and the one that
+//! turns ⌘Q into the app's own quit.
 
 use std::ffi::{c_char, CStr};
 use std::sync::OnceLock;
@@ -108,6 +109,24 @@ extern "C" fn open_file(
     Bool::YES
 }
 
+/// `-[NSApplicationDelegate applicationShouldTerminate:]`.
+///
+/// ⌘Q from the application menu, Quit from the Dock and a log-out all arrive
+/// as `terminate:`, and with nobody answering it AppKit ends the process from
+/// inside `run_app` — so nothing after the event loop in `main.rs` ran: the
+/// window's size was not written, `store::flush` never put down where the
+/// reader was, and the socket was left behind. The answer is "not yet", and
+/// the app's own quit is asked for instead, which closes every window through
+/// the door a window closes through and returns from the event loop the
+/// ordinary way.
+extern "C" fn should_terminate(_this: *mut AnyObject, _cmd: Sel, _app: *mut AnyObject) -> usize {
+    const NS_TERMINATE_CANCEL: usize = 0;
+    if let Some(shell) = SHELL.get() {
+        shell.quit();
+    }
+    NS_TERMINATE_CANCEL
+}
+
 /// Become the application's delegate, once, before the event loop starts.
 pub fn install(shell: Remote) {
     if SHELL.set(shell).is_err() {
@@ -124,6 +143,10 @@ pub fn install(shell: Remote) {
         builder.add_method(
             sel!(application:openFile:),
             open_file as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject) -> Bool,
+        );
+        builder.add_method(
+            sel!(applicationShouldTerminate:),
+            should_terminate as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) -> usize,
         );
         let class = builder.register();
         // Never released: AppKit does not retain a delegate, and this one is

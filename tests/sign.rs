@@ -366,7 +366,7 @@ fn the_document_as_it_arrived_is_kept_beside_it() {
 #[test]
 fn an_ordinary_document_can_be_signed_and_says_so() {
     let path = scratch("standing");
-    let standing = sign::standing(path.to_str().unwrap(), false);
+    let standing = sign::standing(path.to_str().unwrap(), false, false);
     assert!(standing.into_file, "{}", standing.refused);
     assert!(standing.refused.is_empty());
     assert!(!standing.rewrites, "it carries no signature to break");
@@ -379,7 +379,7 @@ fn an_ordinary_document_can_be_signed_and_says_so() {
 #[test]
 fn an_encrypted_document_is_not_signed() {
     let path = scratch("locked");
-    let standing = sign::standing(path.to_str().unwrap(), true);
+    let standing = sign::standing(path.to_str().unwrap(), true, false);
     assert!(!standing.into_file);
     assert_eq!(standing.refused, "this document is encrypted");
 }
@@ -889,7 +889,8 @@ fn a_signed_document_says_what_signing_it_costs() {
     let path = dir.join("carries-a-signature.pdf");
     std::fs::copy(hylopdf::fixture::signed_pdf(), &path).expect("a copy to write to");
 
-    let standing = sign::standing(path.to_str().expect("a path"), false);
+    let opened = hylopdf::render::open(path.to_str().expect("a path")).expect("it opens");
+    let standing = sign::standing(opened.path(), false, opened.sealed());
     assert!(standing.into_file, "it can still be signed with ink");
     assert!(
         standing.rewrites,
@@ -921,7 +922,12 @@ fn a_blank_signature_field_is_not_a_signature() {
     assert!(!seals[0].filled, "and this one has nothing in it");
     assert_eq!(seals[0].says(), "waiting to be signed");
     assert!(
-        !sign::standing(&blank, false).rewrites,
+        !sign::standing(
+            &blank,
+            false,
+            hylopdf::render::open(&blank).expect("it opens").sealed()
+        )
+        .rewrites,
         "so there is no signature here for ink to break",
     );
 }

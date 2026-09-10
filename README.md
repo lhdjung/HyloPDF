@@ -30,8 +30,7 @@ is listed if you want a particular one.
 ## Dev build
 
 The whole app is Rust: [Dioxus] Native, with [Blitz] laying out real HTML and
-CSS instead of a webview. Building it needs the Rust toolchain, Node for one
-fixture generator, and `libfontconfig1-dev` on Linux or the Xcode command line
+CSS instead of a webview. Building it needs the Rust toolchain, and `libfontconfig1-dev` on Linux or the Xcode command line
 tools on macOS. pdfium is a shared library and is not in this repository —
 point `HYLO_PDFIUM` at a directory holding one from
 [pdfium-binaries](https://github.com/bblanchon/pdfium-binaries).

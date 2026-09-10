@@ -19,7 +19,7 @@ use hylopdf::emit::{Exchange, News, Payload};
 use hylopdf::session::Session;
 use hylopdf::shell::Shell;
 use hylopdf::windows::Desk;
-use hylopdf::{render, store, watch};
+use hylopdf::{store, watch};
 
 fn main() {
     // Before a document exists, which is what this has to be. See its own
@@ -55,8 +55,8 @@ fn main() {
     let named = args
         .iter()
         .skip(1)
-        .find(|arg| arg.ends_with(".pdf"))
-        .cloned();
+        .find(|arg| hylopdf::shell::is_document(std::path::Path::new(arg)))
+        .map(|arg| hylopdf::config::absolute(arg));
     let config = Config {
         theme,
         ..Config::here()
@@ -89,37 +89,20 @@ fn main() {
     // fixture nobody asked for, which is a strange first impression for a
     // reader to make.
 
-    // Opened once here for the message below and then dropped: the window
-    // opens it again through `Session::window`, which is the one path a
-    // window's document comes down. Two opens of the same file cost the same
-    // milliseconds twice and buy a launch that says what went wrong before a
-    // window exists to say it in.
-    match path.as_deref().map(render::open) {
-        Some(Ok(document)) => println!(
-            "reader: {} pages in {}, opened in {:.0}ms",
-            document.pages(),
-            path.as_deref().unwrap_or_default(),
-            document.opened_in(),
-        ),
-        None => println!("reader: nothing to open — the start screen"),
-        // A locked document is not a launch that failed: the window comes up
-        // and asks. See `Session::window_on`.
-        Some(Err(render::Refusal::Locked)) => println!(
-            "reader: {} is locked — the window will ask for the password",
-            path.as_deref().unwrap_or_default(),
-        ),
-        Some(Err(err)) => {
-            eprintln!("{err}");
-            // The one mistake worth a second sentence.
-            let named_missing = named.is_some()
-                && path
-                    .as_deref()
-                    .is_some_and(|path| !std::path::Path::new(path).exists());
-            if named_missing {
+    // Not opened here: the window opens it through `Session::window`, which
+    // is the one path a window's document comes down, and opening a document
+    // twice cost the same milliseconds twice. The one mistake worth saying
+    // before a window exists is a path that is not there.
+    match path.as_deref() {
+        Some(path) if std::path::Path::new(path).is_file() => println!("reader: {path}"),
+        Some(path) => {
+            eprintln!("{path}: there is no such file.");
+            if named.is_some() {
                 eprintln!("Run it with no path at all to open whatever you were reading last.");
             }
             std::process::exit(1);
         }
+        None => println!("reader: nothing to open — the start screen"),
     }
 
     // Where the launch window's size waits until the app goes. See the
@@ -176,7 +159,7 @@ fn main() {
     {
         let session = session_maker.clone();
         shell.on_request(move |path| match path {
-            Some(path) => session.hand_over(&path),
+            Some(path) => session.hand_over(&hylopdf::config::absolute(&path)),
             None => session.another(),
         });
     }

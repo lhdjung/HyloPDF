@@ -871,6 +871,13 @@ pub struct Signing {
     /// Kept beside the strokes rather than in a window of its own because it
     /// is the same errand.
     pub line: String,
+    /// What the window lists, read when it opens rather than on every render
+    /// — each stroke on the pad is a render, and one of these opens the file.
+    /// The signatures kept on disk, the ones already on the document's
+    /// pages, and the digital signatures it carries.
+    pub kept: Vec<crate::sign::Signature>,
+    pub signed_here: Vec<crate::sign::Placed>,
+    pub seals: Vec<crate::sign::Seal>,
 }
 
 /// What is armed and waiting for a click on a page.
@@ -1214,7 +1221,15 @@ pub struct Viewer {
     /// view — and a recompile changes none of those while changing every
     /// pixel. `generation` cannot do it: opening the sidebar bumps that, and
     /// that must not throw a texture away.
-    edition: u64,
+    pub edition: u64,
+    /// The process's watch and this window's name in it, so that a write of
+    /// this window's own is not reported back to it as news. See
+    /// [`crate::watch::Watching::wrote`]. Absent in a reader with no watch.
+    pub watching: Option<Arc<crate::watch::Watching>>,
+    pub window: String,
+    /// The markup list as last built, with the edition and journal reading
+    /// it was built for. See [`Viewer::markup_rows`].
+    mark_rows: RefCell<Option<(u64, u64, Vec<MarkRow>)>>,
 }
 
 impl Viewer {
@@ -1298,6 +1313,9 @@ impl Viewer {
             presenting: false,
             place: None,
             edition: 0,
+            watching: None,
+            window: String::new(),
+            mark_rows: RefCell::new(None),
             notice: String::new(),
             dragging: None,
             keymap,
@@ -2801,13 +2819,20 @@ impl Viewer {
         if self.empty() {
             return false;
         }
-        let standing = crate::sign::standing(self.document.path(), self.document.encrypted());
+        let standing = crate::sign::standing(
+            self.document.path(),
+            self.document.encrypted(),
+            self.document.sealed(),
+        );
         if !standing.into_file {
             self.notice = format!("{} — so it cannot be signed.", standing.refused);
             return false;
         }
         self.menu = None;
         self.signing = Some(Signing {
+            kept: self.signatures(),
+            signed_here: self.signed_here(),
+            seals: self.seals(),
             // The pad opens empty and the name opens empty with it. A default
             // of "Signature" is what `sign::save` falls back to, and putting
             // it in the field would mean a reader who types their own name has
@@ -2933,8 +2958,10 @@ impl Viewer {
                 // signature and using one are two things, and a reader who has
                 // just drawn one very often wants to draw the initials too.
                 self.clear_pad();
+                let kept = self.signatures();
                 if let Some(signing) = self.signing.as_mut() {
                     signing.name.clear();
+                    signing.kept = kept;
                 }
                 true
             }
@@ -2949,6 +2976,10 @@ impl Viewer {
     pub fn forget_signature(&mut self, id: &str) {
         if let Err(why) = crate::sign::forget(self.store.dir(), id) {
             self.notice = why;
+        }
+        let kept = self.signatures();
+        if let Some(signing) = self.signing.as_mut() {
+            signing.kept = kept;
         }
     }
 
@@ -3102,7 +3133,7 @@ impl Viewer {
         self.standing = if path.is_empty() {
             crate::markup::Standing::default()
         } else {
-            crate::markup::standing(&path, self.document.encrypted())
+            crate::markup::standing(&path, self.document.encrypted(), self.document.sealed())
         };
         self.sync_journal();
     }
@@ -3326,6 +3357,20 @@ impl Viewer {
     /// One list, because to a reader they are one thing. They are told apart
     /// by a word on the row rather than by a section of their own.
     pub fn markup_rows(&self) -> Vec<MarkRow> {
+        // Built once per reading of the document and of the journal, because
+        // the panel asks on every scroll frame and a row costs a page of text.
+        let (edition, journal) = (self.edition, self.store.journal_rev());
+        if let Some((for_edition, for_journal, rows)) = self.mark_rows.borrow().as_ref() {
+            if *for_edition == edition && *for_journal == journal {
+                return rows.clone();
+            }
+        }
+        let rows = self.build_markup_rows();
+        *self.mark_rows.borrow_mut() = Some((edition, journal, rows.clone()));
+        rows
+    }
+
+    fn build_markup_rows(&self) -> Vec<MarkRow> {
         let mut rows: Vec<MarkRow> = self
             .markup
             .iter()
@@ -3529,6 +3574,17 @@ impl Viewer {
                 None
             }
             MarkKey::InFile(page, index) => {
+                // Asked here as it is asked before a mark goes in: an
+                // encrypted or read-only document cannot have one taken out
+                // either, and finding that out from a failed write costs the
+                // reader the document on screen.
+                if !self.standing.into_file {
+                    self.notice = format!(
+                        "{} — so the mark cannot be taken out of it.",
+                        self.standing.refused
+                    );
+                    return None;
+                }
                 let path = self.document.path().to_string();
                 // **The journal has to be told first**, or the reload cannot
                 // tell "the reader took this off" from "a rebuild lost it" —
@@ -4464,13 +4520,25 @@ impl Viewer {
     /// to a reader who pressed a colour.
     fn reopen(&mut self, path: &str) -> Option<u64> {
         let at = self.layout.anchor(self.scroll_top);
-        let reopened = match crate::render::open(path) {
+        // Every write this reader makes comes through here straight after
+        // the write, so this is where the watch is told the burst on its way
+        // is ours — or it would reload the document a second time, a quarter
+        // of a second after this one. See [`crate::watch::Watching::wrote`].
+        if let Some(watching) = &self.watching {
+            watching.wrote(&self.window, std::path::Path::new(path));
+        }
+        // With the password it was opened with: a recompiled encrypted paper
+        // is still the same encrypted paper.
+        let reopened = match crate::render::open_with(path, self.document.password()) {
             Ok(document) => document,
             // A compiler that is still writing is what `whole()` in `watch.rs`
             // is there to rule out, so this is the genuinely broken file —
             // and the document already open is the better thing to be looking
-            // at than an empty window.
+            // at than an empty window. If it was let go of for a write that
+            // then failed, it is taken up again, or every page is blank until
+            // ⌘O.
             Err(refused) => {
+                self.document.retake();
                 self.notice =
                     format!("The document changed on disk and could not be read: {refused}");
                 return None;
@@ -4546,6 +4614,9 @@ impl Viewer {
     /// `FPDF_ERR_PASSWORD`: the difference is whether this call supplied
     /// one.
     fn open_here_with(&mut self, path: &str, password: Option<&str>) -> bool {
+        // The picker, a drop and a handover all arrive here; the command line
+        // and the socket were made absolute at the door. See `config::absolute`.
+        let path = &crate::config::absolute(path);
         if path == self.document.path() {
             self.notice = "That document is already open here.".into();
             return false;
@@ -5009,6 +5080,8 @@ pub fn Reader(
             store.wear_for_now(index);
         }
         let mut viewer = Viewer::new(document.0.clone(), chosen.clone(), store);
+        viewer.window = config.window.clone();
+        viewer.watching = dioxus_core::try_consume_context::<Arc<crate::watch::Watching>>();
         // **Before the first frame, like the viewport above it**, for the
         // reader's sake rather than the renderer's: a machine in dark mode
         // must never see a white page on the way in. One question of the
@@ -5210,6 +5283,7 @@ pub fn Reader(
                 if !path.is_empty() {
                     watching.document(&config.window, Some(&path));
                 }
+                viewer.write_unchecked().watching = Some(Arc::clone(&watching));
                 Some(watching)
             }
             (None, false) => None,
@@ -5463,6 +5537,11 @@ pub fn Reader(
     let scroll_left = held.scroll_left();
     let wearing = held.palette();
     let theme_name = held.theme_name();
+    // The colours the pages wear, in every page's key — the colours and not
+    // the theme's name, because the theme editor's preview, "Recolour
+    // pictures too" and a theme file edited on disk all change the one
+    // without the other. See `page.rs`.
+    let worn = chosen.get().key();
     // Which draft of the document is being drawn — in every page's key, so
     // that a recompile replaces the nodes and the textures with them. See
     // `Viewer::edition`.
@@ -5504,29 +5583,19 @@ pub fn Reader(
     } else {
         Vec::new()
     };
-    // The Sign window, and the signatures already kept. The list is read off
-    // the disk, so it is read while the window is open and not otherwise —
-    // the same bargain the recents shelf strikes one paragraph down.
+    // The Sign window, with the three lists it shows — read when it opened,
+    // not here, because one of them opens the file. See `Signing::kept`.
     let signing = held.signing.clone();
-    let kept = if signing.is_some() {
-        held.signatures()
-    } else {
-        Vec::new()
-    };
-    // And what is already on the document, which is read from the file rather
-    // than remembered — see `PageSource::signatures`.
-    let signed_here = if signing.is_some() {
-        held.signed_here()
-    } else {
-        Vec::new()
-    };
-    // What the document already carries in the *other* sense of the word. Read
-    // only while the window is open, because it opens the file to find out.
-    let seals = if signing.is_some() {
-        held.seals()
-    } else {
-        Vec::new()
-    };
+    let (kept, signed_here, seals) = signing
+        .as_ref()
+        .map(|signing| {
+            (
+                signing.kept.clone(),
+                signing.signed_here.clone(),
+                signing.seals.clone(),
+            )
+        })
+        .unwrap_or_default();
     // Whether a signature is looking for somewhere to go, which changes what
     // a click on a page means and what the pointer looks like over one.
     let placing = held.placing.is_some();
@@ -7185,7 +7254,7 @@ pub fn Reader(
                             // drawn at, and the theme it is wearing. A change
                             // to any of them is a different node, which is
                             // what gives the old texture back — see `page.rs`.
-                            key: "{placed.index}:{placed.drawn.0}x{placed.drawn.1}:{theme_name}:{view_key}:{edition}",
+                            key: "{placed.index}:{placed.drawn.0}x{placed.drawn.1}:{worn}:{view_key}:{edition}",
                             document: Handle(document.clone()),
                             chosen: chosen.clone(),
                             index: placed.index,

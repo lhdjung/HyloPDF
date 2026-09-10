@@ -108,6 +108,12 @@ pub struct Document {
     /// Whether a password was needed to get in. See
     /// [`PageSource::encrypted`], which is the one thing that asks.
     encrypted: bool,
+    /// The password itself, for opening the same file again after a reload.
+    password: Option<String>,
+    /// Whether the document carries a signature with bytes in it. Read at
+    /// open, with everything else that costs a file load; see
+    /// [`PageSource::sealed`].
+    sealed: bool,
     opened_in: f64,
 }
 
@@ -232,6 +238,17 @@ impl Document {
             .map(|tag| tag.value().trim().to_string())
             .unwrap_or_default();
         let details = read_details(&document, sizes.first(), path);
+        // **A signature field is not a signature.** `FPDF_GetSignatureCount`
+        // counts every `/FT /Sig` field in the `/AcroForm`, signed or not, and
+        // a great many documents ship with a blank one — the line at the foot
+        // of a contract nobody has signed. Warning that ink would break a
+        // signature that does not exist is a warning a reader learns to
+        // ignore. `/Contents` is what tells the two apart, and `bytes()` is
+        // that entry.
+        let sealed = document
+            .signatures()
+            .iter()
+            .any(|signature| !signature.bytes().is_empty());
         Ok(Document {
             path: path.to_string(),
             labels: own_numbering(labels),
@@ -240,6 +257,8 @@ impl Document {
             title,
             details,
             encrypted,
+            password: password.map(str::to_string),
+            sealed,
             opened_in: began.elapsed().as_secs_f64() * 1000.0,
             inner: Mutex::new(Open {
                 document: Some(document),
@@ -515,8 +534,32 @@ impl PageSource for Document {
         held.document = None;
     }
 
+    /// Open the file again after [`Document::release`], if it is still
+    /// released. For a write that failed and left nothing to reopen, so the
+    /// reader is not left with a document that draws nothing.
+    fn retake(&self) {
+        let _library = library();
+        let mut held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if held.document.is_some() {
+            return;
+        }
+        if let Ok(pdfium) = pdfium() {
+            held.document = pdfium
+                .load_pdf_from_file(&self.path, self.password.as_deref())
+                .ok();
+        }
+    }
+
     fn encrypted(&self) -> bool {
         self.encrypted
+    }
+
+    fn password(&self) -> Option<&str> {
+        self.password.as_deref()
+    }
+
+    fn sealed(&self) -> bool {
+        self.sealed
     }
 
     fn opened_in(&self) -> f64 {
@@ -917,12 +960,17 @@ fn readable_date(raw: &str) -> String {
         "December",
     ];
     let digits = raw.strip_prefix("D:").unwrap_or(raw);
-    if digits.len() < 8 || !digits[..8].bytes().all(|b| b.is_ascii_digit()) {
+    // `get`, not a slice: a non-ASCII character inside the first eight bytes
+    // makes `[..8]` a boundary panic while opening the document.
+    let Some(date) = digits
+        .get(..8)
+        .filter(|date| date.bytes().all(|b| b.is_ascii_digit()))
+    else {
         return raw.to_string();
-    }
-    let year = &digits[0..4];
-    let month: usize = digits[4..6].parse().unwrap_or(0);
-    let day: usize = digits[6..8].parse().unwrap_or(0);
+    };
+    let year = &date[0..4];
+    let month: usize = date[4..6].parse().unwrap_or(0);
+    let day: usize = date[6..8].parse().unwrap_or(0);
     let Some(name) = MONTHS.get(month.wrapping_sub(1)) else {
         return raw.to_string();
     };
@@ -937,13 +985,14 @@ fn readable_date(raw: &str) -> String {
     // `Intl` doing the work, and there is no `Intl` here — so the month is
     // named in English, as every other date in this crate already is, and the
     // clock is 24-hour.
-    let clock = if digits.len() >= 12 && digits[8..12].bytes().all(|b| b.is_ascii_digit()) {
-        let hour: usize = digits[8..10].parse().unwrap_or(24);
-        let minute: usize = digits[10..12].parse().unwrap_or(60);
-        (hour < 24 && minute < 60).then(|| format!(", {hour:02}:{minute:02}"))
-    } else {
-        None
-    };
+    let clock = digits
+        .get(8..12)
+        .filter(|time| time.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|time| {
+            let hour: usize = time[..2].parse().unwrap_or(24);
+            let minute: usize = time[2..].parse().unwrap_or(60);
+            (hour < 24 && minute < 60).then(|| format!(", {hour:02}:{minute:02}"))
+        });
     format!("{day} {name} {year}{}", clock.unwrap_or_default())
 }
 
@@ -1010,4 +1059,19 @@ fn read_outline(document: &PdfDocument<'static>) -> Vec<Heading> {
         }
     }
     headings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::readable_date;
+
+    #[test]
+    fn a_date_that_is_not_ascii_is_passed_through_rather_than_panicking() {
+        assert_eq!(readable_date("D:2024０131120000"), "D:2024０131120000");
+        assert_eq!(readable_date("D:20240131é0"), "31 January 2024");
+        assert_eq!(
+            readable_date("D:20240131120000+01'00'"),
+            "31 January 2024, 12:00"
+        );
+    }
 }

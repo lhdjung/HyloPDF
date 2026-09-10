@@ -99,8 +99,6 @@ pub fn defaults() -> Settings {
     // Window
     s.insert("window_width".into(), json!(1280.0));
     s.insert("window_height".into(), json!(860.0));
-    s.insert("window_x".into(), Value::Null);
-    s.insert("window_y".into(), Value::Null);
     s.insert("window_maximized".into(), json!(true));
     // Markup. Six colours a highlight can be, offered from the popover a
     // selection opens — a shortcut, not the constraint, since each highlight

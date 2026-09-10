@@ -239,7 +239,7 @@ fn answering_it_opens_the_document_in_place() {
 fn a_mark_on_an_encrypted_document_stays_beside_it() {
     let opened = hylopdf::render::open_with(&fixture::locked_pdf(), Some(LOCKED_PASSWORD))
         .expect("the password opens it");
-    let standing = hylopdf::markup::standing(opened.path(), opened.encrypted());
+    let standing = hylopdf::markup::standing(opened.path(), opened.encrypted(), opened.sealed());
     assert!(!standing.into_file, "nothing is written into it");
     assert_eq!(standing.refused, "this document is encrypted");
 }

@@ -7,16 +7,20 @@
 //! keep painting on this widget's account. A page is not an animation, so it
 //! says no, and a document sitting still costs no frames.
 //!
-//! What replaces `keyFor()` is the pair of questions in `paint`: is the
-//! texture the size the layout is asking for, and is it wearing the theme the
-//! reader has chosen. The first re-renders the page; the second is a compute
-//! pass over the copy already on the GPU. Under Tauri both were the same
-//! question and both cost a full render.
+//! What replaces `keyFor()` is the component key: the page, its size, the
+//! colours it wears, its view and the draft of the document. A change to any
+//! of them is a new node and a fresh render — the theme included, because the
+//! page as pdfium drew it is not kept on the GPU (see `gpu.rs`), so a theme
+//! change has nothing to re-run a compute pass over. What the key buys is
+//! that the old texture is given back by Blitz, between frames, where it is
+//! safe; a widget replacing its own texture cannot do that (see below).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyrender::{PaintScene, RenderContext, Scene};
 use blitz_dom::node::ComputedStyles;
@@ -31,7 +35,7 @@ use crate::gpu::{PageTexture, Recolorer};
 use crate::layout::{View, MAX_PIXELS};
 use crate::palette::Palette;
 use crate::recolor::Region;
-use crate::render::PageSource;
+use crate::render::{Bitmap, PageSource};
 use crate::stats;
 
 /// What a page has painted *into* it rather than drawn over it.
@@ -196,6 +200,61 @@ pub struct PageWidget {
     fresh: bool,
     /// The same page, for a renderer that is not wgpu. See [`Software`].
     software: Option<Software>,
+    /// A render of this page on its way from the render thread. See
+    /// [`PageWidget::draw_on_thread`].
+    pending: Option<Pending>,
+    /// Whether the render thread said no. Remembered, because the answer to
+    /// a page that will not draw is a blank page and not a page asked for
+    /// again on every frame the last attempt requested.
+    failed: bool,
+}
+
+/// A page being drawn on the render thread, and how to tell it not to bother.
+struct Pending {
+    width: u32,
+    height: u32,
+    done: Receiver<Result<Rendered, String>>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Pending {
+    fn is(&self, width: u32, height: u32) -> bool {
+        self.width == width && self.height == height
+    }
+}
+
+/// What comes back: the page as pdfium drew it, copied out of the renderer's
+/// own buffer because that buffer is borrowed for the length of the call.
+struct Rendered {
+    width: u32,
+    height: u32,
+    bgra: Vec<u8>,
+    drew_in: f64,
+}
+
+type Job = Box<dyn FnOnce() + Send>;
+
+/// Hand a render to the one thread that draws pages.
+///
+/// One thread rather than a pool, because every render takes the process's
+/// pdfium lock and a second thread would only queue on it. Jobs run in the
+/// order they were mounted.
+// ponytail: FIFO; nearest-to-the-middle first if a fast scroll feels late.
+fn render_thread(job: Job) {
+    static QUEUE: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
+    let queue = QUEUE.get_or_init(|| {
+        let (sender, jobs) = channel::<Job>();
+        std::thread::Builder::new()
+            .name("render".into())
+            .spawn(move || {
+                for job in jobs {
+                    job();
+                }
+            })
+            .expect("a render thread");
+        Mutex::new(sender)
+    });
+    let _ = queue.lock().unwrap_or_else(|e| e.into_inner()).send(job);
 }
 
 /// A page drawn for a renderer with no GPU behind it.
@@ -249,6 +308,47 @@ impl PageWidget {
             texture: None,
             fresh: false,
             software: None,
+            pending: None,
+            failed: false,
+        }
+    }
+
+    /// Ask the render thread for this page at this size. It answers through
+    /// the channel and then asks the shell for a frame, which is the frame
+    /// [`PageWidget::ensure`] uploads on.
+    fn draw_on_thread(&self, width: u32, height: u32) -> Pending {
+        let (sender, done) = channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let still_wanted = Arc::clone(&cancelled);
+        let document = Arc::clone(&self.document);
+        let (index, view, shell) = (self.index, self.view, self.shell.clone());
+        render_thread(Box::new(move || {
+            // Scrolled past before its turn came: nothing to draw for.
+            if still_wanted.load(Ordering::Relaxed) {
+                return;
+            }
+            let mut drawn = None;
+            let outcome = document.render(index, width, height, view, &mut |bitmap| {
+                drawn = Some(Rendered {
+                    width: bitmap.width,
+                    height: bitmap.height,
+                    bgra: bitmap.bgra.to_vec(),
+                    drew_in: bitmap.drew_in,
+                });
+            });
+            let answer =
+                outcome.and_then(|()| drawn.ok_or_else(|| "the page was not drawn".to_string()));
+            if sender.send(answer).is_ok() {
+                if let Some(shell) = shell {
+                    shell.request_redraw();
+                }
+            }
+        }));
+        Pending {
+            width,
+            height,
+            done,
+            cancelled,
         }
     }
 
@@ -441,6 +541,9 @@ impl PageWidget {
     /// Draw the page if it is not already drawn at this size, and put the
     /// theme on it if it is not already wearing it.
     fn ensure(&mut self, ctx: &mut dyn RenderContext, width: u32, height: u32) -> Option<()> {
+        if self.failed {
+            return None;
+        }
         let theme = self.chosen.get();
         let recolorer = Rc::clone(self.recolorer.as_ref()?);
 
@@ -465,21 +568,47 @@ impl PageWidget {
             }
         }
 
-        // The page is drawn into the renderer's own buffer and uploaded from
-        // it, inside the borrow — which is why the upload happens in a closure
-        // rather than after the call. See `render::Bitmap`.
-        let mut uploaded_texture = None;
-        let outcome = self
-            .document
-            .render(self.index, width, height, self.view, &mut |bitmap| {
-                uploaded_texture =
-                    recolorer.upload(ctx, &bitmap, &theme, &self.links(&theme, width, height));
-            });
-        if let Err(err) = outcome {
-            eprintln!("{err}");
-            return None;
-        }
-        let texture = uploaded_texture?;
+        // **Drawn off the thread that paints.** pdfium takes 10-80ms on a
+        // scan or a page of figures, and drawing inside `paint` was that long
+        // a stall in the frame — three pages mounted on a fast scroll was a
+        // quarter of a second in one. So the page is drawn on the render
+        // thread and this frame draws what it has: the old texture
+        // stretched, if there is one, or nothing. The thread asks for a frame
+        // when it is done, and that frame uploads.
+        let rendered = match self.pending.take() {
+            Some(pending) if pending.is(width, height) => match pending.done.try_recv() {
+                Ok(Ok(rendered)) => rendered,
+                Ok(Err(err)) => {
+                    eprintln!("{err}");
+                    self.failed = true;
+                    return None;
+                }
+                Err(TryRecvError::Empty) => {
+                    self.pending = Some(pending);
+                    return Some(());
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.failed = true;
+                    return None;
+                }
+            },
+            stale => {
+                // Asked at another size — a zoom that settled — so that one
+                // is told not to bother and this size is asked for.
+                if let Some(stale) = stale {
+                    stale.cancelled.store(true, Ordering::Relaxed);
+                }
+                self.pending = Some(self.draw_on_thread(width, height));
+                return Some(());
+            }
+        };
+        let bitmap = Bitmap {
+            width: rendered.width,
+            height: rendered.height,
+            bgra: &rendered.bgra,
+            drew_in: rendered.drew_in,
+        };
+        let texture = recolorer.upload(ctx, &bitmap, &theme, &self.links(&theme, width, height))?;
 
         // The old texture, if there is one, is dropped without being
         // unregistered — see the note above the struct. It is the widget's
@@ -515,7 +644,10 @@ impl Widget for PageWidget {
         if let Some(texture) = self.texture.take() {
             stats::sub(&stats::RESIDENT, texture.bytes());
         }
-        Recolorer::forget();
+        // The pipelines are *not* forgotten here: `destroy_surfaces` did that
+        // when the renderer went, and `paint` comes through here for every
+        // page mounted after startup — which was two shader modules and two
+        // compute pipelines rebuilt per page scrolled into view.
         // No device means this is not wgpu — a headless test or the CPU
         // fallback — and the page is drawn into a `peniko::ImageData` instead.
         // See [`Software`].
@@ -652,6 +784,10 @@ impl Widget for PageWidget {
 
 impl Drop for PageWidget {
     fn drop(&mut self) {
+        // A render still queued for a page nobody is looking at any more.
+        if let Some(pending) = &self.pending {
+            pending.cancelled.store(true, Ordering::Relaxed);
+        }
         // Unmounting is where the memory actually goes back, so this is the
         // half of `mount()`/`OVERSCAN` that the accounting can see.
         if let Some(texture) = self.texture.take() {

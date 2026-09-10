@@ -16,9 +16,11 @@
 //! the shader read it is free, and it is why the pass runs even for a theme
 //! that recolours nothing — the shader's passthrough branch is the swizzle.
 //!
-//! *Theme invalidation.* `keyFor()` in `viewer.ts` carries the theme, so
-//! changing theme repaints every page from the renderer. Here a page's source
-//! is kept on the GPU and a theme change re-runs the compute pass over it.
+//! *Theme invalidation* was meant to be the third, with the page as drawn
+//! kept on the GPU and a theme change a compute pass over it. It is not: the
+//! source costs 25MB a page (see [`PageTexture`]) and is dropped once read,
+//! so a theme change re-renders the page, and the page's key carries the
+//! colours it wears — see `page.rs`.
 
 use std::rc::Rc;
 

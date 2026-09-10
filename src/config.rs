@@ -42,14 +42,23 @@ pub fn atomic_write(target: &Path, body: &[u8]) -> Result<(), String> {
     })
 }
 
+/// A document's path the way the rest of the app keys it: absolute, so that
+/// `paper.pdf` from a terminal and the same file from the Finder are one
+/// document to the library, the watch and the desk. Every door a path comes
+/// in by calls this once; nothing downstream does.
+pub fn absolute(path: &str) -> String {
+    std::path::absolute(path)
+        .map(|whole| whole.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string())
+}
+
 /// The directory the settings file and the themes directory live in.
 ///
-/// **Not the app's own.** The installed HyloPDF keeps its settings and its
-/// fourteen theme files under its bundle identifier, and this crate rewrites
-/// every shipped theme on every run: pointed at the same directory it would
-/// be editing the files of the app it is being compared against, while that
-/// app is very likely open beside it. So the experiment gets a directory of
-/// its own, and a reader can run both without one disturbing the other.
+/// **The app's own, under its bundle identifier.** The port wrote to
+/// `HyloPDF-dioxus` while it was an experiment; a machine that still has that
+/// directory has it moved into place, once. Anything already under the bundle
+/// id then is a leftover of the retired dev build, which had no users, and is
+/// cleared to make room.
 ///
 /// `HYLOPDF_CONFIG` overrides it, which is what the tests use and what makes
 /// a run reproducible.
@@ -57,7 +66,19 @@ pub fn config_dir() -> PathBuf {
     if let Some(stated) = std::env::var_os("HYLOPDF_CONFIG") {
         return PathBuf::from(stated);
     }
-    base().join("HyloPDF-dioxus")
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = base().join("app.hylopdf");
+        let experiment = base().join("HyloPDF-dioxus");
+        if experiment.is_dir() {
+            if dir.exists() {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            let _ = std::fs::rename(&experiment, &dir);
+        }
+        dir
+    })
+    .clone()
 }
 
 /// The themes directory inside it, which is what `theme::load_all` reads.

@@ -17,7 +17,7 @@
 use dioxus::prelude::*;
 
 use crate::app::{Icon, Pane, Viewer};
-use crate::keymap;
+use crate::keymap::{self, Action};
 use crate::layout::{Fit, Mode, Spread};
 
 /// The whole window, or nothing at all.
@@ -431,7 +431,7 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
         }
         Field {
             label: "Open what I was reading",
-            note: "Start on the documents that were open when you last quit — a window each, where there was more than one. Closing a document yourself means you are done with it, and it is not reopened.",
+            note: "Start on the document you were reading when you last quit. Closing a document yourself means you are done with it, and it is not reopened.",
             Toggle { on: reopen, onchange: move |on| viewer.write().set_flag("reopen_last_document", on) }
         }
         Field {
@@ -488,8 +488,8 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
     // an inert switch on the page.
     let machine = held.store.outside();
     let folder = held.store.themes_dir().display().to_string();
+    let key_dark = held.chord_for(Action::Dark);
     drop(held);
-    let mac = keymap::this_machine();
 
     rsx! {
         h2 { class: "pane-title", "Appearance" }
@@ -504,7 +504,7 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
         }
         Field {
             label: "Dark mode",
-            note: format!("Switches between the light theme and the dark theme you last chose. {}", if mac { "⌘D" } else { "Ctrl+D" }),
+            note: format!("Switches between the light theme and the dark theme you last chose. {key_dark}"),
             Toggle { on: dark, onchange: move |on| viewer.write().set_dark(on) }
         }
         Field {
@@ -1164,19 +1164,24 @@ fn WindowPage(viewer: Signal<Viewer>, frame: crate::app::Frame) -> Element {
     let width = held.sidebar_width;
     let full = held.full_screen;
     let presenting = held.presenting;
+    // Read off the keymap, as every menu does, so a rebound key shows the
+    // key it was bound to rather than the one it shipped with.
+    let key_toolbar = held.chord_for(Action::Toolbar);
+    let key_sidebar = held.chord_for(Action::Sidebar);
+    let key_full = held.chord_for(Action::Fullscreen);
+    let key_present = held.chord_for(Action::Present);
     drop(held);
-    let mac = keymap::this_machine();
 
     rsx! {
         h2 { class: "pane-title", "Window" }
         Field {
             label: "Show toolbar",
-            note: format!("The bar along the top. Hidden, the page number appears briefly as you scroll, and the top edge of the window brings the bar back. {}", if mac { "⌘T" } else { "Ctrl+T" }),
+            note: format!("The bar along the top. Hidden, the page number appears briefly as you scroll, and the top edge of the window brings the bar back. {key_toolbar}"),
             Toggle { on: toolbar, onchange: move |_| viewer.write().toggle_toolbar() }
         }
         Field {
             label: "Show contents sidebar",
-            note: format!("Chapters and page thumbnails, down the left. {}", if mac { "⌘B" } else { "Ctrl+B" }),
+            note: format!("Chapters and page thumbnails, down the left. {key_sidebar}"),
             Toggle { on: sidebar, onchange: move |_| viewer.write().toggle_sidebar() }
         }
         Field {
@@ -1193,10 +1198,7 @@ fn WindowPage(viewer: Signal<Viewer>, frame: crate::app::Frame) -> Element {
         // reader holds. They were a sentence here until it did.
         Field {
             label: "Full screen",
-            note: format!(
-                "The window fills the screen. {} — and Escape leaves again.",
-                if mac { "⌘⌃F" } else { "F11" },
-            ),
+            note: format!("The window fills the screen. {key_full} — and Escape leaves again."),
             Toggle {
                 on: full,
                 onchange: {
@@ -1210,10 +1212,7 @@ fn WindowPage(viewer: Signal<Viewer>, frame: crate::app::Frame) -> Element {
         }
         Field {
             label: "Presenting",
-            note: format!(
-                "Full screen with nothing else on it: the two switches above, thrown together, and Escape puts both back. {}",
-                if mac { "⌘⇧P" } else { "Ctrl+Shift+P" },
-            ),
+            note: format!("Full screen with nothing else on it: the two switches above, thrown together, and Escape puts both back. {key_present}"),
             Toggle {
                 on: presenting,
                 onchange: {
@@ -1253,8 +1252,7 @@ fn Keyboard(viewer: Signal<Viewer>) -> Element {
         }
         for group in keymap::GROUPS {
             {
-                let rows: Vec<(String, String)> = keymap::ACTIONS
-                    .iter()
+                let rows: Vec<(String, String)> = keymap::every()
                     .filter(|spec| spec.group == group)
                     .filter_map(|spec| {
                         let chords = keymap.by_action.get(&spec.id)?;

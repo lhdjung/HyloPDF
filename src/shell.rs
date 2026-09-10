@@ -248,7 +248,7 @@ pub enum Drag {
 /// By extension and nothing else. The alternative is opening the file to find
 /// out, and this runs on the thread drawing the window every time a pointer
 /// carrying a file crosses it.
-fn is_document(path: &std::path::Path) -> bool {
+pub fn is_document(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))

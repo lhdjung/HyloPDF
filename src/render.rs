@@ -395,6 +395,21 @@ pub trait PageSource: Send + Sync {
         false
     }
 
+    /// The password it was opened with, so that a reload can open it again.
+    fn password(&self) -> Option<&str> {
+        None
+    }
+
+    /// Whether the document is digitally signed — a signature with bytes in
+    /// it, which is what a rewrite breaks. See `markup::standing`.
+    fn sealed(&self) -> bool {
+        false
+    }
+
+    /// Take the file up again after [`PageSource::release`], for a write
+    /// that failed and left nothing new to reopen.
+    fn retake(&self) {}
+
     /// What opening the document cost, in milliseconds — the other half of the
     /// comparison with pdf.js, which spends most of a document open starting
     /// its worker.

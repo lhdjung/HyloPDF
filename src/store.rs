@@ -259,6 +259,21 @@ pub fn called(path: &str, declared: &str) -> String {
 
 /// A document's file name, which is what the shelf calls it when the document
 /// itself says nothing worth using.
+/// Whether two readings of the journal say the same thing. `at` is left out:
+/// an entry rebuilt from the file is stamped with the time it was read, and
+/// a journal that differed only in that would be written on every reload.
+fn same_journal(a: &[Highlight], b: &[Highlight]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.id == y.id
+                && x.page == y.page
+                && x.quads == y.quads
+                && x.color == y.color
+                && x.quote == y.quote
+                && x.annotation_id == y.annotation_id
+        })
+}
+
 fn file_name(path: &str) -> String {
     std::path::Path::new(path)
         .file_name()
@@ -361,6 +376,12 @@ pub struct Store {
     /// Markup kept beside the document because it could not go into it. See
     /// [`Store::journal`].
     journal: Vec<Highlight>,
+    /// How many times the journal has been written since the store was made.
+    /// See [`Store::journal_rev`].
+    journal_rev: u64,
+    /// The shelf as last read, with the library file's modification time it
+    /// was read at. See [`Store::recents`].
+    recents: std::cell::RefCell<Option<(Option<std::time::SystemTime>, Vec<Recent>)>>,
     /// What the document is called on the shelf: its own `/Title` where that
     /// is worth having, and the file's name where it is not. Decided once, at
     /// open, by [`worth_calling`].
@@ -408,6 +429,8 @@ impl Store {
             file: String::new(),
             marks: Vec::new(),
             journal: Vec::new(),
+            journal_rev: 0,
+            recents: std::cell::RefCell::new(None),
             title: String::new(),
             outside: None,
         };
@@ -754,9 +777,21 @@ impl Store {
     /// staleness `session.rs` already documents between two windows and the
     /// one place it would actually show.
     pub fn recents(&self) -> Vec<Recent> {
-        library::prune(&library::load(&self.dir))
+        // Read again only when the file has moved: the start screen and the
+        // Open menu ask on every render, and each read is a parse and a
+        // `stat` of every document on the shelf.
+        let written = std::fs::metadata(library::path(&self.dir))
+            .and_then(|meta| meta.modified())
+            .ok();
+        if let Some((at, shelf)) = self.recents.borrow().as_ref() {
+            if *at == written {
+                return shelf.clone();
+            }
+        }
+        let shelf: Vec<Recent> = library::prune(&library::load(&self.dir))
             .files
             .into_iter()
+            .take(library::LIMIT)
             .map(|entry| Recent {
                 title: if entry.title.is_empty() {
                     file_name(&entry.path)
@@ -766,7 +801,9 @@ impl Store {
                 page: entry.page.max(1) as usize,
                 path: entry.path,
             })
-            .collect()
+            .collect();
+        *self.recents.borrow_mut() = Some((written, shelf.clone()));
+        shelf
     }
 
     /// Take a document off that list.
@@ -915,7 +952,10 @@ impl Store {
             annotation_id: None,
         };
         match library::add_highlight(&self.dir, &self.file, highlight) {
-            Ok(highlights) => self.journal = highlights,
+            Ok(highlights) => {
+                self.journal = highlights;
+                self.journal_rev += 1;
+            }
             Err(refused) => self.complaint = Some(refused),
         }
         id
@@ -930,12 +970,19 @@ impl Store {
     /// out of the document. What the caller keeps is its own business, and
     /// the only things it ever keeps are the two the file cannot say.
     pub fn set_journal(&mut self, highlights: Vec<Highlight>) {
-        if self.file.is_empty() {
+        if self.file.is_empty() || same_journal(&highlights, &self.journal) {
             return;
         }
         if library::set_highlights(&self.dir, &self.file, highlights.clone()).is_ok() {
             self.journal = highlights;
+            self.journal_rev += 1;
         }
+    }
+
+    /// Which reading of the journal this is. Moves whenever the journal does,
+    /// so that anything built from it can tell whether it has to be rebuilt.
+    pub fn journal_rev(&self) -> u64 {
+        self.journal_rev
     }
 
     /// One entry of the journal, as this reader writes them.
@@ -947,7 +994,15 @@ impl Store {
         annotation: Option<String>,
     ) -> Highlight {
         Highlight {
-            id: format!("{page}-{}-{}", color, quote.len()),
+            // The annotation's place is in the id, or two marks of one colour
+            // over quotes of one length would share it — and once a rebuild
+            // has lost both, removing one would remove the other.
+            id: format!(
+                "{page}-{}-{}-{}",
+                color,
+                quote.len(),
+                annotation.as_deref().unwrap_or("")
+            ),
             page: page as u32,
             quads,
             color: color.to_string(),
@@ -969,6 +1024,7 @@ impl Store {
         }
         if let Ok(highlights) = library::remove_highlight(&self.dir, &self.file, id) {
             self.journal = highlights;
+            self.journal_rev += 1;
         }
     }
 

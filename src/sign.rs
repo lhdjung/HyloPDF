@@ -535,8 +535,8 @@ fn civil(days: i64) -> (i64, u32, u32) {
 }
 
 /// Ask the disk and the document, once.
-pub fn standing(path: &str, encrypted: bool) -> Standing {
-    let markup = crate::markup::standing(path, encrypted);
+pub fn standing(path: &str, encrypted: bool, sealed: bool) -> Standing {
+    let markup = crate::markup::standing(path, encrypted, sealed);
     Standing {
         into_file: markup.into_file,
         refused: markup.refused,

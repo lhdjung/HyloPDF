@@ -215,7 +215,10 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
     let tab = held.tab;
     let width = held.sidebar_width;
     let page = held.page();
-    let theme_name = held.theme_name();
+    // In every thumbnail's key, with the draft of the document: the colours
+    // it wears and which reading of the file it is of. See `page.rs`.
+    let worn = chosen.get().key();
+    let edition = held.edition;
     // What a tab's icon is drawn in. See `Icon` in `app.rs`: an inline `<svg>`
     // reaches usvg with no cascade behind it, so the shade has to travel with
     // it rather than being inherited from the button.
@@ -546,7 +549,7 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                                 // the size it is drawn at, and the theme. See
                                 // `page.rs` — the key is what gives the old
                                 // texture back.
-                                key: "{index}:{column.width}x{height}:{theme_name}",
+                                key: "{index}:{column.width}x{height}:{worn}:{edition}",
                                 document: Handle(document.0.clone()),
                                 chosen: chosen.clone(),
                                 viewer,

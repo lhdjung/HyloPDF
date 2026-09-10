@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::atomic_write;
 
-const LIMIT: usize = 24;
+pub const LIMIT: usize = 24;
 
 /// How many windows' worth of "what was open" is worth writing down. Nobody
 /// reads eight documents at once; the cap is here so that a label left behind
@@ -170,7 +170,7 @@ where
     })
 }
 
-fn path(dir: &Path) -> PathBuf {
+pub fn path(dir: &Path) -> PathBuf {
     dir.join("library.toml")
 }
 
@@ -201,7 +201,14 @@ pub fn touch(dir: &Path, file: &str, title: &str, now: i64) -> Result<Library, S
     }
     entry.opened_at = now;
     library.files.insert(0, entry);
-    library.files.truncate(LIMIT);
+    // Only an entry with nothing of the reader's in it falls off the end: a
+    // bookmark or a highlight is not "recents" data, and the shelf shows the
+    // first `LIMIT` whatever is kept behind them.
+    let mut seen = 0;
+    library.files.retain(|entry| {
+        seen += 1;
+        seen <= LIMIT || !entry.marks.is_empty() || !entry.highlights.is_empty()
+    });
     save(dir, &library)?;
     Ok(library)
 }
@@ -389,6 +396,29 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("scratch");
         dir
+    }
+
+    #[test]
+    fn a_marked_document_is_not_pushed_off_the_shelf() {
+        let dir = scratch("marked");
+        let docs: Vec<String> = (0..=LIMIT)
+            .map(|n| dir.join(format!("{n}.pdf")).to_string_lossy().to_string())
+            .collect();
+        touch(&dir, &docs[0], "", 1).expect("touch");
+        toggle_mark(&dir, &docs[0], 3, 0.0, "kept", 1).expect("mark");
+        for (n, doc) in docs.iter().enumerate().skip(1) {
+            touch(&dir, doc, "", n as i64 + 1).expect("touch");
+        }
+        let library = load(&dir);
+        assert_eq!(library.files.len(), LIMIT + 1, "the marked one stays");
+        assert_eq!(library.files.last().expect("an entry").path, docs[0]);
+        // And the oldest unmarked one is what goes when another arrives.
+        let plain = dir.join("plain.pdf").to_string_lossy().to_string();
+        touch(&dir, &plain, "", 0).expect("touch");
+        let library = load(&dir);
+        assert_eq!(library.files.len(), LIMIT + 1);
+        assert!(!library.files.iter().any(|e| e.path == docs[1]));
+        assert_eq!(library.files.last().expect("an entry").path, docs[0]);
     }
 
     #[test]

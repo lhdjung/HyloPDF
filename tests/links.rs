@@ -361,6 +361,25 @@ fn the_field_is_a_jump() {
 }
 
 #[test]
+fn the_numbers_printed_on_an_offprint_are_read_off_the_paper() {
+    // No `/PageLabels`, and 407 at the foot of the first page: the label is
+    // what the paper says, the count follows it, and a citation finds its
+    // page.
+    let mut reader = Reader::open_with(&fixture::offprint_pdf(), Options::default());
+    assert_eq!(reader.state().label, "407");
+    assert_eq!(reader.harness.text_content(".of").trim(), "of 425");
+    reader.press("p");
+    reader.type_text("412");
+    reader.press("Enter");
+    assert_eq!(reader.state().label, "412");
+    assert!(
+        reader.state().mounted.contains(&6),
+        "412 is the sixth page of the file: {:?}",
+        reader.state().mounted
+    );
+}
+
+#[test]
 fn a_document_that_numbers_its_pages_1_to_n_says_nothing() {
     // The commoner case by a long way, and the one the app drops the list
     // for: `state().page` is the position, and it is also the label.

@@ -684,6 +684,56 @@ pub fn book_pdf() -> String {
     written("hylopdf-fixtures/book.pdf", || build_book(400))
 }
 
+/// A journal offprint: nineteen pages printed 407 to 425 at the foot, a
+/// running head with the year on every one, and no `/PageLabels` — the file
+/// says nothing about its numbers and the paper says everything.
+pub fn offprint_pdf() -> String {
+    written("hylopdf-fixture-offprint.pdf", build_offprint)
+}
+
+fn build_offprint() -> Vec<u8> {
+    let mut pdf = Pdf::new();
+    let catalog = pdf.reserve();
+    let tree = pdf.reserve();
+    let font = pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let page_ids: Vec<usize> = (0..19).map(|_| pdf.reserve()).collect();
+    for (index, &id) in page_ids.iter().enumerate() {
+        let stream = format!(
+            "BT /F1 9 Tf 72 760 Td (JOURNAL OF THINGS 2011 Vol. 100) Tj ET \
+             BT /F1 11 Tf 72 600 Td (Body text on page {}.) Tj ET \
+             BT /F1 10 Tf 300 40 Td ({}) Tj ET",
+            index + 1,
+            407 + index
+        );
+        let content = pdf.add(format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            stream.len(),
+            stream
+        ));
+        pdf.put(
+            id,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 612 792] \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R >>"
+            ),
+        );
+    }
+    pdf.put(
+        tree,
+        format!(
+            "<< /Type /Pages /Count {} /Kids [{}] >>",
+            page_ids.len(),
+            page_ids
+                .iter()
+                .map(|id| format!("{id} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    );
+    pdf.put(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    pdf.bytes()
+}
+
 fn build_book(pages: usize) -> Vec<u8> {
     let mut pdf = Pdf::new();
     let catalog = pdf.reserve();

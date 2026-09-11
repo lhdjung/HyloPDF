@@ -249,9 +249,15 @@ impl Document {
             .signatures()
             .iter()
             .any(|signature| !signature.bytes().is_empty());
+        let labels = own_numbering(labels);
+        let labels = if labels.is_empty() {
+            printed_numbering(&document, sizes.len())
+        } else {
+            labels
+        };
         Ok(Document {
             path: path.to_string(),
-            labels: own_numbering(labels),
+            labels,
             sizes,
             outline,
             title,
@@ -590,41 +596,7 @@ impl PageSource for Document {
         let Ok(page) = document.pages().get(index as i32) else {
             return PageText::default();
         };
-        // pdfium counts from the bottom of the page and the layout counts from
-        // the top, so the flip happens here, where the page height is already
-        // in hand.
-        let height = page.height().value as f64;
-        let text = page.text();
-        let Ok(text) = text else {
-            return PageText::default();
-        };
-        let chars = text.chars();
-        let mut out = PageText {
-            chars: Vec::with_capacity(chars.len()),
-            boxes: Vec::with_capacity(chars.len()),
-        };
-        for character in chars.iter() {
-            let Some(value) = character.unicode_char() else {
-                continue;
-            };
-            let glyph = character
-                .loose_bounds()
-                .map(|rect| Rect {
-                    left: rect.left().value as f64,
-                    top: height - rect.top().value as f64,
-                    width: (rect.right().value - rect.left().value) as f64,
-                    height: (rect.top().value - rect.bottom().value) as f64,
-                })
-                .unwrap_or(Rect {
-                    left: 0.0,
-                    top: 0.0,
-                    width: 0.0,
-                    height: 0.0,
-                });
-            out.chars.push(value);
-            out.boxes.push(glyph);
-        }
-        out
+        read_text(&page)
     }
 
     fn render(
@@ -756,6 +728,128 @@ fn offset_within(destination: &PdfDestination, height: f64) -> f64 {
     // pdfium counts from the bottom of the page, as it does everywhere else
     // here.
     ((height - top.value as f64) / height).clamp(0.0, 0.95)
+}
+
+/// A page's characters and their boxes. See [`PageSource::text_of`].
+fn read_text(page: &PdfPage) -> PageText {
+    // pdfium counts from the bottom of the page and the layout counts from
+    // the top, so the flip happens here, where the page height is already
+    // in hand.
+    let height = page.height().value as f64;
+    let Ok(text) = page.text() else {
+        return PageText::default();
+    };
+    let chars = text.chars();
+    let mut out = PageText {
+        chars: Vec::with_capacity(chars.len()),
+        boxes: Vec::with_capacity(chars.len()),
+    };
+    for character in chars.iter() {
+        let Some(value) = character.unicode_char() else {
+            continue;
+        };
+        let glyph = character
+            .loose_bounds()
+            .map(|rect| Rect {
+                left: rect.left().value as f64,
+                top: height - rect.top().value as f64,
+                width: (rect.right().value - rect.left().value) as f64,
+                height: (rect.top().value - rect.bottom().value) as f64,
+            })
+            .unwrap_or(Rect {
+                left: 0.0,
+                top: 0.0,
+                width: 0.0,
+                height: 0.0,
+            });
+        out.chars.push(value);
+        out.boxes.push(glyph);
+    }
+    out
+}
+
+/// The numbers printed on the pages, when the file does not say what they are.
+///
+/// A journal offprint is numbered 407 to 425 on the paper and carries no
+/// `/PageLabels` at all, so every viewer calls its first page 1 — and a reader
+/// with a citation in hand types 412 and lands nowhere. The number is on the
+/// page, so it is read off the page: a sample of them (the crop's sample, for
+/// the crop's reason), a whole number standing alone in the top or bottom
+/// band of each, and the offset from the position that most of them agree on.
+///
+/// Cautious, because a wrong answer here renames every page: at least three
+/// pages and more than half the sample have to agree, the first page has to
+/// come out at 1 or more, and an offset that says "1 to n" is the file's own
+/// silence again. A book whose body starts again at 1 after its front matter
+/// fails the second test, and rightly — its front matter has no number here
+/// to give it.
+fn printed_numbering(document: &PdfDocument, pages: usize) -> Vec<String> {
+    let samples: Vec<(usize, Vec<usize>)> = crate::crop::sample(pages)
+        .into_iter()
+        .filter_map(|index| {
+            let page = document.pages().get(index as i32).ok()?;
+            let height = page.height().value as f64;
+            Some((index, numbers_in_margins(&read_text(&page), height)))
+        })
+        .collect();
+    match agreed_first_number(&samples, pages) {
+        Some(first) => (0..pages).map(|index| (first + index).to_string()).collect(),
+        None => Vec::new(),
+    }
+}
+
+/// How much of a page, top and bottom, a running number lives in.
+const MARGIN_BAND: f64 = 0.12;
+
+/// Every whole number standing alone — whitespace either side — in the top
+/// or bottom band of a page.
+fn numbers_in_margins(text: &PageText, height: f64) -> Vec<usize> {
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at < text.chars.len() {
+        if text.chars[at].is_whitespace() {
+            at += 1;
+            continue;
+        }
+        let from = at;
+        while at < text.chars.len() && !text.chars[at].is_whitespace() {
+            at += 1;
+        }
+        let word: String = text.chars[from..at].iter().collect();
+        let Ok(number) = word.parse::<usize>() else {
+            continue;
+        };
+        let glyph = text.boxes[from];
+        if glyph.height <= 0.0 {
+            continue;
+        }
+        let middle = glyph.top + glyph.height / 2.0;
+        if middle < height * MARGIN_BAND || middle > height * (1.0 - MARGIN_BAND) {
+            found.push(number);
+        }
+    }
+    found
+}
+
+/// The number the first page is printed with, if enough of the sample says
+/// the same thing — see [`printed_numbering`] for the rules.
+fn agreed_first_number(samples: &[(usize, Vec<usize>)], pages: usize) -> Option<usize> {
+    let mut votes: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (index, numbers) in samples {
+        // One vote per page, whatever else is printed in its margins.
+        let mut said: Vec<usize> = numbers
+            .iter()
+            .filter_map(|number| number.checked_sub(*index))
+            .filter(|first| *first >= 1)
+            .collect();
+        said.sort_unstable();
+        said.dedup();
+        for first in said {
+            *votes.entry(first).or_default() += 1;
+        }
+    }
+    let (first, count) = votes.into_iter().max_by_key(|(first, count)| (*count, std::cmp::Reverse(*first)))?;
+    (count >= 3 && count * 2 > samples.len() && first > 1 && first + pages < 100_000).then_some(first)
 }
 
 /// The labels, unless they say nothing.
@@ -1063,7 +1157,33 @@ fn read_outline(document: &PdfDocument<'static>) -> Vec<Heading> {
 
 #[cfg(test)]
 mod tests {
-    use super::readable_date;
+    use super::{agreed_first_number, readable_date};
+
+    #[test]
+    fn a_number_the_sample_agrees_on_names_the_first_page() {
+        // An offprint: pages 0, 5, 10 and 18 printed 407, 412, 417 and 425,
+        // with the year in the running head of each.
+        let offprint = vec![
+            (0, vec![2011, 407]),
+            (5, vec![2011, 412]),
+            (10, vec![2011, 417]),
+            (18, vec![2011, 425]),
+        ];
+        assert_eq!(agreed_first_number(&offprint, 19), Some(407));
+        // The year alone agrees on nothing, because the offset moves.
+        let heads = vec![(0, vec![2011]), (5, vec![2011]), (10, vec![2011])];
+        assert_eq!(agreed_first_number(&heads, 19), None);
+        // Numbered 1 to n on the paper: the file's own silence again.
+        let plain = vec![(0, vec![1]), (5, vec![6]), (10, vec![11])];
+        assert_eq!(agreed_first_number(&plain, 19), None);
+        // Front matter, then a body that starts at 1: the first page would
+        // come out below 1, so nothing is said.
+        let book = vec![(0, vec![]), (5, vec![2]), (10, vec![7]), (15, vec![12])];
+        assert_eq!(agreed_first_number(&book, 19), None);
+        // Two pages agreeing is a coincidence, not a numbering.
+        let thin = vec![(0, vec![407]), (5, vec![412]), (10, vec![]), (18, vec![])];
+        assert_eq!(agreed_first_number(&thin, 19), None);
+    }
 
     #[test]
     fn a_date_that_is_not_ascii_is_passed_through_rather_than_panicking() {

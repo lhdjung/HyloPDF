@@ -984,7 +984,7 @@ body { margin: 0;
 }
 .markup-more { background: var(--surface-sunk); color: var(--muted); }
 .markup-more:hover { border-color: var(--accent); color: var(--text); }
-.markup-close { background: #1c1c1e; color: #ff5f56; font-size: 16px; }
+.markup-close { background: var(--surface-sunk); color: #ff5f56; font-size: 16px; }
 .markup-close:hover { border-color: #ff5f56; }
 /* The window the … opens. */
 .colours-window { width: 440px; height: auto; max-height: 80%; }

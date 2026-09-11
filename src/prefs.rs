@@ -736,7 +736,8 @@ pub(crate) fn MarkupColours(viewer: Signal<Viewer>) -> Element {
         .iter()
         .map(|key| held.store.text(key))
         .collect();
-    let ink = crate::palette::hex(held.palette().muted());
+    let worn = held.palette();
+    let ink = crate::palette::hex(worn.muted());
     drop(held);
     // Resetting throws six settings away, so the button asks once before
     // it does — in place, rather than in a window over a window.
@@ -769,15 +770,30 @@ pub(crate) fn MarkupColours(viewer: Signal<Viewer>) -> Element {
                     }
                 }
                 div { class: "colours-body",
-                    p { class: "field-note", "The six colours a selection offers. Press a swatch for the full picker, or type a colour." }
+                    p { class: "field-note",
+                        if worn.recolor {
+                            "The six colours a selection offers. Press a swatch for the full picker, or type a colour. The second swatch is how the colour comes out on this theme's page."
+                        } else {
+                            "The six colours a selection offers. Press a swatch for the full picker, or type a colour."
+                        }
+                    }
                     for (index, (key, colour)) in crate::app::MARKUP_COLOR_KEYS.iter().zip(colours).enumerate() {
                         div { key: "{key}", class: "colours-row",
                             span { class: "colours-label", "Colour {index + 1}" }
                             ColorField {
                                 viewer,
                                 field: *key,
-                                value: colour,
+                                value: colour.clone(),
                                 onchange: move |hex: String| viewer.write().set_markup_color(index + 1, hex),
+                            }
+                            if worn.recolor {
+                                if let Some(rgb) = crate::palette::read_colour(&colour) {
+                                    span {
+                                        class: "colours-on-page",
+                                        title: "On the page",
+                                        style: "background: {crate::palette::hex(worn.on_page(rgb))};",
+                                    }
+                                }
                             }
                         }
                     }

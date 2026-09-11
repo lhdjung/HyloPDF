@@ -314,6 +314,23 @@ pub fn luminance(colour: Rgb) -> f64 {
     0.2126 * channel(colour[0]) + 0.7152 * channel(colour[1]) + 0.0722 * channel(colour[2])
 }
 
+/// What a colour painted onto the page comes out as under this theme.
+///
+/// A highlight is written into the document and pdfium paints it, so the
+/// recolouring maps it like any other ink: yellow on a dark theme is a
+/// mustard. A swatch that shows the colour as written is the picker lying
+/// about the page — so anything showing a highlight's colour shows this.
+impl Palette {
+    pub fn on_page(&self, colour: Rgb) -> Rgb {
+        if !self.recolor {
+            return colour;
+        }
+        let mut pixel = [colour[0], colour[1], colour[2], 0xff];
+        crate::recolor::recolor_cpu(&mut pixel, self.text, self.background, self.keep_colour);
+        [pixel[0], pixel[1], pixel[2]]
+    }
+}
+
 pub fn contrast_ratio(a: Rgb, b: Rgb) -> f64 {
     let (one, two) = (luminance(a), luminance(b));
     let (high, low) = if one >= two { (one, two) } else { (two, one) };

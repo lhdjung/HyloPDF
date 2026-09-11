@@ -992,6 +992,11 @@ body { margin: 0;
 .colours-body .field-note { margin: 0 0 4px; }
 .colours-row { display: flex; align-items: center; gap: 12px; }
 .colours-label { width: 72px; color: var(--muted); font-size: 13.5px; }
+/* How the colour comes out on this theme's page, beside the colour as
+   written — only shown where the two differ. See `Palette::on_page`. */
+.colours-on-page {
+  width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--line);
+}
 .colours-ask { color: var(--text); font-size: 13.5px; align-self: center; }
 
 /* And what a mark already in the document says when it is clicked. The same

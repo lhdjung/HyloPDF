@@ -8312,6 +8312,12 @@ fn Page(
     // The widget is handed over the first time the attribute is set, so
     // `use_hook` is what keeps a re-render from building a second one — and
     // what makes a page that merely moved keep the texture it has.
+    let worn = chosen.get();
+    let on_page = move |colour: &String| {
+        crate::palette::read_colour(colour)
+            .map(|rgb| crate::palette::hex(worn.on_page(rgb)))
+            .unwrap_or_else(|| colour.clone())
+    };
     let widget = use_hook(|| {
         let shell = dioxus_core::try_consume_context::<
             std::sync::Arc<dyn blitz_traits::shell::ShellProvider>,
@@ -8404,13 +8410,16 @@ fn Page(
                     // Under the line it is about. The rectangle is the line's
                     // own, so the offset is simply its height.
                     style: "position: absolute; top: {area.top + area.height + 8.0}px; left: {area.left}px;",
+                    // Each swatch shows the colour as the page will show it
+                    // — see `Palette::on_page` — and carries the colour as
+                    // written, which is what is marked in.
                     for colour in colours.iter() {
                         button {
                             key: "{colour}",
                             class: "markup-swatch",
                             "data-colour": "{colour}",
                             "aria-label": "Mark in {colour}",
-                            style: "background: {colour};",
+                            style: "background: {on_page(colour)};",
                             onclick: {
                                 let colour = colour.clone();
                                 move |_| {
@@ -8455,7 +8464,7 @@ fn Page(
                     // popover down again on the way.
                     onmousedown: move |event| event.stop_propagation(),
                     style: "position: absolute; top: {area.top + area.height + 8.0}px; left: {area.left}px;",
-                    span { class: "mark-dot", style: "background: {colour};" }
+                    span { class: "mark-dot", style: "background: {on_page(&colour)};" }
                     button {
                         class: "mark-remove",
                         onclick: move |_| {

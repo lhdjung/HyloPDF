@@ -39,7 +39,7 @@ use dioxus_native::{DioxusDocument, DocumentConfig};
 
 use crate::steady::Steady;
 use winit::application::ApplicationHandler;
-use winit::dpi::Position;
+use winit::dpi::{Position, Size};
 use winit::event::{ElementState, StartCause, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{WindowAttributes, WindowId};
@@ -509,14 +509,18 @@ impl Shell {
             .map(|view| std::sync::Arc::clone(&view.window))
     }
 
-    /// One step down and across from the window in front, and on again while
-    /// the spot is taken. `None` when there is no window to step off, which is
-    /// the first one.
-    fn next_spot(&self) -> Option<Position> {
-        let corner = |view: &View<Steady>| {
+    /// One step down from the window in front, keeping its edges, and on
+    /// again while the spot is taken. `None` when there is no window to step
+    /// off, which is the first one.
+    fn next_spot(&self) -> Option<(Position, Size)> {
+        let frame = |view: &View<Steady>| {
             let scale = view.window.scale_factor();
             let at = view.window.outer_position().ok()?.to_logical::<f64>(scale);
-            Some((at.x, at.y))
+            // The *surface* size, because that is what a window can be asked
+            // to be — and the outer height less the step gave a surface that,
+            // with its title bar back on top, was exactly the height it was.
+            let size = view.window.surface_size().to_logical::<f64>(scale);
+            Some((at.x, at.y, size.width, size.height))
         };
         let front = self
             .inner
@@ -524,9 +528,12 @@ impl Shell {
             .values()
             .find(|view| view.window.has_focus())
             .or_else(|| self.inner.windows.values().next())
-            .and_then(corner);
-        let (x, y) = crate::windows::cascade(front, &self.corners(), None)?;
-        Some(winit::dpi::LogicalPosition::new(x, y).into())
+            .and_then(frame);
+        let (x, y, width, height) = crate::windows::cascade(front, &self.corners())?;
+        Some((
+            winit::dpi::LogicalPosition::new(x, y).into(),
+            winit::dpi::LogicalSize::new(width, height).into(),
+        ))
     }
 
     fn drain(&mut self, event_loop: &dyn ActiveEventLoop) {
@@ -639,8 +646,9 @@ impl Shell {
         });
         doc.initial_build();
 
-        // Where it goes: what the spec asked for, else one step down and
-        // across from the window in front of it. The cascade is
+        // Where it goes: what the spec asked for, else one step down from
+        // the window in front of it, the same width and that much shorter
+        // so its bottom edge stays on the screen. The cascade is
         // `windows::cascade` and the argument for it is there; what is here
         // is that the shell is the only thing that knows where the windows
         // actually are, and it knows *now* rather than when the spec was
@@ -653,8 +661,13 @@ impl Shell {
         // stepping off itself.
         let position = if spec.tab {
             None
+        } else if let Some(position) = spec.position {
+            Some(position)
+        } else if let Some((position, size)) = self.next_spot() {
+            let _ = view.window.request_surface_size(size);
+            Some(position)
         } else {
-            spec.position.or_else(|| self.next_spot())
+            None
         };
         if let Some(position) = position {
             let before = view.window.outer_position().ok();

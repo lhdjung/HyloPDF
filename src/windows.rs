@@ -35,9 +35,9 @@ use std::sync::{Arc, Mutex};
 /// reading it. See [`crate::emit::Exchange`].
 pub const MAIN: &str = "main";
 
-/// How far a new window is stepped down and across from the one in front of
-/// it, so that two windows are two windows rather than one with a stack
-/// behind it. The app's number.
+/// How far a new window is stepped down from the one in front of it, so that
+/// two windows are two windows rather than one with a stack behind it. The
+/// app's number.
 pub const CASCADE: f64 = 28.0;
 
 /// What to do with a document somebody has handed us.
@@ -247,14 +247,21 @@ impl Desk {
     }
 }
 
-/// Where to put a new window: one step down and across from the window in
-/// front of it, and on again while that spot is taken.
+/// Where to put a new window: one step down from the window in front of it,
+/// keeping its left and right edges and its bottom edge — so the new window
+/// is `CASCADE` shorter, and nothing is ever cut off at the right or the
+/// bottom. Stepping down *and across* was the classic cascade, and off a
+/// maximized window it put every step's worth of the new window past the
+/// edge of the screen. On again while the spot is taken.
 ///
-/// Off the *front* window rather than the remembered position: restoring three
-/// windows makes them in one burst, so all three would cascade off the same
-/// number and land within a few pixels of each other.
+/// Off the *front* window's frame rather than the remembered position:
+/// restoring three windows makes them in one burst, so all three would cascade
+/// off the same number and land within a few pixels of each other.
 ///
-/// `None` means there is nothing to cascade from, and the window is centred.
+/// `front` is `(x, y, width, height)` in logical pixels — the outer corner and
+/// the surface size, which is what a window can be asked to be. `None` means
+/// there is nothing to cascade from, and the window is left where the platform
+/// puts it.
 ///
 /// **What the app needs here and this does not is `Placements`**, because
 /// showing a window on macOS moves it onto the launch window's frame — so the
@@ -262,24 +269,25 @@ impl Desk {
 /// be counted as taken. Here a window is made and positioned in one function
 /// with nothing on screen in between.
 pub fn cascade(
-    front: Option<(f64, f64)>,
+    front: Option<(f64, f64, f64, f64)>,
     taken: &[(f64, f64)],
-    remembered: Option<(f64, f64)>,
-) -> Option<(f64, f64)> {
-    let base = front.or(remembered)?;
-    let mut spot = (base.0 + CASCADE, base.1 + CASCADE);
-    // Bounded: a screen this far down and across is a screen nobody has, and
-    // an unbounded walk here would be an unbounded walk off the display.
+) -> Option<(f64, f64, f64, f64)> {
+    let (x, mut y, width, mut height) = front?;
+    y += CASCADE;
+    height -= CASCADE;
+    // Bounded: a screen this far down is a screen nobody has, and an unbounded
+    // walk here would be an unbounded walk off the display.
     for _ in 0..16 {
         let clash = taken
             .iter()
-            .any(|(x, y)| (x - spot.0).abs() < 2.0 && (y - spot.1).abs() < 2.0);
+            .any(|(tx, ty)| (tx - x).abs() < 2.0 && (ty - y).abs() < 2.0);
         if !clash {
             break;
         }
-        spot = (spot.0 + CASCADE, spot.1 + CASCADE);
+        y += CASCADE;
+        height -= CASCADE;
     }
-    Some(spot)
+    Some((x, y, width, height.max(CASCADE * 8.0)))
 }
 
 #[cfg(test)]
@@ -396,37 +404,38 @@ mod tests {
     }
 
     #[test]
-    fn a_new_window_steps_off_the_one_in_front() {
+    fn a_new_window_steps_down_off_the_one_in_front_and_keeps_its_edges() {
         assert_eq!(
-            cascade(Some((100.0, 100.0)), &[], None),
-            Some((128.0, 128.0))
+            cascade(Some((100.0, 100.0, 800.0, 600.0)), &[]),
+            Some((100.0, 128.0, 800.0, 572.0))
         );
     }
 
     #[test]
     fn and_on_again_while_the_spot_is_taken() {
-        let taken = [(100.0, 100.0), (128.0, 128.0), (156.0, 156.0)];
+        let taken = [(100.0, 100.0), (100.0, 128.0), (100.0, 156.0)];
         assert_eq!(
-            cascade(Some((100.0, 100.0)), &taken, None),
-            Some((184.0, 184.0))
+            cascade(Some((100.0, 100.0, 800.0, 600.0)), &taken),
+            Some((100.0, 184.0, 800.0, 516.0))
         );
     }
 
     #[test]
-    fn with_no_window_in_front_it_falls_back_to_the_remembered_place() {
-        assert_eq!(cascade(None, &[], Some((40.0, 60.0))), Some((68.0, 88.0)));
-        assert_eq!(cascade(None, &[], None), None);
+    fn with_no_window_in_front_there_is_nothing_to_step_off() {
+        assert_eq!(cascade(None, &[]), None);
     }
 
-    /// A screen this far down and across is a screen nobody has. The walk is
-    /// bounded, so a display full of windows lands on top of one rather than
-    /// off the end of the world.
+    /// A screen this far down is a screen nobody has. The walk is bounded, so
+    /// a display full of windows lands on top of one rather than off the end
+    /// of the world — and never shorter than a strip a page can be read in.
     #[test]
     fn the_walk_is_bounded() {
         let taken: Vec<(f64, f64)> = (0..40)
-            .map(|n| (100.0 + n as f64 * CASCADE, 100.0 + n as f64 * CASCADE))
+            .map(|n| (100.0, 100.0 + n as f64 * CASCADE))
             .collect();
-        let spot = cascade(Some((100.0, 100.0)), &taken, None).expect("a spot");
-        assert!(spot.0 <= 100.0 + 17.0 * CASCADE, "walked off: {spot:?}");
+        let (_, y, _, height) =
+            cascade(Some((100.0, 100.0, 800.0, 600.0)), &taken).expect("a spot");
+        assert!(y <= 100.0 + 17.0 * CASCADE, "walked off: {y}");
+        assert!(height >= CASCADE * 8.0, "squeezed to {height}");
     }
 }

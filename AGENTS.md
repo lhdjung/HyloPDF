@@ -464,8 +464,11 @@ because the watcher already broadcasts them.
 
 **Geometry belongs to the launch window.** There is one remembered size and
 place and there are several windows, so somebody has to own it.
-`save_window_state` records only from `main`; every other window cascades off
-the window in front of it, stepping on while the spot is taken. Letting
+`save_window_state` records only from `main`; every other window steps
+straight down off the window in front of it — same left and right edges, same
+bottom edge, so a step shorter — stepping on while the spot is taken. It
+stepped across as well until it did not: off a maximized window every step
+was a strip of the new window past the right and bottom of the screen. Letting
 whichever window last moved own the setting was tried and it drifts: the number
 creeps down and across every session, because what it reads back are windows
 that were themselves cascaded off it. Full screen is the one window fact that

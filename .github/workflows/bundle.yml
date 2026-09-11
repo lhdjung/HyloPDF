@@ -325,7 +325,9 @@ jobs:
 
           # A list rather than a table, and one line per platform: somebody who
           # has never heard of CI should find their download in the first two
-          # seconds, without reading the word "asset".
+          # seconds, without reading the word "asset". Under it, only what a
+          # person has to *do* — one bullet per platform, menu items in
+          # backticks — and nothing about why.
           {
             echo "### Download"
             echo
@@ -346,7 +348,11 @@ jobs:
               echo
             fi
             echo
-            echo "Neither the macOS app nor the Windows installer is signed by a certificate your system has heard of, so both are refused on first launch. On macOS, open *System Settings → Privacy & Security* and click *Open Anyway*; on Windows, click *More info* → *Run anyway*."
+            echo "### First launch"
+            echo
+            echo "- **macOS**: the app is refused as being from an unidentified developer. Open \`System Settings\` → \`Privacy & Security\`, scroll down and click \`Open Anyway\`. The first PDF opened with HyloPDF asks the same again; answer it the same way."
+            echo "- **Windows**: SmartScreen says the app is unrecognised. Click \`More info\`, then \`Run anyway\`."
+            echo "- **Linux**: the AppImage needs \`chmod +x\` before it runs; the \`.deb\` and \`.rpm\` install like any other package."
             echo
             printf '%s\n' "$body"
           } > notes.md

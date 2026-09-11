@@ -47,9 +47,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          {
-            echo "Built from \`main\` at commit \`${GITHUB_SHA:0:7}\`, and replaced by the next push to it. A link to this page is not a link to a fixed version; the numbered releases are."
-          } > notes.md
+          # The body is the download list `bundle.yml` writes once the
+          # installers exist; until then, nothing — a line about which commit
+          # this was built from is for us, not for the person downloading.
+          : > notes.md
           # The release first, which takes the tag with it, and then the tag
           # again in case a previous run left one without a release behind: a
           # stale tag would be reused, and the assets would be a build of this

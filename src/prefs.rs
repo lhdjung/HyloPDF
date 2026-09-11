@@ -50,7 +50,12 @@ pub fn Settings(viewer: Signal<Viewer>, frame: crate::app::Frame) -> Element {
                 role: "dialog",
                 "aria-modal": "true",
                 "aria-label": "Settings",
-                onmousedown: move |event| event.stop_propagation(),
+                // See the highlight colours window: a press anywhere a picker
+                // is not puts the picker away.
+                onmousedown: move |event| {
+                    event.stop_propagation();
+                    viewer.write().close_picker();
+                },
                 div { class: "window-bar",
                     span { class: "window-title", "Settings" }
                     button {
@@ -748,7 +753,12 @@ pub(crate) fn MarkupColours(viewer: Signal<Viewer>) -> Element {
                 role: "dialog",
                 "aria-modal": "true",
                 "aria-label": "Highlight colours",
-                onmousedown: move |event| event.stop_propagation(),
+                // A press anywhere in the window a picker is not puts the
+                // picker away; the field stops the press itself.
+                onmousedown: move |event| {
+                    event.stop_propagation();
+                    viewer.write().close_picker();
+                },
                 div { class: "window-bar",
                     span { class: "window-title", "Highlight colours" }
                     button {
@@ -1135,6 +1145,9 @@ pub(crate) fn ColorField(
                 class: "color-swatch",
                 "aria-label": "Choose a colour",
                 style: "background: {value};",
+                // The window closes a picker on any press; this press is the
+                // one that opens or closes it, so it must not reach the window.
+                onmousedown: move |event| event.stop_propagation(),
                 onclick: move |_| viewer.write().toggle_picker(field),
             }
             input {
@@ -1179,6 +1192,7 @@ pub(crate) fn ColorField(
             }
             if open {
                 div { class: "color-picker",
+                    onmousedown: move |event| event.stop_propagation(),
                     // **Four background layers**, which is what a saturation/
                     // value square is with no `<canvas>` to draw one in: the
                     // marker, black washed up from the foot, white washed in

@@ -27,26 +27,35 @@ is listed if you want a particular one.
 > **Windows first launch:** SmartScreen blocks it. Click *More info* on the
 > warning, then *Run anyway*.
 
-## Dev build
+## Build it yourself
 
-The whole app is Rust: [Dioxus] Native, with [Blitz] laying out real HTML and
-CSS instead of a webview. Building it needs the Rust toolchain, and `libfontconfig1-dev` on Linux or the Xcode command line
-tools on macOS. pdfium is a shared library and is not in this repository —
-point `HYLO_PDFIUM` at a directory holding one from
-[pdfium-binaries](https://github.com/bblanchon/pdfium-binaries).
+One command. It fetches pdfium, builds the release, packages it and installs
+it — on macOS into `/Applications`, on Linux through `apt`, `dnf` or an
+AppImage in `~/.local/bin`, on Windows through the installer:
 
 ```sh
-cargo run                            # the app
-cargo test                           # the whole interface, headlessly
-cargo install cargo-packager --locked
-cargo packager --release             # installers, in target/release
+./scripts/install.sh                 # macOS and Linux
 ```
+```powershell
+.\scripts\install.ps1                # Windows
+```
+
+You need the Rust toolchain, plus the Xcode command line tools on macOS or
+`libfontconfig1-dev` on Linux. Nothing else: pdfium comes from
+[pdfium-binaries] and everything else is a crate. Because you built the app
+rather than downloaded it, neither Gatekeeper nor SmartScreen has anything to
+complain about — no *Open Anyway* step.
+
+The app itself is all Rust: [Dioxus] Native, with [Blitz] laying out real HTML
+and CSS instead of a webview. To work on it, run `./scripts/pdfium.sh` once and
+then the usual `cargo run`, `cargo run -- FILE` and `cargo test`.
 
 [Dioxus]: https://dioxuslabs.com
 [Blitz]: https://github.com/DioxusLabs/blitz
+[pdfium-binaries]: https://github.com/bblanchon/pdfium-binaries
 
 ## AI usage
-The code was written by Claude Opus 5, but I had a strong vision for the UI and kept complaining to Claude until I liked the implementation.
+The code was written by Claude (Opus 5 and Fable 5.1), but I had a strong vision for the UI and kept complaining to Claude until I liked the result.
 
 ## The name
 

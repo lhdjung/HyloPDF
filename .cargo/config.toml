@@ -1,0 +1,5 @@
+# Where `cargo run` and `cargo test` find the libpdfium that scripts/pdfium.sh
+# (or .ps1) downloaded. Relative to this file's parent, and not forced, so a
+# HYLO_PDFIUM set in the environment still wins.
+[env]
+HYLO_PDFIUM = { value = "pdfium/lib", relative = true }

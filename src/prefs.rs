@@ -339,7 +339,6 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
         h2 { class: "pane-title", "Reading" }
         Field {
             label: "Page progression",
-            note: "No shortcut can change it by accident.",
             Segmented {
                 options: vec![
                     ("continuous".into(), "Continuous (default)".into()),
@@ -354,7 +353,7 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
         }
         Field {
             label: "Pages side by side",
-            note: "Two pages across uses a wide window the way a book does. \u{201c}Cover alone\u{201d} leaves page one on its own, so that every spread after it falls the way it was printed.",
+            note: "Two pages across reads like a book. \u{201c}Two, cover alone\u{201d} shows page 1 alone but two pages afterwards.",
             Segmented {
                 options: vec![
                     ("single".into(), "One (default)".into()),
@@ -387,7 +386,7 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
         }
         Field {
             label: "Trim the margins",
-            note: "Scanned books and anything typeset with an inch of white down each side spend a quarter of the window on paper. This measures where the ink starts — over a sample of the pages, so every page keeps the same scale — and gives that room back to the words.",
+            note: "Remove whitespace on the left and right.",
             Toggle { on: trimming, onchange: move |on| viewer.write().set_trim(on) }
         }
         Field {
@@ -437,11 +436,11 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
         }
         Field {
             label: "Page numbers",
-            note: "A journal offprint is printed 407 to 425 and a book's front matter is numbered i, ii, iii. \u{201c}As printed\u{201d} calls each page what the paper does, so a citation finds it; \u{201c}place in the file\u{201d} counts 1 to the end.",
+            note: "\u{201c}As printed\u{201c} uses any page counts from the document itself, like 407 to 425 or i, ii, iii. \u{201c}Count from 1\u{201c} counts from 1 to the end.",
             Segmented {
                 options: vec![
                     ("printed".into(), "As printed (default)".into()),
-                    ("position".into(), "Place in the file".into()),
+                    ("position".into(), "Count from 1".into()),
                 ],
                 chosen: if printed { "printed".to_string() } else { "position".to_string() },
                 onchange: move |value: String| viewer.write().set_page_numbering(value == "printed"),

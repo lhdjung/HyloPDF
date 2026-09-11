@@ -6872,7 +6872,7 @@ pub fn Reader(
                                 if menu == Some(Menu::Numbering) {
                                     div { class: "menu numbering", role: "menu", "aria-label": "Page numbers",
                                         onmousedown: move |event| event.stop_propagation(),
-                                        div { class: "menu-section", "Call this page" }
+                                        div { class: "menu-section", "Page count" }
                                         button {
                                             class: if numbering_printed { "menu-item on" } else { "menu-item" },
                                             onclick: move |_| { viewer.write().set_page_numbering(true); viewer.write().close_menu(); },
@@ -6885,7 +6885,7 @@ pub fn Reader(
                                             onclick: move |_| { viewer.write().set_page_numbering(false); viewer.write().close_menu(); },
                                             span { class: "menu-tick", {if !numbering_printed { "✓" } else { "" }} }
                                             span { class: "menu-label", "{numbering_by_position}" }
-                                            span { class: "menu-key", "Place in the file" }
+                                            span { class: "menu-key", "Count from 1" }
                                         }
                                     }
                                 }
@@ -7331,7 +7331,7 @@ pub fn Reader(
                                     class: if !numbering_printed { "menu-item on" } else { "menu-item" },
                                     onclick: move |_| { viewer.write().set_page_numbering(false); viewer.write().close_menu(); },
                                     span { class: "menu-tick", {if !numbering_printed { "✓" } else { "" }} }
-                                    span { class: "menu-label", "Place in the file" }
+                                    span { class: "menu-label", "Count from 1" }
                                 }
                                 div { class: "menu-rule" }
                                 button {

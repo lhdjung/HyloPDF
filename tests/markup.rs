@@ -215,6 +215,73 @@ fn open(path: &str) -> Reader {
 }
 
 #[test]
+fn the_swatches_have_a_way_out_that_keeps_the_selection() {
+    let mut reader = open(&readable("closed"));
+    reader.sweep_page(1, (0.10, LINE), (0.55, LINE));
+    assert!(reader.harness.query(".markup-popover").is_some());
+    reader.click(".markup-close");
+    assert!(
+        reader.harness.query(".markup-popover").is_none(),
+        "the × puts the swatches away"
+    );
+    assert!(
+        !reader.harness.query_all(".selected").is_empty(),
+        "and leaves the passage selected"
+    );
+}
+
+#[test]
+fn the_six_colours_can_be_changed_and_put_back() {
+    let mut reader = open(&readable("recoloured"));
+    reader.sweep_page(1, (0.10, LINE), (0.55, LINE));
+    let first = reader
+        .harness
+        .attr(".markup-swatch", "data-colour")
+        .unwrap_or_default();
+    reader.click(".markup-more");
+    assert!(
+        reader.harness.query(".colours-window").is_some(),
+        "the … opens the window with the full picker"
+    );
+    assert_eq!(reader.harness.query_all(".colours-window .color-hex").len(), 6);
+
+    // The first colour, retyped: the swatch under the passage follows.
+    reader.click_nth(".colours-window .color-hex", 0);
+    reader.press("End");
+    for _ in 0..7 {
+        reader.press("Backspace");
+    }
+    reader.type_text("#123456");
+    assert_eq!(
+        reader.harness.attr(".markup-swatch", "data-colour").as_deref(),
+        Some("#123456"),
+        "the popover under the window shows the change at once"
+    );
+
+    // Resetting asks first, and keeping them changes nothing.
+    reader.click(".colours-window .chip.action");
+    assert!(reader.harness.query(".colours-ask").is_some(), "a question, not a reset");
+    reader.click_nth(".colours-window .pane-actions .chip.action", 1);
+    assert_eq!(
+        reader.harness.attr(".markup-swatch", "data-colour").as_deref(),
+        Some("#123456"),
+    );
+    reader.click(".colours-window .chip.action");
+    reader.click(".colours-window .chip.action.danger");
+    assert_eq!(
+        reader.harness.attr(".markup-swatch", "data-colour").as_deref(),
+        Some(first.as_str()),
+        "reset puts the default back"
+    );
+    reader.press("Escape");
+    assert!(reader.harness.query(".colours-window").is_none(), "Escape closes the window");
+    assert!(
+        reader.harness.query(".markup-popover").is_some(),
+        "and the swatches are still there to mark with"
+    );
+}
+
+#[test]
 fn a_sweep_offers_the_colours_and_a_swatch_marks_the_passage() {
     let path = readable("swept");
     let mut reader = open(&path);

@@ -974,6 +974,25 @@ body { margin: 0;
   padding: 0;
 }
 .markup-swatch:hover { border-color: var(--accent); }
+/* The long way round and the way out, after the six: the same size as a
+   swatch, so the row reads as one. The × is red on the theme's darkest
+   ground, which is the one thing in the row that is unmistakably not a
+   colour to mark in. */
+.markup-more, .markup-close {
+  width: 22px; height: 22px; padding: 0; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line); font-size: 14px; line-height: 1;
+}
+.markup-more { background: var(--surface-sunk); color: var(--muted); }
+.markup-more:hover { border-color: var(--accent); color: var(--text); }
+.markup-close { background: #1c1c1e; color: #ff5f56; font-size: 16px; }
+.markup-close:hover { border-color: #ff5f56; }
+/* The window the … opens. */
+.colours-window { width: 440px; height: auto; max-height: 80%; }
+.colours-body { padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
+.colours-body .field-note { margin: 0 0 4px; }
+.colours-row { display: flex; align-items: center; gap: 12px; }
+.colours-label { width: 72px; color: var(--muted); font-size: 13.5px; }
+.colours-ask { color: var(--text); font-size: 13.5px; align-self: center; }
 
 /* And what a mark already in the document says when it is clicked. The same
    card as the swatches above it, because it is the same kind of thing in the

@@ -722,6 +722,86 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
     }
 }
 
+/// The six highlight colours, each with the full picker, and a way back to
+/// what a fresh install has. Opened from the … on the swatches a selection
+/// brings up; the swatches stay under it and show the change at once.
+#[component]
+pub(crate) fn MarkupColours(viewer: Signal<Viewer>) -> Element {
+    let held = viewer.read();
+    let colours: Vec<String> = crate::app::MARKUP_COLOR_KEYS
+        .iter()
+        .map(|key| held.store.text(key))
+        .collect();
+    let ink = crate::palette::hex(held.palette().muted());
+    drop(held);
+    // Resetting throws six settings away, so the button asks once before
+    // it does — in place, rather than in a window over a window.
+    let mut confirming = use_signal(|| false);
+    rsx! {
+        div {
+            class: "window-scrim",
+            onmousedown: move |event| {
+                event.stop_propagation();
+                viewer.write().close_markup_colours();
+            },
+            div {
+                class: "window colours-window",
+                role: "dialog",
+                "aria-modal": "true",
+                "aria-label": "Highlight colours",
+                onmousedown: move |event| event.stop_propagation(),
+                div { class: "window-bar",
+                    span { class: "window-title", "Highlight colours" }
+                    button {
+                        class: "chip window-close",
+                        "aria-label": "Close",
+                        onclick: move |_| { viewer.write().close_markup_colours(); },
+                        Icon { name: "close", stroke: ink.clone() }
+                    }
+                }
+                div { class: "colours-body",
+                    p { class: "field-note", "The six colours a selection offers. Press a swatch for the full picker, or type a colour." }
+                    for (index, (key, colour)) in crate::app::MARKUP_COLOR_KEYS.iter().zip(colours).enumerate() {
+                        div { key: "{key}", class: "colours-row",
+                            span { class: "colours-label", "Colour {index + 1}" }
+                            ColorField {
+                                viewer,
+                                field: *key,
+                                value: colour,
+                                onchange: move |hex: String| viewer.write().set_markup_color(index + 1, hex),
+                            }
+                        }
+                    }
+                    div { class: "pane-actions",
+                        if *confirming.read() {
+                            span { class: "colours-ask", "Put all six back to the defaults? Your own colours will be lost." }
+                            button {
+                                class: "chip action danger",
+                                onclick: move |_| {
+                                    confirming.set(false);
+                                    viewer.write().reset_markup_colors();
+                                },
+                                "Reset"
+                            }
+                            button {
+                                class: "chip action",
+                                onclick: move |_| confirming.set(false),
+                                "Keep them"
+                            }
+                        } else {
+                            button {
+                                class: "chip action",
+                                onclick: move |_| confirming.set(true),
+                                "Reset all colours…"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// **A plain key typed into a field is not a shortcut**, and every field in
 /// this reader has to say so for itself.
 ///
@@ -956,7 +1036,7 @@ fn from_hsv(hsv: Hsv) -> crate::palette::Rgb {
 /// here is always the six-digit form, because that is what is written back to
 /// the file.
 #[component]
-fn ColorField(
+pub(crate) fn ColorField(
     viewer: Signal<Viewer>,
     /// The theme file's own name for this colour, which is both what a change
     /// is written to and which picker is open. See [`Viewer::draft_set`] and
@@ -964,10 +1044,16 @@ fn ColorField(
     field: &'static str,
     value: String,
     #[props(default)] onsubmit: Option<EventHandler<()>>,
+    /// Where a change goes, when it is not a theme draft — the highlight
+    /// colours write straight to the settings.
+    #[props(default)] onchange: Option<EventHandler<String>>,
 ) -> Element {
     let root: crate::app::RootFocus = use_context();
     let open = viewer.read().picking == Some(field);
-    let mut change = move |hex: String| viewer.write().draft_set(field, hex);
+    let mut change = move |hex: String| match onchange.as_ref() {
+        Some(onchange) => onchange.call(hex),
+        None => viewer.write().draft_set(field, hex),
+    };
     // What is in the box while it is being typed in, and nothing when it is
     // not: the same shape as the stepper's, one field along, and for the same
     // reason — Blitz's `set_text` moves no caret, so a value written back

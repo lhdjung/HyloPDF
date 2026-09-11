@@ -403,6 +403,17 @@ const TEXT_CACHE: usize = 8;
 /// Blitz's own number for the fields it owns, restated because a page cannot
 /// be told about a double click and has to count one — see
 /// [`Viewer::begin_sweep`].
+/// The settings keys of the six highlight colours, in swatch order. Static
+/// so that [`Viewer::picking`] can name one.
+pub const MARKUP_COLOR_KEYS: [&str; 6] = [
+    "markup_color_1",
+    "markup_color_2",
+    "markup_color_3",
+    "markup_color_4",
+    "markup_color_5",
+    "markup_color_6",
+];
+
 /// How long a message stays on the notice line. `ui.notice` in the app.
 const NOTICE_LASTS: std::time::Duration = std::time::Duration::from_millis(4200);
 
@@ -1022,6 +1033,9 @@ pub struct Viewer {
     /// The note the reader has opened, if any. See the note window in
     /// [`Reader`] — `showNote` in `main.ts`.
     pub note_open: Option<(usize, crate::render::Note)>,
+    /// Whether the window that edits the six highlight colours is up. See
+    /// [`crate::prefs::MarkupColours`].
+    pub colours_open: bool,
     /// The document waiting on a password, if one is. `ui.askForPassword` in
     /// the app, and see [`Locked`].
     pub locked: Option<Locked>,
@@ -1266,6 +1280,7 @@ impl Viewer {
             results_borrowed: false,
             offered_results: false,
             note_open: None,
+            colours_open: false,
             locked: None,
             details_open: false,
             editing: None,
@@ -3486,6 +3501,47 @@ impl Viewer {
         self.markup_at.take().is_some()
     }
 
+    /// The window that edits the six colours, over whatever is open. The
+    /// swatches stay up underneath so that a colour chosen in the window can
+    /// be used on the passage the reader has just swept.
+    pub fn open_markup_colours(&mut self) {
+        self.colours_open = true;
+    }
+
+    /// Take it down. `false` when it was not up, which is what lets Escape
+    /// go on to the next thing it means.
+    pub fn close_markup_colours(&mut self) -> bool {
+        if !self.colours_open {
+            return false;
+        }
+        // A picker open inside it goes first: Escape means the thing on top.
+        if self.picking.take().is_some() {
+            return true;
+        }
+        self.colours_open = false;
+        true
+    }
+
+    /// One of the six, changed. `at` is one-based, as the keys are.
+    pub fn set_markup_color(&mut self, at: usize, hex: String) {
+        if crate::palette::read_colour(&hex).is_none() {
+            return;
+        }
+        self.store.set(vec![(format!("markup_color_{at}"), json!(hex))]);
+    }
+
+    /// All six back to what a fresh install has. This throws a reader's own
+    /// colours away, which is why the window asks first.
+    pub fn reset_markup_colors(&mut self) {
+        let defaults = crate::settings::defaults();
+        let entries = MARKUP_COLOR_KEYS
+            .iter()
+            .filter_map(|key| Some((key.to_string(), defaults.get(*key)?.clone())))
+            .collect();
+        self.store.set(entries);
+        self.notice = "Highlight colours reset.".into();
+    }
+
     /// The six colours the popover offers, in the order the swatches show
     /// them.
     ///
@@ -5633,6 +5689,7 @@ pub fn Reader(
     // rather than the position, which is what `showNote` says too.
     let worn_built_in = held.store.theme().built_in;
     let note_open = held.note_open.clone();
+    let colours_open = held.colours_open;
     let locked = held.locked.clone();
     // The bullets the password field shows, counted here because a format
     // hole in `rsx!` cannot hold a string literal of its own. See the field.
@@ -7525,6 +7582,12 @@ pub fn Reader(
                     }
                 }
             }
+            // The six highlight colours, edited. A window for the theme
+            // editor's reason: a full picker under a swatch on a page would
+            // hang off the passage and off the edge of the window with it.
+            if colours_open {
+                crate::prefs::MarkupColours { viewer }
+            }
             // What the document says about itself. `showDocumentDetails` in
             // `main.ts`, field for field and in its order — and a window
             // rather than a panel for the reason the note beside it is one:
@@ -8340,6 +8403,25 @@ fn Page(
                             },
                         }
                     }
+                    // The six are a shortcut, and this is the long way round:
+                    // the window with the full picker, which is also where
+                    // the six are changed.
+                    button {
+                        class: "markup-more",
+                        "aria-label": "More colours",
+                        title: "More colours…",
+                        onclick: move |_| viewer.write().open_markup_colours(),
+                        "…"
+                    }
+                    // And a way to put the swatches away that is not Escape
+                    // and not a press somewhere else, both of which take the
+                    // selection down with them.
+                    button {
+                        class: "markup-close",
+                        "aria-label": "Close",
+                        onclick: move |_| { viewer.write().close_markup(); },
+                        "×"
+                    }
                 }
             }
             // **A mark clicked on says how to take it off.** Removal has worked
@@ -8585,6 +8667,11 @@ fn perform(
             // Escape typed *into* the field never reaches here, so this is the
             // case where the pointer took the focus elsewhere.
             if viewer.write().close_menu() {
+                return;
+            }
+            // The highlight colours window, before the swatches it was opened
+            // from: it is over them, and Escape means the thing on top.
+            if viewer.write().close_markup_colours() {
                 return;
             }
             // The colour popover, which is a menu in everything but name and

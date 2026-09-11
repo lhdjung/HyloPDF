@@ -8764,10 +8764,7 @@ fn perform(
         // see `keymap::EXTRA`: in the app ⌘C is the webview's, because the
         // browser owns the selection and therefore owns copying it.
         Action::SelectPage => {
-            if viewer.write().select_page() {
-                let words = viewer.read().selected_text().chars().count();
-                viewer.write().notice = format!("{words} characters of this page selected.");
-            }
+            viewer.write().select_page();
         }
         Action::Copy => {
             let copied = viewer.read().selected_text();

@@ -68,6 +68,13 @@ pub struct Ramped {
 #[derive(Clone)]
 pub struct Chosen {
     theme: Rc<Cell<Palette>>,
+    /// The document as it stands. **Here rather than in the page's key**, so
+    /// that a mark written into the file — a reload of the same document —
+    /// redraws each mounted page in place, the old texture staying on screen
+    /// until the new one lands. In the key, a reload was a fresh widget with
+    /// nothing to show for as long as pdfium took: every page went blank and
+    /// came back, once per highlight.
+    document: Rc<RefCell<Arc<dyn PageSource>>>,
     /// What each mounted page has to paint into itself, by page index.
     ///
     /// A shared cell for the reason the theme is one: a widget is handed to
@@ -91,6 +98,7 @@ impl Chosen {
     pub fn new(theme: Palette) -> Self {
         Chosen {
             theme: Rc::new(Cell::new(theme)),
+            document: Rc::new(RefCell::new(crate::render::nothing())),
             ramped: Rc::new(RefCell::new(HashMap::new())),
             holding: Rc::new(Cell::new(false)),
         }
@@ -115,6 +123,15 @@ impl Chosen {
 
     pub fn get(&self) -> Palette {
         self.theme.get()
+    }
+
+    /// The document every page draws from, replaced on open and on reload.
+    pub fn show(&self, document: Arc<dyn PageSource>) {
+        *self.document.borrow_mut() = document;
+    }
+
+    pub fn document(&self) -> Arc<dyn PageSource> {
+        self.document.borrow().clone()
     }
 
     pub fn set(&self, theme: Palette) {
@@ -159,7 +176,6 @@ impl Chosen {
 /// when the window moves to a screen of a different one. A page redrawn for that
 /// reason leaks its old texture until it is unmounted.
 pub struct PageWidget {
-    document: Arc<dyn PageSource>,
     index: usize,
     /// How the page is turned and how much of it is drawn.
     ///
@@ -179,6 +195,10 @@ pub struct PageWidget {
     device: Option<DeviceHandle>,
     recolorer: Option<Rc<Recolorer>>,
     texture: Option<PageTexture>,
+    /// The document the texture was drawn from. See [`Chosen::show`]: a
+    /// texture from another draft is shown, stretched if need be, while this
+    /// draft is drawn.
+    drawn_from: Option<Arc<dyn PageSource>>,
     /// Whether the texture was registered during the frame being painted.
     ///
     /// Registering a texture and drawing it in the same frame works until
@@ -213,13 +233,14 @@ pub struct PageWidget {
 struct Pending {
     width: u32,
     height: u32,
+    document: Arc<dyn PageSource>,
     done: Receiver<Result<Rendered, String>>,
     cancelled: Arc<AtomicBool>,
 }
 
 impl Pending {
-    fn is(&self, width: u32, height: u32) -> bool {
-        self.width == width && self.height == height
+    fn is(&self, width: u32, height: u32, document: &Arc<dyn PageSource>) -> bool {
+        self.width == width && self.height == height && Arc::ptr_eq(&self.document, document)
     }
 }
 
@@ -278,6 +299,8 @@ struct Software {
     height: u32,
     /// What `PageTexture::wears` answers on the other path.
     theme: Palette,
+    /// And what `drawn_from` answers.
+    document: Arc<dyn PageSource>,
     /// The page with its links tinted and nothing selected on it, kept so that
     /// a selection can be taken up again without going back to pdfium.
     ///
@@ -293,7 +316,6 @@ struct Software {
 
 impl PageWidget {
     pub fn new(
-        document: Arc<dyn PageSource>,
         index: usize,
         view: View,
         chosen: Chosen,
@@ -301,7 +323,6 @@ impl PageWidget {
     ) -> Self {
         stats::add(&stats::MOUNTED, 1);
         PageWidget {
-            document,
             index,
             view,
             chosen,
@@ -309,6 +330,7 @@ impl PageWidget {
             device: None,
             recolorer: None,
             texture: None,
+            drawn_from: None,
             fresh: false,
             software: None,
             pending: None,
@@ -323,7 +345,8 @@ impl PageWidget {
         let (sender, done) = channel();
         let cancelled = Arc::new(AtomicBool::new(false));
         let still_wanted = Arc::clone(&cancelled);
-        let document = Arc::clone(&self.document);
+        let document = self.chosen.document();
+        let drawn_from = Arc::clone(&document);
         let (index, view, shell) = (self.index, self.view, self.shell.clone());
         render_thread(Box::new(move || {
             // Scrolled past before its turn came: nothing to draw for.
@@ -350,6 +373,7 @@ impl PageWidget {
         Pending {
             width,
             height,
+            document: drawn_from,
             done,
             cancelled,
         }
@@ -426,9 +450,11 @@ impl PageWidget {
     /// this path a fallback rather than a design.
     fn ensure_software(&mut self, width: u32, height: u32) -> Option<()> {
         let theme = self.chosen.get();
+        let document = self.chosen.document();
         let selection = self.chosen.ramped(self.index).selection;
         if let Some(page) = self.software.as_ref() {
             if page.theme == theme
+                && Arc::ptr_eq(&page.document, &document)
                 && (self.chosen.holding() || (page.width == width && page.height == height))
             {
                 if page.selected != selection {
@@ -439,9 +465,7 @@ impl PageWidget {
         }
 
         let mut pixels: Option<Vec<u8>> = None;
-        let outcome = self
-            .document
-            .render(self.index, width, height, self.view, &mut |bitmap| {
+        let outcome = document.render(self.index, width, height, self.view, &mut |bitmap| {
                 // BGRA as pdfium wrote it, in RGBA order because that is what
                 // the reference ramp reads — the swizzle the GPU path gets for
                 // free by uploading as `Bgra8Unorm`.
@@ -491,6 +515,7 @@ impl PageWidget {
             width,
             height,
             theme,
+            document,
             plain: pixels,
             selected: Vec::new(),
         });
@@ -549,6 +574,11 @@ impl PageWidget {
         }
         let theme = self.chosen.get();
         let recolorer = Rc::clone(self.recolorer.as_ref()?);
+        let document = self.chosen.document();
+        let same_draft = self
+            .drawn_from
+            .as_ref()
+            .is_some_and(|drawn| Arc::ptr_eq(drawn, &document));
 
         let selection = self.chosen.ramped(self.index).selection;
         if let Some(texture) = self.texture.as_ref() {
@@ -560,7 +590,10 @@ impl PageWidget {
             // stretched rather than redrawn. See [`Chosen::holding`]. The
             // theme is still asked, because a theme changed mid-gesture is a
             // page that is the wrong colour rather than the wrong sharpness.
-            if texture.wears(&theme) && (self.chosen.holding() || texture.is(width, height)) {
+            if texture.wears(&theme)
+                && same_draft
+                && (self.chosen.holding() || texture.is(width, height))
+            {
                 // The selection is the one thing that moves without the page
                 // being redrawn, and it is asked here rather than in the key
                 // for exactly that reason.
@@ -579,7 +612,7 @@ impl PageWidget {
         // stretched, if there is one, or nothing. The thread asks for a frame
         // when it is done, and that frame uploads.
         let rendered = match self.pending.take() {
-            Some(pending) if pending.is(width, height) => match pending.done.try_recv() {
+            Some(pending) if pending.is(width, height, &document) => match pending.done.try_recv() {
                 Ok(Ok(rendered)) => rendered,
                 Ok(Err(err)) => {
                     eprintln!("{err}");
@@ -623,6 +656,7 @@ impl PageWidget {
         stats::add(&stats::DRAWN, 1);
         stats::add(&stats::RESIDENT, texture.bytes());
         self.texture = Some(texture);
+        self.drawn_from = Some(document);
         if !selection.is_empty() {
             let (ink, paper) = Self::selection_ramp(&theme);
             let texture = self.texture.as_mut()?;

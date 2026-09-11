@@ -1237,14 +1237,19 @@ pub struct Viewer {
     /// It is also what stops the restore writing over itself:
     /// [`Viewer::remember_place`] says nothing while one is pending.
     place: Option<Anchor>,
-    /// Which draft of the document this is.
-    ///
-    /// **In the page's key, and it is the only thing that could be.** A page
-    /// keeps its texture while its key does not move — page, size, theme,
-    /// view — and a recompile changes none of those while changing every
-    /// pixel. `generation` cannot do it: opening the sidebar bumps that, and
-    /// that must not throw a texture away.
+    /// Which draft of the document this is: a recompile, a mark written in.
+    /// What the markup rows are cached against. Not in the page's key —
+    /// see [`Viewer::opened`] and [`crate::page::Chosen::show`].
     pub edition: u64,
+    /// Which document this is, counting from the first. **In the page's key,
+    /// and it is the only thing that could be.** A page keeps its texture
+    /// while its key does not move — page, size, theme, view — and a
+    /// different document changes none of those while changing every pixel.
+    /// `generation` cannot do it: opening the sidebar bumps that, and that
+    /// must not throw a texture away. `edition` no longer does it either: a
+    /// new draft of the same document is drawn in place, over the old one,
+    /// which is what keeps a highlight from blanking the page.
+    pub opened: u64,
     /// The process's watch and this window's name in it, so that a write of
     /// this window's own is not reported back to it as news. See
     /// [`crate::watch::Watching::wrote`]. Absent in a reader with no watch.
@@ -1272,6 +1277,7 @@ impl Viewer {
             .into_iter()
             .chain(keymap.problems.drain(..))
             .collect();
+        chosen.show(document.clone());
         let mut viewer = Viewer {
             layout: Layout::new(sizes),
             scroll_top: 0.0,
@@ -1338,6 +1344,7 @@ impl Viewer {
             presenting: false,
             place: None,
             edition: 0,
+            opened: 0,
             watching: None,
             window: String::new(),
             mark_rows: RefCell::new(None),
@@ -4676,6 +4683,7 @@ impl Viewer {
             }
         };
         self.document = reopened;
+        self.chosen.show(self.document.clone());
         self.headings = self.document.outline();
         self.labels = self.document.labels();
         self.read_markup();
@@ -4886,7 +4894,9 @@ impl Viewer {
             Tab::Contents
         };
         self.edition += 1;
+        self.opened += 1;
         self.generation += 1;
+        self.chosen.show(self.document.clone());
         self.scroll_top = 0.0;
         self.go_to(place.unwrap_or(crate::layout::Anchor {
             page: 1,
@@ -5675,8 +5685,8 @@ pub fn Reader(
     let worn = chosen.get().key();
     // Which draft of the document is being drawn — in every page's key, so
     // that a recompile replaces the nodes and the textures with them. See
-    // `Viewer::edition`.
-    let edition = held.edition;
+    // `Viewer::opened`.
+    let opened = held.opened;
     let mounted = held.layout.mounted(held.scroll_top);
     let content_width = held.layout.content_width();
     let content_height = held.layout.content_height();
@@ -5969,7 +5979,6 @@ pub fn Reader(
             })
             .collect(),
     );
-    let document = held.document.clone();
     // How every page is drawn, and the string that says so in a key. A turn
     // of 180° leaves a page exactly the shape it was, so the box's size
     // cannot stand in for this: the pixels differ and nothing else would say
@@ -7376,7 +7385,6 @@ pub fn Reader(
             if sidebar_open && !presenting && !empty {
                 Sidebar {
                     viewer,
-                    document: Handle(document.clone()),
                     chosen: chosen.clone(),
                 }
             }
@@ -7441,8 +7449,7 @@ pub fn Reader(
                             // drawn at, and the theme it is wearing. A change
                             // to any of them is a different node, which is
                             // what gives the old texture back — see `page.rs`.
-                            key: "{placed.index}:{placed.drawn.0}x{placed.drawn.1}:{worn}:{view_key}:{edition}",
-                            document: Handle(document.clone()),
+                            key: "{placed.index}:{placed.drawn.0}x{placed.drawn.1}:{worn}:{view_key}:{opened}",
                             chosen: chosen.clone(),
                             index: placed.index,
                             top: placed.top - scroll_top,
@@ -8245,7 +8252,6 @@ pub(crate) fn Icon(name: &'static str, #[props(default)] stroke: Option<String>)
 /// One page, in its place.
 #[component]
 fn Page(
-    document: Handle,
     chosen: Chosen,
     index: usize,
     top: f64,
@@ -8311,7 +8317,6 @@ fn Page(
             std::sync::Arc<dyn blitz_traits::shell::ShellProvider>,
         >();
         CustomWidgetAttr::new(PageWidget::new(
-            document.0.clone(),
             index,
             view,
             chosen.clone(),

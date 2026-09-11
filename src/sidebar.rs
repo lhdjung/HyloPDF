@@ -24,7 +24,7 @@ use dioxus::html::geometry::WheelDelta;
 use dioxus::prelude::*;
 use dioxus_native::CustomWidgetAttr;
 
-use crate::app::{Handle, Icon, Viewer};
+use crate::app::{Icon, Viewer};
 use crate::layout::Size;
 use crate::page::{Chosen, PageWidget};
 
@@ -210,15 +210,16 @@ impl Column {
 /// things about it. Passing them one at a time would be the same coupling
 /// written out longer.
 #[component]
-pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> Element {
+pub fn Sidebar(mut viewer: Signal<Viewer>, chosen: Chosen) -> Element {
     let held = viewer.read();
     let tab = held.tab;
     let width = held.sidebar_width;
     let page = held.page();
-    // In every thumbnail's key, with the draft of the document: the colours
-    // it wears and which reading of the file it is of. See `page.rs`.
+    // In every thumbnail's key, with which document it is of: the colours it
+    // wears. A new draft of the same document is drawn in place — see
+    // `Chosen::show` in `page.rs`.
     let worn = chosen.get().key();
-    let edition = held.edition;
+    let opened = held.opened;
     // What a tab's icon is drawn in. See `Icon` in `app.rs`: an inline `<svg>`
     // reaches usvg with no cascade behind it, so the shade has to travel with
     // it rather than being inherited from the button.
@@ -550,8 +551,7 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
                                 // the size it is drawn at, and the theme. See
                                 // `page.rs` — the key is what gives the old
                                 // texture back.
-                                key: "{index}:{column.width}x{height}:{worn}:{edition}",
-                                document: Handle(document.0.clone()),
+                                key: "{index}:{column.width}x{height}:{worn}:{opened}",
                                 chosen: chosen.clone(),
                                 viewer,
                                 index,
@@ -587,7 +587,6 @@ pub fn heading_for(headings: &[crate::render::Heading], page: usize) -> Option<u
 /// One thumbnail, in its place.
 #[component]
 fn Thumb(
-    document: Handle,
     chosen: Chosen,
     mut viewer: Signal<Viewer>,
     index: usize,
@@ -611,7 +610,6 @@ fn Thumb(
         // the column is a map of the file, and a map that turns with the
         // reader is one they have to re-learn.
         CustomWidgetAttr::new(PageWidget::new(
-            document.0.clone(),
             index,
             crate::layout::View::WHOLE,
             chosen.clone(),

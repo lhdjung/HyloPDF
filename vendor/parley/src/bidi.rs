@@ -889,6 +889,9 @@ impl BracketStack {
     }
 }
 
+// HyloPDF: upstream's warning, replayed on every `cargo run` because this is
+// a path dependency. Theirs to fix; ours to keep quiet.
+#[allow(deprecated)]
 const fn mask(t: BidiClass) -> u32 {
     1 << (t.to_icu4c_value() as u32)
 }

@@ -3,7 +3,8 @@
 rather than `item.size`: harfrust reads the font's `trak` table at that size,
 and `item.size` is the CSS size multiplied by the display scale, so on a
 2x screen 15.5px type was tracked as 31pt type and came out 5-7% wider than
-WebKit sets the same words. Everything else is the crate as published.
+WebKit sets the same words. Everything else is the crate as published, but for an `#[allow(deprecated)]`
+in `bidi.rs` that keeps upstream's one warning off every build.
 `Cargo.toml` patches it in under `[patch.crates-io]`.
 
 ---

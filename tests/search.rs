@@ -531,22 +531,29 @@ fn the_bar_can_be_pressed_over_a_scrolled_document() {
 /* ------------------------------- and the four ways it goes away by itself */
 
 /// **Reaching past the bar puts it away**, which is `onFindOutside` in
-/// `main.ts` and was missing here entirely: the × was the only way out, so a
-/// reader who had found what they came for and gone back to reading had a
-/// card sitting over the top-right corner of the page for the rest of the
-/// session.
+/// `main.ts`: a reader who has found what they came for and gone back to
+/// reading should not have a card sitting over the corner of the page for
+/// the rest of the session.
 ///
-/// The app spells the exceptions as a selector and this reader has no
-/// `closest` to ask with, so the top strip is asked for by height and the
-/// other four stop the press themselves — see the root's `onmousedown` in
-/// `app.rs`.
+/// **But only the bar.** The results moved into a panel the search borrows,
+/// and a click that took the panel down with the bar made the document grow
+/// under the pointer and left the sweep the press had begun measuring
+/// against the old layout — a stray selection where nothing was swept. So
+/// the list stays, and Escape or the panel's own button takes it down.
 #[test]
-fn a_press_in_the_document_puts_the_find_bar_away() {
+fn a_press_in_the_document_puts_the_find_bar_away_and_leaves_the_results() {
     let mut reader = searching();
     look_for(&mut reader, "needle");
+    reader.click(".find-count");
     assert!(reader.state().find.is_some(), "the bar is up");
+    assert_eq!(reader.state().sidebar.as_deref(), Some("results"));
     reader.click(".viewer");
     assert_eq!(reader.state().find, None, "and reading closed it");
+    assert_eq!(
+        reader.state().sidebar.as_deref(),
+        Some("results"),
+        "the list it found stays where it was",
+    );
 }
 
 /// And opening any of the five menus does too, which is `opens(…)` in

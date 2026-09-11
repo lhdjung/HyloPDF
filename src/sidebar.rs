@@ -260,9 +260,10 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, document: Handle, chosen: Chosen) -> 
     let thumb_scroll = held.thumb_scroll;
     let panel_height = held.layout.viewport.height;
     let mounted = column.mounted(thumb_scroll, panel_height);
-    // The third tab is here only while the find bar is: a Results tab with
-    // nothing behind it is a tab that answers a question nobody asked.
-    let searching = held.find_open;
+    // The third tab is here only while there is a search: a Results tab with
+    // nothing behind it is a tab that answers a question nobody asked. The
+    // bar may be down while the search stands — see `Viewer::dismiss_find`.
+    let searching = held.find_open || !held.search.query().is_empty();
     // See the note on `.tabs` below: an icon and a word, or an icon.
     let labelled = width >= TAB_LABELS_FIT;
     // Whether a word could be cut: three tabs in a panel narrow enough that

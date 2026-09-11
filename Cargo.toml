@@ -221,3 +221,9 @@ signing-identity = "-"
 # parser is not an XML parser: an ordinary `<!-- -->` fails the build with
 # "AMFIUnserializeXML: syntax error". The explanation lives here instead.
 entitlements = "entitlements.plist"
+
+# parley 0.11.1 with one line changed: `trak` tracking read at the CSS size
+# rather than the CSS size times the display scale. See `vendor/parley/README.md`
+# and `body` in `styles.rs`.
+[patch.crates-io]
+parley = { path = "vendor/parley" }

@@ -85,6 +85,8 @@ src/
   emit.rs         news, and the mailbox each window reads it out of
   theme.rs settings.rs keys.rs library.rs watch.rs
                   came over from the Tauri app; see `lib.rs`
+vendor/parley     parley 0.11.1 with one line changed — see its README, and
+                  `body` in styles.rs for what the line cost on a 2x screen
 themes/*.toml     the fourteen packaged themes, embedded with include_str!
 keys.toml         the commented template a new install gets, include_str!
 icons/            what the bundler puts on the three platforms

@@ -165,7 +165,14 @@ body { margin: 0;
      17 rather than the size, because 17 is where the axis starts and WebKit
      clamps to it: `opsz normal` and `opsz 17` lay out identically at both
      13.5px and 14.5px, which is what says the clamp is what it does. The two
-     rules above that size set their own. */
+     rules above that size set their own.
+
+     The other half was tracking, and it is not in this sheet: SF carries a
+     `trak` table, harfrust reads it at the size it is handed, and parley
+     handed it the CSS size times the display scale — so on a 2x screen every
+     word was tracked as 31pt type, +26 units an em, where WebKit tracks
+     15.5pt type at -36. That is 5-7% of a word, and it was invisible at 1x.
+     `vendor/parley` is the crate with that one line changed. */
   letter-spacing: 0px;
   font-variation-settings: "opsz" 17; }
 

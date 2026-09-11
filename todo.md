@@ -19,22 +19,16 @@ Short note: Dark Forest text color used to be #f7e0a2
 
 ## New issues
 
-*(1–23 done, 2026-09-09. What each came to is in the code; the shape of the
-larger ones:)*
+*(1–4 done, 2026-09-11.)*
 
-- **⌘Q** is answered by the app's delegate (`applicationShouldTerminate:`
-  → the app's own quit), so the writes after the event loop run.
-- **Textures** are keyed by the palette's colours, not the theme's name, and
-  the pipelines are rebuilt only when the renderer goes.
-- **Every write** tells the watch it was ours (`reopen` does it once, for all
-  of them), reopens with the document's own password, and takes the old
-  handle back if the reopen fails. Removing a mark asks `standing` first.
-- **Rendering is off the UI thread**: one render thread, FIFO, and a frame
-  asked for when a page lands. Nothing prefetches yet, and a page arrives on
-  the frame after it was drawn rather than in the one that mounted it.
-- **Theme change is a re-render**, and the docs now say so; the source is
-  not kept on the GPU (25MB a page), so there is nothing to re-run a pass
-  over. The key stays.
-- **Paths are made absolute at the door** (`config::absolute`); the config
-  directory is the bundle id's, with `HyloPDF-dioxus` moved into place once.
-- Marked documents stay in the library past 24; the shelf still shows 24.
+- **Swatches**: × closes the popover and keeps the selection; … opens the
+  Highlight colours window (the theme editor's picker on each of the six,
+  written straight to `markup_color_N`), with a reset that asks first.
+- **Double click** selects the word and a third click the line; the sweep
+  extends by that unit, so the pixel a mouse moves before the release no
+  longer cuts the word back.
+- **Numbers off the paper**: a document with no `/PageLabels` has a sample of
+  pages read for a whole number in its top or bottom band; the offset most
+  agree on names every page (Bem 2011 reads 407 of 425).
+- **"of 425" is a menu** choosing between the printed numbers and the place
+  in the file (`page_numbering`), also in the settings menu and Reading page.

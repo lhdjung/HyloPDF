@@ -19,7 +19,7 @@ use hylopdf::emit::{Exchange, News, Payload};
 use hylopdf::session::Session;
 use hylopdf::shell::Shell;
 use hylopdf::windows::Desk;
-use hylopdf::{store, watch};
+use hylopdf::{render, store, watch};
 
 fn main() {
     // Before a document exists, which is what this has to be. See its own
@@ -89,20 +89,27 @@ fn main() {
     // fixture nobody asked for, which is a strange first impression for a
     // reader to make.
 
-    // Not opened here: the window opens it through `Session::window`, which
-    // is the one path a window's document comes down, and opening a document
-    // twice cost the same milliseconds twice. The one mistake worth saying
-    // before a window exists is a path that is not there.
-    match path.as_deref() {
-        Some(path) if std::path::Path::new(path).is_file() => println!("reader: {path}"),
-        Some(path) => {
-            eprintln!("{path}: there is no such file.");
-            if named.is_some() {
+    // Opened here, once, and handed to the window below: the line it prints
+    // comes out *before* the event loop exists, which is what lets the
+    // packaging job open a document on a runner with no display and read
+    // "reader: 5 pages" off the log — the one check that says the installed
+    // binary found its pdfium. See `bundle.yml`.
+    let opened = path.as_deref().map(render::open);
+    match (&path, &opened) {
+        (Some(path), Some(Ok(document))) => {
+            println!("reader: {} pages in {path}", document.pages())
+        }
+        (Some(path), Some(Err(render::Refusal::Locked))) => {
+            println!("reader: {path} is locked — the window will ask for the password")
+        }
+        (Some(path), Some(Err(err))) => {
+            eprintln!("{err}");
+            if named.is_some() && !std::path::Path::new(path).exists() {
                 eprintln!("Run it with no path at all to open whatever you were reading last.");
             }
             std::process::exit(1);
         }
-        None => println!("reader: nothing to open — the start screen"),
+        _ => println!("reader: nothing to open — the start screen"),
     }
 
     // Where the launch window's size waits until the app goes. See the
@@ -146,9 +153,9 @@ fn main() {
     // Each is placed as it is made, so the second cascades off the first —
     // the app has to remember the spots instead, because showing a window on
     // macOS moves it and its windows are shown later.
-    let launch = match path.as_deref() {
-        Some(path) => session_maker.window(path),
-        None => session_maker.empty_window(),
+    let launch = match (path.as_deref(), opened) {
+        (Some(path), Some(opened)) => session_maker.window_over(path, opened),
+        _ => session_maker.empty_window(),
     };
     if let Some(spec) = launch {
         windows.open(spec);

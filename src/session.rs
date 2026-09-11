@@ -73,7 +73,18 @@ impl Session {
     /// the app's own reason: two files arriving in the same instant must not
     /// both be handed to the same window.
     pub fn window(&self, path: &str) -> Option<WindowSpec> {
-        self.window_on(Some(path))
+        self.window_over(path, render::open(path))
+    }
+
+    /// The same, over what `render::open` already answered — for `main`,
+    /// which opens the launch document before the shell exists so that it can
+    /// say what it found, and must not pay to open it twice.
+    pub fn window_over(
+        &self,
+        path: &str,
+        opened: Result<Arc<dyn render::PageSource>, render::Refusal>,
+    ) -> Option<WindowSpec> {
+        self.window_on(Some(path), opened)
     }
 
     /// A window with nothing in it.
@@ -89,7 +100,7 @@ impl Session {
     /// one gesture — "Open in a new window…" under the document's own name,
     /// with the document already there.
     pub fn empty_window(&self) -> Option<WindowSpec> {
-        self.window_on(None)
+        self.window_on(None, Ok(render::nothing()))
     }
 
     /// One window, on a document or on nothing.
@@ -100,23 +111,26 @@ impl Session {
     /// what to hand the component. Everything else — the label, the mailbox,
     /// the config, the contexts — is the same because it is about a window
     /// rather than about a document.
-    fn window_on(&self, path: Option<&str>) -> Option<WindowSpec> {
+    fn window_on(
+        &self,
+        path: Option<&str>,
+        opened: Result<Arc<dyn render::PageSource>, render::Refusal>,
+    ) -> Option<WindowSpec> {
         // **A locked document makes a window rather than refusing one**, and
         // that is the whole of what the password prompt costs out here: the
         // window comes up empty with the question over it, because there is
         // nowhere else to ask. Every other refusal is still a line on the
         // terminal and no window at all — there is nothing a reader could do
         // about a file that is missing or is not a PDF.
-        let (document, asking) = match path {
-            Some(path) => match render::open(path) {
-                Ok(document) => (document, None),
-                Err(render::Refusal::Locked) => (render::nothing(), Some(path.to_string())),
-                Err(refused) => {
-                    eprintln!("{refused}");
-                    return None;
-                }
-            },
-            None => (render::nothing(), None),
+        let (document, asking) = match (path, opened) {
+            (_, Ok(document)) => (document, None),
+            (Some(path), Err(render::Refusal::Locked)) => {
+                (render::nothing(), Some(path.to_string()))
+            }
+            (_, Err(refused)) => {
+                eprintln!("{refused}");
+                return None;
+            }
         };
         // …and until it is answered this window is showing *nothing*, which is
         // what it is: the desk, the restore list and the window's own title

@@ -177,9 +177,9 @@ jobs:
       # a PDF.
       #
       # So: install what was just built, the way somebody would, and open a
-      # document with it. `--quit` exits after five seconds, and the line it
-      # prints — `reader: 5 pages in …` — comes out *before any window*, which
-      # is what makes this runnable on a machine with no screen and no GPU. It
+      # document with it. The line it prints — `reader: 5 pages in …` — comes
+      # out *before any window*, which is what makes this runnable on a
+      # machine with no screen and no GPU. It
       # is deliberately not an exit-code check: a headless runner is not a
       # desktop, and a window that fails to come up here says nothing about one
       # that comes up there. What it does say is that the installed files can
@@ -206,15 +206,14 @@ jobs:
 
           # Opens the document, or says what came out instead.
           #
-          # **It kills what it starts.** `--quit` asks the reader to leave after
-          # five seconds, and a reader that cannot get a window may never get
-          # as far as reading the request — which on the Windows runner was a
-          # step that hung until the job was cancelled two hours later. Thirty
-          # seconds, then the axe; what is being asserted is the line, and the
-          # line is printed in the first second.
+          # **It kills what it starts.** A reader that cannot get a window may
+          # never exit on its own — which on the Windows runner was a step that
+          # hung until the job was cancelled two hours later. Thirty seconds,
+          # then the axe; what is being asserted is the line, and the line is
+          # printed in the first second.
           opens() {
             echo "--- $*"
-            "$@" --quit 5 "$document" > smoke.log 2>&1 &
+            "$@" "$document" > smoke.log 2>&1 &
             local pid=$!
             for _ in $(seq 1 30); do
               kill -0 "$pid" 2>/dev/null || break

@@ -156,36 +156,52 @@ fn gap(value: f64, start: f64, length: f64) -> f64 {
 /// The word the caret is in, as a range — or the caret twice over, when it is
 /// not in one.
 ///
-/// This is what a double click means, and the definition of "word" is the
-/// blunt one: a run of characters that are not whitespace. A browser's is
-/// subtler (it knows about punctuation, and about languages that do not put
-/// spaces between words), and matching it exactly would mean carrying the
-/// Unicode word-break tables for a gesture that is a convenience. What this
-/// gets wrong is the trailing comma, which a browser leaves out and this takes
-/// in.
+/// This is what a double click means, and the definition of "word" is a
+/// browser's near enough: a run of letters and digits, with an apostrophe
+/// allowed inside it so that "don't" is one word. Punctuation is not part of
+/// the word beside it — the comma, the full stop, the em dash — and a double
+/// click on a punctuation mark takes that mark alone. Languages that do not
+/// put spaces between words are still one run, because matching the Unicode
+/// word-break tables would be a lot to carry for a gesture that is a
+/// convenience.
 pub fn words_around(text: &PageText, caret: usize) -> (usize, usize) {
     let len = text.chars.len();
     if len == 0 {
         return (0, 0);
     }
+    let chars = &text.chars;
+    let wordy = |at: usize| {
+        chars[at].is_alphanumeric()
+            || (matches!(chars[at], '\'' | '\u{2019}')
+                && at > 0
+                && at + 1 < len
+                && chars[at - 1].is_alphanumeric()
+                && chars[at + 1].is_alphanumeric())
+    };
     // The caret sits between characters, so the one it is "in" is the one
-    // before it when the one after is a space — a click at the end of a word
-    // means that word rather than the gap after it.
+    // before it when the one after is not a word — a click at the end of a
+    // word means that word rather than the comma or the gap after it.
     let at = caret.min(len - 1);
-    let at = if text.chars[at].is_whitespace() && at > 0 && !text.chars[at - 1].is_whitespace() {
+    let at = if at > 0
+        && !wordy(at)
+        && (wordy(at - 1) || chars[at].is_whitespace() && !chars[at - 1].is_whitespace())
+    {
         at - 1
     } else {
         at
     };
-    if text.chars[at].is_whitespace() {
+    if chars[at].is_whitespace() {
         return (caret, caret);
     }
+    if !wordy(at) {
+        return (at, at + 1);
+    }
     let mut from = at;
-    while from > 0 && !text.chars[from - 1].is_whitespace() {
+    while from > 0 && wordy(from - 1) {
         from -= 1;
     }
     let mut to = at + 1;
-    while to < len && !text.chars[to].is_whitespace() {
+    while to < len && wordy(to) {
         to += 1;
     }
     (from, to)
@@ -393,6 +409,31 @@ mod tests {
         };
         assert_eq!(sweep.range_on(5, 100), None);
         assert_eq!(sweep.range_on(4, 100), Some((0, 100)));
+    }
+
+    #[test]
+    fn a_word_stops_at_punctuation() {
+        let chars: Vec<char> = "end, don\u{2019}t stop\u{2014}now.".chars().collect();
+        let boxes = vec![
+            Rect {
+                left: 0.0,
+                top: 0.0,
+                width: 1.0,
+                height: 1.0
+            };
+            chars.len()
+        ];
+        let text = PageText { chars, boxes };
+        // "end" with the caret before the comma, and on the comma's near side.
+        assert_eq!(words_around(&text, 3), (0, 3));
+        assert_eq!(words_around(&text, 1), (0, 3));
+        // The comma itself, from its far side.
+        assert_eq!(words_around(&text, 4), (3, 4));
+        // The apostrophe stays inside the word.
+        assert_eq!(words_around(&text, 7), (5, 10));
+        // The em dash divides "stop" from "now", and the full stop is left out.
+        assert_eq!(words_around(&text, 13), (11, 15));
+        assert_eq!(words_around(&text, 18), (16, 19));
     }
 
     #[test]

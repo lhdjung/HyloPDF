@@ -567,6 +567,14 @@ body { margin: 0;
   background: var(--found); color: var(--found-ink); border-color: var(--accent);
 }
 .of { color: var(--faint); font-size: 13.5px; }
+/* The count as a button, where the document numbers itself: the same text,
+   a hover to say it can be pressed, and nothing else. */
+.of.choice {
+  height: 28px; padding: 0 6px; border: 1px solid transparent; border-radius: 7px;
+  background: none; font: inherit; font-size: 13.5px; color: var(--faint); cursor: pointer;
+}
+.of.choice:hover, .of.choice.on { color: var(--text); border-color: var(--bar-line); }
+.menu.numbering { left: 0; }
 
 /* **The find bar is the app's own card, and it was a row of the column
    here.** A row is simpler — nothing is over anything, and Blitz has no

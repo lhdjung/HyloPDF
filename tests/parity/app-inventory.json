@@ -402,6 +402,23 @@
         "kind": "rule"
       },
       {
+        "kind": "heading",
+        "label": "Page numbers"
+      },
+      {
+        "kind": "item",
+        "label": "As printed on the page",
+        "icon": null
+      },
+      {
+        "kind": "item",
+        "label": "Place in the file",
+        "icon": null
+      },
+      {
+        "kind": "rule"
+      },
+      {
         "kind": "item",
         "label": "All settings…",
         "icon": null
@@ -519,6 +536,7 @@
           "Zoom",
           "Come back to where I stopped",
           "Open what I was reading",
+          "Page numbers",
           "Show page count while scrolling"
         ],
         "groups": [],

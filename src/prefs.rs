@@ -332,6 +332,7 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
         held.store.flag("reopen_last_document"),
         held.store.flag("show_page_pill"),
     );
+    let printed = held.numbering_printed();
     drop(held);
 
     rsx! {
@@ -433,6 +434,18 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
             label: "Open what I was reading",
             note: "Start on the document you were reading when you last quit. Closing a document yourself means you are done with it, and it is not reopened.",
             Toggle { on: reopen, onchange: move |on| viewer.write().set_flag("reopen_last_document", on) }
+        }
+        Field {
+            label: "Page numbers",
+            note: "A journal offprint is printed 407 to 425 and a book's front matter is numbered i, ii, iii. \u{201c}As printed\u{201d} calls each page what the paper does, so a citation finds it; \u{201c}place in the file\u{201d} counts 1 to the end.",
+            Segmented {
+                options: vec![
+                    ("printed".into(), "As printed (default)".into()),
+                    ("position".into(), "Place in the file".into()),
+                ],
+                chosen: if printed { "printed".to_string() } else { "position".to_string() },
+                onchange: move |value: String| viewer.write().set_page_numbering(value == "printed"),
+            }
         }
         Field {
             label: "Show page count while scrolling",

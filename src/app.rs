@@ -804,6 +804,9 @@ pub enum Menu {
     /// Under the cog: the switches somebody reaches for while reading, and
     /// the way to the window that holds all of them. `showSettingsMenu`.
     Settings,
+    /// Under "of 425": whether a page is called by the number printed on it
+    /// or by where it falls in the file. Only where the two differ.
+    Numbering,
 }
 
 impl Menu {
@@ -816,6 +819,7 @@ impl Menu {
             Menu::Theme => "Theme",
             Menu::View => "View",
             Menu::Settings => "Settings",
+            Menu::Numbering => "Page numbers",
         }
     }
 }
@@ -1931,6 +1935,33 @@ impl Viewer {
 
     pub fn set_page_pill(&mut self, on: bool) {
         self.store.set(vec![("show_page_pill".into(), json!(on))]);
+    }
+
+    /// Whether a page is called by the number printed on it rather than by
+    /// its place in the file. The setting is `page_numbering`.
+    pub fn numbering_printed(&self) -> bool {
+        self.store.text("page_numbering") != "position"
+    }
+
+    pub fn set_page_numbering(&mut self, printed: bool) {
+        let value = if printed { "printed" } else { "position" };
+        self.store.set(vec![("page_numbering".into(), json!(value))]);
+    }
+
+    /// Whether this document has numbers of its own to show — which is when
+    /// the choice above is worth offering at all.
+    pub fn has_own_numbering(&self) -> bool {
+        !self.labels.is_empty()
+    }
+
+    /// The labels in force: the document's own, unless the reader has asked
+    /// for positions, in which case there are none.
+    fn labels(&self) -> &[String] {
+        if self.numbering_printed() {
+            &self.labels
+        } else {
+            &[]
+        }
     }
 
     /// Read `keys.toml` again, exactly as the launch did.
@@ -3649,7 +3680,7 @@ impl Viewer {
 
     /// Whether this document numbers its pages its own way.
     pub fn has_labels(&self) -> bool {
-        !self.labels.is_empty()
+        !self.labels().is_empty()
     }
 
     /* ---------------------------------------------------- the toolbar peek */
@@ -3746,7 +3777,7 @@ impl Viewer {
 
     /// What to call a page, one-based, when showing it to a reader.
     pub fn label(&self, page: usize) -> String {
-        match self.labels.get(page.wrapping_sub(1)) {
+        match self.labels().get(page.wrapping_sub(1)) {
             Some(label) if !label.is_empty() => label.clone(),
             _ => page.to_string(),
         }
@@ -3765,7 +3796,7 @@ impl Viewer {
         }
         let folded = wanted.to_lowercase();
         if let Some(at) = self
-            .labels
+            .labels()
             .iter()
             .position(|label| label.to_lowercase() == folded)
         {
@@ -3795,6 +3826,20 @@ impl Viewer {
             return "0".to_string();
         }
         straight_run(&self.label(1), &self.label(pages), pages).unwrap_or_else(|| pages.to_string())
+    }
+
+    /// What the readout would say under each numbering — "407 of 425" and
+    /// "1 of 19" — for the menu that chooses between them.
+    pub fn numbering_choices(&self) -> (String, String) {
+        let (page, pages) = (self.page(), self.pages());
+        let printed = match self.labels.get(page.wrapping_sub(1)) {
+            Some(label) if !label.is_empty() => label.clone(),
+            _ => page.to_string(),
+        };
+        let first = self.labels.first().cloned().unwrap_or_default();
+        let last = self.labels.last().cloned().unwrap_or_default();
+        let count = straight_run(&first, &last, pages).unwrap_or_else(|| pages.to_string());
+        (format!("{printed} of {count}"), format!("{page} of {pages}"))
     }
 
     /// What the field in the toolbar has in it.
@@ -5721,6 +5766,9 @@ pub fn Reader(
     let scroll_mode = held.layout.mode;
     let recolor_images = held.recolor_images();
     let page_pill = held.page_pill();
+    let numbering_printed = held.numbering_printed();
+    let own_numbering = held.has_own_numbering();
+    let (numbering_as_printed, numbering_by_position) = held.numbering_choices();
     let page_field = held.page_field();
     // How wide the page box is: padding, border and the number in it, with a
     // floor so page 1 of a pamphlet is not a slot. Blitz cannot centre an
@@ -6750,7 +6798,44 @@ pub fn Reader(
                             "{page_field}"
                         }
                         }
-                        span { class: "of", "of {pages_text}" }
+                        // **The count is a menu where the document numbers
+                        // itself.** "407 of 425" and "1 of 19" are both true of
+                        // an offprint, and which a reader wants depends on
+                        // whether they hold a citation or a thumb: the choice
+                        // hangs off the count, which is the thing it changes.
+                        if own_numbering {
+                            div { class: "anchor",
+                                button {
+                                    class: if menu == Some(Menu::Numbering) { "of choice on" } else { "of choice" },
+                                    "aria-label": "Page numbers",
+                                    onmousedown: move |event| event.stop_propagation(),
+                                    onclick: move |_| viewer.write().show_menu(Menu::Numbering),
+                                    "of {pages_text}"
+                                }
+                                if menu == Some(Menu::Numbering) {
+                                    div { class: "menu numbering", role: "menu", "aria-label": "Page numbers",
+                                        onmousedown: move |event| event.stop_propagation(),
+                                        div { class: "menu-section", "Call this page" }
+                                        button {
+                                            class: if numbering_printed { "menu-item on" } else { "menu-item" },
+                                            onclick: move |_| { viewer.write().set_page_numbering(true); viewer.write().close_menu(); },
+                                            span { class: "menu-tick", {if numbering_printed { "✓" } else { "" }} }
+                                            span { class: "menu-label", "{numbering_as_printed}" }
+                                            span { class: "menu-key", "As printed" }
+                                        }
+                                        button {
+                                            class: if !numbering_printed { "menu-item on" } else { "menu-item" },
+                                            onclick: move |_| { viewer.write().set_page_numbering(false); viewer.write().close_menu(); },
+                                            span { class: "menu-tick", {if !numbering_printed { "✓" } else { "" }} }
+                                            span { class: "menu-label", "{numbering_by_position}" }
+                                            span { class: "menu-key", "Place in the file" }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            span { class: "of", "of {pages_text}" }
+                        }
                     }
                     button {
                         class: "chip page-next",
@@ -7175,6 +7260,21 @@ pub fn Reader(
                                         on: page_pill,
                                         onchange: move |on: bool| viewer.write().set_page_pill(on),
                                     }
+                                }
+                                div { class: "menu-rule" }
+                                div { class: "menu-section", "Page numbers" }
+                                button {
+                                    class: if numbering_printed { "menu-item on" } else { "menu-item" },
+                                    onclick: move |_| { viewer.write().set_page_numbering(true); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", {if numbering_printed { "✓" } else { "" }} }
+                                    span { class: "menu-label", "As printed on the page" }
+                                    span { class: "menu-key", "Default" }
+                                }
+                                button {
+                                    class: if !numbering_printed { "menu-item on" } else { "menu-item" },
+                                    onclick: move |_| { viewer.write().set_page_numbering(false); viewer.write().close_menu(); },
+                                    span { class: "menu-tick", {if !numbering_printed { "✓" } else { "" }} }
+                                    span { class: "menu-label", "Place in the file" }
                                 }
                                 div { class: "menu-rule" }
                                 button {

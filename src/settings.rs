@@ -107,6 +107,9 @@ pub fn defaults() -> Settings {
     // palette is six independent keys rather than one array, which is also
     // what keeps them each independently rebindable the way every setting
     // here already is.
+    // How a page is called: by the number printed on it, or by where it
+    // falls in the file. See `Viewer::labels`.
+    s.insert("page_numbering".into(), json!("printed"));
     s.insert("markup_color_1".into(), json!("#ffd60a"));
     s.insert("markup_color_2".into(), json!("#7bed9f"));
     s.insert("markup_color_3".into(), json!("#ff6b6b"));

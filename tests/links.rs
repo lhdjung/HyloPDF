@@ -380,6 +380,26 @@ fn the_numbers_printed_on_an_offprint_are_read_off_the_paper() {
 }
 
 #[test]
+fn the_count_is_a_menu_that_chooses_the_numbering() {
+    let mut reader = Reader::open_with(&fixture::offprint_pdf(), Options::default());
+    reader.click(".of.choice");
+    let rows = reader.text_all(".menu.numbering .menu-item");
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows[0].contains("407 of 425") && rows[1].contains("1 of 19"), "{rows:?}");
+    reader.click_nth(".menu.numbering .menu-item", 1);
+    assert_eq!(reader.state().label, "1");
+    assert_eq!(reader.harness.text_content(".of").trim(), "of 19");
+    // And typing a number now means a place in the file.
+    reader.press("p");
+    reader.type_text("6");
+    reader.press("Enter");
+    assert!(reader.state().mounted.contains(&6), "{:?}", reader.state().mounted);
+    // A document with nothing to choose between offers no menu.
+    let reader = Reader::open_with(&fixture::contents_pdf(), Options::default());
+    assert!(reader.harness.query(".of.choice").is_none());
+}
+
+#[test]
 fn a_document_that_numbers_its_pages_1_to_n_says_nothing() {
     // The commoner case by a long way, and the one the app drops the list
     // for: `state().page` is the position, and it is also the label.

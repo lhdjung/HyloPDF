@@ -386,6 +386,11 @@ impl Recolorer {
     /// up.
     pub fn select(&self, page: &mut PageTexture, runs: &[[f32; 4]], ink: Rgb, paper: Rgb) {
         let mut wanted = pack(runs, page.width, page.height);
+        // A device has a ceiling on a texture's side, and the backup is one.
+        // Shelving keeps the grid under it for any page of type; a run that
+        // still lands past it goes unpainted rather than taking the window.
+        let limit = self.device.device.limits().max_texture_dimension_2d;
+        wanted.retain(|run| run.span[1] + run.span[3] <= limit);
         for run in &mut wanted {
             run.ink = ink;
             run.paper = paper;
@@ -422,9 +427,8 @@ impl Recolorer {
             return;
         }
 
-        // The runs stacked one above another: as wide as the widest and as tall
-        // as all of them, which for a paragraph of type is about a hundredth of
-        // the page.
+        // The runs on shelves no wider than the page, which for a paragraph
+        // of type is about a hundredth of it.
         let (across, down) = grid(&wanted);
         let kept = self.device.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("page: under the selection"),
@@ -618,10 +622,14 @@ fn copy(
     );
 }
 
-/// How big the dispatch grid is: as wide as the widest run and as tall as all
-/// of them, because that is how [`stack`] lays them out.
+/// How big the dispatch grid is: the far edge of the runs [`stack`] laid out.
 fn grid(runs: &[Run]) -> (u32, u32) {
-    let across = runs.iter().map(|run| run.span[2]).max().unwrap_or(1).max(1);
+    let across = runs
+        .iter()
+        .map(|run| run.span[0] + run.span[2])
+        .max()
+        .unwrap_or(1)
+        .max(1);
     let down = runs
         .iter()
         .map(|run| run.span[1] + run.span[3])
@@ -711,13 +719,26 @@ fn minus(run: Run, over: &Run) -> Vec<Run> {
     out
 }
 
-/// Give each run its place in the grid: one above another, in order.
-fn stack(runs: &mut [Run]) {
-    let mut next = 0u32;
+/// Give each run its place in the grid: left to right along a shelf no wider
+/// than the page, and a new shelf under it when the next one does not fit.
+///
+/// They were stacked one above another, and the backup texture a selection
+/// takes is the grid's size — so a whole page of type, whose lines add up to
+/// more than the 8192 texels a device promises, was a texture wgpu refused
+/// and a panic that took the window with it. Shelves keep the grid about the
+/// page's own shape: the area is the same, the height is a fraction of it.
+fn stack(runs: &mut [Run], width: u32) {
+    let (mut x, mut y, mut shelf) = (0u32, 0u32, 0u32);
     for run in runs.iter_mut() {
-        run.span[0] = 0;
-        run.span[1] = next;
-        next += run.span[3];
+        if x > 0 && x + run.span[2] > width {
+            x = 0;
+            y += shelf;
+            shelf = 0;
+        }
+        run.span[0] = x;
+        run.span[1] = y;
+        x += run.span[2];
+        shelf = shelf.max(run.span[3]);
     }
 }
 
@@ -745,7 +766,7 @@ fn runs_over(regions: &[Region], width: u32, height: u32) -> Vec<Run> {
         })
         .collect();
     let mut runs = disjoint(runs);
-    stack(&mut runs);
+    stack(&mut runs, width);
     runs
 }
 
@@ -774,7 +795,7 @@ fn pack(runs: &[[f32; 4]], width: u32, height: u32) -> Vec<Run> {
         })
         .collect();
     let mut packed = disjoint(packed);
-    stack(&mut packed);
+    stack(&mut packed, width);
     // A selection reads from the backup, so where it came from is where it was
     // put — which is its own place in the grid.
     for run in &mut packed {
@@ -788,5 +809,31 @@ fn pack(runs: &[[f32; 4]], width: u32, height: u32) -> Vec<Run> {
 fn as_bytes(values: &[f32]) -> &[u8] {
     unsafe {
         std::slice::from_raw_parts(values.as_ptr() as *const u8, std::mem::size_of_val(values))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A page of lines stacked one above another overran a device's texture
+    /// side; on shelves the grid stays about the page's own shape.
+    #[test]
+    fn runs_are_shelved_within_the_page_width() {
+        let mut runs: Vec<Run> = (0..100)
+            .map(|at| Run {
+                span: [0, 0, 400, 100],
+                on: [0, at * 100],
+                from: [0, 0],
+                ink: [0; 3],
+                paper: [0; 3],
+            })
+            .collect();
+        stack(&mut runs, 1000);
+        let (across, down) = grid(&runs);
+        assert_eq!(across, 800);
+        assert_eq!(down, 5000);
+        assert_eq!(runs[1].span[..2], [400, 0]);
+        assert_eq!(runs[2].span[..2], [0, 100]);
     }
 }

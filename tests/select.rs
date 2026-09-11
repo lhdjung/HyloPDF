@@ -204,6 +204,23 @@ fn a_second_click_takes_the_word_under_it() {
 }
 
 #[test]
+fn a_double_click_survives_the_twitch_before_the_release() {
+    // A real mouse moves a pixel between the second press and its release,
+    // and that move used to cut the word back to the letters before the
+    // pointer.
+    let mut reader = prose();
+    reader.double_click_unsteadily_on(1, (0.20, LINE));
+    assert_eq!(selected(&mut reader), "needle");
+}
+
+#[test]
+fn a_third_click_takes_the_line() {
+    let mut reader = prose();
+    reader.triple_click_on(1, (0.20, LINE));
+    assert_eq!(selected(&mut reader), "A needle in the first page.");
+}
+
+#[test]
 fn escape_puts_the_selection_down() {
     let mut reader = prose();
     reader.sweep_page(1, (0.10, LINE), (0.55, LINE));

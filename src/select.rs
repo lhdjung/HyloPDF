@@ -191,6 +191,56 @@ pub fn words_around(text: &PageText, caret: usize) -> (usize, usize) {
     (from, to)
 }
 
+/// What a sweep takes hold of at a time: one character, one word, or one
+/// line — which is a first, a second and a third click on the same spot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unit {
+    Char,
+    Word,
+    Line,
+}
+
+/// The unit the caret is in, as a range. See [`words_around`] and
+/// [`line_around`]; a character is the caret twice over, so a plain sweep
+/// goes through the same door as the others.
+pub fn unit_around(text: &PageText, caret: usize, unit: Unit) -> (usize, usize) {
+    match unit {
+        Unit::Char => (caret, caret),
+        Unit::Word => words_around(text, caret),
+        Unit::Line => line_around(text, caret),
+    }
+}
+
+/// The line the caret is on, as a range — what a triple click means.
+///
+/// A line is what pdfium says it is: the run between the `\r\n` it puts at
+/// the end of each one. The break itself is left out, so a copied line does
+/// not end in a newline.
+pub fn line_around(text: &PageText, caret: usize) -> (usize, usize) {
+    let len = text.chars.len();
+    if len == 0 {
+        return (0, 0);
+    }
+    let is_break = |c: char| c == '\r' || c == '\n';
+    let mut at = caret.min(len - 1);
+    // A caret at the end of a line sits on its break; it means that line.
+    while at > 0 && is_break(text.chars[at]) {
+        at -= 1;
+    }
+    if is_break(text.chars[at]) {
+        return (caret, caret);
+    }
+    let mut from = at;
+    while from > 0 && !is_break(text.chars[from - 1]) {
+        from -= 1;
+    }
+    let mut to = at + 1;
+    while to < len && !is_break(text.chars[to]) {
+        to += 1;
+    }
+    (from, to)
+}
+
 /// A range of a page's characters, as the reader would paste it.
 ///
 /// Two things are done to it and no more. The line endings pdfium reports are

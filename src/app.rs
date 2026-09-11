@@ -56,7 +56,7 @@ use crate::page::{Chosen, PageWidget};
 use crate::palette::Palette;
 use crate::render::{Heading, Link, PageSource, PageText, Rect, Target};
 use crate::search::{Options as Find, Search};
-use crate::select::{Selection, Spot};
+use crate::select::{Selection, Spot, Unit};
 use crate::sidebar::{Column, Sidebar, Tab};
 use crate::store::Store;
 
@@ -1113,10 +1113,15 @@ pub struct Viewer {
     /// `None` outside a sweep, which root's `onmousemove` checks before
     /// touching the signal at all.
     sweep_from: Option<(f64, f64)>,
-    /// When and where the pointer last went down on a page, which is the whole
-    /// of what tells a second click from a first one. See
+    /// When and where the pointer last went down on a page, and how many times
+    /// in a row it has there, which is the whole of what tells a second click
+    /// from a first one and a third from a second. See
     /// [`Viewer::begin_sweep`].
-    pressed: Option<(std::time::Instant, f64, f64)>,
+    pressed: Option<(std::time::Instant, f64, f64, u8)>,
+    /// What the sweep under way takes hold of, and the unit it began on, so
+    /// that dragging on from a double click extends by words from that word
+    /// rather than by characters from wherever the pointer twitched to.
+    sweep_seed: (Unit, Spot, Spot),
     /// The scale a zoom gesture began at, while one is under way.
     ///
     /// A pinch is a stream rather than a step, and this is what makes the
@@ -1291,6 +1296,7 @@ impl Viewer {
             picking: None,
             pressed_on: None,
             sweep_from: None,
+            sweep_seed: (Unit::Char, Spot { page: 0, index: 0 }, Spot { page: 0, index: 0 }),
             pressed: None,
             zoom_from: None,
             zoom_token: 0,
@@ -2536,10 +2542,15 @@ impl Viewer {
     /// [`Viewer::sweep_from`].
     ///
     /// **A second press in the same place is a double click and takes the word
-    /// under it**, counted here rather than heard about: `dblclick` is a
-    /// default action of `pointerup`, and a default action never runs over a
-    /// custom widget. The numbers are Blitz's own, so a page and a text field
-    /// in one window answer a double click alike.
+    /// under it, a third takes the line**, counted here rather than heard
+    /// about: `dblclick` is a default action of `pointerup`, and a default
+    /// action never runs over a custom widget. The numbers are Blitz's own, so
+    /// a page and a text field in one window answer a double click alike.
+    ///
+    /// The unit is kept for the moves that follow: a mouse held still is not
+    /// still, and the half-pixel twitch between the second press and its
+    /// release used to arrive as a sweep that cut the word back to the letters
+    /// before the pointer.
     pub fn begin_sweep(&mut self, page: usize, on: (f64, f64), client: (f64, f64)) {
         let Some(index) = page.checked_sub(1) else {
             return;
@@ -2551,23 +2562,28 @@ impl Viewer {
             client.0 - on.0 - area.left,
             client.1 - on.1 - area.top + self.scroll_top,
         ));
-        let again = self.pressed.is_some_and(|(when, x, y)| {
-            when.elapsed() < DOUBLE_CLICK
-                && (x - client.0).abs() <= 2.0
-                && (y - client.1).abs() <= 2.0
-        });
-        self.pressed = Some((std::time::Instant::now(), client.0, client.1));
+        let count = match self.pressed {
+            Some((when, x, y, count))
+                if when.elapsed() < DOUBLE_CLICK
+                    && (x - client.0).abs() <= 2.0
+                    && (y - client.1).abs() <= 2.0 =>
+            {
+                count + 1
+            }
+            _ => 1,
+        };
+        self.pressed = Some((std::time::Instant::now(), client.0, client.1, count));
         // Where the press landed on the page, for [`Viewer::end_sweep`] to
         // ask what is under it when nothing was swept.
         self.pressed_on = Some((page, on.0, on.1));
         // A press anywhere puts away whatever the last one opened.
         self.mark_open = None;
-        if again {
-            self.sweep_word(page, on);
-            return;
-        }
-        let spot = self.spot_on(index, on.0, on.1);
-        self.selection = Some(Selection::at(spot));
+        let unit = match count {
+            1 => Unit::Char,
+            2 => Unit::Word,
+            _ => Unit::Line,
+        };
+        self.sweep_unit(page, on, unit);
         // A new sweep is a new passage; the swatches offered for the last one
         // go with it.
         self.markup_at = None;
@@ -2588,9 +2604,20 @@ impl Viewer {
             return;
         };
         let head = self.spot_on(index, on_x, on_y);
-        if head == sweep.head {
+        // Whole units, from the one the sweep began on: past its start the
+        // selection runs back from the unit's end, otherwise on from its start.
+        let (unit, from, to) = self.sweep_seed;
+        let text = self.text_on(index + 1);
+        let (before, after) = crate::select::unit_around(&text, head.index, unit);
+        let (anchor, head) = if head < from {
+            (to, Spot { page: head.page, index: before })
+        } else {
+            (from, Spot { page: head.page, index: after })
+        };
+        if head == sweep.head && anchor == sweep.anchor {
             return;
         }
+        sweep.anchor = anchor;
         sweep.head = head;
         self.selection = Some(sweep);
     }
@@ -2659,31 +2686,22 @@ impl Viewer {
         self.sweep_from.is_some()
     }
 
-    /// The word under a point, which is what a second click on it means.
+    /// The unit under a point — the word a second click means, the line a
+    /// third does, or the caret itself for a first.
     ///
-    /// The anchor is left at the *start* of the word and the head at its end,
+    /// The anchor is left at the *start* of the unit and the head at its end,
     /// so a reader who goes on dragging extends from the word rather than from
     /// wherever inside it they happened to press.
-    pub fn sweep_word(&mut self, page: usize, on: (f64, f64)) {
+    fn sweep_unit(&mut self, page: usize, on: (f64, f64), unit: Unit) {
         let Some(index) = page.checked_sub(1) else {
             return;
         };
         let (x, y) = self.layout.unplace_on(index, on.0, on.1);
         let text = self.text_on(index + 1);
-        let (from, to) = crate::select::words_around(&text, crate::select::caret_at(&text, x, y));
-        if from == to {
-            return;
-        }
-        self.selection = Some(Selection {
-            anchor: Spot {
-                page: index + 1,
-                index: from,
-            },
-            head: Spot {
-                page: index + 1,
-                index: to,
-            },
-        });
+        let (from, to) = crate::select::unit_around(&text, crate::select::caret_at(&text, x, y), unit);
+        let (anchor, head) = (Spot { page, index: from }, Spot { page, index: to });
+        self.sweep_seed = (unit, anchor, head);
+        self.selection = Some(Selection { anchor, head });
     }
 
     /// Where a caret goes for a point in a page's box.

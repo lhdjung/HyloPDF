@@ -1043,6 +1043,31 @@ impl Reader {
         self.settle();
     }
 
+    /// Three clicks in the same place, quickly enough to be one gesture, which
+    /// is what selecting a line is.
+    pub fn triple_click_on(&mut self, page: usize, at: (f32, f32)) {
+        let (x, y) = self.point_on(page, at);
+        self.harness.click_at(x, y);
+        self.harness.click_at(x, y);
+        self.harness.click_at(x, y);
+        self.give_keyboard_back();
+        self.settle();
+    }
+
+    /// A double click made with a mouse rather than a script: each press is
+    /// followed by a move of a pixel before the release, because a hand
+    /// holding a mouse still is not holding it still.
+    pub fn double_click_unsteadily_on(&mut self, page: usize, at: (f32, f32)) {
+        let (x, y) = self.point_on(page, at);
+        for _ in 0..2 {
+            self.harness.mouse_down_at(x, y);
+            self.harness.move_mouse_to(x + 1.0, y);
+            self.harness.mouse_up_at(x + 1.0, y);
+        }
+        self.give_keyboard_back();
+        self.settle();
+    }
+
     /// Where a point given as fractions of a page's box is, in the window.
     ///
     /// The page is found by its `data-page` attribute, which is the one thing

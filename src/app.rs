@@ -2060,6 +2060,14 @@ impl Viewer {
         }
     }
 
+    /// How tall the thumbnail panel is: the row the sidebar shares with the
+    /// document, less the tab strip above it. Everything that scrolls the
+    /// column asks this rather than the viewport, or the foot of the last
+    /// thumbnail is unreachable — see [`crate::sidebar::TABS`].
+    pub fn thumb_panel(&self) -> f64 {
+        (self.layout.viewport.height - crate::sidebar::TABS).max(1.0)
+    }
+
     /// Lay the thumbnail column out for the panel as it stands.
     fn relay_column(&mut self) {
         let sizes: Vec<Size> = (0..self.layout.pages())
@@ -2068,11 +2076,11 @@ impl Viewer {
         self.column = Column::new(&sizes, self.sidebar_width);
         self.thumb_scroll = self
             .thumb_scroll
-            .clamp(0.0, self.column.max_scroll(self.layout.viewport.height));
+            .clamp(0.0, self.column.max_scroll(self.thumb_panel()));
     }
 
     pub fn scroll_thumbs(&mut self, delta: f64) {
-        let height = self.layout.viewport.height;
+        let height = self.thumb_panel();
         self.thumb_scroll = (self.thumb_scroll + delta).clamp(0.0, self.column.max_scroll(height));
     }
 
@@ -2082,7 +2090,7 @@ impl Viewer {
         if !self.sidebar_open || self.tab != Tab::Pages {
             return;
         }
-        let height = self.layout.viewport.height;
+        let height = self.thumb_panel();
         if let Some(to) = self
             .column
             .reveal(self.page() - 1, self.thumb_scroll, height)

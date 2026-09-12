@@ -209,6 +209,41 @@ fn the_column_follows_the_document_and_stops_there() {
     );
 }
 
+/// **And the foot of the last one can be reached.** The column was scrolled
+/// against `layout.viewport.height`, which is the whole height of the row the
+/// panel and the document share — so the end of the list was the tab strip's
+/// forty-two pixels short, and the last thumbnail's lower edge and its number
+/// were cut off on every document long enough to scroll. See
+/// `sidebar::TABS`.
+#[test]
+fn the_last_thumbnail_is_whole_at_the_end_of_the_column() {
+    let mut reader = book();
+    reader.press_chord("mod+b");
+    reader.click(".tab[data-tab='pages']");
+    // As far as it goes: `scroll_thumbs` clamps, so one wheel is enough.
+    reader.wheel_over(".panel.thumb-column", 1_000_000.0);
+    let last = *reader.state().thumbs.last().expect("a thumbnail");
+    assert_eq!(
+        last,
+        reader.state().pages,
+        "the column reaches the end of the book"
+    );
+
+    let panel = reader.harness.layout_rect(".panel.thumb-column");
+    let number = *reader
+        .harness
+        .query_all(".thumb-number")
+        .last()
+        .expect("a page number under the last thumbnail");
+    let rect = reader.harness.layout_rect_of(number);
+    assert!(
+        rect.y + rect.height <= panel.y + panel.height + 0.5,
+        "the last number ends at {}, the panel at {}",
+        rect.y + rect.height,
+        panel.y + panel.height,
+    );
+}
+
 #[test]
 fn a_thumbnail_is_a_picture_of_its_page() {
     let mut reader = book();

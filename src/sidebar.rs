@@ -75,6 +75,19 @@ pub const PAD: f64 = 10.0;
 const LABEL: f64 = 18.0;
 const GAP: f64 = 10.0;
 
+/// How tall the tab strip is: `.tabs` is 8px above a 28px `.tab` and 6px
+/// below it.
+///
+/// **The panel is the sidebar less this, and that is what the column has to
+/// be scrolled against.** It was scrolled against `layout.viewport.height`,
+/// which is the whole height of the row the sidebar and the document share —
+/// so `max_scroll` was forty-two pixels short and the last thumbnail's foot
+/// and its number could not be reached, on any document long enough to
+/// scroll. Stated rather than measured because `get_client_rect` panics
+/// inside the borrow every handler holds; see `Reader`'s own note on the
+/// viewport.
+pub const TABS: f64 = 42.0;
+
 /// How much of a screen of thumbnails is kept mounted either side of the one
 /// being looked at. `OVERSCAN` in `layout.rs` is 0.6 of a viewport and does
 /// the same job for the document; this is smaller because a row is cheap to
@@ -259,7 +272,7 @@ pub fn Sidebar(mut viewer: Signal<Viewer>, chosen: Chosen) -> Element {
     // one of them, and a document's outline can be long.
     let current_heading = heading_for(&headings, page);
     let thumb_scroll = held.thumb_scroll;
-    let panel_height = held.layout.viewport.height;
+    let panel_height = held.thumb_panel();
     let mounted = column.mounted(thumb_scroll, panel_height);
     // The third tab is here only while the find bar is: a Results tab with
     // nothing behind it is a tab that answers a question nobody asked.

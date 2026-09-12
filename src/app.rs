@@ -4115,18 +4115,6 @@ impl Viewer {
         }
     }
 
-    /// Put the bar away and nothing else: the query, the matches and the
-    /// panel showing them all stay. This is what a press on the document
-    /// does, and it used to be [`Viewer::close_find`] — which took the
-    /// borrowed panel down too, so the page grew under the pointer as the
-    /// column went, and the sweep the press had begun was left measuring
-    /// against the old layout, putting a stray selection where nothing was
-    /// swept. The reader clicked into the document to use what the search
-    /// found; the list stays until Escape or the panel's own button.
-    pub fn dismiss_find(&mut self) {
-        self.find_open = false;
-    }
-
     /// Look for what is in the field. Returns the token of the scan it
     /// started, or `None` when there is nothing to scan — which is what the
     /// caller needs to know before spawning a task to drive it.
@@ -6214,7 +6202,8 @@ pub fn Reader(
             // for the reason the menu buttons do.
             // And a press past the find bar puts *that* away: anything below
             // the toolbar is somewhere else, and going there is done with the
-            // search. Only the bar, though — see [`Viewer::dismiss_find`].
+            // search — the results panel it borrowed goes with it, or every
+            // search would end with a panel to be closed by hand.
             //
             // The app spells its exceptions as a selector (`FIND_KEEPS_OPEN`)
             // and a handler here has no `closest` to ask with. So the top
@@ -6245,7 +6234,14 @@ pub fn Reader(
                 // of, so every press that reaches the root is past it. That is
                 // `#shell[data-toolbar="hidden"]` in the app saying the same.
                 if find && event.client_coordinates().y > strip {
-                    viewer.write().dismiss_find();
+                    let mut held = viewer.write();
+                    held.close_find();
+                    // The page's own handler has already begun a sweep at
+                    // this press, measured against a layout the panel's
+                    // closing has just changed: carried on, it selected a
+                    // stray patch near the pointer. The press was spent on
+                    // the bar.
+                    held.clear_selection();
                 }
             },
             onmousemove: move |event| {

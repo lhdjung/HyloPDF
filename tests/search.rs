@@ -533,15 +533,14 @@ fn the_bar_can_be_pressed_over_a_scrolled_document() {
 /// **Reaching past the bar puts it away**, which is `onFindOutside` in
 /// `main.ts`: a reader who has found what they came for and gone back to
 /// reading should not have a card sitting over the corner of the page for
-/// the rest of the session.
+/// the rest of the session — nor the panel the search borrowed, which most
+/// readers would otherwise have to close by hand after every search.
 ///
-/// **But only the bar.** The results moved into a panel the search borrows,
-/// and a click that took the panel down with the bar made the document grow
-/// under the pointer and left the sweep the press had begun measuring
-/// against the old layout — a stray selection where nothing was swept. So
-/// the list stays, and Escape or the panel's own button takes it down.
+/// **And the press is spent on that.** The page had begun a sweep at it,
+/// measured against a layout the panel's closing then changed, and carried
+/// on it selected a stray patch near the pointer.
 #[test]
-fn a_press_in_the_document_puts_the_find_bar_away_and_leaves_the_results() {
+fn a_press_in_the_document_puts_the_find_bar_and_its_panel_away() {
     let mut reader = searching();
     look_for(&mut reader, "needle");
     reader.click(".find-count");
@@ -549,10 +548,10 @@ fn a_press_in_the_document_puts_the_find_bar_away_and_leaves_the_results() {
     assert_eq!(reader.state().sidebar.as_deref(), Some("results"));
     reader.click(".viewer");
     assert_eq!(reader.state().find, None, "and reading closed it");
-    assert_eq!(
-        reader.state().sidebar.as_deref(),
-        Some("results"),
-        "the list it found stays where it was",
+    assert_eq!(reader.state().sidebar, None, "and the panel it borrowed");
+    assert!(
+        reader.harness.query_all(".selected").is_empty(),
+        "and nothing was selected by it",
     );
 }
 

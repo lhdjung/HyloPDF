@@ -83,6 +83,17 @@ pub fn defaults() -> Settings {
     // still appears while the bar is being dragged, whatever this says: see
     // `Viewer::pill_shown`.
     s.insert("show_page_pill".into(), json!(false));
+    // **Off by default.** A cursor that disappears is a cursor somebody looks
+    // for, and a reader who has not asked for it would reasonably think the
+    // app had lost the pointer. It is here because a pointer left sitting over
+    // a paragraph is a mark on the page, which is the one thing this app is
+    // trying not to put there — so it is worth having, and worth asking for.
+    s.insert("hide_cursor".into(), json!(false));
+    // …and how long it waits, which is the reader's too: a hand that rests on
+    // the mouse between paragraphs wants longer than a hand that puts it down.
+    // Independent of the switch above, so turning the hiding off and on again
+    // comes back to the number that was chosen.
+    s.insert("hide_cursor_after".into(), json!(3.0));
     // Search. Where a match is looked for is a way of reading, not a property
     // of a document, so these outlive the find bar they are set from and the
     // session they were set in.

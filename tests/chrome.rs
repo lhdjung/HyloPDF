@@ -1115,3 +1115,71 @@ fn the_go_to_page_key_brings_a_hidden_toolbar_in_and_puts_it_back() {
         "and so does abandoning it",
     );
 }
+
+/// **The pointer goes away where the reader asked for it, and nowhere else.**
+///
+/// The wait is a real clock, because the rest is measured against one: see
+/// `CURSOR_RESTS` and the "cursor-timeout" arm in `app.rs`.
+#[test]
+fn the_pointer_goes_away_when_it_is_left_alone() {
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            settings: vec![
+                ("hide_cursor".into(), serde_json::json!(true)),
+                // A second rather than the three it ships with: this is a
+                // real clock, and the suite pays for every one of them.
+                ("hide_cursor_after".into(), serde_json::json!(1.0)),
+            ],
+            ..Options::default()
+        },
+    );
+    let (width, height) = reader.window();
+    let (x, y) = (width as f32 / 2.0, height as f32 / 2.0);
+
+    reader.point_to(x, y);
+    assert!(reader.cursor_shown(), "a pointer that has just moved is there");
+    assert!(
+        reader.wait_until(4.0, |reader| !reader.cursor_shown()),
+        "and one left alone is not"
+    );
+
+    // Moving it brings it straight back, without waiting for anything.
+    reader.point_to(x + 40.0, y + 40.0);
+    assert!(reader.cursor_shown(), "it comes back the moment it moves");
+}
+
+/// And with the setting off — which is how it ships — nothing ever takes it
+/// away.
+#[test]
+fn the_pointer_stays_unless_it_was_asked_to_go() {
+    let mut reader = book();
+    let (width, height) = reader.window();
+    reader.point_to(width as f32 / 2.0, height as f32 / 2.0);
+    assert!(
+        !reader.wait_until(2.5, |reader| !reader.cursor_shown()),
+        "off is off"
+    );
+}
+
+/// And the wait is the reader's: a longer one is still waiting when a short
+/// one would have finished.
+#[test]
+fn the_pointer_waits_as_long_as_it_was_told_to() {
+    let mut reader = Reader::open_with(
+        &Reader::book(),
+        Options {
+            settings: vec![
+                ("hide_cursor".into(), serde_json::json!(true)),
+                ("hide_cursor_after".into(), serde_json::json!(5.0)),
+            ],
+            ..Options::default()
+        },
+    );
+    let (width, height) = reader.window();
+    reader.point_to(width as f32 / 2.0, height as f32 / 2.0);
+    assert!(
+        !reader.wait_until(2.0, |reader| !reader.cursor_shown()),
+        "five seconds is not two"
+    );
+}

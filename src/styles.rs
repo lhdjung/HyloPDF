@@ -757,6 +757,19 @@ body { margin: 0;
 }
 .bar-thumb.held { background: var(--muted); }
 
+/* **The stationary scroll's anchor**, dropped by the middle button. The
+   document runs under it, the faster the further the pointer is carried away
+   — see the block on it in `app.rs`.
+
+   There is nothing here about how it looks: the ring, the chevrons and the
+   size are all `still_mark` and `STILL_MARK` in `app.rs`, drawn as one path
+   rather than as a bordered box — see the note there. `pointer-events: none`
+   because a marker the pointer can catch is a marker that gets in the way of
+   the very gesture it is describing, and the `z-index` for the reason the
+   scrollbar has one. */
+.still-anchor { position: absolute; z-index: 6; pointer-events: none; }
+.still-anchor .icon { color: var(--muted); stroke: var(--muted); }
+
 /* `box-sizing` so that the panel is exactly as wide as it says it is. The
    hairline down its right is a border, and a content box put it *outside* the
    width — so the document was laid out for a viewport one pixel wider than

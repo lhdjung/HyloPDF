@@ -104,6 +104,54 @@ impl PartialEq for Handle {
 }
 
 door!(
+    /// Whether the pointer is on the screen, asked of whatever owns the window.
+    ///
+    /// [`Screen`]'s sibling and for the same reason — a component that reaches
+    /// into winit is a component that knows what it is running under — but this
+    /// one is a *setter*, and there is no CSS for it. `cursor: none` reaches
+    /// Blitz and Blitz reaches the window, but only when the hover target
+    /// changes, which is precisely when the pointer is moving: the one moment
+    /// this must not fire. So it goes to the window directly.
+    ///
+    /// `set_cursor_visible` rather than the shell provider's `set_cursor`,
+    /// which is the other way in and takes the icon with it: showing the
+    /// pointer again would have to name a shape, and the right shape is
+    /// whatever the thing under it already asked for — an I-beam over a page,
+    /// a hand over a link.
+    Pointer(bool)
+);
+
+impl Pointer {
+    /// The default: the window this reader is drawn in, or nothing at all in
+    /// a harness, which has no window and no pointer.
+    pub fn to_the_window(window: Option<Arc<dyn winit::window::Window>>) -> Self {
+        Pointer::new(move |on| {
+            if let Some(window) = window.as_ref() {
+                window.set_cursor_visible(on);
+            }
+        })
+    }
+
+    pub fn show(&self, on: bool) {
+        (self.0)(on)
+    }
+}
+
+/// What the pointer's rest is measured against: when it last moved, whether a
+/// timer is already out for it, and whether it is off the screen now.
+///
+/// **A hook beside the handler, never a capture inside one** — see the note on
+/// `use_effect` in `AGENTS.md`. None of it is in the [`Viewer`]: hiding the
+/// pointer changes nothing the document looks like, and putting it in a signal
+/// would be a render on every move of the mouse.
+#[derive(Default)]
+struct Resting {
+    moved: Cell<Option<std::time::Instant>>,
+    waiting: Cell<bool>,
+    away: Cell<bool>,
+}
+
+door!(
     /// What handing the document to something that prints does. The program
     /// is **named** rather than left to the system's default handler, because
     /// that default may well be this reader and handing a document to
@@ -454,6 +502,42 @@ const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
 /// [`Viewer::settle_zoom`].
 const ZOOM_SETTLES: std::time::Duration = std::time::Duration::from_millis(180);
 
+/// How wide the stationary scroll's marker is, and so how far its own edge is
+/// held back from the window's: half of itself, because it is centred on the
+/// point the button went down on.
+///
+/// The only place the number is written. `.still-anchor` carries no size of
+/// its own — the box and the drawing inside it are both set from here, which
+/// is the whole reason the marker is an `<svg>` rather than a bordered div.
+const STILL_MARK: f64 = 34.0;
+
+/// The marker itself, on the 24px grid the rest of the icons are drawn on: a
+/// ring in the theme's own surface and line, two chevrons, and the point the
+/// distance is measured from.
+///
+/// **Drawn rather than bordered.** It was a div with `border-radius: 50%` and
+/// a hairline border, and on a 2x screen the ring came out heavier down one
+/// side than the other — a grey sliver on the left of a shape whose whole job
+/// is to be symmetrical. A stroked circle goes through the same path
+/// rasteriser as every other icon in the window and is round by construction.
+fn still_mark(paper: &str, line: &str, ink: &str) -> String {
+    format!(
+        r#"<circle cx="12" cy="12" r="11.4" fill="{paper}" stroke="{line}" stroke-width="0.72"/><path d="M12 5.2l-3.4 3.7M12 5.2l3.4 3.7M12 18.8l-3.4-3.7M12 18.8l3.4-3.7" fill="none" stroke="{ink}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="1.4" fill="{ink}"/>"#
+    )
+}
+
+/// The stationary scroll's dead zone: a pointer within this many pixels of
+/// the anchor moves the document not at all. Firefox's own number, and the
+/// whole of what keeps a hand resting on the button from creeping down the
+/// page.
+const STILL_DEAD: f64 = 12.0;
+
+/// How often the stationary scroll steps — a frame — and the interval the
+/// speed curve below is quoted in, which is not the same number. See
+/// [`still_speed`].
+const STILL_TICK: std::time::Duration = std::time::Duration::from_millis(16);
+const STILL_STEP: f64 = 20.0;
+
 /// The zoom ladder, in the app's own steps.
 /// `ZOOM_LADDER` in `main.ts`, and the same sixteen steps: three of them —
 /// 175%, 250% and 600% — had been dropped on the way across, so ⌘+ walked a
@@ -461,6 +545,25 @@ const ZOOM_SETTLES: std::time::Duration = std::time::Duration::from_millis(180);
 const ZOOMS: [f64; 16] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 6.0,
 ];
+
+/// How fast the stationary scroll runs when the pointer is `delta` pixels from
+/// the anchor, in pixels per [`STILL_STEP`].
+///
+/// **Firefox's own curve**, `d^1.5 - 1` past the dead zone, because this is
+/// Firefox's gesture: a reader who has it in their fingers should find it
+/// here behaving exactly as it does there. It is why the pointer just outside
+/// the marker creeps and the pointer at the edge of the window flies, with no
+/// step between the two.
+fn still_speed(delta: f64) -> f64 {
+    let far = delta / STILL_DEAD;
+    if far > 1.0 {
+        far * far.sqrt() - 1.0
+    } else if far < -1.0 {
+        far * (-far).sqrt() + 1.0
+    } else {
+        0.0
+    }
+}
 
 door!(
     /// What opening a link outside the document does.
@@ -1004,6 +1107,18 @@ pub struct Viewer {
     /// scrollbar's thumb was picked up. `None` outside a drag, exactly as
     /// `resize_from` is, and checked in the same place for the same reason.
     bar_from: Option<(f64, f64)>,
+    /// **The stationary scroll**, which the middle button starts: where it
+    /// went down in the window, and where the pointer has got to since. The
+    /// distance between the two is the speed — see [`still_speed`].
+    ///
+    /// `None` is the gesture not running, which is almost always, and is what
+    /// every press, key and wheel checks before ending it.
+    still_from: Option<(f64, f64)>,
+    still_at: (f64, f64),
+    /// Which run of it the clock is stepping, so that a gesture started and
+    /// stopped twice in a second does not end up with two tickers driving one
+    /// document. Zero before the first.
+    still_token: u64,
     pub tab: Tab,
     /// Which toolbar menu is down, if any. `None` almost always.
     ///
@@ -1321,6 +1436,9 @@ impl Viewer {
             sidebar_width: 252.0,
             resize_from: None,
             bar_from: None,
+            still_from: None,
+            still_at: (0.0, 0.0),
+            still_token: 0,
             tab: Tab::Contents,
             menu: None,
             pane: None,
@@ -1992,6 +2110,24 @@ impl Viewer {
     /// toolbar away. See the pill in `Reader` — `show_page_pill` in the app.
     pub fn page_pill(&self) -> bool {
         self.store.flag("show_page_pill")
+    }
+
+    /// Whether the pointer goes away when it has been left alone. Off unless
+    /// the reader asked for it — see the default in `settings.rs`.
+    pub fn hides_cursor(&self) -> bool {
+        self.store.flag("hide_cursor")
+    }
+
+    /// And how long it has to sit still first. Held to a second at the least,
+    /// because a setting written by hand is a file this app does not own and
+    /// zero seconds is a pointer that cannot be found at all.
+    pub fn cursor_rests(&self) -> std::time::Duration {
+        std::time::Duration::from_secs_f64(self.store.number("hide_cursor_after").max(1.0))
+    }
+
+    pub fn set_cursor_rest(&mut self, seconds: f64) {
+        self.store
+            .set(vec![("hide_cursor_after".into(), json!(seconds))]);
     }
 
     pub fn set_page_pill(&mut self, on: bool) {
@@ -5126,6 +5262,107 @@ impl Viewer {
     pub fn dragging_bar(&self) -> bool {
         self.bar_from.is_some()
     }
+
+    /* -------------------------------------------------- the stationary scroll
+
+    The middle button drops an anchor in the page and the document runs under
+    it, the faster the further the pointer is carried from it. Firefox's
+    gesture, down to the curve in [`still_speed`] and to the dead zone around
+    the anchor, because half of what makes it good is that it is already in
+    the reader's fingers.
+
+    Nothing about it is a setting. It answers to a button nothing else in this
+    reader uses, it says what it is doing with a marker on screen, and every
+    press, key and wheel ends it — so there is nothing for a reader who does
+    not want it to turn off. */
+
+    /// The middle button went down at `at`, in the window's own coordinates.
+    ///
+    /// Pressed again while one is running it puts the gesture away instead,
+    /// which is the other half of what Firefox answers to. Returns the token
+    /// of the run to be stepped, or `None` when the press ended one.
+    pub fn hold_still(&mut self, at: (f64, f64)) -> Option<u64> {
+        if self.still_from.is_some() {
+            self.stop_still();
+            return None;
+        }
+        self.still_from = Some(at);
+        self.still_at = at;
+        self.still_token += 1;
+        Some(self.still_token)
+    }
+
+    /// The pointer moved. A no-op outside the gesture, which is what lets this
+    /// hang off the root's `onmousemove` — [`Viewer::drag_bar`]'s reason, and
+    /// the same guard.
+    pub fn steer_still(&mut self, at: (f64, f64)) {
+        if self.still_from.is_some() {
+            self.still_at = at;
+        }
+    }
+
+    pub fn stop_still(&mut self) {
+        self.still_from = None;
+    }
+
+    /// Whether one is running, and where its anchor is drawn.
+    pub fn scrolling_still(&self) -> bool {
+        self.still_from.is_some()
+    }
+
+    /// Where the marker is drawn — which is not quite where the button went
+    /// down, at the edges of the window.
+    ///
+    /// **The whole of it is always on screen.** Pressed hard against the side
+    /// of the window a circle centred on the pointer would be half a circle,
+    /// and half a circle at the edge of the screen reads as a rendering
+    /// fault rather than as a mark; so it is held back by its own radius and
+    /// its edge comes to rest against the window's, which is what Firefox
+    /// does. What the speed is measured from is still the press itself — see
+    /// [`Viewer::still_speed`] — so the gesture does not move when the marker
+    /// does.
+    ///
+    pub fn still_anchor(&self) -> Option<(f64, f64)> {
+        let (x, y) = self.still_from?;
+        let edge = STILL_MARK / 2.0;
+        let top = self.chrome() + edge;
+        Some((
+            x.clamp(edge, (self.window_width - edge).max(edge)),
+            y.clamp(top, (self.window_height - edge).max(top)),
+        ))
+    }
+
+    /// How far to move this step, across and down — or `None` when this run is
+    /// over and the clock should stop re-arming itself.
+    ///
+    /// **Asked before anything is written**, because the gesture spends most
+    /// of its life parked in the dead zone: a step that wrote the viewer to
+    /// move it nothing would be a render sixty times a second for as long as
+    /// the anchor is up. See the note on `use_effect` in `AGENTS.md`.
+    pub fn still_speed(&self, token: u64) -> Option<(f64, f64)> {
+        let from = self.still_from.filter(|_| self.still_token == token)?;
+        let step = STILL_TICK.as_secs_f64() * 1000.0 / STILL_STEP;
+        Some((
+            still_speed(self.still_at.0 - from.0) * step,
+            still_speed(self.still_at.1 - from.1) * step,
+        ))
+    }
+
+    /// And the step itself.
+    ///
+    /// [`Viewer::nudge`] is deliberately not used: it turns the page when
+    /// there is nowhere left to scroll, and a gesture that steps sixty times a
+    /// second would turn sixty pages. In paged mode this runs within the page
+    /// and stops at its edges, which is what that mode means.
+    pub fn drift(&mut self, across: f64, down: f64) {
+        if across != 0.0 {
+            self.pan(across);
+        }
+        if down != 0.0 {
+            let to = self.scroll_by(down);
+            self.scroll_to(to);
+        }
+    }
 }
 
 /// One mounted page as the `rsx!` block needs it: which page, where its box
@@ -5376,6 +5613,13 @@ pub fn Reader(
         let pick = pick.clone();
         let printer = printer.clone();
         move |event: KeyboardEvent| {
+            // **Any key ends the stationary scroll**, the way any press
+            // does — and the key itself still lands, because a reader who
+            // has reached for ⌘F has finished with the anchor and not with
+            // the keystroke.
+            if viewer.read().scrolling_still() {
+                viewer.write().stop_still();
+            }
             let (press, screen) = {
                 let held = viewer.read();
                 (
@@ -5442,6 +5686,19 @@ pub fn Reader(
     // themes, and the document. Both are watched by the app's own `watch.rs`,
     // mounted here, and both arrive as news in a mailbox.
     //
+    // **The pointer, and what keeps it on the screen.** Both are declared
+    // before the mailbox below, because the timer that takes it away is read
+    // out of that mailbox and a hook cannot be declared inside another hook's
+    // initialiser. See [`Pointer`] and [`Resting`].
+    let pointer = use_hook(|| {
+        dioxus_core::try_consume_context::<Pointer>().unwrap_or_else(|| {
+            Pointer::to_the_window(dioxus_core::try_consume_context::<
+                Arc<dyn winit::window::Window>,
+            >())
+        })
+    });
+    let resting = use_hook(|| Rc::new(Resting::default()));
+
     // **The task is the whole of the wiring on this side**, and it is a real
     // wait: the watcher thread wakes it, the wake marks the task ready, and
     // dioxus's waker takes it to the window. Nothing polls, and in the harness
@@ -5493,6 +5750,8 @@ pub fn Reader(
             (None, false) => None,
         };
         let listening = post.clone();
+        let pointing = pointer.clone();
+        let resting = resting.clone();
         let sizing = screen.clone();
         let watching_appearance = appearance.clone();
         let opening = frame.clone();
@@ -5522,6 +5781,66 @@ pub fn Reader(
                         if let Payload::Token(token) = news.payload {
                             viewer.write().unflash_bar(token);
                         }
+                    }
+                    // The pointer has been left alone for a while. It is
+                    // asked for once per rest rather than once per move of
+                    // the mouse — a timer armed by every move would be a
+                    // hundred a second, each outliving what armed it — so
+                    // what fires here may be early, and an early one arms
+                    // the remainder rather than hiding anything.
+                    "cursor-timeout" => {
+                        resting.waiting.set(false);
+                        if !viewer.read().hides_cursor() {
+                            continue;
+                        }
+                        let Some(moved) = resting.moved.get() else {
+                            continue;
+                        };
+                        let rests = viewer.read().cursor_rests();
+                        let still_for = moved.elapsed();
+                        if still_for >= rests {
+                            resting.away.set(true);
+                            pointing.show(false);
+                        } else {
+                            resting.waiting.set(true);
+                            crate::emit::after(
+                                rests - still_for,
+                                listening.clone(),
+                                crate::emit::News {
+                                    event: "cursor-timeout".into(),
+                                    target: None,
+                                    payload: Payload::Nothing,
+                                },
+                            );
+                        }
+                    }
+                    // One step of the stationary scroll, and the next one
+                    // armed — a clock the gesture starts and stops rather
+                    // than one that runs. See the block on it in `Viewer`.
+                    //
+                    // The speed is read before anything is written, because
+                    // the pointer spends most of the gesture inside the dead
+                    // zone: writing the viewer to move it nothing would be a
+                    // render a frame for as long as the anchor is up.
+                    "still-tick" => {
+                        let Payload::Token(token) = news.payload else {
+                            continue;
+                        };
+                        let Some((across, down)) = viewer.read().still_speed(token) else {
+                            continue;
+                        };
+                        if (across, down) != (0.0, 0.0) {
+                            viewer.write().drift(across, down);
+                        }
+                        crate::emit::after(
+                            STILL_TICK,
+                            listening.clone(),
+                            crate::emit::News {
+                                event: "still-tick".into(),
+                                target: None,
+                                payload: Payload::Token(token),
+                            },
+                        );
                     }
                     // The fingers stopped moving. See [`Viewer::settle_zoom`].
                     "zoom-settled" => {
@@ -5633,6 +5952,55 @@ pub fn Reader(
     });
     // Read so that the handle is plainly alive rather than plainly unused.
     let _ = watching.is_some();
+
+    // **The pointer moved, so it is on the screen and the clock starts over.**
+    // One timer at a time: a fresh one per move of the mouse would be a
+    // hundred a second, all of them outliving the move that armed them, so
+    // the one that is out simply arms the remainder when it fires early. See
+    // the "cursor-timeout" arm above.
+    let stir_pointer = {
+        let notifying = notifying.clone();
+        let pointer = pointer.clone();
+        let resting = resting.clone();
+        move || {
+            resting.moved.set(Some(std::time::Instant::now()));
+            if resting.away.replace(false) {
+                pointer.show(true);
+            }
+            if !viewer.read().hides_cursor() || resting.waiting.replace(true) {
+                return;
+            }
+            crate::emit::after(
+                viewer.read().cursor_rests(),
+                notifying.clone(),
+                crate::emit::News {
+                    event: "cursor-timeout".into(),
+                    target: None,
+                    payload: Payload::Nothing,
+                },
+            );
+        }
+    };
+
+    // What starts the stationary scroll's clock. The gesture is begun from a
+    // handler in the tree below and stepped from the mailbox above, and this
+    // is the one line they share: arm the first tick, and the arm above arms
+    // every one after it.
+    let start_still = {
+        let notifying = notifying.clone();
+        move |token: Option<u64>| {
+            let Some(token) = token else { return };
+            crate::emit::after(
+                STILL_TICK,
+                notifying.clone(),
+                crate::emit::News {
+                    event: "still-tick".into(),
+                    target: None,
+                    payload: Payload::Token(token),
+                },
+            );
+        }
+    };
 
     // **What an effect remembers between runs lives in a hook, never in the
     // closure.**
@@ -5781,6 +6149,22 @@ pub fn Reader(
     // the settings table, and the great majority of renders draw no popover
     // at all.
     let markup_colours = held.markup_colors();
+    // Where the stationary scroll is anchored, and the strip above the
+    // document that its point has to be measured against. `None` almost
+    // always: see the block on it in `Viewer`.
+    let still_anchor = held.still_anchor();
+    // Built only when there is one to draw: this component renders on every
+    // frame of a scroll, and the marker is up for a few seconds a session.
+    let mark = still_anchor
+        .map(|_| {
+            still_mark(
+                &crate::palette::hex(wearing.surface()),
+                &crate::palette::hex(wearing.line()),
+                &crate::palette::hex(wearing.muted()),
+            )
+        })
+        .unwrap_or_default();
+    let chrome = held.chrome();
     let sidebar_open = held.sidebar_open;
     let find_open = held.find_open;
     let presenting = held.presenting;
@@ -6312,6 +6696,15 @@ pub fn Reader(
             // larger, so picking a line out of it must not close what found
             // it — `sidebar.rs` stops the press over it and its tab.
             onmousedown: move |event| {
+                // **Any press ends the stationary scroll**, and ends it
+                // instead of doing whatever else it would have done: the
+                // press that puts the anchor away is spent on putting it
+                // away. The page's own handler has already declined to begin
+                // a sweep for the same reason.
+                if viewer.read().scrolling_still() {
+                    viewer.write().stop_still();
+                    return;
+                }
                 let (menu, typing, find, strip) = {
                     let held = viewer.read();
                     (
@@ -6344,6 +6737,19 @@ pub fn Reader(
                 }
             },
             onmousemove: move |event| {
+                // Before anything else, because it is about the pointer
+                // rather than about what the pointer is doing: every move
+                // puts it back on the screen and starts its rest over.
+                stir_pointer();
+                // The stationary scroll, which is steered by where the
+                // pointer *is* rather than by anything it does — and only
+                // the root hears a pointer that has left the page it
+                // anchored on. A no-op outside the gesture.
+                if viewer.read().scrolling_still() {
+                    let at = event.client_coordinates();
+                    viewer.write().steer_still((at.x, at.y));
+                    return;
+                }
                 let (resizing, sweeping, drawing, on_bar) = {
                     let held = viewer.read();
                     (
@@ -7487,7 +7893,24 @@ pub fn Reader(
             div {
                 class: "viewer",
                 onmounted: move |_| resize_from_window(viewer),
+                // **The middle button drops the anchor**, and the press is
+                // kept here rather than left to bubble: the root ends the
+                // gesture on any press, and this is the one press that
+                // begins one. See the stationary scroll in `Viewer`.
+                onmousedown: move |event| {
+                    if event.trigger_button() != Some(dioxus::html::input_data::MouseButton::Auxiliary) {
+                        return;
+                    }
+                    event.stop_propagation();
+                    let at = event.client_coordinates();
+                    start_still(viewer.write().hold_still((at.x, at.y)));
+                },
                 onwheel: move |event| {
+                    // A wheel is the reader scrolling for themselves, which
+                    // is the gesture the anchor was standing in for.
+                    if viewer.read().scrolling_still() {
+                        viewer.write().stop_still();
+                    }
                     // **⌃-wheel and ⌘-wheel are zoom**, which is how a mouse
                     // with no pinch says it and how winit reports a pinch on
                     // the platforms that do not send a gesture. The factor is
@@ -7575,6 +7998,25 @@ pub fn Reader(
                 // than a detail: a pointer thrown at the edge of the screen
                 // stops at the edge, and a bar an inch short of it is a bar
                 // that has to be aimed at.
+                // **Where the stationary scroll is anchored.** The one
+                // thing on screen saying the gesture is running, and the
+                // point the pointer's distance is measured from — so it is
+                // drawn at the press, not at the pointer. `chrome()` is what
+                // takes it from the window's coordinates into `.body`'s,
+                // exactly as the scrollbar's own press does.
+                if let Some((anchor_x, anchor_y)) = still_anchor {
+                    div {
+                        class: "still-anchor",
+                        style: "left: {anchor_x - STILL_MARK / 2.0}px; top: {anchor_y - chrome - STILL_MARK / 2.0}px;",
+                        svg {
+                            view_box: "0 0 24 24",
+                            width: "{STILL_MARK}",
+                            height: "{STILL_MARK}",
+                            "aria-hidden": "true",
+                            dangerous_inner_html: "{mark}",
+                        }
+                    }
+                }
                 if let Some((thumb_top, thumb_height)) = thumb.filter(|_| bar_up) {
                     div {
                         class: "scrollbar",
@@ -8455,6 +8897,14 @@ fn Page(
             // down a document leaves the page it started on within a line or
             // two.
             onmousedown: move |event| {
+                // **Only the left button does anything to a page.** The
+                // middle one drops the stationary scroll's anchor and the
+                // right one is the system's; both used to begin a sweep,
+                // which put a stray selection down under the very gesture
+                // that was about to do something else.
+                if event.trigger_button() != Some(dioxus::html::input_data::MouseButton::Primary) {
+                    return;
+                }
                 let on = event.element_coordinates();
                 let client = event.client_coordinates();
                 // **A signature waiting for somewhere to go takes this press

@@ -43,6 +43,71 @@ fn the_wheel_moves_the_document() {
     assert_eq!(reader.state().scroll, end.scroll, "the end is the end");
 }
 
+/// **The stationary scroll**, which the middle button starts: the anchor goes
+/// down, the document runs under it the further the pointer is carried away,
+/// and the next press puts it away.
+///
+/// The speed is a real clock rather than a pump, so this waits for the offset
+/// to move rather than counting ticks. See `Viewer::still_speed`.
+#[test]
+fn the_middle_button_scrolls_from_where_it_was_pressed() {
+    let mut reader = book();
+    let (width, height) = reader.window();
+    let (middle_x, middle_y) = (width as f32 / 2.0, height as f32 / 2.0);
+
+    reader.middle_click_at(middle_x, middle_y);
+    assert!(
+        reader.box_of(".still-anchor").is_some(),
+        "the anchor says the gesture is running"
+    );
+
+    // Parked on the anchor, the document does not move at all: the dead zone
+    // is the whole of what keeps a resting hand from creeping down the page.
+    assert!(
+        !reader.wait_until(0.4, |reader| reader.state().scroll > 0.0),
+        "nothing moves inside the dead zone"
+    );
+
+    // Carried well below it, it runs.
+    reader.point_to(middle_x, middle_y + 150.0);
+    assert!(
+        reader.wait_until(2.0, |reader| reader.state().scroll > 20.0),
+        "the document runs under the anchor"
+    );
+
+    // And a press — any press — puts it away and leaves the document where
+    // it stopped.
+    reader.click_at(middle_x, middle_y + 150.0);
+    assert!(reader.box_of(".still-anchor").is_none(), "the anchor is gone");
+    let stopped = reader.state().scroll;
+    assert!(
+        !reader.wait_until(0.4, |reader| reader.state().scroll > stopped),
+        "and it stays stopped"
+    );
+}
+
+/// **The whole marker is always on screen.** Pressed hard against the corner
+/// of the window, a circle centred on the pointer would be a quarter of a
+/// circle — so it is held back by its own radius and its edge comes to rest
+/// against the window's. See `Viewer::still_anchor`.
+#[test]
+fn the_anchor_never_hangs_off_the_edge_of_the_window() {
+    let mut reader = book();
+    let (width, height) = reader.window();
+
+    reader.middle_click_at(width as f32 - 1.0, height as f32 - 1.0);
+    let (left, top, mark, _) = reader.box_of(".still-anchor").expect("bottom right");
+    assert!(
+        left + mark <= width as f32 && top + mark <= height as f32,
+        "the far corner: {left} + {mark} against {width}, {top} + {mark} against {height}"
+    );
+
+    reader.middle_click_at(width as f32 - 1.0, height as f32 - 1.0);
+    reader.middle_click_at(1.0, 60.0);
+    let (left, top, _, _) = reader.box_of(".still-anchor").expect("top left");
+    assert!(left >= 0.0 && top >= 0.0, "the near corner: {left}, {top}");
+}
+
 #[test]
 fn the_keys_move_the_reader() {
     let mut reader = book();

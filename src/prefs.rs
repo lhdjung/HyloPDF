@@ -332,11 +332,13 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
     let fit = held.layout.fit;
     let zoom = held.layout.zoom;
     let trimming = held.trims_margins();
-    let (remember, reopen, pill) = (
+    let (remember, reopen, pill, hide_cursor) = (
         held.store.flag("remember_position"),
         held.store.flag("reopen_last_document"),
         held.store.flag("show_page_pill"),
+        held.store.flag("hide_cursor"),
     );
+    let rest = held.store.number("hide_cursor_after");
     let printed = held.numbering_printed();
     drop(held);
 
@@ -455,6 +457,24 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
             label: "Show page count while scrolling",
             note: "A brief \u{201c}page 23 of 197\u{201d} while you scroll with the toolbar hidden.",
             Toggle { on: pill, onchange: move |on| viewer.write().set_flag("show_page_pill", on) }
+        }
+        Field {
+            label: "Hide the pointer while you read",
+            note: "The pointer goes away once it has sat still for a while, and comes back the moment you move it.",
+            Toggle { on: hide_cursor, onchange: move |on| viewer.write().set_flag("hide_cursor", on) }
+        }
+        // Only where there is a wait to set, which is what the fixed zoom
+        // above does and for the same reason: a number that does nothing is
+        // a question the reader has to work out the answer to.
+        if hide_cursor {
+            Field {
+                label: "Wait before hiding it",
+                Stepper {
+                    viewer,
+                    value: rest, min: 1.0, max: 30.0, step: 1.0, unit: "s",
+                    onchange: move |value: f64| viewer.write().set_cursor_rest(value),
+                }
+            }
         }
     }
 }

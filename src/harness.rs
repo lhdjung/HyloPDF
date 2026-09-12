@@ -265,6 +265,9 @@ pub struct Reader {
     /// the real one is the machine's clipboard, and a suite that took it would
     /// empty the clipboard of whoever is running `cargo test`.
     copied: Rc<RefCell<Vec<String>>>,
+    /// Whether this reader has the pointer on the screen. See
+    /// [`crate::app::Pointer`].
+    pointer: Rc<std::cell::Cell<bool>>,
     /// Every document this reader handed over to print. See
     /// [`crate::app::Printer`].
     printed: Rc<RefCell<Vec<String>>>,
@@ -451,6 +454,12 @@ impl Reader {
         self.copied.borrow().clone()
     }
 
+    /// Whether the pointer is on the screen. `true` until this reader has
+    /// asked for it to go — see [`crate::app::Pointer`].
+    pub fn cursor_shown(&self) -> bool {
+        self.pointer.get()
+    }
+
     /// How big the window is, in CSS pixels. What a test needs to know how
     /// much of a page taller than the window is actually on screen.
     pub fn window(&self) -> (f64, f64) {
@@ -568,6 +577,11 @@ impl Reader {
         let picks: Rc<RefCell<std::collections::VecDeque<String>>> =
             Rc::new(RefCell::new(options.picks.iter().cloned().collect()));
         let picking = picks.clone();
+        // Whether the pointer is on the screen, which in the app is a call
+        // into winit and here is a flag. `true` to begin with, because that
+        // is what a window starts as.
+        let pointer: Rc<std::cell::Cell<bool>> = Rc::new(std::cell::Cell::new(true));
+        let pointing = pointer.clone();
         let answering = post.clone();
         vdom.in_scope(ScopeId::ROOT, move || {
             provide_context(posting);
@@ -579,6 +593,7 @@ impl Reader {
             provide_context(crate::app::Frame::new(move |ask| {
                 asked.borrow_mut().push(ask);
             }));
+            provide_context(crate::app::Pointer::new(move |on| pointing.set(on)));
             provide_context(crate::app::Clip::new(move |text| {
                 copying.borrow_mut().push(text.to_string());
             }));
@@ -640,6 +655,7 @@ impl Reader {
             asks,
             copied,
             printed,
+            pointer,
         };
         reader.focus_root();
         // …and then to whatever inside it asks for the keyboard more
@@ -933,6 +949,31 @@ impl Reader {
         }
         self.harness.mouse_up_at(x + by, y);
         self.give_keyboard_back();
+        self.settle();
+    }
+
+    /// The **middle** button, pressed and let go at a point — which is the
+    /// whole of what starts and stops the stationary scroll.
+    ///
+    /// Spelled out rather than reached for through `click_at`, which the
+    /// shared harness sends with the left button in it: which button is down
+    /// is exactly what this gesture is about.
+    pub fn middle_click_at(&mut self, x: f32, y: f32) {
+        use blitz_traits::events::{BlitzPointerId, MouseEventButton, MouseEventButtons, UiEvent};
+        let at = |buttons| {
+            blitz_test_harness::pointer_event(
+                BlitzPointerId::Mouse,
+                x,
+                y,
+                MouseEventButton::Auxiliary,
+                buttons,
+                Default::default(),
+            )
+        };
+        self.harness
+            .dispatch(UiEvent::PointerDown(at(MouseEventButtons::Auxiliary)));
+        self.harness
+            .dispatch(UiEvent::PointerUp(at(MouseEventButtons::None)));
         self.settle();
     }
 

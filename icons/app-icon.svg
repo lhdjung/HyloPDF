@@ -1,22 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- A page ruled in slate on cream, whose lines fall in the shape of an owl:
-       two tufts, a gap for each eye, and the last short line in coral. -->
+  <!-- A low-poly owl (Strix hylophila: round head, no tufts, dark eyes) drawn
+       in slate on cream, one half mirrored, perched on a scroll whose sheet
+       runs off the bottom of the frame. -->
   <defs>
     <linearGradient id="ground" x1="0" y1="30" x2="0" y2="994" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#f8f3ea"/>
       <stop offset="1" stop-color="#ece5d7"/>
     </linearGradient>
+    <clipPath id="frame"><rect x="30" y="30" width="964" height="964" rx="228"/></clipPath>
+    <g id="half" fill="none" stroke="#3f4b66" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M0,-400 L95,-385 L165,-320 L185,-230 L180,-150 L175,-60 L150,20 L95,60 L0,70"/>
+      <path d="M0,-315 L60,-345 L130,-300 L150,-230 L110,-170 L0,-140"/>
+      <path d="M95,-385 L60,-345"/>
+      <path d="M165,-320 L130,-300"/>
+      <path d="M185,-230 L150,-230"/>
+      <path d="M180,-150 L110,-170"/>
+      <path d="M0,-140 L70,-60 L180,-150"/>
+      <path d="M110,-170 L70,-60"/>
+      <path d="M70,-60 L0,10 L0,70"/>
+      <path d="M70,-60 L125,10 L175,-60"/>
+      <path d="M125,10 L95,60"/>
+      <path d="M0,10 L95,60"/>
+      <path d="M70,62 L40,100 M70,62 L72,106 M70,62 L104,100"/>
+    </g>
   </defs>
   <rect x="30" y="30" width="964" height="964" rx="228" fill="url(#ground)"/>
-  <rect x="301" y="148" width="150" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="573" y="148" width="150" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="301" y="244" width="422" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="287" y="340" width="90" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="447" y="340" width="130" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="647" y="340" width="90" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="307" y="436" width="410" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="281" y="532" width="462" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="262" y="628" width="500" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="283" y="724" width="458" height="56" rx="28" fill="#3f4b66"/>
-  <rect x="361" y="820" width="302" height="56" rx="28" fill="#de7c6e"/>
+  <g clip-path="url(#frame)" fill="none" stroke="#3f4b66" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <!-- the sheet, unrolling out of the frame -->
+    <path d="M292,805 L292,1040 M732,805 L732,1040"/>
+    <path d="M362,880 L662,880"/>
+    <path d="M362,950 L542,950"/>
+    <!-- the roll -->
+    <path d="M277,715 L747,715 A45,45 0 0 1 747,805 L277,805 A45,45 0 0 1 277,715 Z" fill="#f0e9db"/>
+    <path d="M747,805 A22,22 0 0 1 747,761 M277,805 A22,22 0 0 0 277,761"/>
+  </g>
+  <g transform="translate(512,628) scale(1.22,1.32)">
+    <path d="M0,-400 L95,-385 L165,-320 L185,-230 L180,-150 L175,-60 L150,20 L95,60 L0,70 L-95,60 L-150,20 L-175,-60 L-180,-150 L-185,-230 L-165,-320 L-95,-385 Z" fill="url(#ground)"/>
+    <use href="#half"/>
+    <use href="#half" transform="scale(-1,1)"/>
+    <path d="M0,-215 L22,-195 L0,-165 L-22,-195 Z" fill="#3f4b66" stroke="#3f4b66" stroke-width="14" stroke-linejoin="round"/>
+    <circle cx="75" cy="-255" r="12" fill="#3f4b66"/>
+    <circle cx="-75" cy="-255" r="12" fill="#3f4b66"/>
+  </g>
 </svg>

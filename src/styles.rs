@@ -975,16 +975,19 @@ body { margin: 0;
 }
 .markup-swatch:hover { border-color: var(--accent); }
 /* The long way round and the way out, after the six: the same size as a
-   swatch, so the row reads as one. The × is red on the theme's darkest
-   ground, which is the one thing in the row that is unmistakably not a
-   colour to mark in. */
+   swatch, so the row reads as one. The × is red on the theme's sunk surface,
+   which is the one thing in the row that is unmistakably not a colour to
+   mark in. **The variable is `--sunk`**: this said `--surface-sunk`, which
+   `variables()` does not write, so the declaration was dropped and the
+   button kept whatever was under it. Nothing warns about a name a theme
+   never defines. */
 .markup-more, .markup-close {
   width: 22px; height: 22px; padding: 0; border-radius: 7px; cursor: pointer;
   border: 1px solid var(--line); font-size: 14px; line-height: 1;
 }
-.markup-more { background: var(--surface-sunk); color: var(--muted); }
+.markup-more { background: var(--sunk); color: var(--muted); }
 .markup-more:hover { border-color: var(--accent); color: var(--text); }
-.markup-close { background: var(--surface-sunk); color: #ff5f56; font-size: 16px; }
+.markup-close { background: var(--sunk); color: #ff5f56; font-size: 16px; }
 .markup-close:hover { border-color: #ff5f56; }
 /* The window the … opens. */
 .colours-window { width: 440px; height: auto; max-height: 80%; }

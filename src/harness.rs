@@ -299,6 +299,15 @@ impl Reader {
         });
     }
 
+    /// The fingers lifted, which is what ends a pinch.
+    pub fn pinch_ended(&mut self) {
+        self.deliver(crate::emit::News {
+            event: "pinch-ended".into(),
+            target: None,
+            payload: Payload::Nothing,
+        });
+    }
+
     /// A document dragged over the window, exactly as winit reports it —
     /// `true` for one this reader would open, `false` for anything else.
     ///

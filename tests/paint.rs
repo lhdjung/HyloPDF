@@ -213,11 +213,14 @@ fn a_pinch_stretches_the_page_it_has_rather_than_drawing_a_new_one() {
     );
 }
 
-/// …and when the fingers stop, it is drawn again at the size it now is.
+/// …and when the fingers lift, it is drawn again at the size it now is.
 ///
-/// The gesture has no end in it — macOS sends magnification and says nothing
-/// about the last one — so what ends it is the gap after it. See
-/// `ZOOM_SETTLES` and `Viewer::settle_zoom`.
+/// **The fingers lifting, not a gap in the stream.** The settle timer used to
+/// end a pinch, and two fingers resting on the trackpad send nothing — so a
+/// pause mid-gesture redrew every page at the size the pause was at, and
+/// again when the fingers lifted. macOS does say when a pinch ends, as the
+/// phase on the event, and that is what ends it now; the timer is for the
+/// ⌃-wheel, which has no phase. See `Viewer::end_pinch`.
 #[test]
 fn and_when_the_fingers_stop_the_page_is_drawn_at_the_size_it_reached() {
     let mut reader = Reader::open_with(&Reader::book(), Options::default());
@@ -227,8 +230,11 @@ fn and_when_the_fingers_stop_the_page_is_drawn_at_the_size_it_reached() {
     let held = drawn_of(&reader);
     let grown = reader.harness.layout_rect(".page").width;
 
+    let by_timer = reader.wait_until(1.0, |reader| drawn_of(reader) != held);
+    assert!(!by_timer, "a pause is not the end of a pinch");
+    reader.pinch_ended();
     let settled = reader.wait_until(3.0, |reader| drawn_of(reader) != held);
-    assert!(settled, "the gesture settled and the page was drawn again");
+    assert!(settled, "the fingers lifted and the page was drawn again");
     let (width, _) = drawn_of(&reader)
         .split_once('x')
         .map(|(w, h)| (w.to_string(), h.to_string()))

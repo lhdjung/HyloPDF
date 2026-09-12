@@ -40,7 +40,7 @@ use dioxus_native::{DioxusDocument, DocumentConfig};
 use crate::steady::Steady;
 use winit::application::ApplicationHandler;
 use winit::dpi::{Position, Size};
-use winit::event::{ElementState, StartCause, WindowEvent};
+use winit::event::{ElementState, StartCause, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{WindowAttributes, WindowId};
 
@@ -209,8 +209,9 @@ type Swap = Box<dyn FnMut(&str, &str)>;
 /// A window's name, said again every time the window changes size. See
 /// [`Shell::on_resized`].
 type Resized = Box<dyn FnMut(&str, f64, f64, bool)>;
-/// That two fingers moved apart or together on a window. See [`Shell::on_pinch`].
-type Pinched = Box<dyn FnMut(&str, f64)>;
+/// That two fingers moved apart or together on a window, or lifted (`None`).
+/// See [`Shell::on_pinch`].
+type Pinched = Box<dyn FnMut(&str, Option<f64>)>;
 
 /// A window's name, said again every time the machine goes light or dark. See
 /// [`Shell::on_theme`].
@@ -382,7 +383,7 @@ impl Shell {
     }
 
     /// Say what happens when two fingers pinch on a window.
-    pub fn on_pinch(&mut self, pinched: impl FnMut(&str, f64) + 'static) {
+    pub fn on_pinch(&mut self, pinched: impl FnMut(&str, Option<f64>) + 'static) {
         self.pinched = Some(Box::new(pinched));
     }
 
@@ -860,9 +861,16 @@ impl ApplicationHandler for Shell {
         // application listening only for ⌃-wheel hears the opening of the
         // gesture at best and usually nothing at all. Blitz has no DOM event
         // for it, so it goes down the mailbox like the resize.
+        // The end of the gesture is news of its own: two fingers resting on
+        // the trackpad send nothing, and only the phase tells a pause from
+        // the fingers lifting. See `Viewer::end_pinch`.
         let pinched = match event {
+            WindowEvent::PinchGesture {
+                phase: TouchPhase::Ended | TouchPhase::Cancelled,
+                ..
+            } => Some(None),
             WindowEvent::PinchGesture { delta, .. } if delta.is_finite() && delta != 0.0 => {
-                Some(delta)
+                Some(Some(delta))
             }
             _ => None,
         };

@@ -1148,6 +1148,9 @@ pub struct Viewer {
     /// frame. Dividing by it gets back to that size, which is what keeps the
     /// component key still. See [`crate::page::Chosen::holding`].
     zoom_from: Option<f64>,
+    /// Whether a pinch is under way, which is what keeps the settle timer
+    /// from ending it. See [`Viewer::end_pinch`].
+    pinching: bool,
     /// Which gesture the settle timer is for; see [`Viewer::settle_zoom`].
     zoom_token: u64,
     /// Where the reader has jumped from, and where they came back from.
@@ -1325,6 +1328,7 @@ impl Viewer {
             pressed: None,
             zoom_from: None,
             zoom_token: 0,
+            pinching: false,
             past: Vec::new(),
             future: Vec::new(),
             typing_page: false,
@@ -1925,11 +1929,29 @@ impl Viewer {
     ///
     /// Guarded by the token for the reason [`Viewer::unflash_pill`] is: a
     /// gesture that went on past the settle is a second timer, and the first
-    /// one must not end it.
+    /// one must not end it. And not while a pinch is under way: two fingers
+    /// resting on the trackpad send nothing, and a timer that ended the
+    /// gesture in that pause redrew every page at the size the pause was at
+    /// — and again when the fingers lifted. The pinch says when it ends.
     pub fn settle_zoom(&mut self, token: u64) {
-        if self.zoom_token != token {
+        if self.zoom_token != token || self.pinching {
             return;
         }
+        self.zoom_from = None;
+        self.chosen.hold(false);
+    }
+
+    /// Two fingers moved on the trackpad. See [`Viewer::zoom_by`]; the
+    /// difference is that the gesture ends with [`Viewer::end_pinch`] rather
+    /// than with the timer.
+    pub fn pinch_by(&mut self, factor: f64) {
+        self.pinching = true;
+        self.zoom_by(factor);
+    }
+
+    /// The fingers lifted.
+    pub fn end_pinch(&mut self) {
+        self.pinching = false;
         self.zoom_from = None;
         self.chosen.hold(false);
     }
@@ -5529,9 +5551,10 @@ pub fn Reader(
                     // one is a proportion to zoom by. See `Viewer::zoom_by`.
                     "pinched" => {
                         if let Payload::Amount(delta) = news.payload {
-                            viewer.write().zoom_by(1.0 + delta);
+                            viewer.write().pinch_by(1.0 + delta);
                         }
                     }
+                    "pinch-ended" => viewer.write().end_pinch(),
                     "appearance-changed" => {
                         viewer.write().follow_system(watching_appearance.get());
                     }

@@ -218,10 +218,17 @@ fn main() {
         // ⌃-wheel does not zoom at all. See `Shell::on_pinch`.
         let exchange = exchange.clone();
         shell.on_pinch(move |label, delta| {
-            exchange.post(News {
-                event: "pinched".into(),
-                target: Some(label.to_string()),
-                payload: Payload::Amount(delta),
+            exchange.post(match delta {
+                Some(delta) => News {
+                    event: "pinched".into(),
+                    target: Some(label.to_string()),
+                    payload: Payload::Amount(delta),
+                },
+                None => News {
+                    event: "pinch-ended".into(),
+                    target: Some(label.to_string()),
+                    payload: Payload::Nothing,
+                },
             });
         });
     }

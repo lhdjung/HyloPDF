@@ -779,6 +779,30 @@ fn the_bar_can_be_dragged_and_says_where_it_has_got_to() {
     );
 }
 
+/// **And it is not there for long.** The bar comes up with the document's
+/// movement and goes a few seconds after it stops — so a page being read has
+/// nothing down its edge. It is drawn away rather than drawn transparent
+/// because the track is twelve live pixels hard against the edge of the
+/// window: an invisible thing that jumps the document when it is pressed is
+/// worse than no thing at all.
+#[test]
+fn the_scrollbar_goes_away_once_the_reader_has_stopped() {
+    let mut reader = book();
+    reader.wheel(1_200.0);
+    assert!(
+        reader.harness.query(".scrollbar").is_some(),
+        "up while the document is moving",
+    );
+    assert!(
+        reader.wait_until(6.0, |reader| reader.harness.query(".scrollbar").is_none()),
+        "and away again once it has stopped",
+    );
+    // …and back on the next wheel, which is the half that makes it a bar
+    // rather than a thing that was there once.
+    reader.wheel(600.0);
+    assert!(reader.harness.query(".scrollbar").is_some());
+}
+
 /// A document short enough to fit has no bar, which is the point of asking
 /// `bar_thumb` rather than always drawing one: a track with a thumb the whole
 /// length of it says nothing and is one more thing on the page.

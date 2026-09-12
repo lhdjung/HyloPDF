@@ -440,6 +440,12 @@ const PEEK_KEEP: f64 = 180.0;
 /// How long the page pill stays up after a scroll. `flashPill` in `main.ts`.
 const PILL_LASTS: std::time::Duration = std::time::Duration::from_millis(1100);
 
+/// And how long the scrollbar stays up after one. Longer than the pill by
+/// some way: the pill is a sentence, read once and done with, and the bar is
+/// where the reader's hand goes next — a bar that leaves as fast as the pill
+/// is a bar that cannot be caught.
+const BAR_LASTS: std::time::Duration = std::time::Duration::from_millis(2500);
+
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// How long a zoom gesture goes on being one after its last event: long
@@ -965,6 +971,15 @@ pub struct Viewer {
     /// one's clock.
     pill_up: bool,
     pill_token: u64,
+    /// The scrollbar, which is the same thing again: up while the document is
+    /// moving and for [`BAR_LASTS`] after it stops.
+    ///
+    /// **It is not drawn at all while it is away**, rather than drawn
+    /// transparent: the track is twelve live pixels hard against the edge of
+    /// the window, and an invisible control that jumps the document when it
+    /// is pressed is worse than no control.
+    bar_up: bool,
+    bar_token: u64,
     /// Scrolls asked for. See [`Viewer::scroll_gesture`].
     scrolls: u64,
     /// Whether the handle that gives the toolbar back is down. See
@@ -1298,6 +1313,8 @@ impl Viewer {
             said_rewrites: false,
             pill_up: false,
             pill_token: 0,
+            bar_up: false,
+            bar_token: 0,
             scrolls: 0,
             peek: false,
             borrowed_toolbar: false,
@@ -3834,6 +3851,34 @@ impl Viewer {
         }
     }
 
+    /* -------------------------------------------------------- the scrollbar */
+
+    /// The document moved: put the bar up. See [`Viewer::bar_shown`].
+    ///
+    /// Unconditional where [`Viewer::flash_pill`] has three conditions, and
+    /// a token for the same reason: the thread that takes the bar down
+    /// carries the number it was started for, so a scroll while it is up
+    /// keeps it up rather than letting it go on the first one's clock.
+    pub fn flash_bar(&mut self) -> u64 {
+        self.bar_token += 1;
+        self.bar_up = true;
+        self.bar_token
+    }
+
+    /// …and [`BAR_LASTS`] later, if nothing has moved since.
+    pub fn unflash_bar(&mut self, token: u64) {
+        if self.bar_token == token {
+            self.bar_up = false;
+        }
+    }
+
+    /// Whether there is a bar on screen at all. A hand on it keeps it there
+    /// however long the drag takes, which is the one gesture no timer should
+    /// be able to interrupt.
+    pub fn bar_shown(&self) -> bool {
+        self.bar_up || self.dragging_bar()
+    }
+
     /// **A hand on the scrollbar always gets the count, setting or no.** The
     /// setting is about scrolling — a message that appears of its own accord
     /// while somebody reads — and dragging a thumb through four hundred pages
@@ -5464,6 +5509,12 @@ pub fn Reader(
                             viewer.write().unflash_pill(token);
                         }
                     }
+                    // And a few seconds after it, the bar goes the same way.
+                    "bar-timeout" => {
+                        if let Payload::Token(token) = news.payload {
+                            viewer.write().unflash_bar(token);
+                        }
+                    }
                     // The fingers stopped moving. See [`Viewer::settle_zoom`].
                     "zoom-settled" => {
                         if let Payload::Token(token) = news.payload {
@@ -5640,6 +5691,19 @@ pub fn Reader(
                 return;
             }
             last.set(now);
+            // The bar first, and with no condition on it: the pill is a
+            // setting and this is the only thing on screen saying how far
+            // into the book the reader is.
+            let token = viewer.write().flash_bar();
+            crate::emit::after(
+                BAR_LASTS,
+                notifying.clone(),
+                crate::emit::News {
+                    event: "bar-timeout".into(),
+                    target: None,
+                    payload: Payload::Token(token),
+                },
+            );
             let Some(token) = viewer.write().flash_pill() else {
                 return;
             };
@@ -5766,6 +5830,10 @@ pub fn Reader(
     // is a document that fits, which has neither. See [`Viewer::bar_thumb`].
     let thumb = held.bar_thumb();
     let on_bar = held.dragging_bar();
+    // …and whether there is one on screen right now. See
+    // [`Viewer::flash_bar`]: the bar comes up with the document's movement
+    // and goes a few seconds after it stops.
+    let bar_up = held.bar_shown();
     // In the root's space rather than the viewer's, because that is what the
     // pill is positioned against: the chrome above it, then the middle of the
     // thumb, less half a pill.
@@ -7499,7 +7567,7 @@ pub fn Reader(
                 // than a detail: a pointer thrown at the edge of the screen
                 // stops at the edge, and a bar an inch short of it is a bar
                 // that has to be aimed at.
-                if let Some((thumb_top, thumb_height)) = thumb {
+                if let Some((thumb_top, thumb_height)) = thumb.filter(|_| bar_up) {
                     div {
                         class: "scrollbar",
                         // Left to bubble on purpose: a press here is still a

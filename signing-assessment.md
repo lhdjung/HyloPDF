@@ -1,7 +1,7 @@
 # Signing a PDF: what it would take
 
 Asked while reading: *any chance to add document signing?* The short answer is
-that "signing" is two unrelated features wearing one word, and HyloPDF is a
+that "signing" is two unrelated features wearing one word, and Moonowl is a
 couple of days from one of them and a month from the other.
 
 ## The two things
@@ -21,7 +21,7 @@ send it back. That is the first column, and it is a drawing feature.
 Everything hard about it is already built, for markup:
 
 - **Writing into the document.** `write_document` takes the per-window lock,
-  writes atomically, leaves a `.hylopdf-original` beside the file the first
+  writes atomically, leaves a `.moonowl-original` beside the file the first
   time, tells the watcher the burst is ours, and reloads the document through
   the path a LaTeX recompile already uses.
 - **Placing something on a page.** The markup path already turns a rectangle

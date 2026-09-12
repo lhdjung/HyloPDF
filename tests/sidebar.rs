@@ -13,8 +13,8 @@
 //! contents, the marks, and the document getting narrower when the panel
 //! opens.
 
-use hylopdf::fixture;
-use hylopdf::harness::{Options, Reader};
+use moonowl::fixture;
+use moonowl::harness::{Options, Reader};
 
 /// A twelve-page document that carries its own table of contents. See
 /// `src/fixture.rs`: written in Rust so that `cargo test` needs cargo and
@@ -304,7 +304,7 @@ fn the_panel_can_be_dragged_wider_and_narrower_and_the_width_survives() {
         // `MAX_WIDTH` is reached well inside it.
         reader.drag_sidebar_edge(500.0);
         assert!(
-            (reader.state().sidebar_width - hylopdf::sidebar::MAX_WIDTH).abs() < 2.0,
+            (reader.state().sidebar_width - moonowl::sidebar::MAX_WIDTH).abs() < 2.0,
             "clamped at the wide end: {}",
             reader.state().sidebar_width,
         );
@@ -314,7 +314,7 @@ fn the_panel_can_be_dragged_wider_and_narrower_and_the_width_survives() {
         // rather than assuming where the last drag left it.
         reader.drag_sidebar_edge(-400.0);
         assert!(
-            (reader.state().sidebar_width - hylopdf::sidebar::MIN_WIDTH).abs() < 2.0,
+            (reader.state().sidebar_width - moonowl::sidebar::MIN_WIDTH).abs() < 2.0,
             "clamped at the narrow end: {}",
             reader.state().sidebar_width,
         );
@@ -331,7 +331,7 @@ fn the_panel_can_be_dragged_wider_and_narrower_and_the_width_survives() {
     )
     .state()
     .sidebar_width;
-    let expected = hylopdf::sidebar::MIN_WIDTH + 60.0;
+    let expected = moonowl::sidebar::MIN_WIDTH + 60.0;
     assert!(
         (width - expected).abs() < 2.0,
         "the dragged width is a setting too: {width}, wanted near {expected}",

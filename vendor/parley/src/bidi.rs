@@ -889,7 +889,7 @@ impl BracketStack {
     }
 }
 
-// HyloPDF: upstream's warning, replayed on every `cargo run` because this is
+// Moonowl: upstream's warning, replayed on every `cargo run` because this is
 // a path dependency. Theirs to fix; ours to keep quiet.
 #[allow(deprecated)]
 const fn mask(t: BidiClass) -> u32 {

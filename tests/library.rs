@@ -14,12 +14,12 @@
 
 use std::path::{Path, PathBuf};
 
-use hylopdf::harness::{Options, Reader};
-use hylopdf::{fixture, store};
+use moonowl::harness::{Options, Reader};
+use moonowl::{fixture, store};
 
 /// A settings directory nothing else is using, and a reader over it.
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("hylopdf-library-{}-{name}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("moonowl-library-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -128,7 +128,7 @@ fn a_document_is_called_what_it_calls_itself() {
     );
 
     // And the library has it too, which is what a shelf would be drawn from.
-    let library = hylopdf::library::load(&dir);
+    let library = moonowl::library::load(&dir);
     assert_eq!(
         library.files[0].title,
         "The Structure of Scientific Revolutions"
@@ -209,7 +209,7 @@ fn a_document_that_is_gone_is_not_reopened() {
 /// document the reader was actually in. `opened_at` does.
 #[test]
 fn a_session_of_two_windows_comes_back_as_the_document_read_last() {
-    use hylopdf::library;
+    use moonowl::library;
 
     let dir = scratch("two-windows");
     std::fs::create_dir_all(&dir).expect("scratch");

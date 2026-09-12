@@ -11,10 +11,10 @@
 //! no window and no document, which is also the shape the Phase 2 harness
 //! wants.
 
-use hylopdf::gpu;
-use hylopdf::recolor::{duotone_cpu, recolor_cpu, Region, Rgb, REGIONS, SHADER};
+use moonowl::gpu;
+use moonowl::recolor::{duotone_cpu, recolor_cpu, Region, Rgb, REGIONS, SHADER};
 
-/// Hylo Dark, near enough: light ink on a slate ground.
+/// Moonowl Dark, near enough: light ink on a slate ground.
 const TEXT: Rgb = [0xe8, 0xe6, 0xe3];
 const BG: Rgb = [0x22, 0x24, 0x2b];
 

@@ -20,7 +20,7 @@
 //! app appends objects and leaves every original byte untouched, this
 //! re-serialises the document. Nothing for an ordinary paper; the end of the
 //! signature for a signed one. That is why [`standing`] asks its questions and
-//! why [`backup`] leaves `.hylopdf-original` beside the document the first
+//! why [`backup`] leaves `.moonowl-original` beside the document the first
 //! time this reader writes into one.
 //!
 //! *And the file has to be let go of before it can be written.* See
@@ -267,7 +267,7 @@ pub(crate) fn edit(
 
 /// Keep the document as it arrived, once, beside itself.
 ///
-/// The app's `.hylopdf-original`, under the app's own name and in the app's
+/// The app's `.moonowl-original`, under the app's own name and in the app's
 /// own place — beside the document rather than tucked away in a config
 /// directory, because the point is that the reader can find it without
 /// knowing this reader keeps one. There it is what removal is *built on*;
@@ -281,7 +281,7 @@ fn backup(path: &str) {
     let Some(name) = target.file_name().and_then(|name| name.to_str()) else {
         return;
     };
-    let beside = target.with_file_name(format!("{name}.hylopdf-original"));
+    let beside = target.with_file_name(format!("{name}.moonowl-original"));
     if beside.exists() {
         return;
     }

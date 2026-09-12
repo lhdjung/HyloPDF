@@ -1,15 +1,15 @@
-# HyloPDF keys
+# Moonowl keys
 #
-# Every action HyloPDF listens for is in here, with the keys it ships with.
+# Every action Moonowl listens for is in here, with the keys it ships with.
 # The lines are commented out, which means "keep the keys you shipped with".
 # Uncomment one, put the keys you want in it, and that action answers to
 # those instead. An empty list takes the action off the keyboard entirely.
 #
 # Leave alone anything you are happy with, rather than uncommenting the lot:
-# a line you have not touched still picks up a key a later version of HyloPDF
+# a line you have not touched still picks up a key a later version of Moonowl
 # adds, and a line you have frozen never will.
 #
-# This file is read when HyloPDF starts, and again when you press Reload on
+# This file is read when Moonowl starts, and again when you press Reload on
 # the Keyboard page in Settings — which is also where you can see what is in
 # force right now, including anything below that could not be read.
 #
@@ -29,7 +29,7 @@
 # So: "mod+f", "mod+shift+g", "alt+left", "escape", "j", "f11", "mod++".
 # Two keys with a space between them are pressed one after the other: "g g".
 #
-# A key does one thing. Give the same one to two actions and HyloPDF keeps the
+# A key does one thing. Give the same one to two actions and Moonowl keeps the
 # one you wrote, drops the one it shipped with, then says so on the Keyboard
 # page. Same for a key that would have to wait to find out what it means: bind
 # "g" to something and "g g" stops working.
@@ -50,7 +50,7 @@
 # Two of them, because there is more than one window: ⌘W closes this one — or
 # this tab, on a Mac, there being no other way to shut one — and ⌘Q closes them
 # all. ⌘Q is empty because the application menu macOS puts up already answers
-# it; on Windows and Linux there is no menu bar, so HyloPDF listens itself.
+# it; on Windows and Linux there is no menu bar, so Moonowl listens itself.
 # close-window = ["mod+w"]
 # quit = []
 # Window tabs are macOS's and exist nowhere else, so this is ⌘1 through ⌘9

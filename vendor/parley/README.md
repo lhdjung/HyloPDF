@@ -1,4 +1,4 @@
-**HyloPDF's copy of parley 0.11.1, with one line changed.** In
+**Moonowl's copy of parley 0.11.1, with one line changed.** In
 `src/shape/mod.rs` the shaper's point size is `item.size / layout.data.scale`
 rather than `item.size`: harfrust reads the font's `trak` table at that size,
 and `item.size` is the CSS size multiplied by the display scale, so on a

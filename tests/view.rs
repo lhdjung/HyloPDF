@@ -10,8 +10,8 @@
 //! checkable — a black rectangle at [`fixture::INK`] on three otherwise empty
 //! pages, its ink box the same on every one of them.
 
-use hylopdf::fixture;
-use hylopdf::harness::{Options, Reader};
+use moonowl::fixture;
+use moonowl::harness::{Options, Reader};
 
 /// The page's box on screen, as (width, height) in CSS pixels.
 fn page_shape(reader: &Reader) -> (f32, f32) {
@@ -55,13 +55,13 @@ fn margined() -> Reader {
     Reader::open(&fixture::margins_pdf())
 }
 
-/// What the ink box becomes once [`hylopdf::crop`] has padded it: the
+/// What the ink box becomes once [`moonowl::crop`] has padded it: the
 /// same arithmetic the module does, restated here so that a change to `PAD`
 /// shows up as a failure rather than as a test that agrees with whatever the
 /// code now says.
 fn expected_crop() -> (f64, f64, f64, f64) {
     let (left, top, right, bottom) = fixture::INK;
-    let pad = hylopdf::crop::PAD;
+    let pad = moonowl::crop::PAD;
     (
         left - pad,
         top - pad,
@@ -152,7 +152,7 @@ fn a_trimmed_page_puts_its_ink_where_its_margins_were() {
     let after = shot.leftmost_ink(band).expect("there is still ink on it");
     let inset_after = (after - band.0) as f64 / rect.width as f64;
     // Everything but the pad has come off, and the pad is what is left.
-    let pad = hylopdf::crop::PAD / expected_crop().2;
+    let pad = moonowl::crop::PAD / expected_crop().2;
     assert!(
         (inset_after - pad).abs() < 0.03,
         "the ink now starts at the padding: {inset_after}, expected about {pad}"

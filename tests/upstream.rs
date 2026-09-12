@@ -310,7 +310,7 @@ fn a_custom_widget_never_sees_a_click() {
 #[test]
 #[ignore = "aborts the process rather than failing"]
 fn pdfium_is_not_thread_safe() {
-    use hylopdf::render;
+    use moonowl::render;
     let path = format!("{}/tests/fixtures/book.pdf", env!("CARGO_MANIFEST_DIR"));
     let threads: Vec<_> = (0..4)
         .map(|_| {
@@ -323,7 +323,7 @@ fn pdfium_is_not_thread_safe() {
                             page,
                             400,
                             500,
-                            hylopdf::layout::View::WHOLE,
+                            moonowl::layout::View::WHOLE,
                             &mut |_bitmap| {},
                         )
                         .unwrap();

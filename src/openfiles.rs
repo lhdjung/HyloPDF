@@ -38,7 +38,7 @@ use crate::shell::Remote;
 static SHELL: OnceLock<Remote> = OnceLock::new();
 
 fn tracing() -> bool {
-    std::env::var_os("HYLOPDF_TRACE").is_some()
+    std::env::var_os("MOONOWL_TRACE").is_some()
 }
 
 /// Hand one path to the shell, which is where every other route ends too.
@@ -140,7 +140,7 @@ pub fn install(shell: Remote) {
         return;
     }
     unsafe {
-        let Some(mut builder) = ClassBuilder::new(c"HyloPDFDelegate", NSObject::class()) else {
+        let Some(mut builder) = ClassBuilder::new(c"MoonowlDelegate", NSObject::class()) else {
             return;
         };
         builder.add_method(

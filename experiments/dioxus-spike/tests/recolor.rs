@@ -14,7 +14,7 @@
 use anyrender_vello::wgpu;
 use dioxus_spike::recolor::{recolor_cpu, Rgb, SHADER};
 
-/// Hylo Dark, near enough: light ink on a slate ground.
+/// Moonowl Dark, near enough: light ink on a slate ground.
 const TEXT: Rgb = [0xe8, 0xe6, 0xe3];
 const BG: Rgb = [0x22, 0x24, 0x2b];
 

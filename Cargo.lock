@@ -1818,40 +1818,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hylopdf"
-version = "0.1.0"
-dependencies = [
- "anyrender",
- "anyrender_vello_cpu",
- "blitz-dom",
- "blitz-html",
- "blitz-paint",
- "blitz-shell",
- "blitz-test-harness",
- "blitz-traits",
- "dioxus",
- "dioxus-core",
- "dioxus-native",
- "hylopdf",
- "keyboard-types 0.7.0",
- "notify",
- "objc2",
- "pdfium-render",
- "peniko",
- "png",
- "pollster 1.0.1",
- "raw-window-handle",
- "serde",
- "serde_json",
- "stylo_static_prefs",
- "toml 0.8.23",
- "unicode-normalization",
- "webbrowser",
- "wgpu",
- "winit",
-]
-
-[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2629,6 +2595,40 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "moonowl"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "anyrender_vello_cpu",
+ "blitz-dom",
+ "blitz-html",
+ "blitz-paint",
+ "blitz-shell",
+ "blitz-test-harness",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-core",
+ "dioxus-native",
+ "keyboard-types 0.7.0",
+ "moonowl",
+ "notify",
+ "objc2",
+ "pdfium-render",
+ "peniko",
+ "png",
+ "pollster 1.0.1",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
+ "stylo_static_prefs",
+ "toml 0.8.23",
+ "unicode-normalization",
+ "webbrowser",
+ "wgpu",
+ "winit",
 ]
 
 [[package]]

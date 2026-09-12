@@ -8,8 +8,8 @@
 //! test that reaches past the interface cannot tell you the interface is
 //! wired up.
 
-use hylopdf::harness::{Options, Reader};
-use hylopdf::keymap::Action;
+use moonowl::harness::{Options, Reader};
+use moonowl::keymap::Action;
 
 fn book() -> Reader {
     Reader::open(&Reader::book())
@@ -229,7 +229,7 @@ fn the_toolbar_is_clickable() {
     reader.press("Escape");
     reader.click(".chip.theme");
     reader.click_nth(".menu.theme .menu-item", 1);
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
 }
 
 /// **A click used to cost the reader its keyboard**, and nothing said so for
@@ -250,17 +250,17 @@ fn a_click_does_not_cost_the_reader_its_keyboard() {
         "a key still moves the document after a click",
     );
     reader.press("t");
-    assert_eq!(reader.state().theme, "Hylo Dark", "…and still acts on it");
+    assert_eq!(reader.state().theme, "Moonowl Dark", "…and still acts on it");
 }
 
 #[test]
 fn a_theme_is_named_where_it_is_changed() {
     let mut reader = book();
-    assert_eq!(reader.state().theme, "Hylo Light");
+    assert_eq!(reader.state().theme, "Moonowl Light");
     reader.press("t");
     let dark = reader.state();
-    assert_eq!(dark.theme, "Hylo Dark");
-    assert_eq!(dark.notice, "Hylo Dark", "the notice says what happened");
+    assert_eq!(dark.theme, "Moonowl Dark");
+    assert_eq!(dark.notice, "Moonowl Dark", "the notice says what happened");
 }
 
 #[test]
@@ -309,7 +309,7 @@ fn the_window_can_be_a_different_size() {
 /// and the half a unit test on `Store` cannot see.
 #[test]
 fn what_the_reader_changes_survives_being_closed() {
-    let config = std::env::temp_dir().join(format!("hylopdf-restart-{}", std::process::id()));
+    let config = std::env::temp_dir().join(format!("moonowl-restart-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&config);
     let open = || {
         Reader::open_with(
@@ -323,13 +323,13 @@ fn what_the_reader_changes_survives_being_closed() {
 
     let (theme, zoom) = {
         let mut reader = open();
-        assert_eq!(reader.state().theme, "Hylo Light", "a fresh directory");
+        assert_eq!(reader.state().theme, "Moonowl Light", "a fresh directory");
         reader.press("t");
         reader.press("s");
         reader.press_chord("mod++");
         reader.press_chord("mod++");
         let state = reader.state();
-        assert_ne!(state.theme, "Hylo Light");
+        assert_ne!(state.theme, "Moonowl Light");
         assert!(state.zoom.ends_with('%'), "a zoom, not a fit: {state:?}");
         (state.theme, state.zoom)
     };
@@ -345,7 +345,7 @@ fn what_the_reader_changes_survives_being_closed() {
     assert!(written.contains("spread_mode = \"cover\""), "{written}");
     // And it is a settings file a person could open, which is the promise the
     // format is for.
-    assert!(written.starts_with("# HyloPDF settings"), "{written}");
+    assert!(written.starts_with("# Moonowl settings"), "{written}");
 
     let _ = std::fs::remove_dir_all(&config);
 }
@@ -359,12 +359,12 @@ fn what_the_reader_changes_survives_being_closed() {
 fn the_whole_shipped_theme_set_is_wearable() {
     let mut reader = book();
     let mut seen = vec![reader.state().theme];
-    for _ in 1..hylopdf::theme::BUILT_IN.len() {
+    for _ in 1..moonowl::theme::BUILT_IN.len() {
         reader.press("t");
         seen.push(reader.state().theme);
     }
     assert!(seen.len() >= 14, "{seen:?}");
-    assert!(seen.contains(&"Hylo Dark".to_string()), "{seen:?}");
+    assert!(seen.contains(&"Moonowl Dark".to_string()), "{seen:?}");
     assert!(seen.contains(&"Nord".to_string()), "{seen:?}");
     let mut sorted = seen.clone();
     sorted.sort();

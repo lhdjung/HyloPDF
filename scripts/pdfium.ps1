@@ -13,6 +13,6 @@ tar xzf pdfium\pdfium.tgz -C pdfium
 Remove-Item pdfium\pdfium.tgz
 
 # The archive puts the DLL in bin\, which is where the packager wants it; the
-# copy in lib\ is what HYLO_PDFIUM points at, so one path works on every system.
+# copy in lib\ is what MOONOWL_PDFIUM points at, so one path works on every system.
 Copy-Item pdfium\bin\pdfium.dll pdfium\lib\ -Force
 Get-ChildItem pdfium\lib

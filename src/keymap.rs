@@ -221,7 +221,7 @@ use Group::{Documents as D, LookingAtIt as L, MovingAround as M};
 
 /// **The app's own table, carried across entry for entry**, because the point
 /// of the port is that `keys.toml` means the same thing on both sides: a table
-/// missing rows would report the other half as things HyloPDF cannot do.
+/// missing rows would report the other half as things Moonowl cannot do.
 /// `tests/keys.rs` holds the two tables against the shipped `keys.toml`.
 ///
 /// The comments explaining *why* a key is what it is live in `src/keys.ts`
@@ -258,7 +258,7 @@ pub const ACTIONS: &[Spec] = &[
     // still mean what they meant on the platforms with no tabs to go to.
     spec!(A::GoToTab, "Go to a tab by number", D, [],
         mac ["mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8", "mod+9"]),
-    spec!(A::Quit, "Close HyloPDF", D, [], other["mod+q"]),
+    spec!(A::Quit, "Close Moonowl", D, [], other["mod+q"]),
     spec!(A::Find, "Search this document", D, ["mod+f"]),
     spec!(A::FindNext, "Next match", D, ["mod+g"]),
     spec!(A::FindPrevious, "Previous match", D, ["mod+shift+g"]),
@@ -803,7 +803,7 @@ impl Keymap {
 
         for name in overrides.keys() {
             if Action::from_name(name).is_none() {
-                problems.push(format!("{name} is not something HyloPDF can do."));
+                problems.push(format!("{name} is not something Moonowl can do."));
             }
         }
 
@@ -824,7 +824,7 @@ impl Keymap {
                     Some(binding) if !chords.contains(&binding) => chords.push(binding),
                     Some(_) => {}
                     None => problems.push(format!(
-                        "{}: \"{text}\" is not a key HyloPDF can read.",
+                        "{}: \"{text}\" is not a key Moonowl can read.",
                         spec.id.as_str()
                     )),
                 }

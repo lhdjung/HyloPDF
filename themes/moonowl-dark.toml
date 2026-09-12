@@ -1,15 +1,15 @@
-# Hylo Dark — the default dark theme.
+# Moonowl Dark — the default dark theme.
 # Not pure black on white: that contrast is tiring to read for long stretches.
-name = "Hylo Dark"
+name = "Moonowl Dark"
 order = 2
 text = "#e9eaee"
 background = "#24272f"
 accent = "#8fb0d4"
-# Hylo Light's copper, lit for a dark page — the same warmth, and the same
+# Moonowl Light's copper, lit for a dark page — the same warmth, and the same
 # reasons: not the accent, which the chrome has taken; not the selection's red,
 # which belongs to the reader; and warm, against a ground that is not.
 link = "#e0a271"
-# The same warm red as Hylo Light's, banked down to sit on a dark page: the
+# The same warm red as Moonowl Light's, banked down to sit on a dark page: the
 # derived colour here is the accent's blue over a slate background, which is
 # blue on blue, and a red reads at a glance where a lighter shade of the ground
 # does not. It is the one colour the theme keeps for the reader — the links

@@ -1,9 +1,9 @@
-# HyloPDF, a smooth reading experience
+# Moonowl, a smooth reading experience
 
 Note: everything down to the horizontal rule describes what the project SHOULD be like. Below it, "Architecture of the built app" describes what it currently is.
 
 ## General
-HyloPDF is a PDF reader written in Rust, drawn by Dioxus Native rather than
+Moonowl is a PDF reader written in Rust, drawn by Dioxus Native rather than
 by a webview. Cross-plattform, ergonomic, with a calm UI, and efficient: fast with no lags, little memory and CPU consumption, and a small binary.
 
 Importantly, all settings are preserved throughout sessions, and all of them are independent of each other: changing one setting does not change any other setting.
@@ -28,9 +28,9 @@ I guess, but I'm not certain, that themes are stored in some kind of config file
 
 ## Preinstalled themes
 Ignoring some settings, we have:
-- Hylo Light: the default light theme, and the overall default theme. Doesn't change colors at all.
-- Hylo Dark: the default dark theme. Text is white. Background is a dark grey, with maybe a tint of slate blue.
-- Hylo Ember: the app icon's palette. The icon's warm yellow on a deep ember red, with its coral as the accent.
+- Moonowl Light: the default light theme, and the overall default theme. Doesn't change colors at all.
+- Moonowl Dark: the default dark theme. Text is white. Background is a dark grey, with maybe a tint of slate blue.
+- Moonowl Ember: the app icon's palette. The icon's warm yellow on a deep ember red, with its coral as the accent.
 - Glamour: cool and glamorous dark theme inspired by the Charm / Bubble Tea aesthetic.
 - Dracula: text is pink, background is dark blue-ish. Some light blue and/or green is sprinkled in. Maybe that's not accurate – check the Dracula themes other apps use, and how that would translate into PDF theming.
 - Gruvbox, for the oldies.
@@ -184,7 +184,7 @@ theme missing from the TypeScript list shipped in the binary, appeared in the
 real app, and was simply absent under `npm run dev`, with nothing anywhere
 saying why. Adding a theme is adding a file.
 
-The one thing a directory cannot say is what order to list them in — the Hylo
+The one thing a directory cannot say is what order to list them in — the Moonowl
 family first, then the rest, is an editorial decision — so each shipped file
 carries an `order`: 1, 2, 3, so that the number is the position in the theme
 menu and can be read straight off it. Inserting one in the middle means
@@ -557,10 +557,10 @@ the *bundled* frontend — `tauri-build` runs `beforeBuildCommand` and embeds
 `dist/` — so a change to `src/` is invisible in it until `npm run build` and a
 rebuild that actually re-embeds. Use `npm run tauri dev`, which serves from
 vite. The second is worse and looks identical: if an installed
-`/Applications/HyloPDF.app` is running, the single-instance plugin routes the
+`/Applications/Moonowl.app` is running, the single-instance plugin routes the
 development binary's launch into *it* and the new one exits with status 0. The
 app on screen is then the installed one, and every change appears to have had
-no effect. `pgrep -fl HyloPDF` is the check.
+no effect. `pgrep -fl Moonowl` is the check.
 
 **None of this can be tested in the harness**, which has no Rust behind it and
 no windows. What is testable is on either side of the seam and is tested there:
@@ -598,7 +598,7 @@ the next open would put straight back, is worse than no button.
 
 **The write goes through Rust, because Rust owns the disk and the watch.**
 `write_document` takes the same per-window lock the read path does, writes
-atomically, leaves a `.hylopdf-original` beside the document the first time it
+atomically, leaves a `.moonowl-original` beside the document the first time it
 ever appends to it, tells `watch.rs` the burst about to arrive is ours, and
 emits `document-changed` to the writing window itself. So a mark reloads the
 document through the path a recompile already used, and every cache a reload
@@ -1177,9 +1177,9 @@ part that decides how it ships.
 
 - **pdfium is not in the binary, and the formats disagree about where it goes**:
   `Contents/Frameworks` in a `.app` (where a signed dylib has to be),
-  `/usr/lib/HyloPDF` beside `/usr/bin/HyloPDF` in a `.deb`, the executable's own
+  `/usr/lib/Moonowl` beside `/usr/bin/Moonowl` in a `.deb`, the executable's own
   directory in an `.msi`. `library_dir()` in `pdfium.rs` stats all three, after
-  `HYLO_PDFIUM`.
+  `MOONOWL_PDFIUM`.
 - **`tests/parity/app-inventory.json` is a *macOS* measurement**, taken from the
   retired app in WebKit where `ui-sans-serif` is SF Pro. Segoe UI sets the same
   words a few per cent narrower and DejaVu Sans several per cent wider, so a
@@ -1196,7 +1196,7 @@ part that decides how it ships.
 and `openfiles.rs` is the whole of that: `'aevt'`/`'odoc'` taken directly off
 `NSAppleEventManager`, because AppKit's own handler forwards to a delegate and
 winit sets none — `[NSApp delegate]` is nil for the life of the process. Until
-it was written, opening a PDF from the Finder gave a start screen and "HyloPDF
+it was written, opening a PDF from the Finder gave a start screen and "Moonowl
 cannot open files in the PDF document format".
 
 **A window is a window, and a tab is asked for.** macOS turns a new window into
@@ -1230,7 +1230,7 @@ cargo packager --release           # the installers, into target/release
 There is deliberately no `cargo fmt --check`: the keymap is one row per action
 so that it can be read down, and rustfmt explodes it.
 
-pdfium is a shared library and is not in this repository. `HYLO_PDFIUM` names
+pdfium is a shared library and is not in this repository. `MOONOWL_PDFIUM` names
 the directory holding it; without that, `pdfium.rs` looks inside the bundle and
 then at the copy vendored with the Phase 0 spike.
 
@@ -1244,8 +1244,8 @@ push to main and every pull request. `nightly.yml` replaces the rolling
 actually downloads the app from. `release.yml` is the only thing that names a
 version, and it runs only when you press the button.
 
-**The assets carry no version in their names** — `HyloPDF-macos-arm64.dmg`,
-`HyloPDF-linux-x86_64.AppImage`, `HyloPDF-windows-setup.exe` and so on. The
+**The assets carry no version in their names** — `Moonowl-macos-arm64.dmg`,
+`Moonowl-linux-x86_64.AppImage`, `Moonowl-windows-setup.exe` and so on. The
 release's tag says which version it is, and a fixed name is what lets
 `bundle.yml` write the download table into the notes from a template, and the
 README link to `releases/latest/download/<name>` without anyone editing it
@@ -1365,9 +1365,9 @@ above on why:
 
 | platform | files |
 | -------- | ----- |
-| macOS | `HyloPDF-macos-arm64.dmg`, `HyloPDF-macos-x64.dmg` |
-| Linux | `HyloPDF-linux-x86_64.AppImage`, `HyloPDF-linux-amd64.deb`, `HyloPDF-linux-x86_64.rpm` |
-| Windows | `HyloPDF-windows-setup.exe`, `HyloPDF-windows.msi` |
+| macOS | `Moonowl-macos-arm64.dmg`, `Moonowl-macos-x64.dmg` |
+| Linux | `Moonowl-linux-x86_64.AppImage`, `Moonowl-linux-amd64.deb`, `Moonowl-linux-x86_64.rpm` |
+| Windows | `Moonowl-windows-setup.exe`, `Moonowl-windows.msi` |
 
 The notes open with a three-line download list written by `bundle.yml`, one
 line per platform, because GitHub collapses the assets list and a reader who

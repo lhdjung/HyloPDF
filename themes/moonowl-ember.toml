@@ -1,9 +1,9 @@
-# Hylo Ember — the app's own icon, made readable.
+# Moonowl Ember — the app's own icon, made readable.
 # The icon is a coral page ruled in warm yellow, on a deep navy ground. At the
 # size of a real page that coral is far too pale to read anything off, so the
 # background here is the same hue banked down to an ember, the yellow of the
 # rules becomes the ink, and the coral stays what it is on the icon: the accent.
-name = "Hylo Ember"
+name = "Moonowl Ember"
 order = 3
 # The icon's rules, lifted a shade — a whole page of them wants more light than
 # four lines on a coral card do.

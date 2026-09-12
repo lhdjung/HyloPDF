@@ -360,7 +360,7 @@ mod tests {
     /// output. Everything else here is the file system's word for it; this is
     /// the one judgement the module makes on its own.
     fn scratch(name: &str, body: &[u8]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hylopdf-watch-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-watch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("scratch directory");
         let path = dir.join(name);
         std::fs::write(&path, body).expect("scratch file");

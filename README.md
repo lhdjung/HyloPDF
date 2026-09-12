@@ -1,4 +1,4 @@
-# HyloPDF
+# Moonowl
 
 A PDF reader that gets out of the way. One thin toolbar, a document that fills
 the rest of the window, and dark mode that actually recolours the page instead
@@ -13,9 +13,9 @@ Download and run — no store, no package manager, nothing to build:
 
 | | |
 |---|---|
-| **macOS** | [Apple silicon](../../releases/latest/download/HyloPDF-macos-arm64.dmg) · [Intel](../../releases/latest/download/HyloPDF-macos-x64.dmg) |
-| **Linux** | [AppImage](../../releases/latest/download/HyloPDF-linux-x86_64.AppImage) · [.deb](../../releases/latest/download/HyloPDF-linux-amd64.deb) · [.rpm](../../releases/latest/download/HyloPDF-linux-x86_64.rpm) |
-| **Windows** | [Installer](../../releases/latest/download/HyloPDF-windows-setup.exe) · [.msi](../../releases/latest/download/HyloPDF-windows.msi) |
+| **macOS** | [Apple silicon](../../releases/latest/download/Moonowl-macos-arm64.dmg) · [Intel](../../releases/latest/download/Moonowl-macos-x64.dmg) |
+| **Linux** | [AppImage](../../releases/latest/download/Moonowl-linux-x86_64.AppImage) · [.deb](../../releases/latest/download/Moonowl-linux-amd64.deb) · [.rpm](../../releases/latest/download/Moonowl-linux-x86_64.rpm) |
+| **Windows** | [Installer](../../releases/latest/download/Moonowl-windows-setup.exe) · [.msi](../../releases/latest/download/Moonowl-windows.msi) |
 
 Those links always point at the newest build; [every release](../../releases)
 is listed if you want a particular one.
@@ -59,4 +59,4 @@ The code was written by Claude (Opus 5 and Fable 5.1), but I had a strong vision
 
 ## The name
 
-*Strix hylophila*, the [rusty-barred owl](https://en.wikipedia.org/wiki/Rusty-barred_owl). Night owls might appreciate dark themes. Also, Rust.
+An owl by moonlight. The icon's owl is *Strix hylophila*, the [rusty-barred owl](https://en.wikipedia.org/wiki/Rusty-barred_owl). Night owls might appreciate dark themes. Also, Rust.

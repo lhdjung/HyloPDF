@@ -99,7 +99,7 @@ impl Scribe {
         SCRIBE.get_or_init(|| {
             let (jobs, inbox) = mpsc::channel();
             std::thread::Builder::new()
-                .name("hylopdf-library".into())
+                .name("moonowl-library".into())
                 .spawn(move || run(inbox))
                 .expect("a thread to write the library on");
             Scribe { jobs }
@@ -406,7 +406,7 @@ impl Store {
     }
 
     /// One stated directory, which is what a test has and what
-    /// `HYLOPDF_CONFIG` gives a run.
+    /// `MOONOWL_CONFIG` gives a run.
     pub fn at(dir: &Path) -> Store {
         let themes_dir = dir.join("themes");
         // On every run, so that a shipped theme whose colours change reaches a
@@ -1093,13 +1093,13 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hylopdf-store-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-store-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
 
     /// The reader gets the app's fourteen themes, from the app's own files,
-    /// with the Hylo family first — which is what the `order` in each shipped
+    /// with the Moonowl family first — which is what the `order` in each shipped
     /// file is for and the one thing a directory cannot say.
     #[test]
     fn the_shipped_themes_are_there_and_in_their_stated_order() {
@@ -1124,7 +1124,7 @@ mod tests {
                 .themes()
                 .iter()
                 .position(|theme| theme.id == theme::DEFAULT_DARK)
-                .expect("Hylo Dark ships");
+                .expect("Moonowl Dark ships");
             store.wear(dark);
             // Read off the file rather than restated here. A colour written
             // twice is a colour that drifts, which is the whole reason the
@@ -1165,8 +1165,8 @@ mod tests {
         store.wear(night);
         assert!(store.dark_now());
 
-        // Back to sepia rather than to Hylo Light, and forward to Tokyo Night
-        // rather than to Hylo Dark — twice each, because the slot is rewritten
+        // Back to sepia rather than to Moonowl Light, and forward to Tokyo Night
+        // rather than to Moonowl Dark — twice each, because the slot is rewritten
         // on every wear and a rule that only holds once is not a rule.
         assert_eq!(store.other_half(false), Some(sepia));
         store.wear(store.other_half(false).expect("a light theme"));
@@ -1192,7 +1192,7 @@ mod tests {
             .themes()
             .iter()
             .position(|theme| theme.id == theme::DEFAULT_DARK)
-            .expect("Hylo Dark ships");
+            .expect("Moonowl Dark ships");
         store.wear(dark);
         assert_eq!(store.following(), None);
 

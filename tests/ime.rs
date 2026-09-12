@@ -21,8 +21,8 @@
 //! is an ordinary `<input>` with an `oninput` handler, and a committed
 //! composition is an `input` event like any other.
 
-use hylopdf::fixture;
-use hylopdf::harness::{Options, Reader};
+use moonowl::fixture;
+use moonowl::harness::{Options, Reader};
 
 /// A reader over the six pages of prose with the find bar up, which is
 /// `tests/search.rs`'s own opening and is repeated rather than shared because

@@ -12,7 +12,7 @@
 //! a running app — including "Escape leaves full screen", which is
 //! specifically called out as a real-app check because a browser in full
 //! screen keeps the key. Here the reader asks its window for things through
-//! one door ([`hylopdf::app::Frame`]) and the harness writes the asks
+//! one door ([`moonowl::app::Frame`]) and the harness writes the asks
 //! down, so the asking is a test even though the window is not.
 //!
 //! What is still a real-app check is what the *shell* does with an ask, and
@@ -21,11 +21,11 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use hylopdf::app::Ask;
-use hylopdf::harness::{Options, Reader};
+use moonowl::app::Ask;
+use moonowl::harness::{Options, Reader};
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("hylopdf-windows-{}-{name}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("moonowl-windows-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -220,7 +220,7 @@ fn the_message_names_whatever_key_the_reader_bound() {
     // a chord reads is the platform's business: ⇧B on a Mac, `Shift+B` on
     // Windows and Linux. What is being tested is that the *rebound* key is the
     // one named, not the default.
-    let want = hylopdf::keymap::describe_binding("shift+b", cfg!(target_os = "macos"));
+    let want = moonowl::keymap::describe_binding("shift+b", cfg!(target_os = "macos"));
     assert!(
         notice.contains(&want),
         "notice was {notice:?}, wanted {want:?}"

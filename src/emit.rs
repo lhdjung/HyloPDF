@@ -214,7 +214,7 @@ pub fn after(delay: std::time::Duration, post: Post, news: News) {
         });
         let ticking = clock.clone();
         let started = std::thread::Builder::new()
-            .name("hylopdf-clock".into())
+            .name("moonowl-clock".into())
             .spawn(move || loop {
                 let mut due = ticking.due.lock().unwrap_or_else(|e| e.into_inner());
                 // Nothing waiting: sleep until something is left here.

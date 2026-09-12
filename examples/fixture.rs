@@ -17,6 +17,6 @@ fn main() {
     let pages = args
         .next()
         .map_or(5, |count| count.parse().expect("a number of pages"));
-    hylopdf::fixture::draft(std::path::Path::new(&path), pages);
+    moonowl::fixture::draft(std::path::Path::new(&path), pages);
     println!("wrote {path}, {pages} pages");
 }

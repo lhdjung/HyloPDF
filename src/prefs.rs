@@ -1467,7 +1467,7 @@ fn About(viewer: Signal<Viewer>) -> Element {
     let licenses = licenses_dir();
 
     rsx! {
-        h2 { class: "pane-title", "HyloPDF" }
+        h2 { class: "pane-title", "Moonowl" }
         p { class: "pane-lede", "A calm place to read." }
         Note { text: "Your settings and themes are stored in plain text on this computer and not sent anywhere else." }
         div { class: "keys",
@@ -1502,7 +1502,7 @@ fn About(viewer: Signal<Viewer>) -> Element {
 /// and the app's own — or `None` from a bare `cargo run`, which has none.
 ///
 /// The same three places `pdfium.rs` looks for the library, one level over:
-/// `Contents/Resources` in the `.app`, `/usr/lib/HyloPDF` beside `/usr/bin`,
+/// `Contents/Resources` in the `.app`, `/usr/lib/Moonowl` beside `/usr/bin`,
 /// and the executable's own directory on Windows. `Cargo.toml` says why the
 /// folder exists.
 fn licenses_dir() -> Option<String> {
@@ -1510,7 +1510,7 @@ fn licenses_dir() -> Option<String> {
     let dir = exe.parent()?;
     [
         dir.join("../Resources/licenses"),
-        dir.join("../lib/HyloPDF/licenses"),
+        dir.join("../lib/Moonowl/licenses"),
         dir.join("licenses"),
     ]
     .into_iter()

@@ -24,7 +24,7 @@
 //! come out of it through `Software` in `page.rs`.
 //!
 //! ```no_run
-//! use hylopdf::harness::Reader;
+//! use moonowl::harness::Reader;
 //! let mut reader = Reader::open("book.pdf");
 //! reader.press("j");
 //! assert!(reader.state().scroll > 0.0);
@@ -64,7 +64,7 @@ pub struct Options {
     pub height: u32,
     pub scale: f32,
     /// A place in the theme list, as `--theme` takes. `None` is whatever the
-    /// settings say, which in a fresh directory is Hylo Light.
+    /// settings say, which in a fresh directory is Moonowl Light.
     pub theme: Option<usize>,
     /// `keys.toml`, as a table: action name against the keys it should
     /// answer to. Written into the config directory before the reader opens,
@@ -132,7 +132,7 @@ pub struct Options {
 fn scratch_config() -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     std::env::temp_dir().join(format!(
-        "hylopdf-harness-{}-{}",
+        "moonowl-harness-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ))

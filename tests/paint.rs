@@ -12,20 +12,20 @@
 //! into it, and the toolbar is drawn in whatever `ui-sans-serif` resolves to
 //! on the machine.
 
-use hylopdf::harness::{Options, Reader};
-use hylopdf::palette;
-use hylopdf::recolor;
-use hylopdf::theme;
+use moonowl::harness::{Options, Reader};
+use moonowl::palette;
+use moonowl::recolor;
+use moonowl::theme;
 
-/// Hylo Dark, as the app's own theme file defines it. The list is fourteen
+/// Moonowl Dark, as the app's own theme file defines it. The list is fourteen
 /// long now and read off the app's `themes/` directory, so a test that wants
 /// *the dark one* asks for it by id rather than by a place in an array.
-fn hylo_dark() -> (usize, palette::Palette) {
+fn moonowl_dark() -> (usize, palette::Palette) {
     let index = theme::BUILT_IN
         .iter()
         .position(|(id, _)| *id == theme::DEFAULT_DARK)
-        .expect("Hylo Dark ships");
-    let parsed: theme::Theme = toml::from_str(theme::BUILT_IN[index].1).expect("Hylo Dark parses");
+        .expect("Moonowl Dark ships");
+    let parsed: theme::Theme = toml::from_str(theme::BUILT_IN[index].1).expect("Moonowl Dark parses");
     (index, palette::resolve(&parsed, true))
 }
 
@@ -91,7 +91,7 @@ fn a_recolouring_theme_reaches_the_page() {
         let mut reader = Reader::open_with(
             &Reader::book(),
             Options {
-                theme: Some(hylo_dark().0),
+                theme: Some(moonowl_dark().0),
                 ..Default::default()
             },
         );
@@ -103,7 +103,7 @@ fn a_recolouring_theme_reaches_the_page() {
         dark[0] < 80.0,
         "and a dark one is not — the recolouring is on the pixels, not on the CSS: {dark:?}"
     );
-    assert!(hylo_dark().1.recolor, "…which is what Hylo Dark asks for");
+    assert!(moonowl_dark().1.recolor, "…which is what Moonowl Dark asks for");
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn the_ink_survives_the_theme() {
     let mut reader = Reader::open_with(
         &Reader::book(),
         Options {
-            theme: Some(hylo_dark().0),
+            theme: Some(moonowl_dark().0),
             ..Default::default()
         },
     );
@@ -134,13 +134,13 @@ fn the_theme_reaches_the_chrome_too() {
     let mut reader = Reader::open_with(
         &Reader::book(),
         Options {
-            theme: Some(hylo_dark().0),
+            theme: Some(moonowl_dark().0),
             ..Default::default()
         },
     );
     let shot = reader.screenshot();
     let bar = shot.mean((0, 0, 1100, 40));
-    let paper = hylo_dark().1.background;
+    let paper = moonowl_dark().1.background;
     for channel in 0..3 {
         assert!(
             (bar[channel] - paper[channel] as f64).abs() < 24.0,
@@ -258,15 +258,15 @@ fn and_when_the_fingers_stop_the_page_is_drawn_at_the_size_it_reached() {
 /// `selection_area`, so the band is the theme's ground and the words on it are
 /// the theme's ink.
 ///
-/// Hylo Dark on purpose: a recoloured dark page is already light ink on dark
+/// Moonowl Dark on purpose: a recoloured dark page is already light ink on dark
 /// paper, so the darkest pixel in a run is its *paper* and the ramp has to go
 /// the other way round. That is the branch `selection_ramp` exists for, and the
 /// one a light theme would not exercise.
 #[test]
 fn a_selected_line_is_painted_in_the_theme_s_selection_colours() {
-    let (index, theme) = hylo_dark();
+    let (index, theme) = moonowl_dark();
     let mut reader = Reader::open_with(
-        &hylopdf::fixture::prose_pdf(),
+        &moonowl::fixture::prose_pdf(),
         Options {
             theme: Some(index),
             ..Options::default()
@@ -280,7 +280,7 @@ fn a_selected_line_is_painted_in_the_theme_s_selection_colours() {
 
     // **What the ground under the words should be, worked out rather than
     // guessed.** The ramp's ends are luma 0 and the white point, and the paper
-    // of a page Hylo Dark has already recoloured is neither: it is the theme's
+    // of a page Moonowl Dark has already recoloured is neither: it is the theme's
     // background, luma about 40, which lands a sixth of the way along rather
     // than at the end. So the expected colour is the ramp entry for that level
     // — the same table `duotone_cpu` builds, asked for one row.
@@ -288,7 +288,7 @@ fn a_selected_line_is_painted_in_the_theme_s_selection_colours() {
         ((colour[0] as u32 * 77 + colour[1] as u32 * 151 + colour[2] as u32 * 28 + 128) >> 8)
             as usize
     };
-    // Hylo Dark recolours and its ink is lighter than its paper, so the ramp
+    // Moonowl Dark recolours and its ink is lighter than its paper, so the ramp
     // runs the other way round: the darkest pixel in the run is the page's
     // *paper*. See `PageWidget::selection_ramp`.
     let ramp = recolor::Tables::new(theme.selection_area, theme.selection_text, false).ramp;

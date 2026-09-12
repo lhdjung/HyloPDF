@@ -3,8 +3,8 @@
 //! Its own file because the counter it reads is the process's, and the two
 //! tests in `cost.rs` drive a reader of their own in parallel with it.
 
-use hylopdf::harness::{Options, Reader};
-use hylopdf::stats;
+use moonowl::harness::{Options, Reader};
+use moonowl::stats;
 
 /// A window small enough that the rasteriser is not the slow part.
 fn options() -> Options {

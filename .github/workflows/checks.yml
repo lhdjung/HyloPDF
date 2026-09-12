@@ -80,7 +80,7 @@ jobs:
       # suite already follows: `cargo test` needs cargo and nothing else.
 
       # pdfium is a shared library and is not in this repository — `pdfium.rs`
-      # finds it beside the executable in a bundle and through `HYLO_PDFIUM`
+      # finds it beside the executable in a bundle and through `MOONOWL_PDFIUM`
       # here. Every path below is relative and the one absolute path is
       # GitHub's own, because bash on the Windows runner reports `RUNNER_TEMP`
       # as a Windows path with backslashes in it and cargo's environment wants
@@ -92,7 +92,7 @@ jobs:
           curl -sSfL -o pdfium.tgz \
             "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_TAG/${{ matrix.pdfium }}"
           tar xzf pdfium.tgz -C pdfium
-          echo "HYLO_PDFIUM=${{ github.workspace }}/pdfium/${{ matrix.lib }}" >> "$GITHUB_ENV"
+          echo "MOONOWL_PDFIUM=${{ github.workspace }}/pdfium/${{ matrix.lib }}" >> "$GITHUB_ENV"
 
       # Clippy on one runner rather than three: it is the same source and the
       # same lints, and the two things that actually differ between platforms —

@@ -19,8 +19,8 @@ use crate::atomic_write;
 // them out on a machine that has never seen them.
 include!(concat!(env!("OUT_DIR"), "/built_in.rs"));
 
-pub const DEFAULT_LIGHT: &str = "hylo-light";
-pub const DEFAULT_DARK: &str = "hylo-dark";
+pub const DEFAULT_LIGHT: &str = "moonowl-light";
+pub const DEFAULT_DARK: &str = "moonowl-dark";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
@@ -60,7 +60,7 @@ pub struct Theme {
     #[serde(default)]
     pub selection_text: Option<String>,
     /// When false the document keeps its own colors and only the app chrome is
-    /// themed. Used by Hylo Light.
+    /// themed. Used by Moonowl Light.
     #[serde(default = "yes")]
     pub recolor: bool,
     /// Set by the loader, not by the file.
@@ -124,13 +124,13 @@ fn is_built_in(id: &str) -> bool {
 ///
 /// These files are rewritten on every run, so an edit made in place disappears
 /// at the next launch. That is deliberate — the shipped set is the app's to
-/// define, and a built-in that could drift would make "Hylo Dark" mean
+/// define, and a built-in that could drift would make "Moonowl Dark" mean
 /// something different on every machine. But a file that silently undoes your
 /// work and says nothing about it is a trap, and the whole point of keeping
 /// themes as plain text is that someone can open one and get somewhere. So the
 /// file says what it is and where to put a copy.
 const BANNER: &str = "\
-# This file ships with HyloPDF and is rewritten every time the app starts.
+# This file ships with Moonowl and is rewritten every time the app starts.
 # Edit it and your changes will be gone at the next launch.
 #
 # To make it yours: copy it to a new name in this folder — any name but the
@@ -388,7 +388,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hylopdf-theme-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-theme-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("scratch");
         dir

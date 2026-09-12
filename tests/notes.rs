@@ -7,8 +7,8 @@
 //! where nothing here was reading them. The icon sat there looking like a
 //! button and was not one.
 
-use hylopdf::fixture;
-use hylopdf::harness::{Options, Reader};
+use moonowl::fixture;
+use moonowl::harness::{Options, Reader};
 
 fn annotated() -> Reader {
     Reader::open_with(&fixture::notes_pdf(), Options::default())

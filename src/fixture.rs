@@ -193,7 +193,7 @@ pub fn expected_headings() -> Vec<(String, usize, usize)> {
 /// writing it is a millisecond and every test that wants it wants the same
 /// bytes.
 pub fn contents_pdf() -> String {
-    written("hylopdf-fixture-contents.pdf", || build(12))
+    written("moonowl-fixture-contents.pdf", || build(12))
 }
 
 /// A document of `pages` pages, written where you say, right now.
@@ -231,7 +231,7 @@ pub fn titled_pdf(title: &str) -> String {
     }
     let named = title.to_string();
     written(
-        &format!("hylopdf-fixture-titled-{digest:016x}.pdf"),
+        &format!("moonowl-fixture-titled-{digest:016x}.pdf"),
         move || build_titled(&named),
     )
 }
@@ -306,7 +306,7 @@ fn build_titled(title: &str) -> Vec<u8> {
 /// WinAnsiEncoding, so it takes an `/Encoding` with `/Differences` and a
 /// `/ToUnicode` map, which is the pair a real typesetter emits.
 pub fn prose_pdf() -> String {
-    written("hylopdf-fixture-prose.pdf", build_prose)
+    written("moonowl-fixture-prose.pdf", build_prose)
 }
 
 /// What each page of [`prose_pdf`] says: a list of runs, each naming the font
@@ -459,7 +459,7 @@ pub const INK: (f64, f64, f64, f64) = (0.2, 0.1, 0.8, 0.9);
 /// clamp in [`crate::crop`] rather than by the page. Here the answer is
 /// [`INK`] padded, and a test can say so in numbers.
 pub fn margins_pdf() -> String {
-    written("hylopdf-fixture-margins.pdf", build_margins)
+    written("moonowl-fixture-margins.pdf", build_margins)
 }
 
 fn build_margins() -> Vec<u8> {
@@ -520,7 +520,7 @@ fn build_margins() -> Vec<u8> {
 /// ways on purpose — see [`LINKS`] — and the labels are the `/PageLabels`
 /// number tree, which is the only way a PDF says what is printed on a page.
 pub fn links_pdf() -> String {
-    written("hylopdf-fixture-links.pdf", build_links)
+    written("moonowl-fixture-links.pdf", build_links)
 }
 
 fn build_links() -> Vec<u8> {
@@ -601,7 +601,7 @@ fn build_links() -> Vec<u8> {
 /// comment over a passage, an annotation with nothing to read, and a link —
 /// the last two being the cases that must *not* show up as notes.
 pub fn notes_pdf() -> String {
-    written("hylopdf-fixture-notes.pdf", build_notes)
+    written("moonowl-fixture-notes.pdf", build_notes)
 }
 
 fn build_notes() -> Vec<u8> {
@@ -681,14 +681,14 @@ fn build_notes() -> Vec<u8> {
 /// a block of ink on it and a wide margin around it — the shape margin
 /// trimming, the layout and the range reads all want.
 pub fn book_pdf() -> String {
-    written("hylopdf-fixtures/book.pdf", || build_book(400))
+    written("moonowl-fixtures/book.pdf", || build_book(400))
 }
 
 /// A journal offprint: nineteen pages printed 407 to 425 at the foot, a
 /// running head with the year on every one, and no `/PageLabels` — the file
 /// says nothing about its numbers and the paper says everything.
 pub fn offprint_pdf() -> String {
-    written("hylopdf-fixture-offprint.pdf", build_offprint)
+    written("moonowl-fixture-offprint.pdf", build_offprint)
 }
 
 fn build_offprint() -> Vec<u8> {
@@ -880,7 +880,7 @@ fn first_and_last(ids: &[usize]) -> String {
 /// name and two passwords would want two files, and because what the tests
 /// need is one document that is locked, one password that opens it and any
 /// other string to be wrong.
-pub const LOCKED_PASSWORD: &str = "hylo";
+pub const LOCKED_PASSWORD: &str = "moonowl";
 
 /// Two pages, and a signature field that has actually been signed.
 ///
@@ -894,13 +894,13 @@ pub const LOCKED_PASSWORD: &str = "hylo";
 /// enough to be *present* — and being present is the fact this reader
 /// reports.
 pub fn signed_pdf() -> String {
-    written("hylopdf-fixture-signed.pdf", || build_signed(true))
+    written("moonowl-fixture-signed.pdf", || build_signed(true))
 }
 
 /// The same document with the signature field left blank — the app's fixture,
 /// rebuilt here so that the pair can be compared in one test.
 pub fn unsigned_field_pdf() -> String {
-    written("hylopdf-fixture-blank-field.pdf", || build_signed(false))
+    written("moonowl-fixture-blank-field.pdf", || build_signed(false))
 }
 
 fn build_signed(filled: bool) -> Vec<u8> {
@@ -990,13 +990,13 @@ fn build_signed(filled: bool) -> Vec<u8> {
 /// told from a corrupt one before there is anything to unlock it with, which is
 /// what `FPDF_ERR_PASSWORD` says and `FPDF_ERR_FORMAT` does not.
 pub fn locked_pdf() -> String {
-    written("hylopdf-locked.pdf", build_locked)
+    written("moonowl-locked.pdf", build_locked)
 }
 
 fn build_locked() -> Vec<u8> {
     // Fixed rather than random, because a fixture that is different every run
     // is a fixture that cannot be cached and cannot be compared.
-    let id: [u8; 16] = *b"HyloPDF fixture ";
+    let id: [u8; 16] = *b"Moonowl fixture ";
     // The owner password is the user password here. A document may perfectly
     // well have two, and nothing this reader does distinguishes them: pdfium
     // takes one string and tries it as both.

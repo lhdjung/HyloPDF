@@ -10,7 +10,7 @@
 //! disagreement from a bug report — which is the drift `build.rs` exists to
 //! prevent elsewhere.
 //!
-//! So an action HyloPDF has never heard of, or a key it cannot read, is
+//! So an action Moonowl has never heard of, or a key it cannot read, is
 //! carried across as written and reported by the frontend. Everything this
 //! module rejects is a shape TOML itself can describe but the frontend
 //! cannot use: `find = 3`, `find = { key = "f" }`.
@@ -145,7 +145,7 @@ mod tests {
     use super::*;
 
     fn dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("hylopdf-keys-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-keys-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir

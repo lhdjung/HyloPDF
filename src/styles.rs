@@ -552,7 +552,7 @@ body { margin: 0;
 }
 .page-now:hover { border-color: var(--muted); }
 /* The platform's focus ring is a blue rounded box that belongs to no theme in
-   this app — under Hylo Ember it is the one cold thing on screen. The border
+   this app — under Moonowl Ember it is the one cold thing on screen. The border
    says the same thing in the theme's own accent, which is
    `.page-jump input:focus` in `styles.css`. */
 .page-field:focus { outline: none; border-color: var(--accent); }
@@ -1328,8 +1328,8 @@ body { margin: 0;
    including the bar it was opened from. */
 /* **The scrim is the theme's backdrop at 62%, not black at 34%.** The app says
    `color-mix(in srgb, var(--bg) 62%, transparent)`, and the difference is not
-   subtle: a black wash over Hylo Light darkens a pale reader into something
-   that looks switched off, and over Hylo Ember it turns a warm room grey. A
+   subtle: a black wash over Moonowl Light darkens a pale reader into something
+   that looks switched off, and over Moonowl Ember it turns a warm room grey. A
    wash of the app's own ground leaves every theme recognisably itself, which
    is the point of having themes. `--scrim` is that colour with its alpha
    already in it, mixed in `palette.rs` where the rest of the shades are.

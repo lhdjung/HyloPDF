@@ -1003,12 +1003,12 @@ impl ApplicationHandler for Shell {
                     // on one.
                     if let Some(view) = self.inner.windows.get(id) {
                         // …and wears the application's own name when it is
-                        // showing nothing, rather than " — HyloPDF" with a
+                        // showing nothing, rather than " — Moonowl" with a
                         // hole where a document used to be.
                         view.window.set_title(&if title.is_empty() {
-                            "HyloPDF".to_string()
+                            "Moonowl".to_string()
                         } else {
-                            format!("{title} — HyloPDF")
+                            format!("{title} — Moonowl")
                         });
                     }
                     if let (Some(label), Some(swap)) =

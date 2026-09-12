@@ -1,4 +1,4 @@
-//! HyloPDF: a reader that reads, drawn by Blitz rather than by a webview.
+//! Moonowl: a reader that reads, drawn by Blitz rather than by a webview.
 //!
 //! This crate was `experiments/dioxus-reader` until it took the app over.
 //! `experiments/PROGRESS.md` is what building it found — the numbers, the

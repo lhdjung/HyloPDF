@@ -1,10 +1,10 @@
 [package]
-name = "hylopdf"
+name = "moonowl"
 version = "0.1.0"
 edition = "2021"
 publish = false
 license = "MIT OR Apache-2.0"
-description = "HyloPDF — a smooth reading experience"
+description = "Moonowl — a smooth reading experience"
 
 # A workspace of one, and `experiments/dioxus-spike` is a workspace of its own:
 # the spike is Phase 0's four answers, kept because they still compile and that
@@ -131,7 +131,7 @@ toml = "0.8"
 # `cargo test` build the library with a feature that `cargo build` leaves off.
 # Without it the harness would either be in the shipped binary or behind a flag
 # every test run had to remember.
-hylopdf = { path = ".", features = ["harness"] }
+moonowl = { path = ".", features = ["harness"] }
 # Named again here so that a test can reach them directly, which only
 # `tests/upstream.rs` does — a minimal reproduction owes nothing to this crate.
 blitz-test-harness = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
@@ -154,7 +154,7 @@ raw-window-handle = "0.6"
 # not the bundle's around it — which is why the target is named rather than
 # taking the crate's own lower-case name.
 [[bin]]
-name = "HyloPDF"
+name = "Moonowl"
 path = "src/main.rs"
 
 # The bundles, through `cargo-packager` — the bundler `tauri-bundler` is a fork
@@ -163,16 +163,16 @@ path = "src/main.rs"
 # to build first. The signing variables are the same `APPLE_*` names
 # `release.yml` has always set, and nothing has ever been signed with them.
 [package.metadata.packager]
-product-name = "HyloPDF"
-identifier = "app.hylopdf"
+product-name = "Moonowl"
+identifier = "app.moonowl"
 category = "Productivity"
 description = "A calm PDF reader"
-long-description = "HyloPDF is a calm, fast PDF reader: no clutter, easy dark mode, flexible themes."
+long-description = "Moonowl is a calm, fast PDF reader: no clutter, easy dark mode, flexible themes."
 # **No `license-file`.** cargo-packager turns one into a DMG licence agreement
 # — a dialogue to accept before the disk image will even mount, which the app's
 # own DMG has never shown. The licence is in the repository and in the archive
 # beside this.
-copyright = "Copyright © 2026 Lukas Jung and the HyloPDF contributors"
+copyright = "Copyright © 2026 Lukas Jung and the Moonowl contributors"
 icons = [
     "icons/32x32.png",
     "icons/128x128.png",
@@ -194,7 +194,7 @@ resources = [
     # want their text reproduced with a binary distribution, so the folder
     # `pdfium-binaries` ships them in travels with the library — beside the
     # app's own licence and THIRD-PARTY.md. The About pane opens the folder.
-    { src = "LICENSE", target = "licenses/HyloPDF.txt" },
+    { src = "LICENSE", target = "licenses/Moonowl.txt" },
     { src = "THIRD-PARTY.md", target = "licenses/THIRD-PARTY.md" },
     { src = "pdfium/LICENSE", target = "licenses/pdfium-binaries.txt" },
     { src = "pdfium/licenses/*", target = "licenses" },

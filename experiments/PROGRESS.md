@@ -1,7 +1,7 @@
 # The Dioxus Native experiment: where it stands
 
 > **The experiment ended and the reader took over.** `experiments/dioxus-reader`
-> is now the repository root, the crate is `hylopdf`, and the Tauri app it was
+> is now the repository root, the crate is `moonowl`, and the Tauri app it was
 > measured against is gone. Paths below are as they were while it was being
 > built; the reader's files are at `src/`, its tests at `tests/`.
 
@@ -382,7 +382,7 @@ questions were added, and each is the general form of what it caught:
   page. `take-recolor.mjs` runs the app's own function in WebKit over 525
   pixels picked to reach every branch and writes what comes out;
   `the_recolouring_is_the_app_s` holds the port to it within one level of 255.
-  It passes, and one of its two ramps is the link case — Hylo Light's copper
+  It passes, and one of its two ramps is the link case — Moonowl Light's copper
   on white — so a cross-reference is now *known* to be the colour the app
   paints it rather than assumed to be.
 
@@ -467,7 +467,7 @@ experiment had ever run on either. Four things it needs:
 
 - **pdfium downloaded per platform**, from the same `chromium/8021` release.
   The Windows archive keeps the DLL in `bin/` and its import library in `lib/`,
-  so the directory `HYLO_PDFIUM` names is not the same on all three.
+  so the directory `MOONOWL_PDFIUM` names is not the same on all three.
 - **`libfontconfig1-dev` on Linux**, or `yeslogic-fontconfig-sys` panics out of
   a build script before any test runs. Its escape hatch,
   `RUST_FONTCONFIG_DLOPEN=1`, is not one: it changes the crate's API enough
@@ -510,9 +510,9 @@ association, the copyright. Two things are the port's own:
 
 - **pdfium travels with the binary**, and the four formats disagree about
   where: `Contents/Frameworks` in a `.app`, where a signed dylib has to be;
-  `/usr/lib/HyloPDF` beside `/usr/bin/HyloPDF` in a `.deb`; the executable's
+  `/usr/lib/Moonowl` beside `/usr/bin/Moonowl` in a `.deb`; the executable's
   own directory in an `.msi`. `library_dir()` in `pdfium.rs` stats all three,
-  after `HYLO_PDFIUM` and before the copy vendored beside the spike.
+  after `MOONOWL_PDFIUM` and before the copy vendored beside the spike.
 - **No `license-file`.** cargo-packager turns one into a DMG licence agreement
   — a dialogue to accept before the image will mount, which the app's own DMG
   has never shown.

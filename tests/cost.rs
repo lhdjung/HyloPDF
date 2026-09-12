@@ -19,8 +19,8 @@
 //! leaks, because everything it holds is charged to the process and nothing is
 //! hidden behind a driver.
 
-use hylopdf::harness::{Options, Reader};
-use hylopdf::stats;
+use moonowl::harness::{Options, Reader};
+use moonowl::stats;
 
 /// A window small enough that the rasteriser is not the slow part.
 fn options() -> Options {

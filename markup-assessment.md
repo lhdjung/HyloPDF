@@ -46,7 +46,7 @@ cases for `FREETEXT`, `HIGHLIGHT`, `INK`, `STAMP` and `SIGNATURE` alone, so
 underline, strike-out and squiggly stay readable and are not writable. And
 `Annotation.save()` is not overridden by any markup subtype, so **an annotation
 already in the file cannot be edited or deleted through `saveDocument()` at
-all** — which is why removal in the app is a rebuild from `.hylopdf-original`
+all** — which is why removal in the app is a rebuild from `.moonowl-original`
 rather than a call.
 
 *The alternative that was rejected:* adopting pdf.js's `AnnotationEditorLayer`.
@@ -137,7 +137,7 @@ than at the open:
 - **Underline, strike-out and squiggly are readable, not writable** — see the
   worker's own switch, above.
 - **Nothing removes a highlight in the Tauri app** except the rebuild path.
-- **A document that cannot be written keeps its markup in HyloPDF alone**, listed
+- **A document that cannot be written keeps its markup in Moonowl alone**, listed
   but not drawn on the page. Not lost, not portable, and the notice says which.
 
 ## Still to build: making a marked page look marked

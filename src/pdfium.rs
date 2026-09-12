@@ -50,18 +50,18 @@ pub(crate) fn pdfium() -> Result<&'static Pdfium, String> {
     Ok(instance)
 }
 
-/// Where `libpdfium` is: `HYLO_PDFIUM` if it is set, then wherever the bundle
+/// Where `libpdfium` is: `MOONOWL_PDFIUM` if it is set, then wherever the bundle
 /// this binary was installed from put it, then the copy vendored with the
 /// spike. Nothing is fetched at runtime, which is the promise the pdf.js assets
 /// make today.
 ///
 /// Three places rather than one because the four bundle formats disagree: a
 /// `.app` keeps a signed dylib in `Contents/Frameworks`, an `.msi` keeps the
-/// DLL beside the `.exe`, and a `.deb` splits them — `/usr/bin/HyloPDF` and
-/// `/usr/lib/HyloPDF/`. They are stat'd in order rather than picked by `cfg`,
+/// DLL beside the `.exe`, and a `.deb` splits them — `/usr/bin/Moonowl` and
+/// `/usr/lib/Moonowl/`. They are stat'd in order rather than picked by `cfg`,
 /// because the ones that are not there cost nothing.
 fn library_dir() -> String {
-    if let Ok(dir) = std::env::var("HYLO_PDFIUM") {
+    if let Ok(dir) = std::env::var("MOONOWL_PDFIUM") {
         return dir;
     }
     let name = Pdfium::pdfium_platform_library_name();
@@ -69,7 +69,7 @@ fn library_dir() -> String {
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf))
     {
-        let beside = [dir.join("../Frameworks"), dir.join("../lib/HyloPDF"), dir];
+        let beside = [dir.join("../Frameworks"), dir.join("../lib/Moonowl"), dir];
         if let Some(found) = beside.iter().find(|dir| dir.join(&name).exists()) {
             return found.to_string_lossy().into_owned();
         }

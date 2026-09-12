@@ -8,8 +8,8 @@
 //! somebody looking at the screen would read it, which is the rule
 //! `PROGRESS.md` sets for `state()`.
 
-use hylopdf::fixture;
-use hylopdf::harness::{Options, Reader};
+use moonowl::fixture;
+use moonowl::harness::{Options, Reader};
 
 /// A reader over the six pages of prose, with the find bar already up.
 fn searching() -> Reader {
@@ -154,7 +154,7 @@ fn an_accent_a_ligature_and_a_soft_hyphen_are_all_findable_by_typing_the_word() 
 /// both outlive the bar they are set from.
 #[test]
 fn the_two_switches_change_what_is_found_and_are_remembered() {
-    let config = std::env::temp_dir().join(format!("hylopdf-switches-{}", std::process::id()));
+    let config = std::env::temp_dir().join(format!("moonowl-switches-{}", std::process::id()));
     let mut reader = Reader::open_with(
         &fixture::prose_pdf(),
         Options {
@@ -298,13 +298,13 @@ fn closing_the_bar_takes_the_highlights_with_it() {
 /// slices are counted.
 #[test]
 fn one_slice_of_the_scan_does_not_read_the_whole_book() {
-    use hylopdf::app::Viewer;
-    use hylopdf::page::Chosen;
-    use hylopdf::palette::FALLBACK;
-    use hylopdf::store::Store;
+    use moonowl::app::Viewer;
+    use moonowl::page::Chosen;
+    use moonowl::palette::FALLBACK;
+    use moonowl::store::Store;
 
-    let config = std::env::temp_dir().join(format!("hylopdf-slices-{}", std::process::id()));
-    let document = hylopdf::render::open(&Reader::book()).expect("the fixture");
+    let config = std::env::temp_dir().join(format!("moonowl-slices-{}", std::process::id()));
+    let document = moonowl::render::open(&Reader::book()).expect("the fixture");
     let pages = document.pages();
     let mut viewer = Viewer::new(document, Chosen::new(FALLBACK), Store::at(&config));
     viewer.resize(1100.0, 800.0);

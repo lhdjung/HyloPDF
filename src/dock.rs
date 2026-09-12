@@ -49,11 +49,11 @@ pub fn install(shell: Remote) {
         return;
     }
     unsafe {
-        let Some(mut builder) = ClassBuilder::new(c"HyloPDFDock", NSObject::class()) else {
+        let Some(mut builder) = ClassBuilder::new(c"MoonowlDock", NSObject::class()) else {
             return;
         };
         builder.add_method(
-            sel!(hyloNewWindow:),
+            sel!(moonowlNewWindow:),
             new_window as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject),
         );
         let class = builder.register();
@@ -67,7 +67,7 @@ pub fn install(shell: Remote) {
         let item: *mut AnyObject = msg_send![
             item,
             initWithTitle: string(c"New Window"),
-            action: sel!(hyloNewWindow:),
+            action: sel!(moonowlNewWindow:),
             keyEquivalent: string(c""),
         ];
         let _: () = msg_send![item, setTarget: target];

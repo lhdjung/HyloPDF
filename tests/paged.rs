@@ -7,7 +7,7 @@
 //! is a line in `settings.toml`, and every test here opens a reader that has
 //! one — which is also what `Options.settings` was added for.
 
-use hylopdf::harness::{Options, Reader};
+use moonowl::harness::{Options, Reader};
 use serde_json::json;
 
 fn paged() -> Reader {

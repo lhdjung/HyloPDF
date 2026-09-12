@@ -6,9 +6,9 @@
 //! window would be a second `Viewer` over a second `Store`, and the harness
 //! has no windows.
 
-use hylopdf::harness::{Options, Reader};
-use hylopdf::keymap::Action;
-use hylopdf::theme;
+use moonowl::harness::{Options, Reader};
+use moonowl::keymap::Action;
+use moonowl::theme;
 
 fn book() -> Reader {
     Reader::open(&Reader::book())
@@ -224,9 +224,9 @@ fn a_theme_is_chosen_from_its_own_swatch() {
         "every shipped theme is listed"
     );
 
-    // The second card, which is the dark one the Hylo family opens with.
+    // The second card, which is the dark one the Moonowl family opens with.
     reader.click_nth(".theme-card", 1);
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
 }
 
 /* --------------------------------------------------- dark mode, and the machine */
@@ -251,13 +251,13 @@ fn appearance(reader: &mut Reader) {
 #[test]
 fn dark_mode_is_a_key_and_a_switch_and_they_are_the_same_thing() {
     let mut reader = Reader::open(&Reader::book());
-    assert_eq!(reader.state().theme, "Hylo Light");
+    assert_eq!(reader.state().theme, "Moonowl Light");
 
     // ⌘D, which until now answered "Dark mode is not built yet".
     reader.press_chord("mod+d");
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
     reader.press_chord("mod+d");
-    assert_eq!(reader.state().theme, "Hylo Light");
+    assert_eq!(reader.state().theme, "Moonowl Light");
 
     // And the switch on the Appearance page, which is the same call.
     appearance(&mut reader);
@@ -266,7 +266,7 @@ fn dark_mode_is_a_key_and_a_switch_and_they_are_the_same_thing() {
     reader.click_nth("[role='switch']", 1);
     assert!(switched(&reader, "Dark mode"));
     reader.press("Escape");
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn dark_mode_returns_to_the_pair_the_reader_chose() {
     reader.press_chord("mod+d");
     assert_eq!(reader.state().theme, "Tokyo Night");
     reader.press_chord("mod+d");
-    assert_eq!(reader.state().theme, "Sepia", "not Hylo Light");
+    assert_eq!(reader.state().theme, "Sepia", "not Moonowl Light");
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn a_dark_machine_is_read_in_the_dark_from_the_first_frame() {
             ..Options::default()
         },
     );
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
 }
 
 #[test]
@@ -315,19 +315,19 @@ fn the_machine_changing_its_mind_is_followed_and_then_is_not() {
             ..Options::default()
         },
     );
-    assert_eq!(reader.state().theme, "Hylo Light");
+    assert_eq!(reader.state().theme, "Moonowl Light");
 
     // Evening.
     reader.set_appearance(Some(true));
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
     reader.set_appearance(Some(false));
-    assert_eq!(reader.state().theme, "Hylo Light");
+    assert_eq!(reader.state().theme, "Moonowl Light");
 
     // Now the reader overrules it, by pressing ⌘D at noon. Following stops,
     // and the reader is told where the switch is — otherwise the machine's
     // next word would take the choice straight back off them.
     reader.press_chord("mod+d");
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
     assert!(
         reader.state().notice.contains("No longer following"),
         "{}",
@@ -339,7 +339,7 @@ fn the_machine_changing_its_mind_is_followed_and_then_is_not() {
 
     // …and the machine going light again leaves them where they are.
     reader.set_appearance(Some(false));
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
 }
 
 #[test]
@@ -356,7 +356,7 @@ fn following_can_be_switched_back_on_and_takes_effect_at_once() {
     );
     assert_eq!(
         reader.state().theme,
-        "Hylo Light",
+        "Moonowl Light",
         "not following, so not moved"
     );
 
@@ -365,7 +365,7 @@ fn following_can_be_switched_back_on_and_takes_effect_at_once() {
     reader.click_nth("[role='switch']", 0);
     assert!(switched(&reader, "Follow the system"));
     reader.press("Escape");
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
 }
 
 #[test]
@@ -384,9 +384,9 @@ fn a_machine_that_will_not_say_leaves_the_reader_alone() {
             ..Options::default()
         },
     );
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
     reader.set_appearance(None);
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
 
     appearance(&mut reader);
     // The switch still reads the setting rather than what the setting can do

@@ -1,4 +1,4 @@
-# Is Dioxus Native a good fit for HyloPDF?
+# Is Dioxus Native a good fit for Moonowl?
 
 Written 2026-08-31 against `dioxus-experiment`, in answer to QRnew's own
 assessment saying its migration "is a much better fit for QRnew than it is for
@@ -14,12 +14,12 @@ their own tests. "Is it a fit" was a live question in the spring; it is now
 mostly a question answered by construction.
 
 What is left is not a fit question at all. It is a **platform-coverage
-question** — HyloPDF ships installers for Windows and Linux — and a **maturity
+question** — Moonowl ships installers for Windows and Linux — and a **maturity
 question**, which is a schedule risk rather than a design one.
 
 The right way to read QRnew's sentence is as a compliment to how little QRnew
-had to change rather than a doubt about HyloPDF. The two apps went through the
-same door for different reasons: QRnew because the door was open, HyloPDF
+had to change rather than a doubt about Moonowl. The two apps went through the
+same door for different reasons: QRnew because the door was open, Moonowl
 carrying a PDF renderer, a window manager, a theme engine and eleven thousand
 lines of interface through it, because every other door was measured and found
 shut.

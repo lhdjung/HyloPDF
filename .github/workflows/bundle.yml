@@ -93,7 +93,7 @@ jobs:
           sudo apt-get install -y libfontconfig1-dev fonts-dejavu-core patchelf
 
       # pdfium travels inside the bundle — `Contents/Frameworks` in the `.app`,
-      # `/usr/lib/HyloPDF` in the `.deb`, beside the `.exe` on Windows — and
+      # `/usr/lib/Moonowl` in the `.deb`, beside the `.exe` on Windows — and
       # `resources` and `frameworks` in `Cargo.toml` are what put it there. The
       # Intel DMG needs the Intel library even though an Apple silicon runner
       # built it.
@@ -142,7 +142,7 @@ jobs:
           fi
           sudo chown "$USER" ./*.rpm 2>/dev/null || true
           for f in ./*.rpm; do
-            if rpm -qlp "$f" | grep -q 'HyloPDF'; then
+            if rpm -qlp "$f" | grep -q 'Moonowl'; then
               echo "keeping $f"
             else
               echo "$f carries nothing recognisable; dropping it." >&2
@@ -160,13 +160,13 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           cd "target/${{ matrix.target }}/release"
-          for f in *.dmg;       do mv "$f" "HyloPDF-macos-${{ matrix.arch }}.dmg"; done
-          for f in *.deb;       do mv "$f" "HyloPDF-linux-amd64.deb"; done
-          for f in *.rpm;       do mv "$f" "HyloPDF-linux-x86_64.rpm"; done
-          for f in *.AppImage;  do mv "$f" "HyloPDF-linux-x86_64.AppImage"; done
-          for f in *setup.exe;  do mv "$f" "HyloPDF-windows-setup.exe"; done
-          for f in *.msi;       do mv "$f" "HyloPDF-windows.msi"; done
-          ls -lh HyloPDF-*
+          for f in *.dmg;       do mv "$f" "Moonowl-macos-${{ matrix.arch }}.dmg"; done
+          for f in *.deb;       do mv "$f" "Moonowl-linux-amd64.deb"; done
+          for f in *.rpm;       do mv "$f" "Moonowl-linux-x86_64.rpm"; done
+          for f in *.AppImage;  do mv "$f" "Moonowl-linux-x86_64.AppImage"; done
+          for f in *setup.exe;  do mv "$f" "Moonowl-windows-setup.exe"; done
+          for f in *.msi;       do mv "$f" "Moonowl-windows.msi"; done
+          ls -lh Moonowl-*
 
       # **The check that would have caught every packaging fault this project
       # has had, and none of them was visible to `cargo test`.** An unsealed
@@ -196,13 +196,13 @@ jobs:
           cargo run --example fixture -- smoke.pdf 5
           document="$PWD/smoke.pdf"
           config="$PWD/smoke-config"
-          # Bash on the Windows runner says `/d/a/HyloPDF/…`, and a Rust `Path`
+          # Bash on the Windows runner says `/d/a/Moonowl/…`, and a Rust `Path`
           # cannot open that.
           if [ "${{ runner.os }}" = "Windows" ]; then
             document=$(cygpath -w "$document")
             config=$(cygpath -w "$config")
           fi
-          export HYLOPDF_CONFIG="$config"
+          export MOONOWL_CONFIG="$config"
 
           # Opens the document, or says what came out instead.
           #
@@ -229,17 +229,17 @@ jobs:
           case "${{ matrix.target }}" in
             aarch64-apple-darwin)
               hdiutil attach -readonly -nobrowse -noverify \
-                -mountpoint /tmp/hylo HyloPDF-macos-arm64.dmg
+                -mountpoint /tmp/moonowl Moonowl-macos-arm64.dmg
               # Both of these are a fault this project shipped: a bundle whose
               # seal claims resources it has not sealed is refused by Gatekeeper
               # with no "Open Anyway" at all, and without the entitlement the
               # hardened runtime will not load `libpdfium.dylib`.
-              codesign --verify --deep --strict /tmp/hylo/HyloPDF.app
-              codesign -d --entitlements - /tmp/hylo/HyloPDF.app 2>&1 \
+              codesign --verify --deep --strict /tmp/moonowl/Moonowl.app
+              codesign -d --entitlements - /tmp/moonowl/Moonowl.app 2>&1 \
                 | grep -q disable-library-validation
-              cp -R /tmp/hylo/HyloPDF.app /tmp/HyloPDF.app
-              hdiutil detach /tmp/hylo
-              opens /tmp/HyloPDF.app/Contents/MacOS/HyloPDF
+              cp -R /tmp/moonowl/Moonowl.app /tmp/Moonowl.app
+              hdiutil detach /tmp/moonowl
+              opens /tmp/Moonowl.app/Contents/MacOS/Moonowl
               ;;
             x86_64-apple-darwin)
               # Cross-compiled, and an Apple silicon runner has no Rosetta to
@@ -247,33 +247,33 @@ jobs:
               echo "an Intel build cannot be run on this runner; not smoke tested"
               ;;
             x86_64-unknown-linux-gnu)
-              sudo apt-get install -y ./HyloPDF-linux-amd64.deb
-              # `/usr/bin/HyloPDF` and `/usr/lib/HyloPDF/libpdfium.so` are two
+              sudo apt-get install -y ./Moonowl-linux-amd64.deb
+              # `/usr/bin/Moonowl` and `/usr/lib/Moonowl/libpdfium.so` are two
               # different directories, which is the whole reason `library_dir()`
               # stats three of them.
-              opens /usr/bin/HyloPDF
-              chmod +x HyloPDF-linux-x86_64.AppImage
-              opens ./HyloPDF-linux-x86_64.AppImage
+              opens /usr/bin/Moonowl
+              chmod +x Moonowl-linux-x86_64.AppImage
+              opens ./Moonowl-linux-x86_64.AppImage
               ;;
             x86_64-pc-windows-msvc)
               # **The installer is listed, not run.** `/S` is NSIS's silent
               # install and it does not return on a runner: the first attempt
               # hung until the job was cancelled two hours later, and the
               # second until the forty-five minute cap, leaving
-              # `HyloPDF-windows-setup` behind as an orphan process both times.
+              # `Moonowl-windows-setup` behind as an orphan process both times.
               # There is nobody here to click anything, so what is checked is
               # what the installer *carries* — and then the two files are put
               # side by side, which is the arrangement it would have made, and
               # a document is opened with them. That is the fault this test
               # exists for: an executable that cannot find its pdfium.
-              7z l HyloPDF-windows-setup.exe > payload.txt
-              grep -qi "HyloPDF.exe" payload.txt
+              7z l Moonowl-windows-setup.exe > payload.txt
+              grep -qi "Moonowl.exe" payload.txt
               grep -qi "pdfium.dll" payload.txt
               echo "the installer carries the executable and the library"
               mkdir -p beside
-              cp HyloPDF.exe beside/
+              cp Moonowl.exe beside/
               cp ../../../pdfium/bin/pdfium.dll beside/
-              opens ./beside/HyloPDF.exe
+              opens ./beside/Moonowl.exe
               ;;
           esac
 
@@ -287,7 +287,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "target/${{ matrix.target }}/release"
-          gh release upload "${{ inputs.tag }}" HyloPDF-* --clobber
+          gh release upload "${{ inputs.tag }}" Moonowl-* --clobber
 
   notes:
     name: The download links
@@ -331,26 +331,26 @@ jobs:
           {
             echo "### Download"
             echo
-            if have HyloPDF-macos-arm64.dmg; then
-              printf -- '- %s — Apple silicon' "$(link macOS HyloPDF-macos-arm64.dmg)"
-              have HyloPDF-macos-x64.dmg && printf ', or %s' "$(link Intel HyloPDF-macos-x64.dmg)" || true
+            if have Moonowl-macos-arm64.dmg; then
+              printf -- '- %s — Apple silicon' "$(link macOS Moonowl-macos-arm64.dmg)"
+              have Moonowl-macos-x64.dmg && printf ', or %s' "$(link Intel Moonowl-macos-x64.dmg)" || true
               echo
             fi
-            if have HyloPDF-windows-setup.exe; then
-              printf -- '- %s' "$(link Windows HyloPDF-windows-setup.exe)"
-              have HyloPDF-windows.msi && printf ' — or an %s' "$(link .msi HyloPDF-windows.msi)" || true
+            if have Moonowl-windows-setup.exe; then
+              printf -- '- %s' "$(link Windows Moonowl-windows-setup.exe)"
+              have Moonowl-windows.msi && printf ' — or an %s' "$(link .msi Moonowl-windows.msi)" || true
               echo
             fi
-            if have HyloPDF-linux-x86_64.AppImage; then
-              printf -- '- %s — an AppImage' "$(link Linux HyloPDF-linux-x86_64.AppImage)"
-              have HyloPDF-linux-amd64.deb && printf ', or %s' "$(link .deb HyloPDF-linux-amd64.deb)" || true
-              have HyloPDF-linux-x86_64.rpm && printf ' · %s' "$(link .rpm HyloPDF-linux-x86_64.rpm)" || true
+            if have Moonowl-linux-x86_64.AppImage; then
+              printf -- '- %s — an AppImage' "$(link Linux Moonowl-linux-x86_64.AppImage)"
+              have Moonowl-linux-amd64.deb && printf ', or %s' "$(link .deb Moonowl-linux-amd64.deb)" || true
+              have Moonowl-linux-x86_64.rpm && printf ' · %s' "$(link .rpm Moonowl-linux-x86_64.rpm)" || true
               echo
             fi
             echo
             echo "### First launch"
             echo
-            echo "- **macOS**: the app is refused as being from an unidentified developer. Open \`System Settings\` → \`Privacy & Security\`, scroll down and click \`Open Anyway\`. The first PDF opened with HyloPDF asks the same again; answer it the same way."
+            echo "- **macOS**: the app is refused as being from an unidentified developer. Open \`System Settings\` → \`Privacy & Security\`, scroll down and click \`Open Anyway\`. The first PDF opened with Moonowl asks the same again; answer it the same way."
             echo "- **Windows**: SmartScreen says the app is unrecognised. Click \`More info\`, then \`Run anyway\`."
             echo "- **Linux**: the AppImage needs \`chmod +x\` before it runs; the \`.deb\` and \`.rpm\` install like any other package."
             echo

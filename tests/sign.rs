@@ -5,23 +5,23 @@
 //! does: a signature drawn once, kept, and dropped onto a page as the
 //! specification's own `/Ink` annotation.
 
-use hylopdf::render::{self, Rect};
-use hylopdf::sign::{self, Signature};
+use moonowl::render::{self, Rect};
+use moonowl::sign::{self, Signature};
 
 /// A copy of the plain fixture, in a directory of this test's own — everything
 /// here writes to the document, and the fixtures are shared.
 fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("hylopdf-sign-{}-{name}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("moonowl-sign-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a directory to write in");
     let path = dir.join("signed.pdf");
-    hylopdf::fixture::draft(&path, 3);
+    moonowl::fixture::draft(&path, 3);
     path
 }
 
 /// A config directory of this test's own, handed to the store rather than set
 /// in the environment — see `sign::dir`, and the reason it takes a path.
 fn own_config(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("hylopdf-signs-{}-{name}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("moonowl-signs-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a config directory");
     dir
@@ -270,7 +270,7 @@ fn a_signature_can_be_taken_off_again() {
     let placed = render::open(file).expect("reopened").signatures();
     assert_eq!(placed.len(), 1);
 
-    hylopdf::markup::remove(file, placed[0].page, placed[0].index).expect("taken off");
+    moonowl::markup::remove(file, placed[0].page, placed[0].index).expect("taken off");
     assert!(
         render::open(file)
             .expect("reopened again")
@@ -317,7 +317,7 @@ fn the_document_as_it_arrived_is_kept_beside_it() {
     let path = scratch("backup");
     let file = path.to_str().unwrap();
     let before = std::fs::read(&path).expect("the fixture");
-    let beside = path.with_file_name("signed.pdf.hylopdf-original");
+    let beside = path.with_file_name("signed.pdf.moonowl-original");
     assert!(!beside.exists(), "nothing kept yet");
 
     sign::place(
@@ -387,18 +387,18 @@ fn an_encrypted_document_is_not_signed() {
 /* -------------------------------------------------------- and in the app */
 
 mod through_the_reader {
-    use hylopdf::harness::{Options, Reader};
-    use hylopdf::render;
+    use moonowl::harness::{Options, Reader};
+    use moonowl::render;
 
     /// A reader over a document of its own, with a config directory of its
     /// own — signing writes to both.
     fn reader(name: &str) -> (Reader, std::path::PathBuf) {
         let dir =
-            std::env::temp_dir().join(format!("hylopdf-signui-{}-{name}", std::process::id()));
+            std::env::temp_dir().join(format!("moonowl-signui-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a directory");
         let pdf = dir.join("doc.pdf");
-        hylopdf::fixture::draft(&pdf, 3);
+        moonowl::fixture::draft(&pdf, 3);
         let reader = Reader::open_with(
             pdf.to_str().expect("a path"),
             Options {
@@ -452,11 +452,11 @@ mod through_the_reader {
     /// green tick should meet them before they meet the pad.
     #[test]
     fn the_window_says_what_the_document_is_already_signed_with() {
-        let dir = std::env::temp_dir().join(format!("hylopdf-signui-{}-seal", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-signui-{}-seal", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a directory");
         let pdf = dir.join("doc.pdf");
-        std::fs::copy(hylopdf::fixture::signed_pdf(), &pdf).expect("a signed copy");
+        std::fs::copy(moonowl::fixture::signed_pdf(), &pdf).expect("a signed copy");
         let mut reader = Reader::open_with(
             pdf.to_str().expect("a path"),
             Options {
@@ -498,8 +498,8 @@ mod through_the_reader {
             .expect("reopened")
             .signatures();
         assert_eq!(placed.len(), 1);
-        assert_eq!(placed[0].kind, hylopdf::sign::Written::Line);
-        assert_eq!(placed[0].by, hylopdf::sign::today());
+        assert_eq!(placed[0].kind, moonowl::sign::Written::Line);
+        assert_eq!(placed[0].by, moonowl::sign::today());
         assert_eq!(placed[0].page, 1);
     }
 
@@ -737,7 +737,7 @@ fn a_line_of_text_is_drawn_on_the_page() {
                 0,
                 width,
                 height,
-                hylopdf::layout::View::WHOLE,
+                moonowl::layout::View::WHOLE,
                 &mut |bitmap| {
                     for y in 290..312u32 {
                         for x in 95..260u32 {
@@ -784,7 +784,7 @@ fn a_line_of_text_is_listed_and_comes_off_again() {
     assert_eq!(placed[0].page, 2);
     assert_eq!(placed[0].by, "Reading, 14 March 2024");
 
-    hylopdf::markup::remove(file, placed[0].page, placed[0].index).expect("taken off");
+    moonowl::markup::remove(file, placed[0].page, placed[0].index).expect("taken off");
     assert!(render::open(file)
         .expect("reopened again")
         .signatures()
@@ -884,12 +884,12 @@ fn the_day_count_becomes_the_right_date() {
 /// their document.
 #[test]
 fn a_signed_document_says_what_signing_it_costs() {
-    let dir = std::env::temp_dir().join(format!("hylopdf-seal-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("moonowl-seal-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a directory");
     let path = dir.join("carries-a-signature.pdf");
-    std::fs::copy(hylopdf::fixture::signed_pdf(), &path).expect("a copy to write to");
+    std::fs::copy(moonowl::fixture::signed_pdf(), &path).expect("a copy to write to");
 
-    let opened = hylopdf::render::open(path.to_str().expect("a path")).expect("it opens");
+    let opened = moonowl::render::open(path.to_str().expect("a path")).expect("it opens");
     let standing = sign::standing(opened.path(), false, opened.sealed());
     assert!(standing.into_file, "it can still be signed with ink");
     assert!(
@@ -916,7 +916,7 @@ fn a_signed_document_says_what_signing_it_costs() {
 /// merely had somewhere to sign.
 #[test]
 fn a_blank_signature_field_is_not_a_signature() {
-    let blank = hylopdf::fixture::unsigned_field_pdf();
+    let blank = moonowl::fixture::unsigned_field_pdf();
     let seals = sign::seals(&blank);
     assert_eq!(seals.len(), 1, "pdfium counts the field either way");
     assert!(!seals[0].filled, "and this one has nothing in it");
@@ -925,7 +925,7 @@ fn a_blank_signature_field_is_not_a_signature() {
         !sign::standing(
             &blank,
             false,
-            hylopdf::render::open(&blank).expect("it opens").sealed()
+            moonowl::render::open(&blank).expect("it opens").sealed()
         )
         .rewrites,
         "so there is no signature here for ink to break",
@@ -940,7 +940,7 @@ fn a_blank_signature_field_is_not_a_signature() {
 /// not obtainable at all — the signer's name among them.
 #[test]
 fn a_signature_says_when_and_why() {
-    let seals = sign::seals(&hylopdf::fixture::signed_pdf());
+    let seals = sign::seals(&moonowl::fixture::signed_pdf());
     assert_eq!(seals.len(), 1);
     assert!(seals[0].filled);
     assert_eq!(seals[0].when, "14 March 2024");
@@ -970,5 +970,5 @@ fn a_date_is_shown_in_words_or_as_it_was_written() {
 /// error.
 #[test]
 fn an_ordinary_document_carries_no_signatures() {
-    assert!(sign::seals(&hylopdf::fixture::prose_pdf()).is_empty());
+    assert!(sign::seals(&moonowl::fixture::prose_pdf()).is_empty());
 }

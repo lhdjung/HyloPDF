@@ -467,7 +467,7 @@ fn shape_item<'a, B: Brush>(
             ShapeOptions::new()
                 .plan(Some(shaper_plan))
                 .features(&scx.features)
-                // HyloPDF: the point size is what the `trak` table is read
+                // Moonowl: the point size is what the `trak` table is read
                 // at, and `item.size` is the CSS size times the display scale
                 // — so on a 2x screen every run was tracked as 31pt type when
                 // it was 15.5pt type, and came out 5-7% wider than the same

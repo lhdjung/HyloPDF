@@ -8,7 +8,7 @@
 //! a module-level constant imported from `api.ts` and there is no other way to
 //! ask the same function what it would say on a different machine. Here `mac`
 //! is a parameter, so both platforms are two arguments rather than two
-//! compilations, and `HYLOPDF_PLATFORM=other` — a whole environment variable
+//! compilations, and `MOONOWL_PLATFORM=other` — a whole environment variable
 //! the app's harness carries to lie to `navigator.platform` — has nothing left
 //! to do.
 //!
@@ -19,8 +19,8 @@
 use std::collections::BTreeMap;
 
 use dioxus::html::{Code, Key, Modifiers};
-use hylopdf::harness::{Options, Reader};
-use hylopdf::keymap::{
+use moonowl::harness::{Options, Reader};
+use moonowl::keymap::{
     chords_of, default_keys, describe_binding, describe_chord, every, needs_document,
     parse_binding, parse_chord, Action, Keymap, Press, ACTIONS, EXTRA, GROUPS,
 };
@@ -75,7 +75,7 @@ fn control_is_its_own_key_on_a_mac_and_is_the_modifier_everywhere_else() {
 }
 
 #[test]
-fn a_key_hylopdf_cannot_read_says_so_rather_than_guessing() {
+fn a_key_moonowl_cannot_read_says_so_rather_than_guessing() {
     assert_eq!(parse_chord("mod+wibble", MAC), None);
     assert_eq!(parse_chord("", MAC), None);
     assert_eq!(parse_chord("mod+", MAC), None);
@@ -127,7 +127,7 @@ fn the_modifiers_a_platform_does_not_use_match_nothing() {
 /* --------------------------------------------------------------- keymaps */
 
 #[test]
-fn what_hylopdf_ships_with_is_readable_and_no_key_does_two_things() {
+fn what_moonowl_ships_with_is_readable_and_no_key_does_two_things() {
     for mac in [MAC, PC] {
         let map = Keymap::shipped(mac);
         assert_eq!(map.problems, Vec::<String>::new(), "on mac={mac}");
@@ -346,7 +346,7 @@ fn the_shipped_keys_toml_shows_the_keys_the_app_actually_ships_with() {
     for name in shown.keys() {
         assert!(
             ACTIONS.iter().any(|spec| spec.id.as_str() == name),
-            "keys.toml offers {name}, which HyloPDF cannot do"
+            "keys.toml offers {name}, which Moonowl cannot do"
         );
     }
     for spec in EXTRA {
@@ -479,7 +479,7 @@ fn every_action_in_the_table_answers() {
     // ⌘D is the other half of the theme the reader chose. `tests/prefs.rs`
     // is where the pair, the machine and the switch are.
     reader.press_chord("mod+d");
-    assert_eq!(reader.state().theme, "Hylo Dark");
+    assert_eq!(reader.state().theme, "Moonowl Dark");
 }
 
 /// **Command arrives in either bit, and reading only one of them was the

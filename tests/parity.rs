@@ -20,7 +20,7 @@
 //! widget the renderer has no counterpart for; those are named where they
 //! occur.
 
-use hylopdf::harness::{Options, Reader};
+use moonowl::harness::{Options, Reader};
 use serde_json::Value;
 
 /// Two pixels on macOS, where the fixture was taken, and a typeface's worth of
@@ -290,7 +290,7 @@ fn every_menu_lists_what_the_app_s_lists() {
         // which is a difference between machines rather than between the two.
         let want: Vec<String> = want
             .into_iter()
-            .map(|label| label.replace("Finder", hylopdf::app::file_manager_name()))
+            .map(|label| label.replace("Finder", moonowl::app::file_manager_name()))
             .collect();
         reader.click(chip);
         let got: Vec<String> = reader
@@ -571,7 +571,7 @@ fn a_recents_row_is_the_height_of_the_app_s() {
     // A config directory of its own, a document read in it, and the document
     // put down again — which is the only way to a shelf with something on it,
     // there being no seam for seeding one.
-    let dir = std::env::temp_dir().join(format!("hylopdf-parity-shelf-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("moonowl-parity-shelf-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let mut reader = Reader::open_with(
         &Reader::book(),
@@ -813,7 +813,7 @@ fn the_chrome_is_painted_the_app_s_colours() {
 /// plotting library actually emits.
 ///
 /// Two ramps, named by what wants them. `duotone` is the one a **link** takes,
-/// in Hylo Light's real copper on the white a page that is not recoloured is
+/// in Moonowl Light's real copper on the white a page that is not recoloured is
 /// printed on — so this is also what says the port paints a cross-reference
 /// the colour the app paints it. `recolor` is a page put onto a dark theme
 /// with the colours on it kept.
@@ -839,7 +839,7 @@ fn the_recolouring_is_the_app_s() {
         let name = ramp["name"].as_str().unwrap_or_default();
         let want = bytes(ramp["out"].as_str().expect("what the app made of it"));
         let mut got = pixels.clone();
-        hylopdf::recolor::recolor_cpu(
+        moonowl::recolor::recolor_cpu(
             &mut got,
             colour(ramp["text"].as_str().expect("ink")),
             colour(ramp["bg"].as_str().expect("paper")),

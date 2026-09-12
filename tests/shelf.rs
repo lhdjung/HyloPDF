@@ -14,13 +14,13 @@
 
 use std::path::{Path, PathBuf};
 
-use hylopdf::harness::{Options, Reader};
-use hylopdf::windows::{Desk, Handover};
-use hylopdf::{fixture, store};
+use moonowl::harness::{Options, Reader};
+use moonowl::windows::{Desk, Handover};
+use moonowl::{fixture, store};
 
 /// A settings directory nothing else is using.
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("hylopdf-shelf-{}-{name}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("moonowl-shelf-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -284,7 +284,7 @@ fn closing_a_document_tells_the_process_the_window_is_empty() {
     assert!(
         asked.iter().any(|ask| matches!(
             ask,
-            hylopdf::app::Ask::Showing { path, .. } if path.is_empty()
+            moonowl::app::Ask::Showing { path, .. } if path.is_empty()
         )),
         "an empty path is how a window says it is showing nothing: {asked:?}",
     );
@@ -340,7 +340,7 @@ fn the_keyboard_knows_there_is_no_document() {
         reader
             .asks()
             .iter()
-            .any(|ask| matches!(ask, hylopdf::app::Ask::NewWindow)),
+            .any(|ask| matches!(ask, moonowl::app::Ask::NewWindow)),
         "⌘N still asks for a window: {:?}",
         reader.asks(),
     );

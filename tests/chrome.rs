@@ -7,10 +7,10 @@
 //! placed, badly coloured, unreachable, or computed against a window that had
 //! stopped being the window.
 
-use hylopdf::fixture;
-use hylopdf::harness::{Options, Reader};
-use hylopdf::keymap::Action;
-use hylopdf::theme;
+use moonowl::fixture;
+use moonowl::harness::{Options, Reader};
+use moonowl::keymap::Action;
+use moonowl::theme;
 
 fn book() -> Reader {
     Reader::open(&Reader::book())
@@ -220,12 +220,12 @@ fn a_menu_comes_down_under_the_button_that_opened_it() {
 
 #[test]
 fn an_undrawn_page_is_the_theme_s_paper_and_not_white() {
-    // Hylo Ember: a recolouring theme, so a page under it is drawn on the
+    // Moonowl Ember: a recolouring theme, so a page under it is drawn on the
     // theme's own paper and a page that has not been drawn yet must be too.
     // A white rectangle on a dark theme is the flash a reader sees on every
     // zoom step and every jump — a re-keyed page is a new node with no
     // texture, and until pdfium answers, this is what is on screen.
-    let reader = wearing("hylo-dark");
+    let reader = wearing("moonowl-dark");
     let style = reader.harness.attr(".root", "style").unwrap_or_default();
     let paper = paper_of(&style);
     let page = value_of(&style, "--page");
@@ -235,7 +235,7 @@ fn an_undrawn_page_is_the_theme_s_paper_and_not_white() {
 
 #[test]
 fn a_page_no_theme_is_recolouring_is_white() {
-    // Hylo Light does not recolour, so the paper on screen is the paper the
+    // Moonowl Light does not recolour, so the paper on screen is the paper the
     // printer used, whatever the chrome around it is.
     let reader = wearing(theme::DEFAULT_LIGHT);
     let style = reader.harness.attr(".root", "style").unwrap_or_default();
@@ -249,7 +249,7 @@ fn the_toolbar_wears_the_theme_rather_than_a_grey() {
     // whatever the two ends are, so all fourteen themes put very nearly the
     // same colour in the bar. What is asserted is the distance from the
     // theme's own ink: near it, and much nearer than the halfway shade was.
-    for id in ["hylo-light", "hylo-dark", "hylo-ember", "sepia", "nord"] {
+    for id in ["moonowl-light", "moonowl-dark", "moonowl-ember", "sepia", "nord"] {
         let reader = wearing(id);
         let style = reader.harness.attr(".root", "style").unwrap_or_default();
         let ink = rgb(&value_of(&style, "--text"));
@@ -270,9 +270,9 @@ fn the_toolbar_carries_the_app_s_icons_in_the_theme_s_shades() {
     // did, which is the other half of a bar that read as grey words. The
     // colour is asserted because it is the part that has no cascade behind it:
     // an inline `<svg>` reaches usvg as its own document — see `Icon` — so a
-    // `currentColor` icon comes out black on every theme, which on Hylo Dark
+    // `currentColor` icon comes out black on every theme, which on Moonowl Dark
     // is invisible.
-    let mut reader = wearing("hylo-dark");
+    let mut reader = wearing("moonowl-dark");
     let style = reader.harness.attr(".root", "style").unwrap_or_default();
     let muted = value_of(&style, "--muted");
     let accent = value_of(&style, "--accent");
@@ -450,7 +450,7 @@ fn a_chip_in_force_stands_on_the_accent_rather_than_wearing_it() {
     // among the grey with nothing under it. The tint is what carries the
     // theme. `--accent-soft` is a fifth of the way from the paper to the
     // accent: plainly the accent, and still somewhere a word can be read.
-    for id in ["hylo-light", "hylo-ember", "dracula"] {
+    for id in ["moonowl-light", "moonowl-ember", "dracula"] {
         let reader = wearing(id);
         let style = reader.harness.attr(".root", "style").unwrap_or_default();
         // Measured against the *surface*, which is what the app mixes it from
@@ -808,7 +808,7 @@ fn the_scrollbar_goes_away_once_the_reader_has_stopped() {
 /// length of it says nothing and is one more thing on the page.
 #[test]
 fn a_document_that_fits_has_no_scrollbar() {
-    let path = std::env::temp_dir().join("hylopdf-chrome-fits.pdf");
+    let path = std::env::temp_dir().join("moonowl-chrome-fits.pdf");
     fixture::draft(&path, 1);
     let mut reader = Reader::open(path.to_str().expect("a path"));
     reader.press_action(Action::FitPage);
@@ -1005,14 +1005,14 @@ fn the_cross_on_close_reddens_under_the_pointer() {
     assert_ne!(hot, quiet, "the cross did not change under the pointer");
 
     // The theme's own negative, resolved the way `paint.rs` resolves a shipped
-    // theme — `themes.ts`'s `RED_DARK`, since the reader opens on Hylo Light
+    // theme — `themes.ts`'s `RED_DARK`, since the reader opens on Moonowl Light
     // unless it is told otherwise.
     let parsed: theme::Theme = toml::from_str(theme::BUILT_IN[shipped(theme::DEFAULT_LIGHT)].1)
-        .expect("Hylo Light parses");
-    let red = hylopdf::palette::resolve(&parsed, false).negative();
+        .expect("Moonowl Light parses");
+    let red = moonowl::palette::resolve(&parsed, false).negative();
     assert_eq!(
         hot[0],
-        hylopdf::palette::hex(red),
+        moonowl::palette::hex(red),
         "the cross is the theme's own negative",
     );
 

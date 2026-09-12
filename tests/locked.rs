@@ -11,8 +11,8 @@
 //! forty lines of MD5 and RC4 and no dependency. See its own comment for why
 //! the weakest variant in the spec is the right one to test against.
 
-use hylopdf::fixture::{self, LOCKED_PASSWORD};
-use hylopdf::harness::Reader;
+use moonowl::fixture::{self, LOCKED_PASSWORD};
+use moonowl::harness::Reader;
 
 /// MD5 against the RFC's own vectors, because everything below stands on it:
 /// a key derivation that is quietly wrong makes a fixture no reader can open,
@@ -48,17 +48,17 @@ fn the_digest_the_key_is_derived_with_is_md5() {
 fn pdfium_says_locked_rather_than_broken() {
     let path = fixture::locked_pdf();
     assert_eq!(
-        hylopdf::render::open(&path).err(),
-        Some(hylopdf::render::Refusal::Locked),
+        moonowl::render::open(&path).err(),
+        Some(moonowl::render::Refusal::Locked),
         "a locked document with no password",
     );
-    let wrong = hylopdf::render::open_with(&path, Some("not the password"));
+    let wrong = moonowl::render::open_with(&path, Some("not the password"));
     assert_eq!(
         wrong.err(),
-        Some(hylopdf::render::Refusal::Locked),
+        Some(moonowl::render::Refusal::Locked),
         "and a wrong one, which pdfium reports identically",
     );
-    let opened = hylopdf::render::open_with(&path, Some(LOCKED_PASSWORD))
+    let opened = moonowl::render::open_with(&path, Some(LOCKED_PASSWORD))
         .unwrap_or_else(|err| panic!("the password did not open it: {err}"));
     assert_eq!(opened.pages(), 3);
     assert!(opened.encrypted(), "and it knows it came in through a lock");
@@ -108,7 +108,7 @@ fn the_password_opens_it() {
 #[test]
 fn a_wrong_password_says_so_and_asks_again() {
     let mut reader = Reader::locked(&fixture::locked_pdf());
-    reader.type_text("hylo but wrong");
+    reader.type_text("moonowl but wrong");
     reader.press("Enter");
     let window = reader.harness.text_content(".ask-window");
     assert!(
@@ -223,8 +223,8 @@ fn answering_it_opens_the_document_in_place() {
         reader
             .asks()
             .iter()
-            .any(|ask| matches!(ask, hylopdf::app::Ask::Showing { path, .. }
-                if path.ends_with("hylopdf-locked.pdf"))),
+            .any(|ask| matches!(ask, moonowl::app::Ask::Showing { path, .. }
+                if path.ends_with("moonowl-locked.pdf"))),
         "and the process was told, exactly as ⌘O tells it: {:?}",
         reader.asks(),
     );
@@ -237,9 +237,9 @@ fn answering_it_opens_the_document_in_place() {
 /// what the journal has always been for, and the reader is told in one line.
 #[test]
 fn a_mark_on_an_encrypted_document_stays_beside_it() {
-    let opened = hylopdf::render::open_with(&fixture::locked_pdf(), Some(LOCKED_PASSWORD))
+    let opened = moonowl::render::open_with(&fixture::locked_pdf(), Some(LOCKED_PASSWORD))
         .expect("the password opens it");
-    let standing = hylopdf::markup::standing(opened.path(), opened.encrypted(), opened.sealed());
+    let standing = moonowl::markup::standing(opened.path(), opened.encrypted(), opened.sealed());
     assert!(!standing.into_file, "nothing is written into it");
     assert_eq!(standing.refused, "this document is encrypted");
 }

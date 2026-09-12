@@ -1,6 +1,6 @@
 # Dioxus Native (Blitz) — the assessment, and the plan
 
-Whether HyloPDF should be rewritten on **Dioxus Native**: Rust all the way
+Whether Moonowl should be rewritten on **Dioxus Native**: Rust all the way
 down, HTML and CSS rendered by **Blitz** onto the GPU through **Vello**, with
 no webview anywhere. Not Dioxus Desktop, which is a webview and would buy
 nothing over Tauri.

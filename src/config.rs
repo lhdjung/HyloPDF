@@ -52,40 +52,16 @@ pub fn absolute(path: &str) -> String {
         .unwrap_or_else(|_| path.to_string())
 }
 
-/// The directory the settings file and the themes directory live in.
+/// The directory the settings file and the themes directory live in, named
+/// for the bundle identifier.
 ///
-/// **The app's own, under its bundle identifier.** The port wrote to
-/// `HyloPDF-dioxus` while it was an experiment; a machine that still has that
-/// directory has it moved into place, once.
-///
-/// **Warning: `app.hylopdf` is not a leftover of a dev build.** It is the
-/// directory the *shipped Tauri app* wrote from its first release on (the
-/// `identifier` in its `tauri.conf.json`), holding `library.toml` with every
-/// bookmark and highlight, `keys.toml` and any theme the reader made. The
-/// `remove_dir_all` below fires only when both directories exist — a machine
-/// that ran the experiment beside the installed app — and there it wipes that
-/// data rather than merging it. The formats are the same modules, so the
-/// safer move is to leave an existing `app.hylopdf` alone and not rename.
-///
-/// `HYLOPDF_CONFIG` overrides it, which is what the tests use and what makes
+/// `MOONOWL_CONFIG` overrides it, which is what the tests use and what makes
 /// a run reproducible.
 pub fn config_dir() -> PathBuf {
-    if let Some(stated) = std::env::var_os("HYLOPDF_CONFIG") {
-        return PathBuf::from(stated);
+    match std::env::var_os("MOONOWL_CONFIG") {
+        Some(stated) => PathBuf::from(stated),
+        None => base().join("app.moonowl"),
     }
-    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let dir = base().join("app.hylopdf");
-        let experiment = base().join("HyloPDF-dioxus");
-        if experiment.is_dir() {
-            if dir.exists() {
-                let _ = std::fs::remove_dir_all(&dir);
-            }
-            let _ = std::fs::rename(&experiment, &dir);
-        }
-        dir
-    })
-    .clone()
 }
 
 /// The themes directory inside it, which is what `theme::load_all` reads.
@@ -114,3 +90,4 @@ fn base() -> PathBuf {
             .unwrap_or_else(|| home().join(".config"))
     }
 }
+

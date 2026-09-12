@@ -1,8 +1,8 @@
 # Third-party components
 
-HyloPDF's own source is MIT or Apache-2.0, at your option (see `LICENSE`). A
+Moonowl's own source is MIT or Apache-2.0, at your option (see `LICENSE`). A
 built app also carries the components below, each under its own licence. All of them are permissive:
-nothing here places a condition on what you may do with HyloPDF, and nothing
+nothing here places a condition on what you may do with Moonowl, and nothing
 here has to be shared back. What they do ask for is attribution, which is why
 this file exists and why the licence texts travel with the files they cover.
 
@@ -19,8 +19,8 @@ The pdfium build shipped beside the binary is Google's own source, compiled by
 LittleCMS, ICU and abseil compiled into it, and every one of those wants its
 notice reproduced with a binary distribution. So the `licenses/` folder from
 that archive travels with the app — `Contents/Resources/licenses` in the `.app`,
-`/usr/lib/HyloPDF/licenses` on Linux, `licenses` beside the executable on
-Windows — together with this file and HyloPDF's own `LICENSE`. The About pane
+`/usr/lib/Moonowl/licenses` on Linux, `licenses` beside the executable on
+Windows — together with this file and Moonowl's own `LICENSE`. The About pane
 has a button that opens it. `cargo tree` is the current answer for the rest,
 and `cargo metadata` prints every licence field at once.
 
@@ -38,7 +38,7 @@ but every one of these is released under MIT and the credit is owed either way:
 | Solarized Light and Dark | [ethanschoonover.com/solarized](https://ethanschoonover.com/solarized/) | Ethan Schoonover |
 | Tokyo Night and Storm | [enkia/tokyo-night-vscode-theme](https://github.com/enkia/tokyo-night-vscode-theme) | Enkia |
 | Rosé Pine | [rosepinetheme.com](https://rosepinetheme.com) | Rosé Pine contributors |
-| Glamour | after the [Charm](https://charm.sh) aesthetic; the colours are HyloPDF's own | — |
+| Glamour | after the [Charm](https://charm.sh) aesthetic; the colours are Moonowl's own | — |
 
 Each theme file says where it departs from the palette it is named for.
 

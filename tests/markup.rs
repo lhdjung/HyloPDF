@@ -1,15 +1,15 @@
 //! Marking a passage, what lands in the file, and taking it out again.
 
-use hylopdf::markup;
-use hylopdf::render::{self, PageSource, Rect};
+use moonowl::markup;
+use moonowl::render::{self, PageSource, Rect};
 
 /// A copy of the plain fixture, in a directory of this test's own: everything
 /// here writes to the document, and the fixtures are shared.
 fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("hylopdf-markup-{}-{name}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("moonowl-markup-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a directory to write in");
     let path = dir.join("marked.pdf");
-    hylopdf::fixture::draft(&path, 3);
+    moonowl::fixture::draft(&path, 3);
     path
 }
 
@@ -33,7 +33,7 @@ fn a_marked_passage_is_a_highlight_in_the_file() {
         path.to_str().unwrap(),
         &[(1, quads.clone())],
         "#ffd60a",
-        "HyloPDF",
+        "Moonowl",
     )
     .expect("the highlight is written");
 
@@ -72,7 +72,7 @@ fn the_mark_is_where_the_words_are() {
         path.to_str().unwrap(),
         &[(1, quads.clone())],
         "#7bed9f",
-        "HyloPDF",
+        "Moonowl",
     )
     .expect("written");
     let again = render::open(path.to_str().unwrap()).expect("reopened");
@@ -101,8 +101,8 @@ fn a_highlight_already_in_the_file_can_be_taken_out() {
     let (second, _) = first_line(&document, 2);
     drop(document);
 
-    markup::add(&name, &[(1, first.clone())], "#ffd60a", "HyloPDF").expect("the first is written");
-    markup::add(&name, &[(2, second.clone())], "#74c0fc", "HyloPDF")
+    markup::add(&name, &[(1, first.clone())], "#ffd60a", "Moonowl").expect("the first is written");
+    markup::add(&name, &[(2, second.clone())], "#74c0fc", "Moonowl")
         .expect("the second is written");
     let marks = render::open(&name).expect("reopened").markup();
     assert_eq!(marks.len(), 2);
@@ -119,7 +119,7 @@ fn a_highlight_already_in_the_file_can_be_taken_out() {
 
 #[test]
 fn the_document_as_it_arrived_is_kept_beside_it() {
-    // The app's `.hylopdf-original`, under the app's own name. There it is
+    // The app's `.moonowl-original`, under the app's own name. There it is
     // what removal is built on; here it is kept because pdfium's save is a
     // full rewrite rather than an appended update — see `markup.rs`.
     let path = scratch("backed-up");
@@ -129,8 +129,8 @@ fn the_document_as_it_arrived_is_kept_beside_it() {
     let (quads, _) = first_line(&document, 1);
     drop(document);
 
-    markup::add(&name, &[(1, quads.clone())], "#ffd60a", "HyloPDF").expect("written");
-    let beside = path.with_file_name("marked.pdf.hylopdf-original");
+    markup::add(&name, &[(1, quads.clone())], "#ffd60a", "Moonowl").expect("written");
+    let beside = path.with_file_name("marked.pdf.moonowl-original");
     assert_eq!(
         std::fs::read(&beside).expect("the original is beside it"),
         before,
@@ -139,7 +139,7 @@ fn the_document_as_it_arrived_is_kept_beside_it() {
 
     // And a second write does not replace it: the first copy is the pristine
     // one, and by the second this reader has already been in the document.
-    markup::add(&name, &[(2, quads.clone())], "#ffd60a", "HyloPDF").expect("written again");
+    markup::add(&name, &[(2, quads.clone())], "#ffd60a", "Moonowl").expect("written again");
     assert_eq!(std::fs::read(&beside).expect("still there"), before);
 }
 
@@ -160,7 +160,7 @@ fn the_mark_is_drawn_on_the_page() {
     let (quads, _) = first_line(&document, 1);
     let size = document.size_of(0);
     let (width, height) = (size.width.round() as u32, size.height.round() as u32);
-    let view = hylopdf::layout::View::WHOLE;
+    let view = moonowl::layout::View::WHOLE;
     let sample = |document: &std::sync::Arc<dyn PageSource>| {
         let mut pixel = [0u8; 3];
         let at = (
@@ -178,7 +178,7 @@ fn the_mark_is_drawn_on_the_page() {
     let before = sample(&document);
     drop(document);
 
-    markup::add(&name, &[(1, quads.clone())], "#ff0000", "HyloPDF").expect("written");
+    markup::add(&name, &[(1, quads.clone())], "#ff0000", "Moonowl").expect("written");
     let after = sample(&render::open(&name).expect("reopened"));
     assert_ne!(before, after, "the page under the mark changed");
     // BGRA, as `Bitmap` says and as `render` now actually asks for: the mark
@@ -193,16 +193,16 @@ fn the_mark_is_drawn_on_the_page() {
 
 /* ------------------------------------------------------------ the gesture */
 
-use hylopdf::harness::{Options, Reader};
+use moonowl::harness::{Options, Reader};
 
 /// A copy of the prose fixture — one line of type near the top of each of six
 /// pages — in a directory of this test's own, because every test below writes
 /// to the document it opens.
 fn readable(name: &str) -> String {
-    let dir = std::env::temp_dir().join(format!("hylopdf-marked-{}-{name}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("moonowl-marked-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a directory to write in");
     let path = dir.join("prose.pdf");
-    std::fs::copy(hylopdf::fixture::prose_pdf(), &path).expect("a copy of the fixture");
+    std::fs::copy(moonowl::fixture::prose_pdf(), &path).expect("a copy of the fixture");
     path.to_string_lossy().into_owned()
 }
 
@@ -532,7 +532,7 @@ fn a_passage_survives_the_document_being_rebuilt() {
 
     // The compiler's output: the same six pages, written over the top the way
     // `atomic_write` and every LaTeX run does it.
-    std::fs::copy(hylopdf::fixture::prose_pdf(), &path).expect("recompiled");
+    std::fs::copy(moonowl::fixture::prose_pdf(), &path).expect("recompiled");
     reader.document_changed(&path);
     assert!(
         render::open(&path).expect("reopens").markup().is_empty(),

@@ -151,8 +151,8 @@ impl Session {
         // a window's title is an attribute given to the builder, and pdfium
         // answers at open, so there is nothing to gain by waiting.
         let called = match path {
-            Some(path) => format!("{} — HyloPDF", store::called(path, &document.title())),
-            None => "HyloPDF".to_string(),
+            Some(path) => format!("{} — Moonowl", store::called(path, &document.title())),
+            None => "Moonowl".to_string(),
         };
         let attributes = WindowAttributes::default()
             .with_title(called)

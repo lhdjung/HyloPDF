@@ -30,7 +30,7 @@ static LOCK: Mutex<()> = Mutex::new(());
 
 pub type Settings = BTreeMap<String, Value>;
 
-/// Every setting HyloPDF knows, with its default. This list is also the
+/// Every setting Moonowl knows, with its default. This list is also the
 /// whitelist: a write to an unknown key is refused, so a typo in a command
 /// cannot quietly create a setting that nothing reads.
 pub fn defaults() -> Settings {
@@ -227,7 +227,7 @@ fn write(dir: &Path, settings: &Settings) -> Result<(), String> {
         }
     }
     let body = format!(
-        "# HyloPDF settings. Edited by the app, but yours to edit too.\n\n{}",
+        "# Moonowl settings. Edited by the app, but yours to edit too.\n\n{}",
         toml::to_string_pretty(&table).map_err(|e| e.to_string())?
     );
 
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn a_group_is_written_together_and_read_back() {
-        let dir = std::env::temp_dir().join(format!("hylopdf-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
         let after = set_many(
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn a_bad_key_is_reported_and_the_rest_still_land() {
-        let dir = std::env::temp_dir().join(format!("hylopdf-bad-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-bad-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
         let refused = set_many(
@@ -364,7 +364,7 @@ mod tests {
     /// frontend has to be what the frontend's types say it is.
     #[test]
     fn a_hand_edited_file_cannot_change_what_a_setting_is() {
-        let dir = std::env::temp_dir().join(format!("hylopdf-shape-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-shape-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -404,7 +404,7 @@ something_a_later_version_added = "kept"
     /// setting whose default is a string, so this was the one path through.
     #[test]
     fn a_value_that_is_not_a_scalar_cannot_stand_in_for_one() {
-        let dir = std::env::temp_dir().join(format!("hylopdf-scalar-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-scalar-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -437,7 +437,7 @@ page_gap = 20
     /// types describe — so the file itself is what remembers.
     #[test]
     fn a_later_versions_setting_survives_a_write_by_this_one() {
-        let dir = std::env::temp_dir().join(format!("hylopdf-downgrade-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-downgrade-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -463,7 +463,7 @@ page_gap = 20
     /// stopped running on the main thread.
     #[test]
     fn concurrent_writes_do_not_lose_settings() {
-        let dir = std::env::temp_dir().join(format!("hylopdf-race-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moonowl-race-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 

@@ -14,24 +14,24 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use hylopdf::app::Config;
-use hylopdf::emit::{Exchange, News, Payload};
-use hylopdf::session::Session;
-use hylopdf::shell::Shell;
-use hylopdf::windows::Desk;
-use hylopdf::{render, store, watch};
+use moonowl::app::Config;
+use moonowl::emit::{Exchange, News, Payload};
+use moonowl::session::Session;
+use moonowl::shell::Shell;
+use moonowl::windows::Desk;
+use moonowl::{render, store, watch};
 
 fn main() {
     // Before a document exists, which is what this has to be. See its own
     // comment, and `body` in `styles.rs` for what it buys.
-    hylopdf::styles::use_variable_fonts();
+    moonowl::styles::use_variable_fonts();
     let args: Vec<String> = std::env::args().collect();
     // **The window's size is the app's setting, not a number in this file.**
     // It was 1100×900 and never remembered, and that is most of what a reader
     // comparing the two saw as "everything is too small": the app opens at
     // 1280×860 *maximized* (`settings.rs`), so its toolbar has room for the
     // document's name and this one squeezed the name to three letters.
-    let remembered = hylopdf::settings::load(&hylopdf::config::config_dir());
+    let remembered = moonowl::settings::load(&moonowl::config::config_dir());
     let setting = |key: &str, fallback: f64| -> f64 {
         remembered
             .get(key)
@@ -55,8 +55,8 @@ fn main() {
     let named = args
         .iter()
         .skip(1)
-        .find(|arg| hylopdf::shell::is_document(std::path::Path::new(arg)))
-        .map(|arg| hylopdf::config::absolute(arg));
+        .find(|arg| moonowl::shell::is_document(std::path::Path::new(arg)))
+        .map(|arg| moonowl::config::absolute(arg));
     let config = Config {
         theme,
         ..Config::here()
@@ -67,8 +67,8 @@ fn main() {
     // otherwise be reopened, and fail, on every launch for ever.
     // One reader at a time, and a second launch hands its document to the one
     // that is running rather than becoming a second one. See `single.rs`.
-    let door = hylopdf::single::claim(&config.dir, named.as_deref());
-    if matches!(door, hylopdf::single::Claim::Second) {
+    let door = moonowl::single::claim(&config.dir, named.as_deref());
+    if matches!(door, moonowl::single::Claim::Second) {
         // Quietly and successfully: the document is on its way to a window
         // that already exists, which is what was asked for.
         return;
@@ -122,10 +122,10 @@ fn main() {
     let mut shell = Shell::new(proxy, queue);
     // What the shell says about the windows it makes and closes. Off, because
     // it is a line per window on a run nobody asked to debug — and on with
-    // `HYLOPDF_TRACE=1`, which is how "did the second window actually land
+    // `MOONOWL_TRACE=1`, which is how "did the second window actually land
     // where it was told to" is answered from a terminal rather than with a
     // ruler on the screen.
-    shell.trace = std::env::var_os("HYLOPDF_TRACE").is_some();
+    shell.trace = std::env::var_os("MOONOWL_TRACE").is_some();
     let windows = shell.windows();
 
     // What the process holds and every window shares: who is showing what,
@@ -135,7 +135,7 @@ fn main() {
     let exchange = Exchange::new();
     let watching = Arc::new(watch::start(
         exchange.clone(),
-        hylopdf::config::themes_dir(),
+        moonowl::config::themes_dir(),
     ));
     let session_maker = Rc::new(Session {
         desk: desk.clone(),
@@ -166,7 +166,7 @@ fn main() {
     {
         let session = session_maker.clone();
         shell.on_request(move |path| match path {
-            Some(path) => session.hand_over(&hylopdf::config::absolute(&path)),
+            Some(path) => session.hand_over(&moonowl::config::absolute(&path)),
             None => session.another(),
         });
     }
@@ -255,10 +255,10 @@ fn main() {
         let exchange = exchange.clone();
         shell.on_drop(move |label, drag| {
             let (event, payload) = match drag {
-                hylopdf::shell::Drag::Over(t) => ("drag-over", Payload::Takeable(t)),
-                hylopdf::shell::Drag::Left => ("drag-left", Payload::Nothing),
-                hylopdf::shell::Drag::Refused => ("drag-refused", Payload::Nothing),
-                hylopdf::shell::Drag::Drop(path) => ("open-document", Payload::Text(path)),
+                moonowl::shell::Drag::Over(t) => ("drag-over", Payload::Takeable(t)),
+                moonowl::shell::Drag::Left => ("drag-left", Payload::Nothing),
+                moonowl::shell::Drag::Refused => ("drag-refused", Payload::Nothing),
+                moonowl::shell::Drag::Drop(path) => ("open-document", Payload::Text(path)),
             };
             exchange.post(News {
                 event: event.into(),
@@ -280,22 +280,22 @@ fn main() {
     // need this reader to be in front already, which is exactly the moment
     // somebody wants one.
     #[cfg(unix)]
-    if let hylopdf::single::Claim::First(listener) = door {
-        hylopdf::single::serve(listener, windows.remote());
+    if let moonowl::single::Claim::First(listener) = door {
+        moonowl::single::serve(listener, windows.remote());
     }
     #[cfg(target_os = "macos")]
-    hylopdf::dock::install(windows.remote());
+    moonowl::dock::install(windows.remote());
     // The Finder's own door: a double-clicked document is an Apple Event and
     // not an argument, and it has to be answered before the application
     // finishes launching or the first one is lost. See `openfiles.rs`.
     #[cfg(target_os = "macos")]
-    hylopdf::openfiles::install(windows.remote());
+    moonowl::openfiles::install(windows.remote());
 
     event_loop.run_app(shell).unwrap();
     // How big the window was when the reader put it down, which is how big it
     // comes back. Written here rather than as it changes, for the reason above.
     if let Some((width, height, maximized)) = *geometry.lock().unwrap_or_else(|e| e.into_inner()) {
-        let _ = hylopdf::settings::set_many(
+        let _ = moonowl::settings::set_many(
             &config.dir,
             vec![
                 ("window_width".into(), serde_json::json!(width)),
@@ -305,7 +305,7 @@ fn main() {
         );
     }
     // The socket goes with the process it stood for.
-    hylopdf::single::release(&config.dir);
+    moonowl::single::release(&config.dir);
     // Where the reader got to, if the scribe is still holding it. Everything
     // else this reader remembers is written as it changes; a position is
     // written when the scrolling stops, and quitting is the one way to stop

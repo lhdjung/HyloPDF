@@ -83,7 +83,7 @@ fn Chrome() -> Element {
         _ => None,
     });
     let mut notice = use_signal(|| Some("Toolbar hidden, ⌘T brings it back".to_string()));
-    let mut theme = use_signal(|| "Hylo Light");
+    let mut theme = use_signal(|| "Moonowl Light");
 
     // A menu button toggles its own menu, which is what `showPopover`'s
     // anchor tracking is for in the app.
@@ -148,7 +148,7 @@ fn Chrome() -> Element {
                     style: "left: {at}px; top: 52px;",
                     if name == "theme" {
                         div { class: "popover-section", "Themes" }
-                        for option in ["Hylo Light", "Hylo Dark", "Hylo Ember", "Sepia", "Nord"] {
+                        for option in ["Moonowl Light", "Moonowl Dark", "Moonowl Ember", "Sepia", "Nord"] {
                             div {
                                 class: if *theme.read() == option { "popover-item current" } else { "popover-item" },
                                 onclick: move |_| { theme.set(option); menu.set(None); },
@@ -183,8 +183,8 @@ const OUTLINE: [(u32, &str); 6] = [
 
 fn swatch(theme: &str) -> &'static str {
     match theme {
-        "Hylo Dark" => "#22242b",
-        "Hylo Ember" => "#7a2318",
+        "Moonowl Dark" => "#22242b",
+        "Moonowl Ember" => "#7a2318",
         "Sepia" => "#e9dcc3",
         "Nord" => "#2e3440",
         _ => "#e7e6e2",

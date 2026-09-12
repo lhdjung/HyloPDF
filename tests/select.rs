@@ -9,13 +9,13 @@
 //!
 //! Everything is asked through the interface: a sweep is three pointer events,
 //! the selection is the rectangles on the page, and a copy is what the
-//! harness's clipboard wrote down — see [`hylopdf::app::Clip`], which
+//! harness's clipboard wrote down — see [`moonowl::app::Clip`], which
 //! exists so that a test run does not empty anybody's real one.
 
-use hylopdf::fixture;
-use hylopdf::harness::{Options, Reader};
-use hylopdf::keymap::Action;
-use hylopdf::stats;
+use moonowl::fixture;
+use moonowl::harness::{Options, Reader};
+use moonowl::keymap::Action;
+use moonowl::stats;
 
 /// Six pages, one line of type near the top of each. `PROSE` says what they
 /// are, which is what makes an assertion about copied text an assertion about
@@ -41,7 +41,7 @@ fn painted(reader: &Reader) -> usize {
 ///
 /// Empty when nothing was selected: ⌘C on an empty selection copies nothing
 /// and says so on the notice line, so the list the harness keeps does not
-/// grow. See [`hylopdf::app::Clip`].
+/// grow. See [`moonowl::app::Clip`].
 fn selected(reader: &mut Reader) -> String {
     let before = reader.copied().len();
     reader.press_chord("mod+c");

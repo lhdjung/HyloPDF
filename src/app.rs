@@ -793,7 +793,7 @@ impl Frame {
 /// the margin beside it. The app writes nothing here, because pdf.js's
 /// annotation editor does not offer to; this reader is writing the annotation
 /// itself and there is no reason to leave it anonymous.
-const AUTHOR: &str = "HyloPDF";
+const AUTHOR: &str = "Moonowl";
 
 /// How tall a signature is dropped, in the page's own points.
 ///
@@ -8132,7 +8132,7 @@ pub fn Reader(
                             p { class: "note-where", "On page {note_page}." }
                             p { class: "note-text", "{note.text}" }
                             p { class: "note-said",
-                                "HyloPDF shows the notes a document already carries. It does not write them."
+                                "Moonowl shows the notes a document already carries. It does not write them."
                             }
                         }
                     }
@@ -8483,7 +8483,7 @@ pub fn Reader(
                             // touches the editor only when the string differs,
                             // and setting it collapses the selection to the
                             // front — so the caret is thrown to offset 0 after
-                            // every keystroke and "hylo" is typed in as "olyh".
+                            // every keystroke and "moonowl" is typed in as "lwonoom".
                             // Backspace cannot be intercepted to work around it
                             // either: on macOS it is a `doCommandBySelector:`
                             // the editor answers directly.
@@ -8614,7 +8614,7 @@ fn Start(viewer: Signal<Viewer>, pick: Pick, frame: Frame) -> Element {
     rsx! {
         div { class: "start",
             div { class: "start-inner",
-                h1 { class: "start-name", "HyloPDF" }
+                h1 { class: "start-name", "Moonowl" }
                 p { class: "start-sub", "A calm place to read." }
                 button {
                     class: "start-open",

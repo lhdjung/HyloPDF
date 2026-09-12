@@ -6,7 +6,7 @@
 //! than WebKit. `vendor/parley` divides the scale back out; this is the
 //! assertion that it stays divided out.
 
-use hylopdf::harness::{Options, Reader};
+use moonowl::harness::{Options, Reader};
 
 /// The one filled button on the start screen is as wide as its words.
 fn button_width(scale: f32) -> f64 {

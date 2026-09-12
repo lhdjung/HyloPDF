@@ -12,8 +12,8 @@
 //! a jump is the page the toolbar then says, and an address handed to the
 //! system is one the harness wrote down rather than one a browser opened.
 
-use hylopdf::fixture;
-use hylopdf::harness::{Options, Reader};
+use moonowl::fixture;
+use moonowl::harness::{Options, Reader};
 
 /// Six pages: two links on the first, a `/GoTo` action on the second, a link
 /// that points nowhere on the third, and `/PageLabels` over all of them.

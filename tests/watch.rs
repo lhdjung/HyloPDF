@@ -16,8 +16,8 @@
 
 use std::path::{Path, PathBuf};
 
-use hylopdf::harness::{Options, Reader};
-use hylopdf::{fixture, theme};
+use moonowl::harness::{Options, Reader};
+use moonowl::{fixture, theme};
 
 /// A settings directory nothing else is using.
 fn scratch(name: &str) -> PathBuf {
@@ -29,7 +29,7 @@ fn scratch(name: &str) -> PathBuf {
     // nothing is ever reported. Nothing a reader has is behind a link; a test
     // that writes into `/tmp` is.
     let temp = std::fs::canonicalize(std::env::temp_dir()).expect("a real temp directory");
-    let dir = temp.join(format!("hylopdf-watch-{}-{name}", std::process::id()));
+    let dir = temp.join(format!("moonowl-watch-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -41,7 +41,7 @@ fn scratch(name: &str) -> PathBuf {
 /// every other test's watcher.
 fn document(name: &str, pages: usize) -> PathBuf {
     let temp = std::fs::canonicalize(std::env::temp_dir()).expect("a real temp directory");
-    let dir = temp.join(format!("hylopdf-drafts-{}-{name}", std::process::id()));
+    let dir = temp.join(format!("moonowl-drafts-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a place for drafts");
     let path = dir.join(format!("{name}.pdf"));
     fixture::draft(&path, pages);
@@ -99,7 +99,7 @@ const PAGE: (u32, u32, u32, u32) = (350, 250, 550, 450);
 /// is the whole reason themes are files.
 ///
 /// The theme is one somebody wrote, for two reasons: it is the case the
-/// feature exists for, and Hylo Light does not recolour anything — editing
+/// feature exists for, and Moonowl Light does not recolour anything — editing
 /// its paper is a change to the chrome and to nothing on the page, which is
 /// what that theme is *for* and a poor thing to photograph.
 #[test]
@@ -142,7 +142,7 @@ fn a_theme_edited_on_disk_is_worn_at_once() {
 /// **It has to be a theme somebody wrote**, and that is `theme.rs` being
 /// right rather than this being awkward: a shipped theme is embedded in the
 /// binary and `load_all` falls back to the embedded copy, so deleting
-/// `hylo-light.toml` deletes nothing a reader can see. The theme that can
+/// `moonowl-light.toml` deletes nothing a reader can see. The theme that can
 /// actually vanish is the one that only ever existed as a file.
 #[test]
 fn a_theme_that_is_deleted_hands_the_reader_to_another() {
@@ -182,7 +182,7 @@ fn the_replacement_survives_the_run_that_chose_it() {
         reader.state().theme
     };
     assert_eq!(
-        chosen, "Hylo Dark",
+        chosen, "Moonowl Dark",
         "a dark theme was replaced by a light one"
     );
 
@@ -274,7 +274,7 @@ fn news_about_another_document_is_ignored() {
 #[test]
 fn a_document_renamed_by_its_rebuild_is_renamed_in_the_toolbar() {
     let dir = scratch("renamed");
-    let drafts = std::env::temp_dir().join(format!("hylopdf-drafts-{}", std::process::id()));
+    let drafts = std::env::temp_dir().join(format!("moonowl-drafts-{}", std::process::id()));
     std::fs::create_dir_all(&drafts).expect("a place for drafts");
     let path = drafts.join("renamed.pdf");
     std::fs::copy(fixture::titled_pdf("An Early Draft of Something"), &path).expect("first draft");

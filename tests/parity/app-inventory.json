@@ -245,17 +245,17 @@
       },
       {
         "kind": "item",
-        "label": "Hylo Light",
+        "label": "Moonowl Light",
         "icon": null
       },
       {
         "kind": "item",
-        "label": "Hylo Dark",
+        "label": "Moonowl Dark",
         "icon": null
       },
       {
         "kind": "item",
-        "label": "Hylo Ember",
+        "label": "Moonowl Ember",
         "icon": null
       },
       {
@@ -554,7 +554,7 @@
         ],
         "actions": [
           "New theme…",
-          "Make a copy of Hylo Light…"
+          "Make a copy of Moonowl Light…"
         ]
       },
       "Window": {
@@ -649,7 +649,7 @@
     "pill": "1 of 400"
   },
   "start": {
-    "name": "HyloPDF",
+    "name": "Moonowl",
     "sub": "A calm place to read.",
     "open": "Open a document",
     "hint": "Or drop a PDF anywhere in this window",

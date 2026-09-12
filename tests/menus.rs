@@ -12,9 +12,9 @@
 //! answers with a path and what is tested is everything downstream of the
 //! answer.
 
-use hylopdf::app::Ask;
-use hylopdf::fixture;
-use hylopdf::harness::{Options, Reader};
+use moonowl::app::Ask;
+use moonowl::fixture;
+use moonowl::harness::{Options, Reader};
 
 fn reader() -> Reader {
     // **1280, not the harness's 1100.** The Document menu hangs off the
@@ -117,7 +117,7 @@ fn the_theme_menu_is_the_whole_list() {
     );
 
     reader.click_nth(".menu.theme .menu-item", 2);
-    assert_eq!(reader.state().theme, "Hylo Ember");
+    assert_eq!(reader.state().theme, "Moonowl Ember");
     // **And the menu stays.** A theme is something you try on, so the tick
     // moves and the list is still there — `showThemeMenu` in `main.ts` puts
     // the menu away only for the items that take you somewhere else.

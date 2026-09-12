@@ -1,4 +1,4 @@
-//! One HyloPDF at a time, and how a second launch hands its document over.
+//! One Moonowl at a time, and how a second launch hands its document over.
 //!
 //! The app uses `tauri-plugin-single-instance`, and `AGENTS.md` says why it
 //! has to have one: three double-clicked documents mean three launches, and

@@ -1,14 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- A page ruled in slate on cream, whose lines fall in the shape of an owl:
+       two tufts, a gap for each eye, and the last short line in coral. -->
   <defs>
     <linearGradient id="ground" x1="0" y1="30" x2="0" y2="994" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#333f59"/>
-      <stop offset="1" stop-color="#232834"/>
+      <stop offset="0" stop-color="#f8f3ea"/>
+      <stop offset="1" stop-color="#ece5d7"/>
     </linearGradient>
   </defs>
   <rect x="30" y="30" width="964" height="964" rx="228" fill="url(#ground)"/>
-  <rect x="263.95" y="196.85" width="496.1" height="630.3" rx="37.95" fill="#de7c6e"/>
-  <rect x="343.15" y="380.55" width="337.7" height="25.3" rx="12.65" fill="#ffffff"/>
-  <rect x="343.15" y="465.25" width="337.7" height="25.3" rx="12.65" fill="#ffffff"/>
-  <rect x="343.15" y="549.95" width="337.7" height="25.3" rx="12.65" fill="#ffffff"/>
-  <rect x="343.15" y="634.65" width="202.95" height="25.3" rx="12.65" fill="#ffffff"/>
+  <rect x="301" y="148" width="150" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="573" y="148" width="150" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="301" y="244" width="422" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="287" y="340" width="90" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="447" y="340" width="130" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="647" y="340" width="90" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="307" y="436" width="410" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="281" y="532" width="462" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="262" y="628" width="500" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="283" y="724" width="458" height="56" rx="28" fill="#3f4b66"/>
+  <rect x="361" y="820" width="302" height="56" rx="28" fill="#de7c6e"/>
 </svg>

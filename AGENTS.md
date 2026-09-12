@@ -1436,7 +1436,7 @@ instead.
 The icon has a source, and it is `icons/app-icon.svg`: `app-icon.png` was once
 the only copy of the design, so the first change to it began by measuring the
 old bitmap back into numbers. Everything under `icons/` is generated from the
-SVG and nothing there is edited by hand.
+SVG by `scripts/icons.sh` and nothing there is edited by hand.
 
 ## What a critical read turned up
 

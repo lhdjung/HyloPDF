@@ -159,22 +159,28 @@ impl Chosen {
     }
 }
 
-/// A page's texture belongs to the node, not to the widget.
+/// A page's texture is replaced in place, and the old one goes two frames
+/// later.
 ///
-/// The obvious design gives the widget one texture and replaces it whenever the
-/// page is drawn again, unregistering the old one. **Unregistering a resource
-/// from inside `paint` panics Vello** — "tried to draw an invalid empty image",
-/// from the atlas upload — and leaving it registered leaks a whole page of
-/// texture for every zoom step.
+/// It used to belong to the node: the component key carried the page, its
+/// size and the theme, and a change to any of them was a new node, a new
+/// widget and a new texture, with the old node's resources released by Blitz
+/// between frames. What that cost was a blank page for as long as pdfium took,
+/// every time — a mark written in, a zoom settled — because the new node had
+/// nothing to show until its own texture arrived.
 ///
-/// So the widget draws exactly once and the *component key* carries what
-/// `keyFor()` carries: the page, its size, the theme. A change to any of them is
-/// a different node — a new widget, a new texture, and the old node's resources
-/// released by Blitz between frames, where it is safe.
+/// So a widget now outlives its texture. A new draft of the same document at
+/// the same size is drawn *into* the texture already registered
+/// ([`Recolorer::repaint`]), and nothing on the GPU changes hands at all. A
+/// new size is a new texture, registered on one frame and drawn from the next
+/// (see `fresh`), with the old texture painted, stretched, until then — and
+/// then retired: unregistered by the widget itself a couple of frames on,
+/// once no scene in flight can still be naming it. Unregistering in the frame
+/// that registered its replacement is what used to panic Vello ("tried to draw
+/// an invalid empty image"); a frame or two later, it is a hash-map removal.
 ///
-/// Not in the key: the screen's density, because nothing tells the component
-/// when the window moves to a screen of a different one. A page redrawn for that
-/// reason leaks its old texture until it is unmounted.
+/// The theme is still in the key: a theme change re-keys every page at once,
+/// which `fresh` was written around, and is left as it was.
 pub struct PageWidget {
     index: usize,
     /// How the page is turned and how much of it is drawn.
@@ -199,6 +205,9 @@ pub struct PageWidget {
     /// texture from another draft is shown, stretched if need be, while this
     /// draft is drawn.
     drawn_from: Option<Arc<dyn PageSource>>,
+    /// Textures replaced and not yet released, each with the frames left
+    /// before it is. See the note above the struct.
+    retired: Vec<(PageTexture, u8)>,
     /// Whether the texture was registered during the frame being painted.
     ///
     /// Registering a texture and drawing it in the same frame works until
@@ -228,6 +237,12 @@ pub struct PageWidget {
     /// again on every frame the last attempt requested.
     failed: bool,
 }
+
+/// How many frames a replaced texture is kept before it is unregistered:
+/// the frame that registered its replacement and drew it instead, the frame
+/// that first drew the replacement, and one more for a scene still in
+/// flight. See the note above [`PageWidget`].
+const RETIRES_IN: u8 = 3;
 
 /// A page being drawn on the render thread, and how to tell it not to bother.
 struct Pending {
@@ -331,6 +346,7 @@ impl PageWidget {
             recolorer: None,
             texture: None,
             drawn_from: None,
+            retired: Vec::new(),
             fresh: false,
             software: None,
             pending: None,
@@ -644,28 +660,34 @@ impl PageWidget {
             bgra: &rendered.bgra,
             drew_in: rendered.drew_in,
         };
-        let texture = recolorer.upload(ctx, &bitmap, &theme, &self.links(&theme, width, height))?;
-
-        // The old texture, if there is one, is dropped without being
-        // unregistered — see the note above the struct. It is the widget's
-        // node going away that gives it back, and that is Blitz's job.
-        if let Some(old) = self.texture.take() {
-            stats::sub(&stats::RESIDENT, old.bytes());
-        }
-
+        let links = self.links(&theme, width, height);
         stats::add(&stats::DRAWN, 1);
-        stats::add(&stats::RESIDENT, texture.bytes());
-        self.texture = Some(texture);
+        match self.texture.as_mut() {
+            // The same size: drawn into the texture on screen, which changes
+            // nothing the renderer holds and costs no frame.
+            Some(texture) if texture.is(width, height) => {
+                recolorer.repaint(texture, &bitmap, &theme, &links);
+            }
+            // A new size is a new texture, and the old one is shown for the
+            // frame the new one cannot be, then released.
+            _ => {
+                let texture = recolorer.upload(ctx, &bitmap, &theme, &links)?;
+                stats::add(&stats::RESIDENT, texture.bytes());
+                if let Some(old) = self.texture.replace(texture) {
+                    self.retired.push((old, RETIRES_IN));
+                }
+                self.fresh = true;
+                // And a frame to draw it in.
+                if let Some(shell) = &self.shell {
+                    shell.request_redraw();
+                }
+            }
+        }
         self.drawn_from = Some(document);
         if !selection.is_empty() {
             let (ink, paper) = Self::selection_ramp(&theme);
             let texture = self.texture.as_mut()?;
             recolorer.select(texture, &selection, ink, paper);
-        }
-        self.fresh = true;
-        // And a frame to draw it in.
-        if let Some(shell) = &self.shell {
-            shell.request_redraw();
         }
         Some(())
     }
@@ -679,6 +701,9 @@ impl Widget for PageWidget {
     /// atlas upload rather than from the call that orphaned it.
     fn can_create_surfaces(&mut self, render_ctx: &mut dyn RenderContext) {
         if let Some(texture) = self.texture.take() {
+            stats::sub(&stats::RESIDENT, texture.bytes());
+        }
+        for (texture, _) in self.retired.drain(..) {
             stats::sub(&stats::RESIDENT, texture.bytes());
         }
         // The pipelines are *not* forgotten here: `destroy_surfaces` did that
@@ -705,6 +730,9 @@ impl Widget for PageWidget {
         if let Some(texture) = self.texture.take() {
             stats::sub(&stats::RESIDENT, texture.bytes());
         }
+        for (texture, _) in self.retired.drain(..) {
+            stats::sub(&stats::RESIDENT, texture.bytes());
+        }
         if let Some(page) = self.software.take() {
             stats::sub(
                 &stats::RESIDENT,
@@ -720,7 +748,7 @@ impl Widget for PageWidget {
     /// A page is not an animation — except for the single frame between
     /// registering its texture and drawing it. See `fresh`.
     fn requires_redraw(&self) -> bool {
-        self.fresh
+        self.fresh || !self.retired.is_empty()
     }
 
     fn paint(
@@ -772,19 +800,43 @@ impl Widget for PageWidget {
             return scene;
         }
 
+        // Textures replaced earlier, released once no scene in flight can
+        // still name them. Before `ensure`, so that a release and a
+        // registration never share a frame.
+        for (_, left) in &mut self.retired {
+            *left = left.saturating_sub(1);
+        }
+        let mut retired = std::mem::take(&mut self.retired);
+        retired.retain(|(texture, left)| {
+            if *left > 0 {
+                return true;
+            }
+            render_ctx.unregister_resource(texture.id());
+            stats::sub(&stats::RESIDENT, texture.bytes());
+            false
+        });
+        self.retired = retired;
+
         if self.ensure(render_ctx, drawn_width, drawn_height).is_none() {
             return scene;
         }
-        let Some(texture) = self.texture.as_ref() else {
-            return scene;
-        };
         // A texture registered during this frame must not be drawn during it.
         // See `fresh` on the struct: this is the frame that registers, and
-        // `requires_redraw` asks for the one that draws.
-        if self.fresh {
+        // `requires_redraw` asks for the one that draws. What is drawn instead
+        // is the texture being replaced, if there is one — stretched to the
+        // box, which is what the zoom gesture has been showing all along.
+        let texture = if self.fresh {
             self.fresh = false;
-            return scene;
-        }
+            match self.retired.last() {
+                Some((old, _)) => old,
+                None => return scene,
+            }
+        } else {
+            match self.texture.as_ref() {
+                Some(texture) => texture,
+                None => return scene,
+            }
+        };
 
         // A page drawn at a different size from its box — held under the
         // ceiling, or frozen for the length of a zoom gesture — is scaled to

@@ -214,34 +214,6 @@ impl Recolorer {
             height: bitmap.height,
             depth_or_array_layers: 1,
         };
-        // pdfium's own byte order, uploaded as it stands. The shader reads it
-        // in RGBA order because the format says so, so there is no swizzle.
-        let source = self.device.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("page: as drawn"),
-            size: extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        self.device.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &source,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            bitmap.bgra,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(bitmap.width * 4),
-                rows_per_image: Some(bitmap.height),
-            },
-            extent,
-        );
-
         let painted = self.device.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("page: themed"),
             size: extent,
@@ -271,7 +243,57 @@ impl Recolorer {
             selected: Vec::new(),
             kept: None,
         };
-        self.paint(&mut page, &source, theme);
+        self.repaint(&mut page, bitmap, theme, regions);
+        Some(page)
+    }
+
+    /// Draw a page again into the texture it already has — a new draft of
+    /// the document, at the same size — so that what is on screen changes
+    /// without a texture being registered or released. The bitmap must be
+    /// the texture's size; one that is not is ignored.
+    pub fn repaint(
+        &self,
+        page: &mut PageTexture,
+        bitmap: &Bitmap,
+        theme: &Palette,
+        regions: &[Region],
+    ) {
+        if !page.is(bitmap.width, bitmap.height) {
+            return;
+        }
+        let extent = wgpu::Extent3d {
+            width: bitmap.width,
+            height: bitmap.height,
+            depth_or_array_layers: 1,
+        };
+        // pdfium's own byte order, uploaded as it stands. The shader reads it
+        // in RGBA order because the format says so, so there is no swizzle.
+        let source = self.device.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("page: as drawn"),
+            size: extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.device.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &source,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bitmap.bgra,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bitmap.width * 4),
+                rows_per_image: Some(bitmap.height),
+            },
+            extent,
+        );
+        self.paint(page, &source, theme);
         // **The links, before the source goes.** They are tinted under every
         // theme, including the ones that leave the document alone — a link that
         // reads exactly like the sentence around it is a link nobody can see —
@@ -298,7 +320,6 @@ impl Recolorer {
         // 144MB idle without it, 169MB with, and the same 177-228MB of
         // graphics memory mid-scroll either way.
         drop(source);
-        Some(page)
     }
 
     /// Run the ramp from the page as drawn onto the page as shown.

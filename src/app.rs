@@ -7441,11 +7441,11 @@ pub fn Reader(
                     "data-scroll": "{scroll_top}",
                     for placed in boxes {
                         Page {
-                            // What `keyFor()` is: the page, the size it is
-                            // drawn at, and the theme it is wearing. A change
-                            // to any of them is a different node, which is
-                            // what gives the old texture back — see `page.rs`.
-                            key: "{placed.index}:{placed.drawn.0}x{placed.drawn.1}:{worn}:{view_key}:{opened}",
+                            // The page, the theme it is wearing, its view and
+                            // which document it is of. Not its size: a page
+                            // redraws itself at a new size, showing the old
+                            // texture until the new one lands — see `page.rs`.
+                            key: "{placed.index}:{worn}:{view_key}:{opened}",
                             chosen: chosen.clone(),
                             index: placed.index,
                             top: placed.top - scroll_top,

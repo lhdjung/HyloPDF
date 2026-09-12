@@ -1444,6 +1444,7 @@ fn About(viewer: Signal<Viewer>) -> Element {
     let themes = held.store.themes_dir().display().to_string();
     let settings_file = held.store.dir().join("settings.toml").display().to_string();
     drop(held);
+    let licenses = licenses_dir();
 
     rsx! {
         h2 { class: "pane-title", "HyloPDF" }
@@ -1466,8 +1467,35 @@ fn About(viewer: Signal<Viewer>) -> Element {
                 label: "Open themes folder".to_string(),
                 path: themes.clone(),
             }
+            if let Some(path) = licenses {
+                OpenPath {
+                    viewer,
+                    label: "Open licences folder".to_string(),
+                    path,
+                }
+            }
         }
     }
+}
+
+/// Where the installer put the licence notices — pdfium's and its libraries',
+/// and the app's own — or `None` from a bare `cargo run`, which has none.
+///
+/// The same three places `pdfium.rs` looks for the library, one level over:
+/// `Contents/Resources` in the `.app`, `/usr/lib/HyloPDF` beside `/usr/bin`,
+/// and the executable's own directory on Windows. `Cargo.toml` says why the
+/// folder exists.
+fn licenses_dir() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    [
+        dir.join("../Resources/licenses"),
+        dir.join("../lib/HyloPDF/licenses"),
+        dir.join("licenses"),
+    ]
+    .into_iter()
+    .find(|d| d.is_dir())
+    .map(|d| d.display().to_string())
 }
 
 /// A button that hands a path to whatever the platform opens it with.

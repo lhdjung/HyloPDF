@@ -186,7 +186,19 @@ icons = [
 # executable. On macOS that means `Contents/Frameworks`, where a signed dylib
 # has to live for notarisation; everywhere else it is the executable's own
 # directory, which is what `resources` gives.
-resources = ["pdfium/lib/*.so", "pdfium/bin/*.dll"]
+resources = [
+    "pdfium/lib/*.so",
+    "pdfium/bin/*.dll",
+    # The notices. pdfium is BSD-3-Clause and the libraries compiled into it
+    # (FreeType, libjpeg-turbo, libpng, OpenJPEG, LittleCMS, ICU, abseil) each
+    # want their text reproduced with a binary distribution, so the folder
+    # `pdfium-binaries` ships them in travels with the library — beside the
+    # app's own licence and THIRD-PARTY.md. The About pane opens the folder.
+    { src = "LICENSE", target = "licenses/HyloPDF.txt" },
+    { src = "THIRD-PARTY.md", target = "licenses/THIRD-PARTY.md" },
+    { src = "pdfium/LICENSE", target = "licenses/pdfium-binaries.txt" },
+    { src = "pdfium/licenses/*", target = "licenses" },
+]
 
 [[package.metadata.packager.file-associations]]
 extensions = ["pdf"]

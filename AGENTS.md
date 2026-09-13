@@ -35,6 +35,7 @@ Ignoring some settings, we have:
 - Gruvbox, for the oldies.
 - Sepia: background is sepia, text is dark. Use whatever good sepia themes use.
 - Bay Brown: warm yellow ink on a deep brown ground, with a coral accent.
+- Dark Forest: cozy and warm — glowing yellow ink on a dark green ground, with ember orange and coral for the rest.
 - High contrast: background is perfect black, text is white.
 - Nord: the arctic, north-bluish palette — dark slate background, frost blue accents.
 - Solarized Light and Solarized Dark: Ethan Schoonover's palette, both halves.

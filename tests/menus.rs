@@ -95,7 +95,7 @@ fn opening_a_menu_puts_the_find_bar_away_and_escape_closes_the_menu() {
     assert_eq!(reader.state().menu, None);
 }
 
-/// Fourteen themes reached by pressing `t` fourteen times is what a menu is
+/// Fifteen themes reached by pressing `t` fifteen times is what a menu is
 /// for. The list is every theme installed, the one in use is ticked, and
 /// choosing one wears it.
 #[test]
@@ -109,7 +109,7 @@ fn the_theme_menu_is_the_whole_list() {
         .harness
         .query_all(".menu.theme .menu-item .swatch")
         .len();
-    assert_eq!(names, 14, "every shipped theme is in the menu");
+    assert_eq!(names, 15, "every shipped theme is in the menu");
     assert_eq!(
         reader.harness.query_all(".menu.theme .menu-item.on").len(),
         1,

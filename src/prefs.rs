@@ -332,12 +332,14 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
     let fit = held.layout.fit;
     let zoom = held.layout.zoom;
     let trimming = held.trims_margins();
-    let (remember, reopen, pill, hide_cursor) = (
+    let (remember, reopen, pill, hide_cursor, offer) = (
         held.store.flag("remember_position"),
         held.store.flag("reopen_last_document"),
         held.store.flag("show_page_pill"),
         held.store.flag("hide_cursor"),
+        held.store.flag("offer_highlight_on_select"),
     );
+    let key_mark = held.chord_for(Action::Markup);
     let rest = held.store.number("hide_cursor_after");
     let printed = held.numbering_printed();
     drop(held);
@@ -459,6 +461,11 @@ fn Reading(viewer: Signal<Viewer>) -> Element {
             Toggle { on: pill, onchange: move |on| viewer.write().set_flag("show_page_pill", on) }
         }
         Field {
+            label: "Offer highlight colours on selecting",
+            note: format!("The colours appear as soon as you finish selecting text. Off, they wait to be asked for. {key_mark}"),
+            Toggle { on: offer, onchange: move |on| viewer.write().set_flag("offer_highlight_on_select", on) }
+        }
+        Field {
             label: "Hide the pointer while you read",
             note: "The pointer goes away once it has sat still for a while, and comes back the moment you move it.",
             Toggle { on: hide_cursor, onchange: move |on| viewer.write().set_flag("hide_cursor", on) }
@@ -527,6 +534,9 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
     let folder = held.store.themes_dir().display().to_string();
     let key_dark = held.chord_for(Action::Dark);
     drop(held);
+    // Deleting a theme removes a file, so the button asks first, in place —
+    // the way resetting the highlight colours does.
+    let mut confirming = use_signal(|| false);
 
     rsx! {
         h2 { class: "pane-title", "Appearance" }
@@ -601,16 +611,31 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
                     }}
                 }
                 if !worn.built_in {
-                    button {
-                        class: "chip action danger",
-                        onclick: {
-                            let worn = worn.clone();
-                            move |_| {
-                                viewer.write().begin_theme(Some(worn.clone()));
-                                viewer.write().delete_theme();
-                            }
-                        },
-                        "Delete {worn.name}"
+                    if *confirming.read() {
+                        span { class: "colours-ask", "Delete {worn.name}? Its file goes too." }
+                        button {
+                            class: "chip action danger",
+                            onclick: {
+                                let worn = worn.clone();
+                                move |_| {
+                                    confirming.set(false);
+                                    viewer.write().begin_theme(Some(worn.clone()));
+                                    viewer.write().delete_theme();
+                                }
+                            },
+                            "Delete"
+                        }
+                        button {
+                            class: "chip action",
+                            onclick: move |_| confirming.set(false),
+                            "Keep it"
+                        }
+                    } else {
+                        button {
+                            class: "chip action danger",
+                            onclick: move |_| confirming.set(true),
+                            "Delete {worn.name}…"
+                        }
                     }
                 }
             }
@@ -636,6 +661,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
     let shown = crate::palette::resolve(&draft, true);
     let hex = crate::palette::hex;
     let fresh = draft.id.trim().is_empty();
+    let mut confirming = use_signal(|| false);
 
     // Enter, from any field in the editor: the theme is saved and the window
     // goes. It is what Enter means in every other window with a form in it,
@@ -736,10 +762,27 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             // Only a theme already on disk can be deleted: "New theme…" and a
             // copy of a built-in have not been saved yet.
             if !fresh {
-                button {
-                    class: "chip action danger",
-                    onclick: move |_| viewer.write().delete_theme(),
-                    "Delete this theme"
+                if *confirming.read() {
+                    span { class: "colours-ask", "Delete this theme? Its file goes too." }
+                    button {
+                        class: "chip action danger",
+                        onclick: move |_| {
+                            confirming.set(false);
+                            viewer.write().delete_theme();
+                        },
+                        "Delete"
+                    }
+                    button {
+                        class: "chip action",
+                        onclick: move |_| confirming.set(false),
+                        "Keep it"
+                    }
+                } else {
+                    button {
+                        class: "chip action danger",
+                        onclick: move |_| confirming.set(true),
+                        "Delete this theme…"
+                    }
                 }
             }
         }

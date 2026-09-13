@@ -6838,8 +6838,11 @@ pub fn Reader(
                     // Reachable only by ⌘⇧H, nothing on screen ever pointed at
                     // highlighting and nobody found the feature after it was
                     // built. Letting go of a selection is the moment the
-                    // reader is looking at the passage.
-                    viewer.write().open_markup();
+                    // reader is looking at the passage. A setting, because a
+                    // reader who selects to copy has not asked to mark.
+                    if viewer.read().store.flag("offer_highlight_on_select") {
+                        viewer.write().open_markup();
+                    }
                 }
             },
             if toolbar_on {

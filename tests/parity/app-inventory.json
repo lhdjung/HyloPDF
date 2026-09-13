@@ -295,6 +295,11 @@
       },
       {
         "kind": "item",
+        "label": "Dark Forest",
+        "icon": null
+      },
+      {
+        "kind": "item",
         "label": "High Contrast",
         "icon": null
       },
@@ -538,6 +543,7 @@
           "Open what I was reading",
           "Page numbers",
           "Show page count while scrolling",
+          "Offer highlight colours on selecting",
           "Hide the pointer while you read"
         ],
         "groups": [],

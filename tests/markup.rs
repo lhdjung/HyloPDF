@@ -297,7 +297,7 @@ fn a_sweep_offers_the_colours_and_a_swatch_marks_the_passage() {
         .attr(".markup-swatch", "data-colour")
         .unwrap_or_default();
     reader.click(".markup-swatch");
-    assert_eq!(reader.state().notice, "Marked.");
+    assert_eq!(reader.state().notice, "", "a mark says nothing");
     assert!(
         reader.harness.query(".markup-popover").is_none(),
         "and the swatches go once one of them has been chosen",
@@ -363,7 +363,7 @@ fn a_mark_can_be_taken_off_from_the_panel() {
     assert_eq!(reader.harness.query_all(".markup-row").len(), 1);
 
     reader.click(".markup-row .mark-drop");
-    assert_eq!(reader.state().notice, "Mark removed.");
+    assert_eq!(reader.state().notice, "", "nor does taking one out");
     assert_eq!(reader.harness.query_all(".markup-row").len(), 0);
     // And out of the file, not merely off the screen — which is the sentence
     // the app cannot say. See the head of `src/markup.rs`.
@@ -396,7 +396,7 @@ fn a_mark_clicked_on_offers_to_come_off_and_does() {
     );
 
     reader.click(".mark-remove");
-    assert_eq!(reader.state().notice, "Mark removed.");
+    assert_eq!(reader.state().notice, "", "nor does taking one out");
     assert!(reader.harness.query(".mark-popover").is_none());
     // Out of the file, which is the sentence the app cannot say.
     assert!(render::open(&path).expect("reopens").markup().is_empty());
@@ -596,7 +596,7 @@ fn the_mark_is_on_the_screen_in_the_colour_it_was_given() {
         .expect("six swatches");
     assert_eq!(colour, "#ff6b6b");
     reader.click_nth(".markup-swatch", 2);
-    assert_eq!(reader.state().notice, "Marked.");
+    assert_eq!(reader.state().notice, "", "a mark says nothing");
 
     let shot = reader.screenshot();
     let wanted: [i32; 3] = [0xff, 0x6b, 0x6b];

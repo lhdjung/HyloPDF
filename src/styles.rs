@@ -594,13 +594,16 @@ body { margin: 0;
    and twelve pixels below the bar in both cases, which is the app's own
    placement and reads, next to menus that come down flush against the button
    that opened them, as a panel belonging to nothing. */
+/* Dressed as `.notice` is, for `.notice`'s reason: it floats over the page
+   and belongs to the bar, so its hovers are the bar's too. */
 .find-bar {
   position: absolute; z-index: 30;
   display: flex; flex-direction: column;
   padding: 6px 8px 8px 12px;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
-  box-shadow: 0 8px 26px rgba(0,0,0,0.14);
+  background: var(--page); border: 1px solid var(--bar-line); border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
+.find-bar .chip:hover { background: var(--bar-hover); }
 .find-row { display: flex; align-items: center; gap: 8px; }
 /* Indented to the field above them rather than to the bar, so the three read
    as belonging to the query and not as three more buttons. */
@@ -616,7 +619,7 @@ body { margin: 0;
   height: 22px; padding: 0 7px; border: 0; border-radius: 7px;
   background: transparent; color: var(--faint); font-size: 12.5px;
 }
-.find-option:hover { background: var(--hover); color: var(--muted); }
+.find-option:hover { background: var(--bar-hover); color: var(--muted); }
 .find-option.on { background: var(--accent-soft); color: var(--accent); }
 .find-icon { display: flex; align-items: center; color: var(--faint); }
 .find-field {
@@ -638,7 +641,7 @@ body { margin: 0;
   background: transparent; color: var(--faint); font-size: 12.5px;
   justify-content: flex-end;
 }
-.find-count.ready:hover { background: var(--hover); color: var(--text); }
+.find-count.ready:hover { background: var(--bar-hover); color: var(--text); }
 /* A chip wearing a drawing and no word: square, with the drawing centred in
    it. `.btn.icon-only` in the app, where the find bar's close button is one
    too. */
@@ -976,14 +979,14 @@ body { margin: 0;
 
 /* The colour popover, over the passage it is about. It is not in `#popovers`
    and there is no such thing here — it belongs to the page, because the
-   rectangle it is placed against is the page's. */
+   rectangle it is placed against is the page's. Dressed as `.notice` is. */
 .markup-popover {
   display: flex; gap: 6px; padding: 7px; z-index: 6;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 11px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  background: var(--page); border: 1px solid var(--bar-line); border-radius: 9px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 .markup-swatch {
-  width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 7px;
+  width: 22px; height: 22px; border: 1px solid var(--bar-line); border-radius: 7px;
   padding: 0;
 }
 .markup-swatch:hover { border-color: var(--accent); }
@@ -996,11 +999,11 @@ body { margin: 0;
    never defines. */
 .markup-more, .markup-close {
   width: 22px; height: 22px; padding: 0; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--line); font-size: 14px; line-height: 1;
+  border: 1px solid var(--bar-line); font-size: 14px; line-height: 1;
 }
-.markup-more { background: var(--sunk); color: var(--muted); }
+.markup-more { background: var(--bar-sunk); color: var(--muted); }
 .markup-more:hover { border-color: var(--accent); color: var(--text); }
-.markup-close { background: var(--sunk); color: #ff5f56; font-size: 16px; }
+.markup-close { background: var(--bar-sunk); color: #ff5f56; font-size: 16px; }
 .markup-close:hover { border-color: #ff5f56; }
 /* The window the … opens. */
 .colours-window { width: 440px; height: auto; max-height: 80%; }
@@ -1021,11 +1024,11 @@ body { margin: 0;
    showing six colours, since there is exactly one thing to do here. */
 .mark-popover {
   display: flex; align-items: center; gap: 8px; padding: 7px 9px; z-index: 6;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 11px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  background: var(--page); border: 1px solid var(--bar-line); border-radius: 9px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 .mark-dot {
-  width: 12px; height: 12px; border-radius: 6px; border: 1px solid var(--line);
+  width: 12px; height: 12px; border-radius: 6px; border: 1px solid var(--bar-line);
 }
 .mark-remove {
   border: 0; background: transparent; padding: 0;
@@ -1227,11 +1230,13 @@ body { margin: 0;
 
    Placed by a row rather than by `left: 50%` and a transform, which is how the
    app did it and is not something to lean on in Blitz. 55px is the toolbar and
-   its hairline (`TOOLBAR` + `HAIRLINE` in `app.rs`) and eight of gap. */
+   its hairline (`TOOLBAR` + `HAIRLINE` in `app.rs`) and eight of gap. The
+   right padding is the toolbar's own ten, so the chip's edge lines up with
+   the bar's last control. */
 .notice-line {
   position: absolute; left: 0; right: 0; top: 55px; z-index: 45;
   display: flex; align-items: center; justify-content: flex-end;
-  padding-right: 16px;
+  padding-right: 10px;
   pointer-events: none;
 }
 /* With the bar away there is nothing above it, so it comes up to the band the
@@ -1240,19 +1245,22 @@ body { margin: 0;
 .notice-line.tucked {
   top: 8px;
 }
-/* A shadow, because this is the one thing in the reader that floats over the
-   document with nothing behind it — `.notice` in the app carries one, and a
-   pill with a hairline and no shadow reads as a shape drawn on the page
-   rather than as something laid over it. `gap` is for the tick beside "Saved". */
+/* **Made of the toolbar, not of the menus.** It stands where the bar's zoom
+   stepper is and says what the bar would, so it wears the bar's paper, its
+   hairline and its chip radius. It was `--surface` in a full pill with a
+   heavy shadow, which read as a piece of system chrome dropped on the page.
+   The shadow is kept, but faint: with nothing behind it, a hairline alone
+   reads as a shape drawn on the page rather than something laid over it.
+   `gap` is for the tick beside "Saved". */
 /* `pre-line` because one notice is two sentences and reads better as two
    lines — "Toolbar hidden." and the key that brings it back. Every other
    notice is one line and is unaffected. */
 .notice {
   display: flex; align-items: center; gap: 8px;
   white-space: pre-line; text-align: center;
-  max-width: 70%; padding: 9px 16px; border-radius: 999px;
-  background: var(--surface); border: 1px solid var(--line);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.16);
+  max-width: 70%; padding: 7px 13px; border-radius: 9px;
+  background: var(--page); border: 1px solid var(--bar-line);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   color: var(--text);
 }
 
@@ -1271,18 +1279,26 @@ body { margin: 0;
    below the notice now, on the line the toolbar itself occupied, and is a
    floating chip rather than a tab hanging off nothing. The 74px clears a
    two-line notice at `top: 8px`. */
+/* **The row takes no presses; only the button does.** The row is the width
+   of the window, so without this a text selection could not begin anywhere
+   along the band the button sits in. `pointer-events` inherits, which is why
+   the button has to ask for them back. */
 .peek-line {
   position: absolute; left: 0; right: 0; top: 74px; z-index: 30;
   display: flex; align-items: flex-start; justify-content: flex-end;
-  padding-right: 16px;
+  padding-right: 10px;
+  pointer-events: none;
 }
+/* Dressed as `.notice` is, for `.notice`'s reason. */
 .toolbar-peek {
   display: flex; align-items: center; gap: 6px;
   white-space: pre-line; text-align: left;
-  padding: 6px 13px; border: 1px solid var(--line); border-radius: 11px;
-  background: var(--surface); box-shadow: 0 6px 18px rgba(0,0,0,0.16);
+  padding: 6px 12px; border: 1px solid var(--bar-line); border-radius: 9px;
+  background: var(--page); box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   color: var(--muted); font-size: 13.5px;
+  pointer-events: auto;
 }
+.toolbar-peek:hover { background: var(--bar-hover); color: var(--text); }
 
 /* **The page pill**: where the reader is, said in the middle of the lower
    edge while they scroll with the toolbar away — `#page-pill` in the app,
@@ -1303,10 +1319,11 @@ body { margin: 0;
   padding-right: 20px;
   pointer-events: none;
 }
+/* Dressed as `.notice` is. */
 .page-pill {
-  padding: 6px 14px; border-radius: 999px;
-  background: var(--surface); border: 1px solid var(--line);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.14);
+  padding: 6px 12px; border-radius: 9px;
+  background: var(--page); border: 1px solid var(--bar-line);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   color: var(--muted); font-size: 13.5px;
 }
 

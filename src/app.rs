@@ -3807,7 +3807,10 @@ impl Viewer {
         let restarted = self.reopen(&path);
         self.show_markup_panel();
         match written {
-            Ok(()) => self.notice = format!("Marked.{warning}"),
+            // Nothing said unless there is something to say: the mark on the
+            // page is the answer.
+            Ok(()) if !warning.is_empty() => self.notice = warning.trim_start().into(),
+            Ok(()) => {}
             Err(refused) => {
                 // The file is as it was, so there is nothing to put back. The
                 // mark is kept beside the document instead, which is the
@@ -3864,8 +3867,8 @@ impl Viewer {
     pub fn remove_markup(&mut self, key: &MarkKey) -> Option<u64> {
         match key {
             MarkKey::Beside(id) => {
+                // Nothing said: the mark going from the page is the answer.
                 self.store.drop_markup(id);
-                self.notice = "Mark removed.".into();
                 None
             }
             MarkKey::InFile(page, index) => {
@@ -3913,10 +3916,9 @@ impl Viewer {
                 self.document.release();
                 let taken = crate::markup::remove(&path, *page, *index);
                 let restarted = self.reopen(&path);
-                self.notice = match taken {
-                    Ok(()) => "Mark removed.".into(),
-                    Err(refused) => refused,
-                };
+                if let Err(refused) = taken {
+                    self.notice = refused;
+                }
                 restarted
             }
         }
@@ -7877,7 +7879,7 @@ pub fn Reader(
             // the card comes up to meet the window's edge at the right — which
             // is `#shell[data-toolbar="hidden"] .find-bar` in the app.
             if find_open && !toolbar_on {
-                {find_card("top: 12px; right: 18px;")}
+                {find_card("top: 8px; right: 10px;")}
             }
             div { class: "body",
             if empty {

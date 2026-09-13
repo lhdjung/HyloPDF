@@ -220,7 +220,7 @@ fn a_menu_comes_down_under_the_button_that_opened_it() {
 
 #[test]
 fn an_undrawn_page_is_the_theme_s_paper_and_not_white() {
-    // Moonowl Ember: a recolouring theme, so a page under it is drawn on the
+    // Moonowl Dark: a recolouring theme, so a page under it is drawn on the
     // theme's own paper and a page that has not been drawn yet must be too.
     // A white rectangle on a dark theme is the flash a reader sees on every
     // zoom step and every jump — a re-keyed page is a new node with no
@@ -252,7 +252,7 @@ fn the_toolbar_wears_the_theme_rather_than_a_grey() {
     for id in [
         "moonowl-light",
         "moonowl-dark",
-        "moonowl-ember",
+        "bay-brown",
         "sepia",
         "nord",
     ] {
@@ -456,7 +456,7 @@ fn a_chip_in_force_stands_on_the_accent_rather_than_wearing_it() {
     // among the grey with nothing under it. The tint is what carries the
     // theme. `--accent-soft` is a fifth of the way from the paper to the
     // accent: plainly the accent, and still somewhere a word can be read.
-    for id in ["moonowl-light", "moonowl-ember", "dracula"] {
+    for id in ["moonowl-light", "bay-brown", "dracula"] {
         let reader = wearing(id);
         let style = reader.harness.attr(".root", "style").unwrap_or_default();
         // Measured against the *surface*, which is what the app mixes it from

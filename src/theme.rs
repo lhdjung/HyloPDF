@@ -499,7 +499,7 @@ mod tests {
     }
 
     /// **A renamed theme renames its file**, where the app is the one that
-    /// named it: `brownie.toml` saying `name = "Bay Brown"` is a directory
+    /// named it: `brownie.toml` saying `name = "Walnut"` is a directory
     /// nobody can read.
     #[test]
     fn renaming_a_theme_renames_the_file_the_app_named() {
@@ -525,13 +525,13 @@ mod tests {
         let renamed = save(
             &dir,
             &Theme {
-                name: "Bay Brown".into(),
+                name: "Walnut".into(),
                 ..made
             },
         )
         .expect("saved again");
-        assert_eq!(renamed.id, "bay-brown", "the id follows the name");
-        assert!(dir.join("bay-brown.toml").exists());
+        assert_eq!(renamed.id, "walnut", "the id follows the name");
+        assert!(dir.join("walnut.toml").exists());
         assert!(
             !dir.join("brownie.toml").exists(),
             "and the old file is gone"

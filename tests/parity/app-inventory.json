@@ -255,7 +255,17 @@
       },
       {
         "kind": "item",
-        "label": "Moonowl Ember",
+        "label": "Tokyo Night",
+        "icon": null
+      },
+      {
+        "kind": "item",
+        "label": "Tokyo Night Storm",
+        "icon": null
+      },
+      {
+        "kind": "item",
+        "label": "Rosé Pine",
         "icon": null
       },
       {
@@ -280,6 +290,11 @@
       },
       {
         "kind": "item",
+        "label": "Bay Brown",
+        "icon": null
+      },
+      {
+        "kind": "item",
         "label": "High Contrast",
         "icon": null
       },
@@ -296,21 +311,6 @@
       {
         "kind": "item",
         "label": "Solarized Dark",
-        "icon": null
-      },
-      {
-        "kind": "item",
-        "label": "Tokyo Night",
-        "icon": null
-      },
-      {
-        "kind": "item",
-        "label": "Tokyo Night Storm",
-        "icon": null
-      },
-      {
-        "kind": "item",
-        "label": "Rosé Pine",
         "icon": null
       },
       {

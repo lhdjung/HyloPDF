@@ -30,11 +30,11 @@ I guess, but I'm not certain, that themes are stored in some kind of config file
 Ignoring some settings, we have:
 - Moonowl Light: the default light theme, and the overall default theme. Doesn't change colors at all.
 - Moonowl Dark: the default dark theme. Text is white. Background is a dark grey, with maybe a tint of slate blue.
-- Moonowl Ember: the app icon's palette. The icon's warm yellow on a deep ember red, with its coral as the accent.
 - Glamour: cool and glamorous dark theme inspired by the Charm / Bubble Tea aesthetic.
 - Dracula: text is pink, background is dark blue-ish. Some light blue and/or green is sprinkled in. Maybe that's not accurate – check the Dracula themes other apps use, and how that would translate into PDF theming.
 - Gruvbox, for the oldies.
 - Sepia: background is sepia, text is dark. Use whatever good sepia themes use.
+- Bay Brown: warm yellow ink on a deep brown ground, with a coral accent.
 - High contrast: background is perfect black, text is white.
 - Nord: the arctic, north-bluish palette — dark slate background, frost blue accents.
 - Solarized Light and Solarized Dark: Ethan Schoonover's palette, both halves.

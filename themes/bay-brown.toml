@@ -1,0 +1,9 @@
+# Bay Brown — a deep brown ground with warm yellow ink and a coral accent.
+name = "Bay Brown"
+order = 10
+text = "#ecdaa7"
+background = "#45230c"
+accent = "#e9917f"
+link = "#ffab93"
+selection_area = "#c06154"
+selection_text = "#ffffff"

@@ -793,7 +793,9 @@ fn printed_numbering(document: &PdfDocument, pages: usize) -> Vec<String> {
         })
         .collect();
     match agreed_first_number(&samples, pages) {
-        Some(first) => (0..pages).map(|index| (first + index).to_string()).collect(),
+        Some(first) => (0..pages)
+            .map(|index| (first + index).to_string())
+            .collect(),
         None => Vec::new(),
     }
 }
@@ -848,8 +850,11 @@ fn agreed_first_number(samples: &[(usize, Vec<usize>)], pages: usize) -> Option<
             *votes.entry(first).or_default() += 1;
         }
     }
-    let (first, count) = votes.into_iter().max_by_key(|(first, count)| (*count, std::cmp::Reverse(*first)))?;
-    (count >= 3 && count * 2 > samples.len() && first > 1 && first + pages < 100_000).then_some(first)
+    let (first, count) = votes
+        .into_iter()
+        .max_by_key(|(first, count)| (*count, std::cmp::Reverse(*first)))?;
+    (count >= 3 && count * 2 > samples.len() && first > 1 && first + pages < 100_000)
+        .then_some(first)
 }
 
 /// The labels, unless they say nothing.

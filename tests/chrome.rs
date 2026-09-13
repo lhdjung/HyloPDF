@@ -249,7 +249,13 @@ fn the_toolbar_wears_the_theme_rather_than_a_grey() {
     // whatever the two ends are, so all fourteen themes put very nearly the
     // same colour in the bar. What is asserted is the distance from the
     // theme's own ink: near it, and much nearer than the halfway shade was.
-    for id in ["moonowl-light", "moonowl-dark", "moonowl-ember", "sepia", "nord"] {
+    for id in [
+        "moonowl-light",
+        "moonowl-dark",
+        "moonowl-ember",
+        "sepia",
+        "nord",
+    ] {
         let reader = wearing(id);
         let style = reader.harness.attr(".root", "style").unwrap_or_default();
         let ink = rgb(&value_of(&style, "--text"));
@@ -1138,7 +1144,10 @@ fn the_pointer_goes_away_when_it_is_left_alone() {
     let (x, y) = (width as f32 / 2.0, height as f32 / 2.0);
 
     reader.point_to(x, y);
-    assert!(reader.cursor_shown(), "a pointer that has just moved is there");
+    assert!(
+        reader.cursor_shown(),
+        "a pointer that has just moved is there"
+    );
     assert!(
         reader.wait_until(4.0, |reader| !reader.cursor_shown()),
         "and one left alone is not"

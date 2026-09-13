@@ -78,7 +78,10 @@ fn the_middle_button_scrolls_from_where_it_was_pressed() {
     // And a press — any press — puts it away and leaves the document where
     // it stopped.
     reader.click_at(middle_x, middle_y + 150.0);
-    assert!(reader.box_of(".still-anchor").is_none(), "the anchor is gone");
+    assert!(
+        reader.box_of(".still-anchor").is_none(),
+        "the anchor is gone"
+    );
     let stopped = reader.state().scroll;
     assert!(
         !reader.wait_until(0.4, |reader| reader.state().scroll > stopped),
@@ -250,7 +253,11 @@ fn a_click_does_not_cost_the_reader_its_keyboard() {
         "a key still moves the document after a click",
     );
     reader.press("t");
-    assert_eq!(reader.state().theme, "Moonowl Dark", "…and still acts on it");
+    assert_eq!(
+        reader.state().theme,
+        "Moonowl Dark",
+        "…and still acts on it"
+    );
 }
 
 #[test]

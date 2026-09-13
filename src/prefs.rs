@@ -1091,7 +1091,8 @@ pub(crate) fn ColorField(
     #[props(default)] onsubmit: Option<EventHandler<()>>,
     /// Where a change goes, when it is not a theme draft — the highlight
     /// colours write straight to the settings.
-    #[props(default)] onchange: Option<EventHandler<String>>,
+    #[props(default)]
+    onchange: Option<EventHandler<String>>,
 ) -> Element {
     let root: crate::app::RootFocus = use_context();
     let open = viewer.read().picking == Some(field);

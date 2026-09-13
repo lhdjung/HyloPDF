@@ -25,7 +25,8 @@ fn moonowl_dark() -> (usize, palette::Palette) {
         .iter()
         .position(|(id, _)| *id == theme::DEFAULT_DARK)
         .expect("Moonowl Dark ships");
-    let parsed: theme::Theme = toml::from_str(theme::BUILT_IN[index].1).expect("Moonowl Dark parses");
+    let parsed: theme::Theme =
+        toml::from_str(theme::BUILT_IN[index].1).expect("Moonowl Dark parses");
     (index, palette::resolve(&parsed, true))
 }
 
@@ -103,7 +104,10 @@ fn a_recolouring_theme_reaches_the_page() {
         dark[0] < 80.0,
         "and a dark one is not — the recolouring is on the pixels, not on the CSS: {dark:?}"
     );
-    assert!(moonowl_dark().1.recolor, "…which is what Moonowl Dark asks for");
+    assert!(
+        moonowl_dark().1.recolor,
+        "…which is what Moonowl Dark asks for"
+    );
 }
 
 #[test]

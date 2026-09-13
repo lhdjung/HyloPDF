@@ -482,29 +482,29 @@ impl PageWidget {
 
         let mut pixels: Option<Vec<u8>> = None;
         let outcome = document.render(self.index, width, height, self.view, &mut |bitmap| {
-                // BGRA as pdfium wrote it, in RGBA order because that is what
-                // the reference ramp reads — the swizzle the GPU path gets for
-                // free by uploading as `Bgra8Unorm`.
-                let mut rgba = bitmap.bgra.to_vec();
-                for pixel in rgba.as_chunks_mut::<4>().0 {
-                    pixel.swap(0, 2);
-                }
-                if theme.recolor {
-                    crate::recolor::recolor_cpu(
-                        &mut rgba,
-                        theme.text,
-                        theme.background,
-                        theme.keep_colour,
-                    );
-                }
-                crate::recolor::duotone_cpu(
+            // BGRA as pdfium wrote it, in RGBA order because that is what
+            // the reference ramp reads — the swizzle the GPU path gets for
+            // free by uploading as `Bgra8Unorm`.
+            let mut rgba = bitmap.bgra.to_vec();
+            for pixel in rgba.as_chunks_mut::<4>().0 {
+                pixel.swap(0, 2);
+            }
+            if theme.recolor {
+                crate::recolor::recolor_cpu(
                     &mut rgba,
-                    width,
-                    height,
-                    &self.links(&theme, width, height),
+                    theme.text,
+                    theme.background,
+                    theme.keep_colour,
                 );
-                pixels = Some(rgba);
-            });
+            }
+            crate::recolor::duotone_cpu(
+                &mut rgba,
+                width,
+                height,
+                &self.links(&theme, width, height),
+            );
+            pixels = Some(rgba);
+        });
         if let Err(err) = outcome {
             eprintln!("{err}");
             return None;
@@ -628,22 +628,24 @@ impl PageWidget {
         // stretched, if there is one, or nothing. The thread asks for a frame
         // when it is done, and that frame uploads.
         let rendered = match self.pending.take() {
-            Some(pending) if pending.is(width, height, &document) => match pending.done.try_recv() {
-                Ok(Ok(rendered)) => rendered,
-                Ok(Err(err)) => {
-                    eprintln!("{err}");
-                    self.failed = true;
-                    return None;
+            Some(pending) if pending.is(width, height, &document) => {
+                match pending.done.try_recv() {
+                    Ok(Ok(rendered)) => rendered,
+                    Ok(Err(err)) => {
+                        eprintln!("{err}");
+                        self.failed = true;
+                        return None;
+                    }
+                    Err(TryRecvError::Empty) => {
+                        self.pending = Some(pending);
+                        return Some(());
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        self.failed = true;
+                        return None;
+                    }
                 }
-                Err(TryRecvError::Empty) => {
-                    self.pending = Some(pending);
-                    return Some(());
-                }
-                Err(TryRecvError::Disconnected) => {
-                    self.failed = true;
-                    return None;
-                }
-            },
+            }
             stale => {
                 // Asked at another size — a zoom that settled — so that one
                 // is told not to bother and this size is asked for.

@@ -1459,7 +1459,11 @@ impl Viewer {
             picking: None,
             pressed_on: None,
             sweep_from: None,
-            sweep_seed: (Unit::Char, Spot { page: 0, index: 0 }, Spot { page: 0, index: 0 }),
+            sweep_seed: (
+                Unit::Char,
+                Spot { page: 0, index: 0 },
+                Spot { page: 0, index: 0 },
+            ),
             pressed: None,
             zoom_from: None,
             zoom_token: 0,
@@ -2142,7 +2146,8 @@ impl Viewer {
 
     pub fn set_page_numbering(&mut self, printed: bool) {
         let value = if printed { "printed" } else { "position" };
-        self.store.set(vec![("page_numbering".into(), json!(value))]);
+        self.store
+            .set(vec![("page_numbering".into(), json!(value))]);
     }
 
     /// Whether this document has numbers of its own to show — which is when
@@ -2846,9 +2851,21 @@ impl Viewer {
         let text = self.text_on(index + 1);
         let (before, after) = crate::select::unit_around(&text, head.index, unit);
         let (anchor, head) = if head < from {
-            (to, Spot { page: head.page, index: before })
+            (
+                to,
+                Spot {
+                    page: head.page,
+                    index: before,
+                },
+            )
         } else {
-            (from, Spot { page: head.page, index: after })
+            (
+                from,
+                Spot {
+                    page: head.page,
+                    index: after,
+                },
+            )
         };
         if head == sweep.head && anchor == sweep.anchor {
             return;
@@ -2934,7 +2951,8 @@ impl Viewer {
         };
         let (x, y) = self.layout.unplace_on(index, on.0, on.1);
         let text = self.text_on(index + 1);
-        let (from, to) = crate::select::unit_around(&text, crate::select::caret_at(&text, x, y), unit);
+        let (from, to) =
+            crate::select::unit_around(&text, crate::select::caret_at(&text, x, y), unit);
         let (anchor, head) = (Spot { page, index: from }, Spot { page, index: to });
         self.sweep_seed = (unit, anchor, head);
         self.selection = Some(Selection { anchor, head });
@@ -3717,7 +3735,8 @@ impl Viewer {
         if crate::palette::read_colour(&hex).is_none() {
             return;
         }
-        self.store.set(vec![(format!("markup_color_{at}"), json!(hex))]);
+        self.store
+            .set(vec![(format!("markup_color_{at}"), json!(hex))]);
     }
 
     /// All six back to what a fresh install has. This throws a reader's own
@@ -4115,7 +4134,10 @@ impl Viewer {
         let first = self.labels.first().cloned().unwrap_or_default();
         let last = self.labels.last().cloned().unwrap_or_default();
         let count = straight_run(&first, &last, pages).unwrap_or_else(|| pages.to_string());
-        (format!("{printed} of {count}"), format!("{page} of {pages}"))
+        (
+            format!("{printed} of {count}"),
+            format!("{page} of {pages}"),
+        )
     }
 
     /// What the field in the toolbar has in it.
@@ -8861,12 +8883,7 @@ fn Page(
         let shell = dioxus_core::try_consume_context::<
             std::sync::Arc<dyn blitz_traits::shell::ShellProvider>,
         >();
-        CustomWidgetAttr::new(PageWidget::new(
-            index,
-            view,
-            chosen.clone(),
-            shell,
-        ))
+        CustomWidgetAttr::new(PageWidget::new(index, view, chosen.clone(), shell))
     });
 
     rsx! {

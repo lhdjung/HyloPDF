@@ -90,4 +90,3 @@ fn base() -> PathBuf {
             .unwrap_or_else(|| home().join(".config"))
     }
 }
-

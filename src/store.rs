@@ -534,6 +534,14 @@ impl Store {
         let dark = self.is_dark(theme);
         let slot = if dark { "dark_theme" } else { "light_theme" };
         let mut moving = vec![("theme".into(), json!(id)), (slot.into(), json!(id))];
+        if theme.built_in {
+            let last = if dark {
+                "last_built_in_dark"
+            } else {
+                "last_built_in_light"
+            };
+            moving.push((last.into(), json!(id)));
+        }
         let overruling =
             self.flag("follow_system_theme") && self.outside.is_some_and(|outside| outside != dark);
         if overruling {
@@ -626,13 +634,20 @@ impl Store {
 
     /// What to wear instead of a theme whose file has gone.
     ///
-    /// `replacementFor` in `main.ts`, in order: the theme remembered for that
-    /// half of the pair, else anything of the same darkness, else whatever is
-    /// left. The point of the order is that somebody who was reading in a
-    /// dark theme is not put into a light one because a file was deleted.
+    /// In order: the theme remembered for that half of the pair, else the
+    /// last shipped theme worn in that half, else anything of the same
+    /// darkness, else whatever is left. The point of the order is that
+    /// somebody who was reading in a dark theme is not put into a light one
+    /// because a file was deleted — and that deleting a copy of Nord goes
+    /// back to Nord, since wearing the copy took over the remembered slot.
     pub fn replacement_for(&self, gone: &theme::Theme) -> Option<usize> {
         let dark = self.is_dark(gone);
         let remembered = self.text(if dark { "dark_theme" } else { "light_theme" });
+        let last_built_in = self.text(if dark {
+            "last_built_in_dark"
+        } else {
+            "last_built_in_light"
+        });
         let left = || {
             self.themes
                 .iter()
@@ -641,6 +656,7 @@ impl Store {
         };
         left()
             .find(|(_, theme)| theme.id == remembered)
+            .or_else(|| left().find(|(_, theme)| theme.id == last_built_in))
             .or_else(|| left().find(|(_, theme)| self.is_dark(theme) == dark))
             .or_else(|| left().next())
             .map(|(index, _)| index)
@@ -1312,6 +1328,34 @@ mod tests {
         assert_eq!(store.palette().text, [0x10, 0x20, 0x30]);
         // It is light, so it filled the light slot.
         assert_eq!(store.text("light_theme"), "Mine");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A copy of a shipped dark theme, deleted, hands back to that theme rather
+    /// than to Moonowl Dark.
+    #[test]
+    fn a_deleted_copy_falls_back_to_the_shipped_theme_worn_before_it() {
+        let dir = scratch("copy");
+        Store::at(&dir);
+        std::fs::write(
+            dir.join("themes/Mine.toml"),
+            "name = \"Mine\"\ntext = \"#e8e8e8\"\nbackground = \"#101018\"\n",
+        )
+        .expect("write a theme");
+        let mut store = Store::at(&dir);
+        let find = |store: &Store, id: &str| {
+            store
+                .themes()
+                .iter()
+                .position(|theme| theme.id == id)
+                .expect(id)
+        };
+        store.wear(find(&store, "nord"));
+        let mine = find(&store, "Mine");
+        store.wear(mine);
+        let gone = store.themes()[mine].clone();
+        let replacement = store.replacement_for(&gone).expect("a replacement");
+        assert_eq!(store.themes()[replacement].id, "nord");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

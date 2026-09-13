@@ -39,6 +39,16 @@ pub fn defaults() -> Settings {
     s.insert("theme".into(), json!(super::theme::DEFAULT_LIGHT));
     s.insert("light_theme".into(), json!(super::theme::DEFAULT_LIGHT));
     s.insert("dark_theme".into(), json!(super::theme::DEFAULT_DARK));
+    // The last shipped theme worn in each half: where a deleted theme of your
+    // own falls back to. See `Store::replacement_for`.
+    s.insert(
+        "last_built_in_light".into(),
+        json!(super::theme::DEFAULT_LIGHT),
+    );
+    s.insert(
+        "last_built_in_dark".into(),
+        json!(super::theme::DEFAULT_DARK),
+    );
     // On, and on by default: an app that stays white while the machine around
     // it has gone dark at sunset is the one thing every reader now notices.
     // It is a switch rather than a mode — `theme` is still what is in use, and

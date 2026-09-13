@@ -1228,6 +1228,9 @@ pub struct Viewer {
     /// `None` almost always. It opens where the selection ends rather than off
     /// a toolbar button, because nothing in the toolbar is what it is about.
     pub markup_at: Option<(usize, Rect)>,
+    /// The theme a "Delete…" button is asking about, while its window is up.
+    /// See [`crate::prefs::ConfirmDeleteTheme`].
+    pub deleting_theme: Option<crate::theme::Theme>,
     /// The mark the pointer was last clicked on, and what to say about it:
     /// which page, where on it, what colour it is and how to take it out.
     ///
@@ -1455,6 +1458,7 @@ impl Viewer {
             standing: crate::markup::Standing::default(),
             said_standing: false,
             markup_at: None,
+            deleting_theme: None,
             mark_open: None,
             picking: None,
             pressed_on: None,
@@ -2684,6 +2688,25 @@ impl Viewer {
                 self.notice = format!("Saved {}.", saved.name);
             }
             Err(said) => self.notice = said,
+        }
+    }
+
+    /// Ask whether to delete `theme`, in a window of its own.
+    pub fn ask_delete_theme(&mut self, theme: crate::theme::Theme) {
+        self.menu = None;
+        self.deleting_theme = Some(theme);
+    }
+
+    /// Put the question away without deleting anything.
+    pub fn close_delete_theme(&mut self) -> bool {
+        self.deleting_theme.take().is_some()
+    }
+
+    /// The answer was yes.
+    pub fn confirm_delete_theme(&mut self) {
+        if let Some(theme) = self.deleting_theme.take() {
+            self.begin_theme(Some(theme));
+            self.delete_theme();
         }
     }
 
@@ -7732,14 +7755,12 @@ pub fn Reader(
                                         class: "menu-item",
                                         "data-item": "delete-theme",
                                         onclick: move |_| {
-                                            viewer.write().close_menu();
                                             let worn = viewer.read().store.theme().clone();
-                                            viewer.write().begin_theme(Some(worn));
-                                            viewer.write().delete_theme();
+                                            viewer.write().ask_delete_theme(worn);
                                         },
                                         span { class: "menu-tick", "" }
                                         Icon { name: "trash", stroke: ink.clone() }
-                                        span { class: "menu-label", "Delete this theme" }
+                                        span { class: "menu-label", "Delete this theme…" }
                                     }
                                 }
                                 div { class: "menu-rule" }
@@ -8611,6 +8632,8 @@ pub fn Reader(
             // last in paint order too — Blitz paints by the rules, and a
             // scrim that comes before the document is a scrim behind it.
             crate::prefs::Settings { viewer, frame: frame.clone() }
+            // Over Settings, because the editor's Delete opens it from there.
+            crate::prefs::ConfirmDeleteTheme { viewer }
         }
     }
 }
@@ -9260,6 +9283,10 @@ fn perform(
             // Escape typed *into* the field never reaches here, so this is the
             // case where the pointer took the focus elsewhere.
             if viewer.write().close_menu() {
+                return;
+            }
+            // "Delete this theme?", which is over everything, Settings included.
+            if viewer.write().close_delete_theme() {
                 return;
             }
             // The highlight colours window, before the swatches it was opened

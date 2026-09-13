@@ -33,6 +33,53 @@ fn reader() -> Reader {
     )
 }
 
+/// Deleting a theme from the menu asks first, in a window of its own.
+#[test]
+fn deleting_a_theme_from_the_menu_asks_first() {
+    let dir = std::env::temp_dir().join(format!("moonowl-menu-delete-{}", std::process::id()));
+    let themes = dir.join("themes");
+    std::fs::create_dir_all(&themes).expect("a themes directory");
+    let file = themes.join("Mine.toml");
+    std::fs::write(
+        &file,
+        "name = \"Mine\"\ntext = \"#e8e8e8\"\nbackground = \"#101018\"\n",
+    )
+    .expect("write a theme");
+    let mut reader = Reader::open_with(
+        &fixture::contents_pdf(),
+        Options {
+            width: 1280,
+            config: dir.clone(),
+            settings: vec![("theme".into(), serde_json::json!("Mine"))],
+            ..Options::default()
+        },
+    );
+    reader.click(".chip.theme");
+    reader.click("[data-item=delete-theme]");
+    assert!(
+        file.exists(),
+        "the menu item deleted the theme without asking"
+    );
+    assert!(reader
+        .harness
+        .query("[aria-label='Delete theme']")
+        .is_some());
+    reader.press("Escape");
+    assert!(
+        file.exists()
+            && reader
+                .harness
+                .query("[aria-label='Delete theme']")
+                .is_none()
+    );
+
+    reader.click(".chip.theme");
+    reader.click("[data-item=delete-theme]");
+    reader.click("[aria-label='Delete theme'] .danger");
+    assert!(!file.exists(), "Delete theme deletes it");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// One at a time, and every way out of one.
 #[test]
 fn a_menu_opens_and_closes() {

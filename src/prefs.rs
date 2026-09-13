@@ -534,9 +534,6 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
     let folder = held.store.themes_dir().display().to_string();
     let key_dark = held.chord_for(Action::Dark);
     drop(held);
-    // Deleting a theme removes a file, so the button asks first, in place —
-    // the way resetting the highlight colours does.
-    let mut confirming = use_signal(|| false);
 
     rsx! {
         h2 { class: "pane-title", "Appearance" }
@@ -611,31 +608,13 @@ fn Appearance(viewer: Signal<Viewer>) -> Element {
                     }}
                 }
                 if !worn.built_in {
-                    if *confirming.read() {
-                        span { class: "colours-ask", "Delete {worn.name}? Its file goes too." }
-                        button {
-                            class: "chip action danger",
-                            onclick: {
-                                let worn = worn.clone();
-                                move |_| {
-                                    confirming.set(false);
-                                    viewer.write().begin_theme(Some(worn.clone()));
-                                    viewer.write().delete_theme();
-                                }
-                            },
-                            "Delete"
-                        }
-                        button {
-                            class: "chip action",
-                            onclick: move |_| confirming.set(false),
-                            "Keep it"
-                        }
-                    } else {
-                        button {
-                            class: "chip action danger",
-                            onclick: move |_| confirming.set(true),
-                            "Delete {worn.name}…"
-                        }
+                    button {
+                        class: "chip action danger",
+                        onclick: {
+                            let worn = worn.clone();
+                            move |_| viewer.write().ask_delete_theme(worn.clone())
+                        },
+                        "Delete {worn.name}…"
                     }
                 }
             }
@@ -661,7 +640,6 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
     let shown = crate::palette::resolve(&draft, true);
     let hex = crate::palette::hex;
     let fresh = draft.id.trim().is_empty();
-    let mut confirming = use_signal(|| false);
 
     // Enter, from any field in the editor: the theme is saved and the window
     // goes. It is what Enter means in every other window with a form in it,
@@ -682,7 +660,6 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
         }
         Field {
             label: "Text",
-            note: "The colour the words are printed in.".to_string(),
             ColorField {
                 viewer,
                 field: "text",
@@ -692,7 +669,6 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
         }
         Field {
             label: "Background",
-            note: "The colour of the paper behind them.".to_string(),
             ColorField {
                 viewer,
                 field: "background",
@@ -702,7 +678,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
         }
         Field {
             label: "Accent",
-            note: "The current page, the ring around whatever has the keyboard, and anything else that needs to stand out.".to_string(),
+            note: "Marks around things that need to stand out.".to_string(),
             ColorField {
                 viewer,
                 field: "accent",
@@ -712,7 +688,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
         }
         Field {
             label: "Links",
-            note: "Links in the document take this colour, wherever the page is recoloured.".to_string(),
+            note: "Links within the document, like to the references section, count just like web links.".to_string(),
             ColorField {
                 viewer,
                 field: "link",
@@ -722,7 +698,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
         }
         Field {
             label: "Selection area",
-            note: "The colour behind text you have selected. Left alone it follows the accent.".to_string(),
+            note: "The color behind text you selected. By default, it follows the accent.".to_string(),
             ColorField {
                 viewer,
                 field: "selection_area",
@@ -732,7 +708,7 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
         }
         Field {
             label: "Selected text",
-            note: "The words inside that area. Left alone they take the opposite of it.".to_string(),
+            note: "The color of the words you selected. By default, the inverse of the area color.".to_string(),
             ColorField {
                 viewer,
                 field: "selection_text",
@@ -762,26 +738,63 @@ fn ThemeEditor(viewer: Signal<Viewer>, draft: crate::theme::Theme) -> Element {
             // Only a theme already on disk can be deleted: "New theme…" and a
             // copy of a built-in have not been saved yet.
             if !fresh {
-                if *confirming.read() {
-                    span { class: "colours-ask", "Delete this theme? Its file goes too." }
+                button {
+                    class: "chip action danger",
+                    onclick: move |_| viewer.write().ask_delete_theme(draft.clone()),
+                    "Delete this theme…"
+                }
+            }
+        }
+    }
+}
+
+/// "Delete this theme?", asked in a small window of its own over whatever
+/// opened it — the theme menu, the Appearance page or the editor.
+#[component]
+pub(crate) fn ConfirmDeleteTheme(viewer: Signal<Viewer>) -> Element {
+    let held = viewer.read();
+    let Some(theme) = held.deleting_theme.clone() else {
+        return rsx! {};
+    };
+    let ink = crate::palette::hex(held.palette().muted());
+    drop(held);
+    rsx! {
+        div {
+            class: "window-scrim",
+            onmousedown: move |event| {
+                event.stop_propagation();
+                viewer.write().close_delete_theme();
+            },
+            div {
+                class: "window ask-window",
+                role: "dialog",
+                "aria-modal": "true",
+                "aria-label": "Delete theme",
+                onmousedown: move |event| event.stop_propagation(),
+                div { class: "window-bar",
+                    span { class: "window-title", "Delete {theme.name}?" }
                     button {
-                        class: "chip action danger",
-                        onclick: move |_| {
-                            confirming.set(false);
-                            viewer.write().delete_theme();
-                        },
-                        "Delete"
+                        class: "chip window-close",
+                        "aria-label": "Close",
+                        onclick: move |_| { viewer.write().close_delete_theme(); },
+                        Icon { name: "close", stroke: ink.clone() }
                     }
-                    button {
-                        class: "chip action",
-                        onclick: move |_| confirming.set(false),
-                        "Keep it"
+                }
+                div { class: "ask-body",
+                    p { class: "pane-lede",
+                        "Its file is removed from the themes folder, and this cannot be undone."
                     }
-                } else {
-                    button {
-                        class: "chip action danger",
-                        onclick: move |_| confirming.set(true),
-                        "Delete this theme…"
+                    div { class: "pane-actions ask-actions",
+                        button {
+                            class: "chip action",
+                            onclick: move |_| { viewer.write().close_delete_theme(); },
+                            "Keep it"
+                        }
+                        button {
+                            class: "chip action danger",
+                            onclick: move |_| viewer.write().confirm_delete_theme(),
+                            "Delete theme"
+                        }
                     }
                 }
             }

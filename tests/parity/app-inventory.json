@@ -616,28 +616,26 @@
         "note": ""
       },
       {
-        "label": "Text",
-        "note": "The colour the words are printed in."
+        "label": "Text"
       },
       {
-        "label": "Background",
-        "note": "The colour of the paper behind them."
+        "label": "Background"
       },
       {
         "label": "Accent",
-        "note": "The current page, the ring around whatever has the keyboard, and anything else that needs to stand out."
+        "note": "Marks around things that need to stand out."
       },
       {
         "label": "Links",
-        "note": "Links in the document take this colour, wherever the page is recoloured."
+        "note": "Links within the document, like to the references section, count just like web links."
       },
       {
         "label": "Selection area",
-        "note": "The colour behind text you have selected. Left alone it follows the accent."
+        "note": "The color behind text you selected. By default, it follows the accent."
       },
       {
         "label": "Selected text",
-        "note": "The words inside that area. Left alone they take the opposite of it."
+        "note": "The color of the words you selected. By default, the inverse of the area color."
       },
       {
         "label": "Recolour the document",

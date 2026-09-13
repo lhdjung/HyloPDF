@@ -1,21 +1,38 @@
-# Moonowl
+<p align="center"><img src="icons/128x128@2x.png" alt="" width="128"></p>
 
-A PDF reader that gets out of the way. One thin toolbar, a document that fills
-the rest of the window, and dark mode that actually recolours the page instead
-of dimming the screen.
+# Moonowl: free and user-friendly PDF reader
 
-It is small, quick to open a book of any size, and it puts you back on the page
-you left.
+Calm and spacious reading experience. Tidy interface, rich color themes,
+and flexible options. Respect for user experience and preferences.
+No cluttered UI, no paywall. Written in Rust.
+
+![example-light](./images/example-screenshot-light.png)
+![example-dark](./images/example-screenshot-dark.png)
+
+Moonowl is free and open-source forever, so it won't let you down
+for basic features until you upgrade to some paid version. It was
+designed by a user, for users – not by a company.
+
+Features include:
+
+- Choose between many color themes
+- Create your own themes
+- Rotate pages easily
+- Hide toolbar for undistracted reading
+- Use keybinds for fast navigation (optional)
+
+Moonowl is fast, lean, and 100% Rust. Binary size is just ~20 MB.
+Respect for computer resources as well as for user experience.
 
 ## Installation
 
-Download and run — no store, no package manager, nothing to build:
+Download and run:
 
 | | |
 |---|---|
-| **macOS** | [Apple silicon](../../releases/latest/download/Moonowl-macos-arm64.dmg) · [Intel](../../releases/latest/download/Moonowl-macos-x64.dmg) |
-| **Linux** | [AppImage](../../releases/latest/download/Moonowl-linux-x86_64.AppImage) · [.deb](../../releases/latest/download/Moonowl-linux-amd64.deb) · [.rpm](../../releases/latest/download/Moonowl-linux-x86_64.rpm) |
-| **Windows** | [Installer](../../releases/latest/download/Moonowl-windows-setup.exe) · [.msi](../../releases/latest/download/Moonowl-windows.msi) |
+| **macOS** | [Apple silicon](../../releases/latest/download/Moonowl-macos-arm64.dmg) / [Intel](../../releases/latest/download/Moonowl-macos-x64.dmg) |
+| **Linux** | [AppImage](../../releases/latest/download/Moonowl-linux-x86_64.AppImage) / [.deb](../../releases/latest/download/Moonowl-linux-amd64.deb) / [.rpm](../../releases/latest/download/Moonowl-linux-x86_64.rpm) |
+| **Windows** | [Installer](../../releases/latest/download/Moonowl-windows-setup.exe) / [.msi](../../releases/latest/download/Moonowl-windows.msi) |
 
 Those links always point at the newest build; [every release](../../releases)
 is listed if you want a particular one.
@@ -27,26 +44,30 @@ is listed if you want a particular one.
 > **Windows first launch:** SmartScreen blocks it. Click *More info* on the
 > warning, then *Run anyway*.
 
-## Build it yourself
+## Developer build
 
-One command. It fetches pdfium, builds the release, packages it and installs
-it — on macOS into `/Applications`, on Linux through `apt`, `dnf` or an
-AppImage in `~/.local/bin`, on Windows through the installer:
+With a local copy of the repo, a single command packages and installs the app:
 
 ```sh
-./scripts/install.sh                 # macOS and Linux
+# macOS and Linux
+./scripts/install.sh
 ```
 ```powershell
-.\scripts\install.ps1                # Windows
+# Windows
+.\scripts\install.ps1
 ```
 
-You need the Rust toolchain, plus the Xcode command line tools on macOS or
-`libfontconfig1-dev` on Linux. Nothing else: pdfium comes from
-[pdfium-binaries] and everything else is a crate. Because you built the app
-rather than downloaded it, neither Gatekeeper nor SmartScreen has anything to
-complain about — no *Open Anyway* step.
+It fetches pdfium, builds the release, packages it and installs
+it — on macOS into `/Applications`, on Linux through `apt`, `dnf` or an
+AppImage in `~/.local/bin`, on Windows through the installer.
 
-The app itself is all Rust: [Dioxus] Native, with [Blitz] laying out real HTML
+You need the Rust toolchain, plus the Xcode command line tools on macOS or
+`libfontconfig1-dev` on Linux. Nothing else because pdfium comes from
+[pdfium-binaries] and everything else is a crate. As you build the app
+rather than download it, neither Gatekeeper nor SmartScreen is triggered,
+so there is no *Open Anyway* step.
+
+The app is pure Rust: [Dioxus] Native with [Blitz] laying out real HTML
 and CSS instead of a webview. To work on it, run `./scripts/pdfium.sh` once and
 then the usual `cargo run`, `cargo run -- FILE` and `cargo test`.
 
@@ -55,8 +76,10 @@ then the usual `cargo run`, `cargo run -- FILE` and `cargo test`.
 [pdfium-binaries]: https://github.com/bblanchon/pdfium-binaries
 
 ## AI usage
-The code was written by Claude (Opus 5 and Fable 5.1), but I had a strong vision for the UI and kept complaining to Claude until I liked the result.
+The code was written by Claude (Opus 5 and Fable 5.1), but I had a strong vision
+for the UI and kept complaining to Claude until I liked the result.
 
 ## The name
 
-An owl by moonlight. The icon's owl is *Strix hylophila*, the [rusty-barred owl](https://en.wikipedia.org/wiki/Rusty-barred_owl). Night owls might appreciate dark themes. Also, Rust.
+I named the app after the [rusty-barred owl](https://en.wikipedia.org/wiki/Rusty-barred_owl).
+Night owls might appreciate dark themes. Also, Rust.
